@@ -25,10 +25,17 @@ const mapWithConcurrency = async <T, R>(items: readonly T[], limit: number, fn: 
 };
 
 export class BlobsPlayerRepository implements PlayerRepository {
-  private readonly store: BlobStore;
+  private readonly injected: BlobStore | undefined;
 
   constructor(store?: BlobStore) {
-    this.store = store ?? getStore({ name: "incidentlab-players", consistency: "strong" });
+    this.injected = store;
+  }
+
+  // Resolve the store on EVERY call: getStore() reads the per-request Blobs token from the
+  // function context, and a store cached at cold start keeps an expired token on warm
+  // instances ("Failed to decode token: Token expired") -> every request 500s.
+  private get store(): BlobStore {
+    return this.injected ?? getStore({ name: "incidentlab-players", consistency: "strong" });
   }
 
   async get(playerId: string): Promise<VersionedPlayer | null> {
