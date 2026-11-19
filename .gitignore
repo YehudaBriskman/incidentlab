@@ -1,0 +1,6 @@
+build/
+node_modules/
+site/dist/
+site/public/evidence/
+.netlify/
+__pycache__/
