@@ -18,7 +18,14 @@
     "year": 2019,
     "summary": "On 2 July 2019, Cloudflare pushed a new WAF rule containing a regular expression vulnerable to catastrophic backtracking. Deployed globally at once, it pinned CPUs on every edge server and caused widespread 502 errors for about 27 minutes, until the WAF was disabled with a global kill switch."
   },
-  "briefing": "**Monday, 09:12. Shipfast HQ.**\n\nFriday night, a little after 3 AM local time, checkout died. For roughly **27 minutes** customers could browse the shop all they liked, but almost nobody could pay. PagerDuty woke the on-call SRE, the incident channel filled with theories, and eventually someone rolled checkout back. Everything recovered.\n\nNobody actually knows *why* it broke.\n\nYour manager has dropped the RCA on your desk, due today. Leadership wants a timeline, a root cause and a list of who was affected. Engineering wants to know whether it can happen again.\n\nDownload the **evidence pack**. It holds everything the on-call team collected: nginx access logs, the checkout service's JSON logs, metrics, the Postgres slow log, the deploy log, the Slack incident channel and a git bundle of the service repo. **Read `README_FIRST.txt` before anything else**, and keep an eye on time zones. Not every source agrees on what time it is.\n\nThe six questions follow the shape of a real RCA:\n\n1. **When** did it start?\n2. **What changed?**\n3. **What triggered it?**\n4. **Where in the code** does it live?\n5. **Why did it keep going?**\n6. **What was the blast radius?**\n\nEach answer is a small, exact value (a timestamp, a SHA, a name, a number). Use the **Toolbox** tab if you get stuck on a command, and hints are available if you get stuck on the investigation. Good luck. The coffee machine is also down, but that one is a hardware issue.",
+  "briefing": "**Monday, 09:12. Shipfast HQ.**\n\nFriday, a little after 3 AM local time, checkout died. For about **27 minutes** customers could browse but not pay. Someone rolled checkout back and everything recovered. Nobody knows *why* it broke.\n\nThe RCA is on your desk, due today: a timeline, a root cause and who was affected.\n\nThe **evidence pack** holds what on-call collected: nginx and app logs, metrics, the Postgres slow log, deploys, the Slack channel and the service's git history. **Read `README_FIRST.txt` first**, and watch the time zones: not every source agrees on what time it is.\n\nSix stages follow a real RCA: **when** it started, **what changed**, **what triggered** it, **where in the code**, **why it kept going**, and the **blast radius**. Each answer is a small, exact value. Stuck? Use the Toolbox and the hints.",
+  "setupChecklist": [
+    "Get the evidence: download and unzip the **evidence pack**, *or* open the **Evidence Explorer** to browse every file in your browser (no installs).",
+    "Read `README_FIRST.txt` end to end.",
+    "Note each source's time zone: nginx, Postgres and deploys are **UTC**, the app log is **local time (+02:00)**, metrics and Slack use **epoch seconds**.",
+    "Pick your path: **bash** (Linux, macOS or WSL), **Windows PowerShell** (every Toolbox command has a PowerShell version), or the **browser Explorer**.",
+    "Git is optional: `repo/git-log.txt` holds the full history (with diffs) as plain text."
+  ],
   "evidenceZip": "/evidence/3am-outage-evidence.zip",
   "evidence": [
     {
@@ -65,6 +72,11 @@
       "path": "repo/shipfast-checkout.bundle",
       "format": "git bundle",
       "description": "The full history of the checkout service repo, tags included. Clone it with `git clone shipfast-checkout.bundle`."
+    },
+    {
+      "path": "repo/git-log.txt",
+      "format": "text (git log -p)",
+      "description": "The same repo history as plain text: every commit, tag and diff (`git log -p --decorate --all`). Use it if you don't have git."
     }
   ],
   "rules": [
@@ -79,9 +91,27 @@
   ],
   "questions": [
     {
+      "stage": {
+        "name": "When did it start?",
+        "goal": "Find the exact UTC time of the first server error users saw.",
+        "lookFor": [
+          "`nginx/access.log` is in UTC and logs when a request *ended*",
+          "The status is the 3-digit number right after the quoted request",
+          "Any 5xx counts, on any path",
+          "Take the earliest timestamp, not just the first line you see"
+        ],
+        "tools": [
+          "filter-5xx",
+          "first-last-match",
+          "status-histogram",
+          "per-minute-5xx",
+          "grep-regex"
+        ],
+        "explorerTip": "Open `nginx/access.log` and add a **regex** filter `\" 5\\d\\d ` to keep only 5xx lines. Use **First match** to jump to the earliest hit and check the **histogram by minute** to see where errors cluster. The time inside `[...]` is already UTC."
+      },
       "id": "q1",
       "title": "When did it start?",
-      "prompt": "Every RCA starts with an anchor: **when did users first start seeing errors?**\n\nFind the timestamp of the **first** request in `nginx/access.log` that returned a server error, meaning **any HTTP status from 500 to 599**, on any path.\n\nAnswer with the time as it appears in the nginx log, **in UTC**, formatted `HH:MM:SS` (no date, no milliseconds).",
+      "prompt": "When did users first see errors?\n\nFind the **first** request in `nginx/access.log` that returned a server error (**any status 500–599**, any path).\n\nAnswer with its time **in UTC** as `HH:MM:SS` (no date, no milliseconds).",
       "answerFormat": "HH:MM:SS (UTC)",
       "placeholder": "04:20:00",
       "points": 100,
@@ -102,9 +132,27 @@
       "successNote": "nginx's `$time_local` records when the request **finished**, not when it started. A request that hung for 30 seconds is logged 30 seconds after the damage began. Always ask *what moment a timestamp represents* and *which time zone it's in* before you line up sources."
     },
     {
+      "stage": {
+        "name": "What changed?",
+        "goal": "Identify the commit checkout was actually running when the errors began.",
+        "lookFor": [
+          "`deploys/deploys.log` lists each release with its short commit",
+          "Several services deployed that night; only one serves checkout",
+          "Compare deploy times with your stage 1 answer",
+          "Slack opinions are not evidence"
+        ],
+        "tools": [
+          "line-up-sources",
+          "versions-over-time",
+          "git-tags",
+          "git-show-release",
+          "git-log-oneline"
+        ],
+        "explorerTip": "Open `deploys/deploys.log` and filter **contains** `service=checkout`. Find the last checkout deploy *before* your first 5xx (both are UTC). Then open `repo/git-log.txt`, filter **contains** that version tag and use **First match** to confirm the commit."
+      },
       "id": "q2",
       "title": "What changed?",
-      "prompt": "Most outages follow a change. Several changes landed that night, and the Slack channel has opinions.\n\nWhich **commit was the checkout service actually running when the errors started**? Find the deployed release, then the commit behind it in the repo.\n\nAnswer with the **7-character short git SHA** (lowercase hex).",
+      "prompt": "Which **commit was checkout actually running when the errors started**? Find the deployed release, then its commit in the repo.\n\nAnswer with the **7-character short SHA** (lowercase hex).",
       "answerFormat": "7-char short SHA (hex)",
       "placeholder": "a1b2c3d",
       "points": 100,
@@ -125,9 +173,27 @@
       "successNote": "The most recent deploy is the first suspect, not automatically the culprit. One release went out over half an hour before anything broke, so recency alone would have sent you the wrong way. Correlate *when each change went live* with *when symptoms began*, and then confirm it by reading the diff."
     },
     {
+      "stage": {
+        "name": "What triggered it?",
+        "goal": "Find the order whose checkout started but never finished.",
+        "lookFor": [
+          "`app/checkout-service.log` is JSON lines in *local* time (+02:00)",
+          "Each checkout logs a start and, normally, a done",
+          "Look just before the first errors, after converting time zones",
+          "A frozen pod goes silent, then lags, then restarts"
+        ],
+        "tools": [
+          "json-filter-msg",
+          "never-finished",
+          "json-follow-order",
+          "pod-timeline",
+          "utc-to-local"
+        ],
+        "explorerTip": "Use the **time converter** widget to turn your stage 1 UTC time into +02:00. Open `app/checkout-service.log`, add the **JSON field filter** `msg = checkout.start` and look at starts shortly before that time. Filter **contains** each candidate order ID: the one with no `checkout.done` is your suspect."
+      },
       "id": "q3",
       "title": "What triggered it?",
-      "prompt": "The bad code was live for a while before anything broke. Something had to **trigger** it.\n\nIn the checkout service log, one order shows up as a request that **started but never finished**: there's a `checkout.start` for it, with no matching `checkout.done`, and the pod went quiet afterwards.\n\nWhich **order ID** is that \"poison\" order?",
+      "prompt": "One order in the checkout service log **started but never finished**: a `checkout.start` with no matching `checkout.done`, after which the pod went quiet.\n\nWhich **order ID** is that \"poison\" order?",
       "answerFormat": "Order ID, e.g. ORD-XXXXXX",
       "placeholder": "ORD-1A2B3C",
       "points": 100,
@@ -148,9 +214,27 @@
       "successNote": "Some bugs only fire on specific input. A deploy can look healthy for 15 minutes until the one payload that triggers it arrives. A request that **starts and never ends** (no completion log, no error) is a classic sign that a thread or event loop is stuck rather than crashing."
     },
     {
+      "stage": {
+        "name": "Where in the code?",
+        "goal": "Find the function in the bad release that can block Node's event loop.",
+        "lookFor": [
+          "Look at what the bad release changed, not the whole repo",
+          "Nested quantifiers like `(x+)*` can backtrack catastrophically",
+          "The poison order's log line hints at what kind of input it carried",
+          "The answer is a function name, not a file name"
+        ],
+        "tools": [
+          "git-show-release",
+          "git-diff-releases",
+          "git-pickaxe",
+          "git-grep",
+          "regex-timing"
+        ],
+        "explorerTip": "Open `repo/git-log.txt` (the full `git log -p`). Filter **contains** the release tag from stage 2 and use **First match** to jump to that commit, then filter **regex** `^\\+.*(function|RegExp|=\\s*/\\^)` to see only the added lines that define functions or regexes."
+      },
       "id": "q4",
       "title": "Where in the code?",
-      "prompt": "You know the commit and you know the input. Now find the code.\n\nSomething in that release spends a very long time on certain input and blocks the whole Node.js process. Which **function** contains the dangerous code?\n\nAnswer with the **function name exactly as written in the source** (no parentheses, no file path).",
+      "prompt": "Something in that release takes a very long time on certain input and blocks the whole Node.js process.\n\nWhich **function** contains the dangerous code? Answer with its name **exactly as in the source** (no parentheses, no path).",
       "answerFormat": "functionName (as in code)",
       "placeholder": "validateCartItems",
       "points": 100,
@@ -171,9 +255,26 @@
       "successNote": "**Catastrophic backtracking:** with nested quantifiers like `(\\w+\\s?)*`, a backtracking regex engine can split a string of words in exponentially many ways. When the final character makes the match fail, it tries **all** of them. 99 characters is enough to keep a CPU busy for far longer than anyone will wait, and in single-threaded Node.js that blocks everything."
     },
     {
+      "stage": {
+        "name": "Why did it keep going?",
+        "goal": "Count how many times the poison order was submitted in total.",
+        "lookFor": [
+          "Every submission logs its own start line with a new request id",
+          "Retries and repeat clicks land on different pods",
+          "Count submissions, not every log line that mentions the order",
+          "Include the first one"
+        ],
+        "tools": [
+          "json-follow-order",
+          "grep-count",
+          "count-unique",
+          "json-msg-types"
+        ],
+        "explorerTip": "In `app/checkout-service.log`, add the **JSON field filter** `order = <your stage 3 order>` plus `msg = checkout.start`; the match count is your answer. Cross-check with **Count unique** using the regex `\"rid\":\"([0-9a-f]+)\"`."
+      },
       "id": "q5",
       "title": "Why did it keep going?",
-      "prompt": "One bad request should freeze one pod for a while. The outage lasted about 27 minutes across the whole fleet. Something kept **re-poisoning** the service.\n\nHow many times **in total** was the poison order submitted to the checkout service during the incident?\n\nAnswer with an **integer**: the total number of submissions, **including the first**.",
+      "prompt": "One bad request freezes one pod, yet the outage lasted ~27 minutes. Something kept **re-poisoning** the service.\n\nHow many times **in total** was the poison order submitted to checkout? Answer with an **integer, including the first**.",
       "answerFormat": "Integer (total, incl. the first)",
       "placeholder": "3",
       "points": 100,
@@ -194,9 +295,27 @@
       "successNote": "Client **retries** (automatic, plus impatient users clicking again) kept sending the same poison payload. Round-robin load balancing spread it across every pod, and **liveness probes** restarted frozen pods straight back into the line of fire. Retries need backoff and caps, and the system needs a way to reject inputs that killed it before. Otherwise self-healing just becomes self-reinfecting."
     },
     {
+      "stage": {
+        "name": "Blast radius",
+        "goal": "Count the distinct real customers who got a 5xx on checkout.",
+        "lookFor": [
+          "Only `POST /api/checkout` lines with a 500–599 status",
+          "Use the whole file, not just the incident window",
+          "The customer is the `cid=` field at the end of each line",
+          "Drop `cid=-` and `cid=cus_synthetic`"
+        ],
+        "tools": [
+          "grep-regex",
+          "grep-exclude",
+          "grep-only-match",
+          "count-unique",
+          "group-two-fields"
+        ],
+        "explorerTip": "Open `nginx/access.log`, add a **regex** filter `\"POST /api/checkout [^\"]*\" 5\\d\\d `, add **NOT** filters for `cid=-` and `cid=cus_synthetic`, then run **Count unique** with the regex `cid=(\\S+)`. The number of unique values is your answer."
+      },
       "id": "q6",
       "title": "Blast radius",
-      "prompt": "Support needs to email affected customers and finance wants an estimate. **How many real customers** were hit?\n\nCount the **distinct customer IDs** (`cid=` values) that received **at least one HTTP 5xx** (500–599) on **`POST /api/checkout`** anywhere in `nginx/access.log` (the whole file, not just a window).\n\nExclude `cid=-` (anonymous) and `cid=cus_synthetic` (our synthetic monitor). Answer with an **integer**.",
+      "prompt": "How many **real customers** were hit?\n\nCount the **distinct `cid=` values** with **at least one 5xx** (500–599) on **`POST /api/checkout`**, anywhere in `nginx/access.log` (whole file).\n\nExclude `cid=-` (anonymous) and `cid=cus_synthetic` (our monitor). Answer with an **integer**.",
       "answerFormat": "Integer (distinct customers)",
       "placeholder": "42",
       "points": 150,
@@ -222,39 +341,53 @@
       "category": "Getting oriented",
       "items": [
         {
+          "id": "unzip-evidence",
           "title": "Unpack the evidence",
           "command": "unzip 3am-outage-evidence.zip && cd 3am-outage",
-          "explain": "Extracts the pack. Everything lives under one top-level folder."
+          "explain": "Extracts the pack. Everything lives under one top-level folder.",
+          "powershell": "Expand-Archive .\\3am-outage-evidence.zip -DestinationPath .\ncd .\\3am-outage"
         },
         {
+          "id": "list-files",
           "title": "See what you've got",
           "command": "ls -laR",
-          "explain": "Lists every file recursively with sizes. A huge file is usually the one worth sampling first."
+          "explain": "Lists every file recursively with sizes. A huge file is usually the one worth sampling first.",
+          "powershell": "Get-ChildItem -Recurse | Select-Object FullName, Length"
         },
         {
+          "id": "head-lines",
           "title": "Peek at the first lines",
           "command": "head -n 5 nginx/access.log",
-          "explain": "Look at the format **before** you parse it. `tail -n 5` shows the end of the window."
+          "explain": "Look at the format **before** you parse it. `tail -n 5` shows the end of the window.",
+          "powershell": "Get-Content nginx\\access.log -TotalCount 5"
         },
         {
+          "id": "line-count",
           "title": "How big is it?",
           "command": "wc -l nginx/access.log app/checkout-service.log",
-          "explain": "Line counts tell you whether you can eyeball a file or need to aggregate it."
+          "explain": "Line counts tell you whether you can eyeball a file or need to aggregate it.",
+          "powershell": "Get-ChildItem nginx\\access.log, app\\checkout-service.log | ForEach-Object { '{0,8} {1}' -f (Get-Content $_.FullName | Measure-Object -Line).Lines, $_.Name }"
         },
         {
+          "id": "browse-file",
           "title": "Browse without wrapping",
           "command": "less -S nginx/access.log",
-          "explain": "`-S` chops long lines instead of wrapping them. Use `/pattern` to search, `n` for the next hit, `G` for the end of the file."
+          "explain": "`-S` chops long lines instead of wrapping them. Use `/pattern` to search, `n` for the next hit, `G` for the end of the file.",
+          "powershell": "Get-Content nginx\\access.log | Out-Host -Paging"
         },
         {
+          "id": "file-type",
           "title": "What kind of file is this?",
           "command": "file repo/shipfast-checkout.bundle metrics/*.csv",
-          "explain": "Identifies file types: text, JSON, git bundle, and so on."
+          "explain": "Identifies file types: text, JSON, git bundle, and so on.",
+          "powershell": "Get-ChildItem repo, metrics | Select-Object Name, Length\nGet-Content metrics\\checkout_metrics.csv -TotalCount 2"
         },
         {
+          "id": "read-readme",
           "title": "Read the README",
           "command": "cat README_FIRST.txt",
-          "explain": "Seriously. It has notes on formats and time zones."
+          "explain": "Seriously. It has notes on formats and time zones.",
+          "powershell": "Get-Content README_FIRST.txt"
         }
       ]
     },
@@ -262,44 +395,60 @@
       "category": "grep & friends",
       "items": [
         {
+          "id": "grep-count",
           "title": "Count matches",
           "command": "grep -c ' 404 ' nginx/access.log",
-          "explain": "`-c` prints the number of matching lines instead of the lines themselves. Fast sanity checks."
+          "explain": "`-c` prints the number of matching lines instead of the lines themselves. Fast sanity checks.",
+          "powershell": "(Select-String -Path nginx\\access.log -Pattern ' 404 ' -SimpleMatch).Count"
         },
         {
+          "id": "grep-regex",
           "title": "Extended regex",
           "command": "grep -E '\" (502|504) ' nginx/access.log | head",
-          "explain": "`-E` enables alternation `|`, `+`, `{n}` and so on without backslashes. The leading `\" ` anchors the match right after the request string."
+          "explain": "`-E` enables alternation `|`, `+`, `{n}` and so on without backslashes. The leading `\" ` anchors the match right after the request string.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern '\" (502|504) ' | Select-Object -First 10"
         },
         {
+          "id": "grep-line-numbers",
           "title": "Line numbers",
           "command": "grep -n 'pattern' app/checkout-service.log | head",
-          "explain": "`-n` prefixes each hit with its line number, which helps you jump there in `less` (`<num>G`)."
+          "explain": "`-n` prefixes each hit with its line number, which helps you jump there in `less` (`<num>G`).",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'pattern' | Select-Object -First 10 LineNumber, Line"
         },
         {
+          "id": "grep-first-match",
           "title": "Stop at the first match",
           "command": "grep -m1 -E 'pattern' nginx/access.log",
-          "explain": "`-m1` exits after the first hit. On a chronologically sorted log, that gives you the *earliest* occurrence."
+          "explain": "`-m1` exits after the first hit. On a chronologically sorted log, that gives you the *earliest* occurrence.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern 'pattern' | Select-Object -First 1"
         },
         {
+          "id": "grep-exclude",
           "title": "Invert / exclude",
           "command": "grep -v -e 'kube-probe' -e 'Shipfast-Synthetic' nginx/access.log",
-          "explain": "`-v` keeps lines that do **not** match. Each `-e` adds another pattern. Great for removing health checks and synthetic noise."
+          "explain": "`-v` keeps lines that do **not** match. Each `-e` adds another pattern. Great for removing health checks and synthetic noise.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern 'kube-probe', 'Shipfast-Synthetic' -NotMatch"
         },
         {
+          "id": "grep-only-match",
           "title": "Print only the match",
           "command": "grep -o 'cid=[^ ]*' nginx/access.log | sort | uniq -c | sort -rn | head",
-          "explain": "`-o` outputs just the matched text, which makes it ideal for extracting one field from messy lines."
+          "explain": "`-o` outputs just the matched text, which makes it ideal for extracting one field from messy lines.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern 'cid=\\S+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count, Name"
         },
         {
+          "id": "grep-context",
           "title": "Context around a hit",
           "command": "grep -n -B3 -A10 'ORD-XXXXXX' app/checkout-service.log",
-          "explain": "`-B`/`-A` show lines before and after each match, so you see what happened around an event."
+          "explain": "`-B`/`-A` show lines before and after each match, so you see what happened around an event.",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'ORD-XXXXXX' -Context 3,10"
         },
         {
+          "id": "grep-gzip",
           "title": "Search compressed logs",
           "command": "zgrep -c 'pattern' rotated.log.gz",
-          "explain": "In real life old logs are gzipped. `zgrep`/`zcat` read them without unpacking."
+          "explain": "In real life old logs are gzipped. `zgrep`/`zcat` read them without unpacking.",
+          "powershell": "$gz = New-Object IO.Compression.GZipStream([IO.File]::OpenRead(\"$PWD\\rotated.log.gz\"), [IO.Compression.CompressionMode]::Decompress)\n((New-Object IO.StreamReader($gz)).ReadToEnd() -split \"`n\" | Select-String 'pattern').Count"
         }
       ]
     },
@@ -307,44 +456,60 @@
       "category": "awk / sort / uniq",
       "items": [
         {
+          "id": "nginx-fields",
           "title": "Pull fields from nginx lines",
           "command": "awk '{print $4, $6, $7, $9}' nginx/access.log | head",
-          "explain": "awk splits on whitespace. In this format: `$1` IP, `$4` `[time`, `$6` `\"METHOD`, `$7` path, `$9` status, `$NF` `cid=...`. Verify against the `log_format`."
+          "explain": "awk splits on whitespace. In this format: `$1` IP, `$4` `[time`, `$6` `\"METHOD`, `$7` path, `$9` status, `$NF` `cid=...`. Verify against the `log_format`.",
+          "powershell": "Get-Content nginx\\access.log -TotalCount 10 | ForEach-Object { $f = $_ -split ' '; \"$($f[3]) $($f[5]) $($f[6]) $($f[8])\" }"
         },
         {
+          "id": "status-histogram",
           "title": "Status code histogram",
           "command": "awk '{print $9}' nginx/access.log | sort | uniq -c | sort -rn",
-          "explain": "The classic first look at any access log: how many of each status code."
+          "explain": "The classic first look at any access log: how many of each status code.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern '\" (\\d{3}) ' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
         },
         {
+          "id": "filter-5xx",
           "title": "Filter by field",
           "command": "awk '$9 >= 500 && $9 <= 599' nginx/access.log | head",
-          "explain": "awk conditions on fields are more precise than grep, because a `500` can also show up in a byte count."
+          "explain": "awk conditions on fields are more precise than grep, because a `500` can also show up in a byte count.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern '\" 5\\d\\d ' | Select-Object -First 10"
         },
         {
+          "id": "per-minute-5xx",
           "title": "Bucket per minute",
           "command": "awk '$9 ~ /^5/ {print substr($4, 14, 5)}' nginx/access.log | uniq -c",
-          "explain": "`substr($4,14,5)` pulls out `HH:MM` from `[13/Nov/2026:HH:MM:SS`. Since the log is sorted, `uniq -c` gives a per-minute count. Use `,8)` for per-second."
+          "explain": "`substr($4,14,5)` pulls out `HH:MM` from `[13/Nov/2026:HH:MM:SS`. Since the log is sorted, `uniq -c` gives a per-minute count. Use `,8)` for per-second.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern ':(\\d\\d:\\d\\d):\\d\\d \\+0000\\] \"[^\"]*\" 5\\d\\d ' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name"
         },
         {
+          "id": "per-minute-all",
           "title": "Per-minute with cut",
           "command": "cut -d: -f2,3 nginx/access.log | sort | uniq -c | head",
-          "explain": "`cut` on `:` gives `HH:MM` from the timestamp. Cruder than awk, but quick."
+          "explain": "`cut` on `:` gives `HH:MM` from the timestamp. Cruder than awk, but quick.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern ':(\\d\\d:\\d\\d):\\d\\d ' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object -First 10 Count, Name"
         },
         {
+          "id": "group-two-fields",
           "title": "Group by two fields",
           "command": "awk '{print $7, $9}' nginx/access.log | sort | uniq -c | sort -rn | head -20",
-          "explain": "Which path + status combinations dominate? Great for seeing *which* endpoints fail."
+          "explain": "Which path + status combinations dominate? Great for seeing *which* endpoints fail.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern '\"\\w+ (\\S+) [^\"]*\" (\\d{3}) ' | ForEach-Object { $_.Matches[0].Groups[1].Value + ' ' + $_.Matches[0].Groups[2].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name"
         },
         {
+          "id": "count-unique",
           "title": "Count unique values",
           "command": "awk '{print $NF}' nginx/access.log | sort -u | wc -l",
-          "explain": "`sort -u` removes duplicates, and `wc -l` counts what's left. Distinct users, IPs, rids, and so on."
+          "explain": "`sort -u` removes duplicates, and `wc -l` counts what's left. Distinct users, IPs, rids, and so on.",
+          "powershell": "(Select-String -Path nginx\\access.log -Pattern 'cid=(\\S+)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Sort-Object -Unique | Measure-Object).Count"
         },
         {
+          "id": "first-last-match",
           "title": "First and last occurrence",
           "command": "awk '$9 ~ /^5/' nginx/access.log | sed -n '1p;$p'",
-          "explain": "Prints the first and last matching lines, which gives you the start and end of a phenomenon in one go."
+          "explain": "Prints the first and last matching lines, which gives you the start and end of a phenomenon in one go.",
+          "powershell": "$hits = Select-String -Path nginx\\access.log -Pattern '\" 5\\d\\d '\n$hits[0].Line\n$hits[-1].Line"
         }
       ]
     },
@@ -352,44 +517,60 @@
       "category": "jq for JSON logs",
       "items": [
         {
+          "id": "json-pretty",
           "title": "Pretty-print one line",
           "command": "head -n1 app/checkout-service.log | jq .",
-          "explain": "See every field a log line carries before you write filters."
+          "explain": "See every field a log line carries before you write filters.",
+          "powershell": "Get-Content app\\checkout-service.log -TotalCount 1 | ConvertFrom-Json | Format-List"
         },
         {
+          "id": "json-filter-msg",
           "title": "Filter by message",
           "command": "jq -c 'select(.msg==\"checkout.start\")' app/checkout-service.log | head",
-          "explain": "`select()` keeps matching objects, and `-c` keeps them one per line so you can still grep, head and wc."
+          "explain": "`select()` keeps matching objects, and `-c` keeps them one per line so you can still grep, head and wc.",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"msg\":\"checkout.start\"' | ForEach-Object { $_.Line | ConvertFrom-Json } | Select-Object -First 10 ts, pod, order, customer"
         },
         {
+          "id": "json-follow-order",
           "title": "Follow one order",
           "command": "jq -c 'select(.order==\"ORD-XXXXXX\")' app/checkout-service.log",
-          "explain": "Every event for a single order. Is there a start *and* a done?"
+          "explain": "Every event for a single order. Is there a start *and* a done?",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'ORD-XXXXXX' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json } | Format-Table ts, pod, msg, order, rid"
         },
         {
+          "id": "json-custom-output",
           "title": "Custom output with -r",
           "command": "jq -r '\"\\(.ts) \\(.pod) \\(.msg) \\(.order // \"\")\"' app/checkout-service.log | less -S",
-          "explain": "`-r` prints raw strings, and `\\(...)` interpolates fields. `//` gives a default when a field is missing."
+          "explain": "`-r` prints raw strings, and `\\(...)` interpolates fields. `//` gives a default when a field is missing.",
+          "powershell": "Get-Content app\\checkout-service.log | ForEach-Object { $j = $_ | ConvertFrom-Json; \"$($j.ts) $($j.pod) $($j.msg) $($j.order)\" } | Out-Host -Paging"
         },
         {
+          "id": "json-msg-types",
           "title": "What message types exist?",
           "command": "jq -r '.msg' app/checkout-service.log | sort | uniq -c | sort -rn",
-          "explain": "A histogram of event types. Rare warnings stand out immediately."
+          "explain": "A histogram of event types. Rare warnings stand out immediately.",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"msg\":\"([^\"]+)\"' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
         },
         {
+          "id": "json-group-count",
           "title": "Group and count (slurp)",
           "command": "jq -s 'map(select(.level==\"warn\")) | group_by(.msg) | map({msg: .[0].msg, n: length})' app/checkout-service.log",
-          "explain": "`-s` slurps all lines into one array, so you can `group_by`, `sort_by` and `length` across the whole file."
+          "explain": "`-s` slurps all lines into one array, so you can `group_by`, `sort_by` and `length` across the whole file.",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"level\":\"warn\"' | ForEach-Object { $_.Line | ConvertFrom-Json } | Group-Object msg | Select-Object Count, Name"
         },
         {
+          "id": "json-numeric-filter",
           "title": "Filter on numbers",
           "command": "jq -c 'select(.msg==\"eventloop.lag\" and .lag_ms > 1000) | {ts, pod, lag_ms}' app/checkout-service.log",
-          "explain": "Numeric comparisons and object construction `{a, b}` keep only the fields you care about."
+          "explain": "Numeric comparisons and object construction `{a, b}` keep only the fields you care about.",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'eventloop.lag' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json } | Where-Object { $_.lag_ms -gt 1000 } | Format-Table ts, pod, lag_ms"
         },
         {
+          "id": "versions-over-time",
           "title": "Versions over time",
           "command": "jq -r '[.ts, .pod, .version] | @tsv' app/checkout-service.log | uniq -f2 | less",
-          "explain": "`@tsv` turns arrays into tab-separated lines. Combined with `uniq`, you see when each pod switched version."
+          "explain": "`@tsv` turns arrays into tab-separated lines. Combined with `uniq`, you see when each pod switched version.",
+          "powershell": "Get-Content app\\checkout-service.log | ForEach-Object { $j = $_ | ConvertFrom-Json; \"$($j.ts)`t$($j.pod)`t$($j.version)\" } | Out-Host -Paging"
         }
       ]
     },
@@ -397,34 +578,46 @@
       "category": "Correlating sources",
       "items": [
         {
+          "id": "rid-from-nginx",
           "title": "Grab a request id from nginx",
           "command": "grep -m1 -E '\" 50[0-9] ' nginx/access.log | grep -o 'rid=[0-9a-f]*'",
-          "explain": "nginx and the checkout service share the `rid` (request id), which is the thread you pull to link both sides of a request."
+          "explain": "nginx and the checkout service share the `rid` (request id), which is the thread you pull to link both sides of a request.",
+          "powershell": "(Select-String -Path nginx\\access.log -Pattern '\" 50\\d .*rid=([0-9a-f]+)' | Select-Object -First 1).Matches[0].Groups[1].Value"
         },
         {
+          "id": "rid-in-app-log",
           "title": "Find that request in the app log",
           "command": "grep '<rid>' app/checkout-service.log | jq .",
-          "explain": "The same request from the service's point of view: which pod, which order, which version, and did it finish?"
+          "explain": "The same request from the service's point of view: which pod, which order, which version, and did it finish?",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '<rid>' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json }"
         },
         {
+          "id": "customer-requests",
           "title": "All requests for one customer",
           "command": "grep 'cid=cus_XXXX' nginx/access.log | awk '{print $4, $6, $7, $9, $(NF-2)}'",
-          "explain": "Retries from the same person line up here. Watch the timing between attempts."
+          "explain": "Retries from the same person line up here. Watch the timing between attempts.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern 'cid=cus_XXXX\\b' | ForEach-Object Line"
         },
         {
+          "id": "line-up-sources",
           "title": "Line up two sources by time",
           "command": "grep -h '01:2[0-9]' deploys/deploys.log db/postgresql-slow.log | sort | head",
-          "explain": "Merge events from different files into one view, **but only after they're all in the same time zone**."
+          "explain": "Merge events from different files into one view, **but only after they're all in the same time zone**.",
+          "powershell": "Select-String -Path deploys\\deploys.log, db\\postgresql-slow.log -Pattern '01:2\\d' | ForEach-Object Line | Sort-Object | Select-Object -First 20"
         },
         {
+          "id": "never-finished",
           "title": "Requests that never finished",
           "command": "comm -23 <(jq -r 'select(.msg==\"x.start\")|.rid' app.log | sort -u) <(jq -r 'select(.msg==\"x.done\")|.rid' app.log | sort -u)",
-          "explain": "`comm -23` prints lines only in the first sorted list: things that started but have no matching end."
+          "explain": "`comm -23` prints lines only in the first sorted list: things that started but have no matching end.",
+          "powershell": "$done = @{}\nSelect-String -Path app.log -Pattern '\"msg\":\"x.done\"' | ForEach-Object { $done[($_.Line | ConvertFrom-Json).rid] = 1 }\nSelect-String -Path app.log -Pattern '\"msg\":\"x.start\"' | ForEach-Object { $_.Line | ConvertFrom-Json } | Where-Object { -not $done.ContainsKey($_.rid) }"
         },
         {
+          "id": "pod-timeline",
           "title": "Pod timeline",
           "command": "jq -r 'select(.pod==\"<pod>\") | \"\\(.ts) \\(.level) \\(.msg)\"' app/checkout-service.log | less",
-          "explain": "One pod's life story. Gaps (silence) can be as telling as errors."
+          "explain": "One pod's life story. Gaps (silence) can be as telling as errors.",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '<pod>' -SimpleMatch | ForEach-Object { $j = $_.Line | ConvertFrom-Json; \"$($j.ts) $($j.level) $($j.msg)\" } | Out-Host -Paging"
         }
       ]
     },
@@ -432,39 +625,53 @@
       "category": "Time zones & timestamps",
       "items": [
         {
+          "id": "epoch-to-utc",
           "title": "Epoch to UTC",
           "command": "date -u -d @1794531600",
-          "explain": "Converts unix epoch seconds to a human UTC time (GNU date). On macOS: `date -u -r 1794531600`."
+          "explain": "Converts unix epoch seconds to a human UTC time (GNU date). On macOS: `date -u -r 1794531600`.",
+          "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794531600).UtcDateTime.ToString('u')"
         },
         {
+          "id": "utc-to-local",
           "title": "UTC to local (Israel)",
           "command": "TZ=Asia/Jerusalem date -d '2026-11-13T00:30:00Z'",
-          "explain": "Shows what a UTC instant was on the office clock. In November, Israel is **UTC+02:00**."
+          "explain": "Shows what a UTC instant was on the office clock. In November, Israel is **UTC+02:00**.",
+          "powershell": "([DateTimeOffset]'2026-11-13T00:30:00Z').ToOffset([TimeSpan]'02:00')"
         },
         {
+          "id": "local-to-utc",
           "title": "Local to UTC",
           "command": "date -u -d '2026-11-13T02:30:00+02:00' +%H:%M:%S",
-          "explain": "Normalizes an offset timestamp (like the app log's) to UTC. `+%H:%M:%S` sets the output format."
+          "explain": "Normalizes an offset timestamp (like the app log's) to UTC. `+%H:%M:%S` sets the output format.",
+          "powershell": "([DateTimeOffset]'2026-11-13T02:30:00+02:00').UtcDateTime.ToString('HH:mm:ss')"
         },
         {
+          "id": "epoch-python",
           "title": "Python one-liner",
           "command": "python3 -c 'from datetime import datetime, timezone; print(datetime.fromtimestamp(1794531600, timezone.utc))'",
-          "explain": "Same conversion, but portable. Swap in `timezone(timedelta(hours=2))` to get local time."
+          "explain": "Same conversion, but portable. Swap in `timezone(timedelta(hours=2))` to get local time.",
+          "powershell": "# no Python needed on Windows:\n[DateTimeOffset]::FromUnixTimeSeconds(1794531600).ToString('yyyy-MM-dd HH:mm:ss zzz')"
         },
         {
+          "id": "time-to-epoch",
           "title": "Human time to epoch",
           "command": "date -u -d '2026-11-13 01:00:00' +%s",
-          "explain": "Handy for finding the matching row in an epoch-indexed file like the metrics CSV."
+          "explain": "Handy for finding the matching row in an epoch-indexed file like the metrics CSV.",
+          "powershell": "([DateTimeOffset]'2026-11-13T01:00:00Z').ToUnixTimeSeconds()"
         },
         {
+          "id": "csv-epoch-column",
           "title": "Convert a whole CSV column",
           "command": "awk -F, 'NR>1 {cmd=\"date -u -d @\"$1\" +%H:%M:%S\"; cmd | getline t; close(cmd); print t, $0}' metrics/checkout_metrics.csv | head",
-          "explain": "Prefix every metrics row with a readable UTC time. Slow-ish (it forks `date` per row), but fine for a few hundred rows."
+          "explain": "Prefix every metrics row with a readable UTC time. Slow-ish (it forks `date` per row), but fine for a few hundred rows.",
+          "powershell": "Import-Csv metrics\\checkout_metrics.csv | Select-Object -First 10 @{n='utc'; e={ [DateTimeOffset]::FromUnixTimeSeconds([long]$_.ts_epoch).ToString('HH:mm:ss') }}, *"
         },
         {
+          "id": "slack-timestamps",
           "title": "Slack timestamps",
           "command": "jq -r '.[] | \"\\(.ts | tonumber | floor | todate) \\(.user): \\(.text)\"' slack/inc-checkout.json",
-          "explain": "Slack `ts` is an epoch *string* with a fractional part. `tonumber | floor | todate` gives ISO-8601 UTC."
+          "explain": "Slack `ts` is an epoch *string* with a fractional part. `tonumber | floor | todate` gives ISO-8601 UTC.",
+          "powershell": "(Get-Content slack\\inc-checkout.json -Raw | ConvertFrom-Json) | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][Math]::Floor([double]$_.ts)).ToString('u'), $_.user, $_.text }"
         }
       ]
     },
@@ -472,34 +679,46 @@
       "category": "CSV metrics",
       "items": [
         {
+          "id": "csv-table",
           "title": "Pretty table",
           "command": "column -s, -t < metrics/checkout_metrics.csv | less -S",
-          "explain": "Aligns CSV columns so you can actually read them. `-s,` sets the separator and `-t` builds a table."
+          "explain": "Aligns CSV columns so you can actually read them. `-s,` sets the separator and `-t` builds a table.",
+          "powershell": "Import-Csv metrics\\checkout_metrics.csv | Format-Table | Out-Host -Paging"
         },
         {
+          "id": "csv-header",
           "title": "Show the header with column numbers",
           "command": "head -1 metrics/checkout_metrics.csv | tr , '\\n' | nl",
-          "explain": "Numbers each column, so you know which `$N` to use in awk."
+          "explain": "Numbers each column, so you know which `$N` to use in awk.",
+          "powershell": "$i = 0; (Get-Content metrics\\checkout_metrics.csv -TotalCount 1) -split ',' | ForEach-Object { $i++; \"$i $_\" }"
         },
         {
+          "id": "csv-select",
           "title": "Select columns",
           "command": "awk -F, '{print $1, $3, $4}' metrics/checkout_metrics.csv | head",
-          "explain": "`-F,` splits on commas. Print just the columns you're investigating."
+          "explain": "`-F,` splits on commas. Print just the columns you're investigating.",
+          "powershell": "Import-Csv metrics\\checkout_metrics.csv | Select-Object -First 10 ts_epoch, cpu_pct_max, eventloop_lag_p99_ms"
         },
         {
+          "id": "csv-first-over",
           "title": "First row over a threshold",
           "command": "awk -F, 'NR>1 && $7 > 0.05 {print; exit}' metrics/checkout_metrics.csv",
-          "explain": "Finds when a metric first crosses a line (here, the error-rate column). Then convert `$1` with `date -u -d @...`."
+          "explain": "Finds when a metric first crosses a line (here, the error-rate column). Then convert `$1` with `date -u -d @...`.",
+          "powershell": "Import-Csv metrics\\checkout_metrics.csv | Where-Object { [double]$_.error_rate -gt 0.05 } | Select-Object -First 1"
         },
         {
+          "id": "csv-all-over",
           "title": "All rows over a threshold",
           "command": "awk -F, 'NR>1 && $4 > 1000 {print $1, $4}' metrics/checkout_metrics.csv",
-          "explain": "Shows the full span of an anomaly: when it started, when it ended, and whether it was continuous."
+          "explain": "Shows the full span of an anomaly: when it started, when it ended, and whether it was continuous.",
+          "powershell": "Import-Csv metrics\\checkout_metrics.csv | Where-Object { [double]$_.eventloop_lag_p99_ms -gt 1000 } | Select-Object ts_epoch, eventloop_lag_p99_ms"
         },
         {
+          "id": "csv-min-max",
           "title": "Min / max of a column",
           "command": "awk -F, 'NR>1 {if($2<m||m==\"\")m=$2; if($2>M)M=$2} END{print m, M}' metrics/checkout_metrics.csv",
-          "explain": "Quick range check: did pods_ready ever hit zero?"
+          "explain": "Quick range check: did pods_ready ever hit zero?",
+          "powershell": "Import-Csv metrics\\checkout_metrics.csv | ForEach-Object { [double]$_.pods_ready } | Measure-Object -Minimum -Maximum"
         }
       ]
     },
@@ -507,44 +726,60 @@
       "category": "git forensics",
       "items": [
         {
+          "id": "git-clone",
           "title": "Clone a bundle",
           "command": "git clone repo/shipfast-checkout.bundle && cd shipfast-checkout",
-          "explain": "A bundle is a whole repo in one file. Cloning it gives you a normal working copy with full history and tags."
+          "explain": "A bundle is a whole repo in one file. Cloning it gives you a normal working copy with full history and tags. No git? `repo/git-log.txt` holds the same history as plain text (`git log -p --decorate --all`).",
+          "powershell": "# git is optional: read repo\\git-log.txt instead\nGet-Content repo\\git-log.txt | Out-Host -Paging"
         },
         {
+          "id": "git-log-oneline",
           "title": "History at a glance",
           "command": "git log --oneline --decorate --graph | head -30",
-          "explain": "`--decorate` shows tags and branches next to commits, so you can see where each release sits."
+          "explain": "`--decorate` shows tags and branches next to commits, so you can see where each release sits. No git? `repo/git-log.txt` holds the same history as plain text (`git log -p --decorate --all`).",
+          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern '^commit ' -Context 0,5 | Select-Object -First 30"
         },
         {
+          "id": "git-tags",
           "title": "List tags",
           "command": "git tag --sort=creatordate",
-          "explain": "Releases in order. Match them against the versions in deploy logs."
+          "explain": "Releases in order. Match them against the versions in deploy logs. No git? `repo/git-log.txt` holds the same history as plain text (`git log -p --decorate --all`).",
+          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern 'tag: [^,)]+' -AllMatches | ForEach-Object { $_.Matches.Value }"
         },
         {
+          "id": "git-show-release",
           "title": "What's in a release?",
           "command": "git show <tag> --stat",
-          "explain": "Commit message, author, date and the files touched by the commit a tag points to."
+          "explain": "Commit message, author, date and the files touched by the commit a tag points to. No git? `repo/git-log.txt` holds the same history as plain text (`git log -p --decorate --all`).",
+          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern 'tag: v2.14.1\\b' -Context 0,60"
         },
         {
+          "id": "git-diff-releases",
           "title": "Diff two releases",
           "command": "git diff v2.13.4..v2.14.0 --stat",
-          "explain": "Everything that changed between two versions. Drop `--stat` for the full patch."
+          "explain": "Everything that changed between two versions. Drop `--stat` for the full patch. No git? `repo/git-log.txt` holds the same history as plain text (`git log -p --decorate --all`).",
+          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern '^commit |^\\+\\+\\+ b/' | Select-Object -First 40 Line"
         },
         {
+          "id": "git-pickaxe",
           "title": "Find who added a string",
           "command": "git log -p -S'pattern' --oneline",
-          "explain": "The \"pickaxe\": commits that added or removed occurrences of `pattern`, with their patches."
+          "explain": "The \"pickaxe\": commits that added or removed occurrences of `pattern`, with their patches. No git? `repo/git-log.txt` holds the same history as plain text (`git log -p --decorate --all`).",
+          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern '^commit |^[+-].*pattern' | ForEach-Object Line"
         },
         {
+          "id": "git-grep",
           "title": "Search code at a revision",
           "command": "git grep -n 'pattern' <tag>",
-          "explain": "Greps the tree as it was at that tag, without checking it out."
+          "explain": "Greps the tree as it was at that tag, without checking it out. No git? `repo/git-log.txt` holds the same history as plain text (`git log -p --decorate --all`).",
+          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern 'pattern' -Context 2,2"
         },
         {
+          "id": "git-blame",
           "title": "Blame a line range",
           "command": "git blame -L 1,30 src/path/to/file.ts",
-          "explain": "Who last touched each line, and in which commit. Add `-w` to ignore whitespace changes."
+          "explain": "Who last touched each line, and in which commit. Add `-w` to ignore whitespace changes. No git? `repo/git-log.txt` holds the same history as plain text (`git log -p --decorate --all`).",
+          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern '^commit |^Author:|^\\+\\+\\+ b/src/path/to/file.ts' | ForEach-Object Line"
         }
       ]
     },
@@ -552,24 +787,32 @@
       "category": "Regex sanity check (careful!)",
       "items": [
         {
+          "id": "regex-timing",
           "title": "Time a regex in Node (SAFE sizes only)",
           "command": "node -e 'const re=/^(a+)+$/; for (let n=18;n<=26;n++){const s=\"a\".repeat(n)+\"!\"; const t=Date.now(); re.test(s); console.log(n, Date.now()-t, \"ms\")}'",
-          "explain": "Measures how long a regex takes to **fail** on inputs of growing length that end in a char it can't match. `(a+)+` is the textbook evil pattern; swap in any regex you're suspicious of (and an input shape that suits it). If the time roughly **doubles per extra character**, it's exponential.\n\n**WARNING: never go above ~28 characters.** Each extra char doubles the runtime, so a few more and your terminal is frozen for minutes, or years. If that happens, `Ctrl+C`, or `pkill node` from another terminal."
+          "explain": "Measures how long a regex takes to **fail** on inputs of growing length that end in a char it can't match. `(a+)+` is the textbook evil pattern; swap in any regex you're suspicious of (and an input shape that suits it). If the time roughly **doubles per extra character**, it's exponential.\n\n**WARNING: never go above ~28 characters.** Each extra char doubles the runtime, so a few more and your terminal is frozen for minutes, or years. If that happens, `Ctrl+C`, or `pkill node` from another terminal.",
+          "powershell": "$re = [regex]'^(a+)+$'\nforeach ($n in 18..24) { $s = ('a' * $n) + '!'; $t = [Diagnostics.Stopwatch]::StartNew(); [void]$re.IsMatch($s); \"$n $($t.ElapsedMilliseconds) ms\" }"
         },
         {
+          "id": "regex-timing-python",
           "title": "Same test in Python",
           "command": "python3 -c '\nimport re, time\nfor n in range(18, 25):\n    s = \"a\" * n + \"!\"\n    t = time.time()\n    re.match(r\"^(a+)+$\", s)\n    print(n, round((time.time() - t) * 1000), \"ms\")\n'",
-          "explain": "Python's `re` is also a backtracking engine and blows up the same way. Paste it as-is: the multi-line string inside single quotes is fine in bash and zsh. **Same warning: keep n small.**"
+          "explain": "Python's `re` is also a backtracking engine and blows up the same way. Paste it as-is: the multi-line string inside single quotes is fine in bash and zsh. **Same warning: keep n small.**",
+          "powershell": "# PowerShell uses .NET regex, which backtracks too:\n$re = [regex]'^(a+)+$'\n18..24 | ForEach-Object { $s = ('a' * $_) + '!'; '{0} {1:N0} ms' -f $_, (Measure-Command { $re.IsMatch($s) }).TotalMilliseconds }"
         },
         {
+          "id": "regex-timeout",
           "title": "Run with a hard timeout",
           "command": "timeout 10s node -e '...your test...'",
-          "explain": "A safety net: kills the process after 10 seconds no matter what."
+          "explain": "A safety net: kills the process after 10 seconds no matter what.",
+          "powershell": "$re = New-Object Text.RegularExpressions.Regex('^(a+)+$', 'None', [TimeSpan]::FromSeconds(5))\ntry { $re.IsMatch(('a' * 40) + '!') } catch { 'timed out after 5s' }"
         },
         {
+          "id": "regex-linear",
           "title": "Compare to a linear version",
           "command": "node -e 'const re=/^[\\w\\s]*$/; const s=\"a \".repeat(5000)+\"!\"; console.time(\"t\"); re.test(s); console.timeEnd(\"t\")'",
-          "explain": "A character class with a single quantifier can't backtrack exponentially. Even on 10,000 characters it finishes in well under a millisecond."
+          "explain": "A character class with a single quantifier can't backtrack exponentially. Even on 10,000 characters it finishes in well under a millisecond.",
+          "powershell": "$re = [regex]'^[\\w\\s]*$'; $s = ('a ' * 5000) + '!'\n(Measure-Command { $re.IsMatch($s) }).TotalMilliseconds"
         }
       ]
     },
@@ -577,29 +820,39 @@
       "category": "Postgres slow log",
       "items": [
         {
+          "id": "pg-slow-all",
           "title": "All slow statements",
           "command": "grep 'duration:' db/postgresql-slow.log | head",
-          "explain": "Every line that logged a query duration."
+          "explain": "Every line that logged a query duration.",
+          "powershell": "Select-String -Path db\\postgresql-slow.log -Pattern 'duration:' | Select-Object -First 10 Line"
         },
         {
+          "id": "pg-slower-than",
           "title": "Queries slower than X ms",
           "command": "awk '/duration:/ {for(i=1;i<=NF;i++) if($i==\"duration:\" && $(i+1)>2000) print $1, $2, $(i+1)}' db/postgresql-slow.log",
-          "explain": "Finds the `duration:` token and prints the timestamp and duration when it's above 2000 ms. Adjust the threshold to taste."
+          "explain": "Finds the `duration:` token and prints the timestamp and duration when it's above 2000 ms. Adjust the threshold to taste.",
+          "powershell": "Select-String -Path db\\postgresql-slow.log -Pattern 'duration: ([\\d.]+) ms' | Where-Object { [double]$_.Matches[0].Groups[1].Value -gt 2000 } | ForEach-Object { $_.Line.Substring(0, 23) + '  ' + $_.Matches[0].Groups[1].Value }"
         },
         {
+          "id": "pg-per-minute",
           "title": "Slow queries per minute",
           "command": "grep 'duration:' db/postgresql-slow.log | cut -c12-16 | uniq -c",
-          "explain": "Characters 12–16 are `HH:MM` in `2026-11-13 HH:MM:SS UTC`. A histogram shows *when* the DB was struggling, and also when it went *quiet*."
+          "explain": "Characters 12–16 are `HH:MM` in `2026-11-13 HH:MM:SS UTC`. A histogram shows *when* the DB was struggling, and also when it went *quiet*.",
+          "powershell": "Select-String -Path db\\postgresql-slow.log -Pattern '^\\S+ (\\d\\d:\\d\\d).*duration:' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name"
         },
         {
+          "id": "pg-connections",
           "title": "Who connected?",
           "command": "grep -E 'connection authorized|application_name' db/postgresql-slow.log",
-          "explain": "Shows sessions opening, and which application opened them (backup jobs, migrations, apps)."
+          "explain": "Shows sessions opening, and which application opened them (backup jobs, migrations, apps).",
+          "powershell": "Select-String -Path db\\postgresql-slow.log -Pattern 'connection authorized|application_name'"
         },
         {
+          "id": "pg-non-query",
           "title": "Non-query events",
           "command": "grep -v 'duration:' db/postgresql-slow.log | head -40",
-          "explain": "Checkpoints, connections, COPY: the background activity around the queries."
+          "explain": "Checkpoints, connections, COPY: the background activity around the queries.",
+          "powershell": "Select-String -Path db\\postgresql-slow.log -Pattern 'duration:' -NotMatch | Select-Object -First 40 Line"
         }
       ]
     }
