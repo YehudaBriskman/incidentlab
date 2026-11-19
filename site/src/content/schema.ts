@@ -7,7 +7,16 @@ export const HintSchema = z.object({
   text: z.string(),                     // markdown
 });
 
+export const StageSchema = z.object({
+  name: z.string(),                     // short stage name, e.g. "When did it start?"
+  goal: z.string(),                     // ONE sentence: what to find
+  lookFor: z.array(z.string()).max(4),  // 2–4 short bullet pointers (no answers)
+  tools: z.array(z.string()),           // toolbox item ids relevant to this stage
+  explorerTip: z.string(),              // how to do it in the in-browser Evidence Explorer
+});
+
 export const QuestionSchema = z.object({
+  stage: StageSchema.optional(),
   id: z.string(),                       // "q1".."q6" — must match flags.json keys
   title: z.string(),
   prompt: z.string(),                   // markdown
@@ -19,6 +28,8 @@ export const QuestionSchema = z.object({
 });
 
 export const ToolItemSchema = z.object({
+  id: z.string().optional(),            // referenced by QuestionSchema.stage.tools
+  powershell: z.string().optional(),    // Windows PowerShell equivalent (no installs needed)
   title: z.string(),
   command: z.string(),                  // shown in a copyable code block
   explain: z.string(),                  // markdown
@@ -36,6 +47,7 @@ export const EvidenceFileSchema = z.object({
 });
 
 export const CaseSchema = z.object({
+  setupChecklist: z.array(z.string()).optional(), // stage 0 checklist items (markdown inline)
   id: z.string(),
   title: z.string(),
   subtitle: z.string(),

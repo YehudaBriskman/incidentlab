@@ -1,7 +1,4 @@
-import { CaseSchema, FlagsSchema, TeasersSchema, type Case, type Flags, type Teaser } from "./schema";
-import flagsJson from "../generated/flags.json";
-import sealedJson from "../generated/debrief.sealed.json";
-import { SealedDebriefSchema, type SealedDebrief } from "./sealed";
+import { CaseSchema, TeasersSchema, type Case, type Teaser } from "./schema";
 
 /*
  * Content is bundled at build time and validated with zod at startup.
@@ -52,7 +49,6 @@ function parseTeasers(): Teaser[] {
 
 export const cases: ReadonlyMap<string, Case> = parseCases();
 export const teasers: readonly Teaser[] = parseTeasers();
-export const flags: Flags = FlagsSchema.parse(flagsJson);
 
 export function getCase(id: string): Case | undefined {
   return cases.get(id);
@@ -60,12 +56,4 @@ export function getCase(id: string): Case | undefined {
 
 export function featuredCase(): Case | undefined {
   return cases.get(FEATURED_CASE_ID) ?? cases.values().next().value;
-}
-
-const sealedResult = SealedDebriefSchema.safeParse(sealedJson);
-if (!sealedResult.success) console.error("[content] debrief.sealed.json failed schema validation", sealedResult.error.issues);
-
-/** Sealed (encrypted) debrief for a case, if one is bundled. */
-export function sealedDebriefFor(caseId: string): SealedDebrief | undefined {
-  return sealedResult.success && sealedResult.data.caseId === caseId ? sealedResult.data : undefined;
 }
