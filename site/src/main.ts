@@ -1,10 +1,34 @@
 import "./styles.css";
+import { applyLang, getLang, setLang } from "./i18n/i18n";
+import { T } from "./i18n/strings-player";
 import { getCase } from "./content/load";
 import { onConnectivity } from "./lib/api";
 import { h, setChildren } from "./lib/dom";
 import { renderCase, stopCaseTimers } from "./views/case";
 import { renderHome } from "./views/home";
 import { renderToolbox } from "./views/toolbox";
+
+applyLang();
+
+/* ---------- language toggle (header, every page) ---------- */
+function mountLangToggle(): void {
+  const bar = document.querySelector(".topbar");
+  if (!(bar instanceof HTMLElement)) return;
+  const mk = (lang: "en" | "he", label: string): HTMLButtonElement => {
+    const btn = h("button", { type: "button", class: "lang-btn", lang, "aria-pressed": String(getLang() === lang), onclick: () => setLang(lang) }, label);
+    return btn;
+  };
+  const en = mk("en", "EN");
+  const he = mk("he", "עב");
+  const wrap = h("div", { class: "lang-toggle", role: "group", "aria-label": T().langToggle }, en, h("span", { class: "lang-sep", "aria-hidden": "true" }, "|"), he);
+  bar.append(wrap);
+  window.addEventListener("hashchange", () => {
+    en.setAttribute("aria-pressed", String(getLang() === "en"));
+    he.setAttribute("aria-pressed", String(getLang() === "he"));
+    wrap.setAttribute("aria-label", T().langToggle);
+  });
+}
+mountLangToggle();
 
 const root = document.getElementById("app");
 if (!(root instanceof HTMLElement)) throw new Error("#app root missing");
@@ -20,30 +44,30 @@ function toast(message: string): void {
 }
 window.addEventListener("error", (ev) => {
   console.error(ev.error ?? ev.message);
-  toast("Something went wrong. If the page looks stuck, reload it.");
+  toast(T().toastError);
 });
 window.addEventListener("unhandledrejection", (ev) => {
   console.error(ev.reason);
-  toast("A request failed. Please try again.");
+  toast(T().toastRequestFailed);
 });
 
 const banner = h("div", { class: "net-banner", role: "status", hidden: true });
 document.body.prepend(banner);
 onConnectivity((state) => {
   banner.hidden = state === "ok";
-  banner.textContent = state === "retrying" ? "Server unreachable, retrying…" : "Can't reach the server. Your progress is safe; try again in a moment.";
+  banner.textContent = state === "retrying" ? T().netRetrying : T().netDown;
 });
 
 function notFound(message: string): void {
-  document.title = "Not found · IncidentLab";
+  document.title = T().notFoundTitle;
   setChildren(
     appRoot,
-    h("section", { class: "center-card" }, h("p", { class: "mono accent" }, "404"), h("h1", {}, message), h("a", { class: "btn btn-primary", href: "#/" }, "Back to all cases")),
+    h("section", { class: "center-card" }, h("p", { class: "mono accent" }, "404"), h("h1", {}, message), h("a", { class: "btn btn-primary", href: "#/" }, T().backToCases)),
   );
 }
 
 function loadingView(): void {
-  setChildren(appRoot, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, "Loading…")));
+  setChildren(appRoot, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, T().loading)));
 }
 
 function lazyView(load: () => Promise<(root: HTMLElement) => void>): void {
@@ -55,7 +79,7 @@ function lazyView(load: () => Promise<(root: HTMLElement) => void>): void {
     })
     .catch((err: unknown) => {
       console.error(err);
-      if (token === routeToken) notFound("This page failed to load. Try reloading.");
+      if (token === routeToken) notFound(T().pageFailed);
     });
 }
 
@@ -81,20 +105,20 @@ function route(): void {
     if (parts[0] === "case" && parts[1] !== undefined) {
       const c = getCase(parts[1]);
       if (!c) {
-        notFound(`Case "${parts[1]}" does not exist (yet).`);
+        notFound(T().caseMissing(parts[1]));
         return;
       }
       const sub = parts[2];
       if (sub === undefined) renderCase(appRoot, c);
       else if (sub === "toolbox") renderToolbox(appRoot, c);
       else if (sub === "explorer") lazyView(() => import("./views/explorer").then((m) => m.renderExplorer));
-      else notFound("That page is not on the runbook.");
+      else notFound(T().notOnRunbook);
       return;
     }
-    notFound("That page is not on the runbook.");
+    notFound(T().notOnRunbook);
   } catch (err) {
     console.error(err);
-    notFound("Something broke while loading this page.");
+    notFound(T().pageBroke);
   }
 }
 

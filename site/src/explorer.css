@@ -91,3 +91,32 @@
   .ex-aggs, .ex-jsonbar { grid-template-columns: 1fr; }
   .ex-viewport { height: 55vh; }
 }
+
+/* ============ RTL (Hebrew) ============ */
+/* Grid order follows dir, so the sidebar naturally flips to the right. */
+[dir=rtl] .ex-file,
+[dir=rtl] .ex-linkish { text-align: start; }
+[dir=rtl] .ex-big strong { margin-right: 0; margin-inline-end: 4px; }
+[dir=rtl] .ex-table th { text-align: start; }
+/* Log lines, the virtual line view, regex/code inputs, paths, numbers, time values stay LTR. */
+[dir=rtl] .ex-viewport,
+[dir=rtl] .ex-rows,
+[dir=rtl] .ex-row,
+[dir=rtl] .ex-csvhead,
+[dir=rtl] .ex-input,
+[dir=rtl] .ex-chip.mono,
+[dir=rtl] .ex-title,
+[dir=rtl] .ex-file-name,
+[dir=rtl] .ex-time-out,
+[dir=rtl] .ex-time-out dd,
+[dir=rtl] .ex-linkish,
+[dir=rtl] .ex-table .num,
+[dir=rtl] .ex-hist-key,
+[dir=rtl] .ex-hist-n,
+[dir=rtl] .ex-big strong,
+[dir=rtl] .ex-pipe,
+[dir=rtl] .explorer code { direction: ltr; unicode-bidi: isolate; }
+[dir=rtl] .ex-input { text-align: left; }
+[dir=rtl] .ex-rows { left: 0; right: auto; }
+[dir=rtl] .ex-table .num { text-align: left; }
+[dir=rtl] .ex-time-out { text-align: left; }

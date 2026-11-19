@@ -248,3 +248,31 @@ html.admin-board-open { overflow: hidden; }
   .admin-board-row { grid-template-columns: 1.8em minmax(0, 1fr) 3em; }
   .board-time { display: none; }
 }
+
+/* ---- RTL (Hebrew) ----------------------------------------------------------
+   Layout mirrors via logical properties; bars and the funnel mirror naturally.
+   Numbers, codes, URLs and timestamps stay LTR, isolated from surrounding text. */
+[dir="rtl"] .admin-updated { margin-right: 0; margin-inline-end: 4px; }
+[dir="rtl"] .funnel-count,
+[dir="rtl"] .admin-table .num,
+[dir="rtl"] .col-actions,
+[dir="rtl"] .board-score { text-align: end; }
+[dir="rtl"] .admin-table th { text-align: start; }
+[dir="rtl"] .help-item {
+  border-left: 0;
+  border-inline-start: 3px solid var(--amber);
+}
+[dir="rtl"] .help-item.is-alert { border-inline-start-color: var(--red); }
+[dir="rtl"] .admin-legend .cell { margin-left: 0; margin-inline-start: 6px; }
+[dir="rtl"] .admin-tile-value,
+[dir="rtl"] .funnel-count,
+[dir="rtl"] .admin-table .num,
+[dir="rtl"] .board-rank,
+[dir="rtl"] .board-time,
+[dir="rtl"] .board-score,
+[dir="rtl"] .admin-share-url,
+[dir="rtl"] .admin-input[type="password"],
+[dir="rtl"] code {
+  direction: ltr;
+  unicode-bidi: isolate;
+}

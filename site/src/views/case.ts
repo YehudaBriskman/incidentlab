@@ -5,6 +5,7 @@ import { confirmButton, copyButton, h, html, setChildren, type Child } from "../
 import { md, mdInline } from "../lib/markdown";
 import { formatElapsed } from "../lib/time";
 import { commandCard } from "./toolbox";
+import { T } from "../i18n/strings-player";
 
 type StageKey = "setup" | QuestionId | "debrief";
 type StepState = "locked" | "active" | "solved" | "revealed";
@@ -41,7 +42,7 @@ function writePref(key: string, value: string): void {
 
 function errorMessage(err: unknown): string {
   if (err instanceof ApiError) return err.message;
-  return "Something went wrong. Please try again.";
+  return T().genericError;
 }
 
 /* ================= entry ================= */
@@ -53,7 +54,7 @@ export function renderCase(root: HTMLElement, c: Case): void {
     renderGate(root, c);
     return;
   }
-  setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, "Loading your investigation…")));
+  setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, T().loadingInvestigation)));
   getMe()
     .then((player) => renderStaged(root, c, player))
     .catch((err: unknown) => {
@@ -67,9 +68,9 @@ export function renderCase(root: HTMLElement, c: Case): void {
         h(
           "section",
           { class: "center-card", role: "alert" },
-          h("h1", {}, "Can't load your progress"),
+          h("h1", {}, T().cantLoadProgress),
           h("p", { class: "muted" }, errorMessage(err)),
-          h("button", { type: "button", class: "btn btn-primary", onclick: () => renderCase(root, c) }, "Try again"),
+          h("button", { type: "button", class: "btn btn-primary", onclick: () => renderCase(root, c) }, T().tryAgain),
         ),
       );
     });
@@ -85,19 +86,19 @@ function renderGate(root: HTMLElement, c: Case): void {
     autocomplete: "nickname",
     maxlength: "32",
     required: true,
-    placeholder: "e.g. Dana",
+    placeholder: T().namePlaceholder,
     "aria-describedby": "name-help name-error",
   });
   const errorEl = h("p", { id: "name-error", class: "form-error", role: "alert" });
-  const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg btn-block" }, "Start investigating →");
+  const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg btn-block" }, T().startInvestigating);
 
   const form = h(
     "form",
     { class: "center-card gate", novalidate: true },
     h("p", { class: "eyebrow mono" }, c.title),
-    h("h1", {}, "Who's investigating?"),
-    h("p", { id: "name-help", class: "muted" }, "Pick a name for the scoreboard. Your progress is saved on the server."),
-    h("label", { class: "visually-hidden", for: "player-name" }, "Your name"),
+    h("h1", {}, T().whoInvestigating),
+    h("p", { id: "name-help", class: "muted" }, T().nameHelp),
+    h("label", { class: "visually-hidden", for: "player-name" }, T().yourName),
     input,
     errorEl,
     submit,
@@ -109,7 +110,7 @@ function renderGate(root: HTMLElement, c: Case): void {
     if (!parsed.success) {
       errorEl.textContent = parsed.error.issues[0]?.message.includes("only")
         ? (parsed.error.issues[0]?.message ?? "")
-        : "Use 2–32 characters.";
+        : T().nameLength;
       input.setAttribute("aria-invalid", "true");
       input.focus();
       return;
@@ -117,13 +118,13 @@ function renderGate(root: HTMLElement, c: Case): void {
     input.removeAttribute("aria-invalid");
     errorEl.textContent = "";
     submit.disabled = true;
-    submit.textContent = "Starting…";
+    submit.textContent = T().starting;
     createPlayer(parsed.data)
       .then((player) => renderStaged(root, c, player))
       .catch((err: unknown) => {
         errorEl.textContent = errorMessage(err);
         submit.disabled = false;
-        submit.textContent = "Start investigating →";
+        submit.textContent = T().startInvestigating;
       });
   });
 
@@ -192,20 +193,20 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: PlayerView): vo
     const solved = QUESTION_ORDER.filter((id) => isDone(stageProgress(player, id))).length;
     const start = Date.parse(player.createdAt);
     const end = player.completedAt !== null ? Date.parse(player.completedAt) : Date.now();
-    elStats.textContent = `${solved} of ${QUESTION_ORDER.length} · ${player.score} pts · ${formatElapsed(end - start)}`;
+    elStats.textContent = T().progressStats(solved, QUESTION_ORDER.length, player.score, formatElapsed(end - start));
     elFill.style.width = `${(solved / QUESTION_ORDER.length) * 100}%`;
   };
 
   const stepper = (): HTMLElement =>
     h(
       "ol",
-      { class: "stepper", "aria-label": "Investigation stages" },
+      { class: "stepper", "aria-label": T().stagesLabel },
       STAGE_KEYS.map((key, i) => {
         const state = stepState(player, key);
-        const label = key === "setup" ? "Setup" : key === "debrief" ? "Debrief" : stageLabel(c, key);
+        const label = key === "setup" ? T().setup : key === "debrief" ? T().debrief : stageLabel(c, key);
         const num = key === "setup" ? "0" : key === "debrief" ? "★" : String(i);
         const icon = state === "solved" ? "✓" : state === "revealed" ? "👁" : num;
-        const stateText = { locked: "locked", active: "current", solved: "solved", revealed: "answer revealed" }[state];
+        const stateText = { locked: T().stLocked, active: T().stCurrent, solved: T().stSolved, revealed: T().stRevealed }[state];
         const btn = h(
           "button",
           {
@@ -213,7 +214,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: PlayerView): vo
             class: `step step-${state}${key === viewing ? " is-viewing" : ""}`,
             disabled: state === "locked",
             "aria-current": key === viewing ? "step" : null,
-            "aria-label": `${key === "setup" || key === "debrief" ? "" : `Stage ${i}: `}${label} (${stateText})`,
+            "aria-label": `${key === "setup" || key === "debrief" ? "" : T().stageN(i)}${label} (${stateText})`,
             title: label,
             onclick: () => {
               viewing = key;
@@ -237,21 +238,21 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: PlayerView): vo
       h(
         "div",
         { class: "case-head-top" },
-        h("a", { class: "back-link", href: "#/" }, "← Cases"),
+        h("a", { class: "back-link", href: "#/" }, T().navCases),
         h(
           "span",
           { class: "player-tag" },
-          "Playing as ",
+          T().playingAs,
           h("strong", {}, player.name), // textContent only
           " · ",
-          h("button", { type: "button", class: "link-btn", onclick: switchPlayer }, "not you? switch"),
+          h("button", { type: "button", class: "link-btn", onclick: switchPlayer }, T().switchPlayer),
         ),
       ),
       h(
         "div",
         { class: "case-head-title" },
         h("h1", {}, c.title),
-        h("a", { class: "btn btn-ghost btn-sm", href: `#/case/${c.id}/toolbox` }, "All commands"),
+        h("a", { class: "btn btn-ghost btn-sm", href: `#/case/${c.id}/toolbox` }, T().allCommands),
       ),
       stepper(),
       h("div", { class: "progress" }, h("div", { class: "progress-track", "aria-hidden": "true" }, elFill), elStats),
@@ -281,7 +282,7 @@ function renderSetup(c: Case, player: PlayerView, update: (p: PlayerView) => voi
   const briefing = h(
     "details",
     { class: "briefing", open: readPref("briefingRead") === null },
-    h("summary", {}, "Briefing: what happened"),
+    h("summary", {}, T().briefing),
     html("div", { class: "prose" }, md(c.briefing)),
   );
   briefing.addEventListener("toggle", () => {
@@ -297,7 +298,7 @@ function renderSetup(c: Case, player: PlayerView, update: (p: PlayerView) => voi
   });
 
   const errorEl = h("p", { class: "form-error", role: "alert" });
-  const ready = h("button", { type: "button", class: "btn btn-primary btn-lg" }, "I'm ready → start Stage 1");
+  const ready = h("button", { type: "button", class: "btn btn-primary btn-lg" }, T().readyStart);
   ready.addEventListener("click", () => {
     ready.disabled = true;
     errorEl.textContent = "";
@@ -315,18 +316,18 @@ function renderSetup(c: Case, player: PlayerView, update: (p: PlayerView) => voi
   return h(
     "div",
     { class: "stage" },
-    h("p", { class: "stage-kicker mono" }, "Stage 0 · Setup"),
-    h("h2", { class: "stage-goal" }, "Get the evidence and pick how you'll investigate."),
+    h("p", { class: "stage-kicker mono" }, T().setupKicker),
+    h("h2", { class: "stage-goal" }, T().setupGoal),
     briefing,
     h(
       "div",
       { class: "block" },
-      h("h3", {}, "1. Download the evidence"),
-      h("a", { class: "btn btn-lg", href: c.evidenceZip, download: true }, "⬇ Download evidence (.zip)"),
+      h("h3", {}, T().downloadHead),
+      h("a", { class: "btn btn-lg", href: c.evidenceZip, download: true }, T().downloadBtn),
       h(
         "details",
         { class: "quiet-details" },
-        h("summary", {}, `What's inside (${c.evidence.length} files)`),
+        h("summary", {}, T().whatsInside(c.evidence.length)),
         h(
           "ul",
           { class: "file-list" },
@@ -334,30 +335,30 @@ function renderSetup(c: Case, player: PlayerView, update: (p: PlayerView) => voi
         ),
       ),
     ),
-    checks.length > 0 ? h("div", { class: "block" }, h("h3", {}, "2. Checklist"), h("ul", { class: "checklist" }, checks)) : null,
+    checks.length > 0 ? h("div", { class: "block" }, h("h3", {}, T().checklistHead), h("ul", { class: "checklist" }, checks)) : null,
     h(
       "div",
       { class: "block" },
-      h("h3", {}, `${checks.length > 0 ? 3 : 2}. Choose your path`),
+      h("h3", {}, T().choosePath(checks.length > 0 ? 3 : 2)),
       h(
         "div",
         { class: "paths" },
         h(
           "div",
           { class: "path-card" },
-          h("h4", {}, "Use your terminal"),
-          h("p", { class: "muted" }, "Linux, macOS or WSL. Unzip the evidence and use grep, jq and git. Each stage shows the commands you need."),
+          h("h4", {}, T().pathTerminal),
+          h("p", { class: "muted" }, T().pathTerminalBody),
         ),
         h(
           "a",
           { class: "path-card path-link", href: `#/case/${c.id}/explorer` },
-          h("h4", {}, "No tools? Use the Evidence Explorer →"),
-          h("p", { class: "muted" }, "Search and filter the same evidence right in your browser."),
+          h("h4", {}, T().pathExplorer),
+          h("p", { class: "muted" }, T().pathExplorerBody),
         ),
       ),
     ),
     done
-      ? h("p", { class: "done-note" }, "✓ Setup complete.")
+      ? h("p", { class: "done-note" }, T().setupComplete)
       : h("div", { class: "primary-action" }, ready, errorEl),
   );
 }
@@ -375,9 +376,9 @@ function renderQuestionStage(
   const q = questionFor(c, id);
   const s = stageProgress(player, id);
   const index = QUESTION_ORDER.indexOf(id) + 1;
-  const kicker = h("p", { class: "stage-kicker mono" }, `Stage ${index} of ${QUESTION_ORDER.length}`);
+  const kicker = h("p", { class: "stage-kicker mono" }, T().stageOf(index, QUESTION_ORDER.length));
   if (q === undefined || s === undefined) {
-    return h("div", { class: "stage" }, kicker, h("p", { class: "muted" }, "This stage's content isn't available yet."));
+    return h("div", { class: "stage" }, kicker, h("p", { class: "muted" }, T().stageUnavailable));
   }
   const stage = q.stage;
   const nextKey: StageKey = QUESTION_ORDER[index] ?? "debrief";
@@ -385,14 +386,14 @@ function renderQuestionStage(
     h(
       "button",
       { type: "button", class: "btn btn-primary btn-lg", onclick: () => update(player, currentStage(player)) },
-      nextKey === "debrief" ? "Continue to the Debrief →" : `Continue to Stage ${index + 1} →`,
+      nextKey === "debrief" ? T().continueDebrief : T().continueStage(index + 1),
     );
 
   const head: Child[] = [
     kicker,
     h("h2", { class: "stage-goal" }, stage?.goal ?? q.title),
     stage && stage.lookFor.length > 0
-      ? h("div", { class: "look-for" }, h("h3", {}, "Look for"), h("ul", {}, stage.lookFor.map((l) => html("li", {}, mdInline(l)))))
+      ? h("div", { class: "look-for" }, h("h3", {}, T().lookFor), h("ul", {}, stage.lookFor.map((l) => html("li", {}, mdInline(l)))))
       : null,
   ];
 
@@ -407,8 +408,8 @@ function renderQuestionStage(
       h(
         "div",
         { class: `result-panel ${solved ? "is-solved" : "is-revealed"}${justSolved ? " pop" : ""}`, role: justSolved ? "status" : null },
-        h("p", { class: "result-title" }, solved ? `✓ Solved · +${s.points} pts` : "👁 Answer revealed · 0 pts"),
-        !solved && s.revealedAnswer !== null ? h("p", {}, "Answer: ", h("code", { class: "answer-code" }, s.revealedAnswer)) : null,
+        h("p", { class: "result-title" }, solved ? T().solvedPts(s.points) : T().revealedPts),
+        !solved && s.revealedAnswer !== null ? h("p", {}, T().answerLabel, h("code", { class: "answer-code" }, s.revealedAnswer)) : null,
         html("div", { class: "prose" }, md(q.successNote)),
         currentStage(player) !== id ? continueBtn() : null,
       ),
@@ -416,7 +417,7 @@ function renderQuestionStage(
   }
 
   if (s.status === "locked") {
-    return h("div", { class: "stage" }, kicker, h("p", { class: "muted" }, "Finish the previous stage to unlock this one."));
+    return h("div", { class: "stage" }, kicker, h("p", { class: "muted" }, T().finishPrevious));
   }
 
   /* active stage */
@@ -432,9 +433,9 @@ function renderQuestionStage(
   });
   input.value = drafts.get(id) ?? "";
   input.addEventListener("input", () => drafts.set(id, input.value));
-  const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg" }, "Submit");
+  const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg" }, T().submit);
   const feedback = h("p", { id: `feedback-${id}`, class: "feedback", role: "status" });
-  if (s.wrongAttempts > 0) feedback.textContent = `${s.wrongAttempts} wrong attempt${s.wrongAttempts === 1 ? "" : "s"} so far.`;
+  if (s.wrongAttempts > 0) feedback.textContent = T().wrongSoFar(s.wrongAttempts);
 
   let cooldown: number | null = null;
   const startCooldown = (seconds: number): void => {
@@ -442,7 +443,7 @@ function renderQuestionStage(
     submit.disabled = true;
     const show = (): void => {
       feedback.className = "feedback is-wrong";
-      feedback.textContent = `Too many attempts. Try again in ${left}s.`;
+      feedback.textContent = T().tooMany(left);
     };
     show();
     if (cooldown !== null) window.clearInterval(cooldown);
@@ -452,7 +453,7 @@ function renderQuestionStage(
         if (cooldown !== null) window.clearInterval(cooldown);
         submit.disabled = false;
         feedback.className = "feedback";
-        feedback.textContent = "You can try again now.";
+        feedback.textContent = T().canTryAgain;
         return;
       }
       show();
@@ -462,8 +463,8 @@ function renderQuestionStage(
   const form = h(
     "form",
     { class: "answer-form", novalidate: true },
-    h("label", { class: "answer-label", for: `answer-${id}` }, "Your answer"),
-    h("p", { id: `fmt-${id}`, class: "muted small" }, "Format: ", h("code", {}, q.answerFormat)),
+    h("label", { class: "answer-label", for: `answer-${id}` }, T().yourAnswer),
+    h("p", { id: `fmt-${id}`, class: "muted small" }, T().format, h("code", {}, q.answerFormat)),
     h("div", { class: "answer-row" }, input, submit),
     feedback,
   );
@@ -472,7 +473,7 @@ function renderQuestionStage(
     const answer = input.value.trim();
     if (answer.length === 0) {
       feedback.className = "feedback is-wrong";
-      feedback.textContent = "Type an answer first.";
+      feedback.textContent = T().typeFirst;
       input.focus();
       return;
     }
@@ -487,7 +488,7 @@ function renderQuestionStage(
         submit.disabled = false;
         const attempts = next.stages[id]?.wrongAttempts ?? 0;
         feedback.className = "feedback is-wrong";
-        feedback.textContent = `Not quite. ${attempts} wrong attempt${attempts === 1 ? "" : "s"}. Check the format and try again.`;
+        feedback.textContent = T().notQuite(attempts);
         form.classList.remove("shake");
         void form.offsetWidth;
         form.classList.add("shake");
@@ -510,12 +511,12 @@ function renderQuestionStage(
 
   /* hints */
   const hintList = q.hints.slice(0, s.hintsRevealed).map((hint, i) =>
-    h("li", { class: "hint" }, h("span", { class: "hint-label mono" }, `Hint ${i + 1} · −${hint.cost} pts`), html("div", { class: "prose" }, md(hint.text))),
+    h("li", { class: "hint" }, h("span", { class: "hint-label mono" }, T().hintLabel(i + 1, hint.cost)), html("div", { class: "prose" }, md(hint.text))),
   );
   const nextHint = q.hints[s.hintsRevealed];
   const hintError = h("p", { class: "form-error", role: "alert" });
   const hintBtn = nextHint
-    ? h("button", { type: "button", class: "btn btn-ghost" }, `Reveal hint ${s.hintsRevealed + 1} of ${q.hints.length} (−${nextHint.cost} pts)`)
+    ? h("button", { type: "button", class: "btn btn-ghost" }, T().revealHint(s.hintsRevealed + 1, q.hints.length, nextHint.cost))
     : null;
   hintBtn?.addEventListener("click", () => {
     hintBtn.disabled = true;
@@ -529,8 +530,8 @@ function renderQuestionStage(
 
   const revealError = h("p", { class: "form-error", role: "alert" });
   const reveal = confirmButton({
-    label: "Stuck? Reveal answer (0 pts for this stage)",
-    confirmLabel: "Yes, reveal it",
+    label: T().revealAnswer,
+    confirmLabel: T().revealConfirm,
     className: "link-btn muted",
     onConfirm: () => {
       for (const b of reveal.querySelectorAll("button")) b.disabled = true;
@@ -549,23 +550,23 @@ function renderQuestionStage(
     head,
     h("div", { class: "question-box" }, html("div", { class: "prose prompt" }, md(q.prompt)), form),
     tools.length > 0
-      ? h("div", { class: "block" }, h("h3", {}, "Useful commands"), h("div", { class: "tool-list" }, tools.map(commandCard)))
-      : h("p", { class: "muted small" }, "Need commands? ", h("a", { href: `#/case/${c.id}/toolbox` }, "Browse all commands"), "."),
+      ? h("div", { class: "block" }, h("h3", {}, T().usefulCommands), h("div", { class: "tool-list" }, tools.map(commandCard)))
+      : h("p", { class: "muted small" }, T().needCommands, h("a", { href: `#/case/${c.id}/toolbox` }, T().browseCommands), "."),
     stage?.explorerTip
       ? h(
           "div",
           { class: "tip" },
-          h("h3", {}, "In the Explorer"),
+          h("h3", {}, T().inExplorer),
           html("div", { class: "prose" }, md(stage.explorerTip)),
-          h("a", { href: `#/case/${c.id}/explorer` }, "Open the Evidence Explorer →"),
+          h("a", { href: `#/case/${c.id}/explorer` }, T().openExplorer),
         )
       : null,
     h(
       "div",
       { class: "block hints" },
-      h("h3", {}, "Hints"),
+      h("h3", {}, T().hints),
       hintList.length > 0 ? h("ol", { class: "hint-list" }, hintList) : null,
-      hintBtn ?? h("p", { class: "muted small" }, "No more hints for this stage."),
+      hintBtn ?? h("p", { class: "muted small" }, T().noMoreHints),
       hintError,
     ),
     h("div", { class: "reveal" }, reveal, revealError),
@@ -577,31 +578,31 @@ function renderQuestionStage(
 function shareText(c: Case, player: PlayerView): string {
   const hints = QUESTION_ORDER.reduce((n, id) => n + (player.stages[id]?.hintsRevealed ?? 0), 0);
   const end = player.completedAt !== null ? Date.parse(player.completedAt) : Date.now();
-  return `IncidentLab · ${c.title} · ${player.score}/${player.maxScore} pts · ${hints} hint${hints === 1 ? "" : "s"} · ${formatElapsed(end - Date.parse(player.createdAt))}`;
+  return T().shareText(c.title, player.score, player.maxScore, hints, formatElapsed(end - Date.parse(player.createdAt)));
 }
 
 function renderDebrief(c: Case, player: PlayerView): HTMLElement {
-  const body = h("div", { class: "prose" }, h("p", { class: "muted" }, "Loading the debrief…"));
+  const body = h("div", { class: "prose" }, h("p", { class: "muted" }, T().loadingDebrief));
   getDebrief()
     .then((markdown) => {
       body.replaceChildren(html("div", {}, md(markdown)));
     })
     .catch((err: unknown) => {
       body.replaceChildren(
-        h("p", { class: "muted" }, err instanceof ApiError && err.status === 403 ? "Finish every stage to unlock the debrief." : errorMessage(err)),
+        h("p", { class: "muted" }, err instanceof ApiError && err.status === 403 ? T().finishAll : errorMessage(err)),
       );
     });
   return h(
     "div",
     { class: "stage" },
-    h("p", { class: "stage-kicker mono" }, "Debrief"),
-    h("h2", { class: "stage-goal" }, "Case closed. Here's the full story."),
+    h("p", { class: "stage-kicker mono" }, T().debrief),
+    h("h2", { class: "stage-goal" }, T().caseClosed),
     h(
       "div",
       { class: "score-card" },
-      h("p", { class: "score-big mono" }, `${player.score}`, h("span", { class: "muted" }, ` / ${player.maxScore} pts`)),
+      h("p", { class: "score-big mono" }, `${player.score}`, h("span", { class: "muted" }, T().ptsOf(player.maxScore))),
       h("code", { class: "share-text" }, shareText(c, player)),
-      copyButton(() => shareText(c, player), "Copy result"),
+      copyButton(() => shareText(c, player), T().copyResult),
     ),
     body,
   );

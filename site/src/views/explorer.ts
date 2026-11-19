@@ -21,6 +21,7 @@ import type { FilterStep, HistogramResult, JsonFilter, StepKind } from "../explo
 import { EVIDENCE_FILES, FILTER_PRESETS, HISTOGRAM_PRESETS, UNIQUE_PRESETS, evidenceUrl } from "../explorer/files";
 import type { EvidenceFile } from "../explorer/files";
 import type { WorkerResponse } from "../explorer/protocol";
+import { T } from "../i18n/strings-tools";
 
 const ROUTE = "#/case/3am-outage/explorer";
 const ROW_H = 20;
@@ -37,7 +38,7 @@ function ownsHash(hash: string): boolean {
 export function renderExplorer(root: HTMLElement): void {
   activeTeardown?.();
   activeTeardown = null;
-  document.title = "Evidence explorer · IncidentLab";
+  document.title = T().exDocTitle;
 
   const initial = decodeState(window.location.hash.split("?")[1] ?? "");
 
@@ -71,37 +72,37 @@ export function renderExplorer(root: HTMLElement): void {
   const notice = h("div", { class: "ex-notice", hidden: true });
   const fileList = h("ul", { class: "ex-files" });
   const sidebar = h("aside", { class: "ex-sidebar" });
-  const sideToggle = h("button", { class: "btn btn-sm ex-side-toggle", type: "button", "aria-expanded": "false" }, "Files & time");
+  const sideToggle = h("button", { class: "btn btn-sm ex-side-toggle", type: "button", "aria-expanded": "false" }, T().exFilesTime);
   const progressBar = h("div", { class: "ex-progress-bar" });
   const progressText = h("span", { class: "ex-progress-text" });
-  const cancelBtn = h("button", { class: "btn btn-sm btn-ghost", type: "button" }, "Cancel");
+  const cancelBtn = h("button", { class: "btn btn-sm btn-ghost", type: "button" }, T().exCancel);
   const progress = h("div", { class: "ex-progress", hidden: true }, h("div", { class: "ex-progress-track" }, progressBar), progressText, cancelBtn);
-  const title = h("h2", { class: "ex-title mono" }, "Pick a file");
+  const title = h("h2", { class: "ex-title mono" }, T().exPickFile);
   const countEl = h("span", { class: "ex-count mono" });
   const pipeline = h("div", { class: "ex-pipeline" });
   const presets = h("div", { class: "ex-chips" });
-  const jsonInput = h("input", { class: "ex-input mono", placeholder: "field = value   (e.g. level = error, * = any)", spellcheck: "false" });
-  const colsInput = h("input", { class: "ex-input mono", placeholder: "columns: ts, level, msg", spellcheck: "false" });
+  const jsonInput = h("input", { class: "ex-input mono", placeholder: T().exJsonPh, spellcheck: "false" });
+  const colsInput = h("input", { class: "ex-input mono", placeholder: T().exColsPh, spellcheck: "false" });
   const jsonBar = h("div", { class: "ex-jsonbar", hidden: true },
-    h("label", {}, h("span", {}, "JSON field filter"), jsonInput),
-    h("label", {}, h("span", {}, "Column view"), colsInput));
-  const viewport = h("div", { class: "ex-viewport", tabindex: "0", "aria-label": "File lines" });
+    h("label", {}, h("span", {}, T().exJsonFilter), jsonInput),
+    h("label", {}, h("span", {}, T().exColView), colsInput));
+  const viewport = h("div", { class: "ex-viewport", dir: "ltr", tabindex: "0", "aria-label": T().exFileLines });
   const spacer = h("div", { class: "ex-spacer" });
   const rowsLayer = h("div", { class: "ex-rows" });
-  const csvHead = h("div", { class: "ex-csvhead mono", hidden: true });
+  const csvHead = h("div", { class: "ex-csvhead mono", dir: "ltr", hidden: true });
   viewport.append(spacer, rowsLayer);
-  const firstBtn = h("button", { class: "btn btn-sm", type: "button" }, "First match");
-  const lastBtn = h("button", { class: "btn btn-sm", type: "button" }, "Last match");
-  const copyBtn = h("button", { class: "btn btn-sm", type: "button" }, "Copy lines");
-  const shareBtn = h("button", { class: "btn btn-sm btn-ghost", type: "button" }, "Copy link");
+  const firstBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exFirst);
+  const lastBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exLast);
+  const copyBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exCopyLines);
+  const shareBtn = h("button", { class: "btn btn-sm btn-ghost", type: "button" }, T().exCopyLink);
 
-  const uniqInput = h("input", { class: "ex-input mono", value: "cid=(\\S+)", spellcheck: "false", "aria-label": "Capture regex" });
+  const uniqInput = h("input", { class: "ex-input mono", value: "cid=(\\S+)", spellcheck: "false", "aria-label": T().exCaptureRegex });
   const uniqOut = h("div", { class: "ex-agg-out" });
-  const histInput = h("input", { class: "ex-input mono", value: "", spellcheck: "false", "aria-label": "Timestamp regex", placeholder: "regex with one capture group, e.g. \\[(\\d+/\\w+/\\d+:\\d\\d:\\d\\d)" });
+  const histInput = h("input", { class: "ex-input mono", value: "", spellcheck: "false", "aria-label": T().exTsRegex, placeholder: T().exHistPh });
   const histOut = h("div", { class: "ex-agg-out" });
 
-  const timeInput = h("input", { class: "ex-input mono", placeholder: "epoch / ISO / 13/Nov/2026:00:00:00 +0000", spellcheck: "false", "aria-label": "Time to convert" });
-  const timeOut = h("dl", { class: "ex-time-out mono" });
+  const timeInput = h("input", { class: "ex-input mono", placeholder: "epoch / ISO / 13/Nov/2026:00:00:00 +0000", spellcheck: "false", "aria-label": T().exTimeToConvert });
+  const timeOut = h("dl", { class: "ex-time-out mono", dir: "ltr" });
 
   /* ---------------------------------------------------------------- worker */
   const client = new WorkerClient(onMessage, (reason) => {
@@ -126,7 +127,7 @@ export function renderExplorer(root: HTMLElement): void {
         if (msg.job !== loadJob) return;
         progress.hidden = false;
         progressBar.style.width = msg.total > 0 ? `${Math.min(100, (msg.loaded / msg.total) * 100).toFixed(1)}%` : "30%";
-        progressText.textContent = `Loading ${fmtBytes(msg.loaded)}${msg.total > 0 ? ` of ${fmtBytes(msg.total)}` : ""}…`;
+        progressText.textContent = T().exLoadingOf(fmtBytes(msg.loaded), msg.total > 0 ? fmtBytes(msg.total) : "");
         return;
       case "loaded":
         if (msg.job !== loadJob || !file || msg.path !== file.path) return;
@@ -176,7 +177,7 @@ export function renderExplorer(root: HTMLElement): void {
       case "copy":
         if (msg.job !== copyJob) return;
         void copyText(msg.text).then((ok) => {
-          showNotice(ok ? `Copied ${fmtCount(msg.count)} lines${msg.capped ? " (capped at 5,000)" : ""}.` : "Clipboard is blocked by the browser.", ok ? "info" : "warn");
+          showNotice(ok ? T().exCopied(fmtCount(msg.count), msg.capped) : T().exClipBlocked, ok ? "info" : "warn");
         });
         return;
       case "error":
@@ -187,14 +188,14 @@ export function renderExplorer(root: HTMLElement): void {
         }
         if (msg.job === loadJob) {
           progress.hidden = true;
-          showNotice(msg.cancelled ? "Load cancelled." : `Could not load file: ${msg.message}. Try again.`);
+          showNotice(msg.cancelled ? T().exLoadCancelled : T().exLoadFailed(msg.message));
           return;
         }
         if (msg.job === filterJob) {
           count = 0;
           updateCount();
         }
-        showNotice(msg.message === "regex took too long" ? "regex took too long — simplify the pattern." : msg.message);
+        showNotice(msg.message === "regex took too long" ? T().exRegexSlow : msg.message);
         if (msg.job === aggJob) {
           uniqOut.replaceChildren();
           histOut.replaceChildren();
@@ -212,7 +213,7 @@ export function renderExplorer(root: HTMLElement): void {
           "button",
           { class: `ex-file${file?.path === f.path ? " is-active" : ""}`, type: "button", "aria-current": file?.path === f.path ? "true" : null },
           h("span", { class: "ex-file-name mono" }, f.path),
-          h("span", { class: "ex-file-meta" }, bytes !== undefined ? fmtBytes(bytes) : f.size, inWorker.has(f.path) ? " · loaded" : ""),
+          h("span", { class: "ex-file-meta" }, bytes !== undefined ? fmtBytes(bytes) : f.size, inWorker.has(f.path) ? T().exLoadedTag : ""),
           h("span", { class: "ex-file-desc" }, f.description),
         );
         btn.addEventListener("click", () => {
@@ -257,7 +258,7 @@ export function renderExplorer(root: HTMLElement): void {
     loadJob = client.job();
     progress.hidden = false;
     progressBar.style.width = "0%";
-    progressText.textContent = "Loading…";
+    progressText.textContent = T().exLoading;
     countEl.textContent = "";
     client.send({ type: "load", job: loadJob, path: f.path, url: evidenceUrl(f.path) });
   }
@@ -273,13 +274,13 @@ export function renderExplorer(root: HTMLElement): void {
       if (s.kind === "regex" && s.text !== "") {
         const err = regexError(s.text);
         if (err) {
-          showNotice(`Invalid regex: ${err}`);
+          showNotice(T().exInvalidRegex(err));
           return;
         }
       }
     }
     filterJob = client.job();
-    countEl.textContent = "filtering…";
+    countEl.textContent = T().exFiltering;
     const hasRegex = effectiveSteps().some((s) => s.kind === "regex" && s.text !== "");
     client.send({ type: "filter", job: filterJob, path: file.path, steps: effectiveSteps(), json: file.mode === "json" ? json : null }, hasRegex ? HARD_TIMEOUT_MS : 0);
   }
@@ -296,22 +297,22 @@ export function renderExplorer(root: HTMLElement): void {
   }
 
   function updateCount(): void {
-    countEl.textContent = `${fmtCount(count)} of ${fmtCount(total)} lines`;
+    countEl.textContent = T().exCountOf(fmtCount(count), fmtCount(total));
   }
 
   function renderPipeline(): void {
     pipeline.replaceChildren(
       ...steps.map((step, idx) => {
-        const kind = h("select", { class: "ex-select", "aria-label": "Filter type" },
-          h("option", { value: "contains" }, "contains"),
-          h("option", { value: "not" }, "NOT contains"),
+        const kind = h("select", { class: "ex-select", "aria-label": T().exFilterType },
+          h("option", { value: "contains" }, T().exContains),
+          h("option", { value: "not" }, T().exNotContains),
           h("option", { value: "regex" }, "regex"));
         kind.value = step.kind;
         kind.addEventListener("change", () => {
           step.kind = kind.value === "not" ? "not" : kind.value === "regex" ? "regex" : "contains";
           scheduleFilter();
         });
-        const input = h("input", { class: "ex-input mono", placeholder: idx === 0 ? "type to filter…" : "and then…", spellcheck: "false", "aria-label": "Filter text" });
+        const input = h("input", { class: "ex-input mono", placeholder: idx === 0 ? T().exTypeToFilter : T().exAndThen, spellcheck: "false", "aria-label": T().exFilterText });
         input.value = step.text;
         input.addEventListener("input", () => {
           step.text = input.value;
@@ -323,7 +324,7 @@ export function renderExplorer(root: HTMLElement): void {
           step.ci = ci.checked;
           scheduleFilter();
         });
-        const remove = h("button", { class: "btn btn-sm btn-ghost", type: "button", "aria-label": "Remove filter" }, "×");
+        const remove = h("button", { class: "btn btn-sm btn-ghost", type: "button", "aria-label": T().exRemoveFilter }, "×");
         remove.addEventListener("click", () => {
           steps.splice(idx, 1);
           if (steps.length === 0) steps.push({ kind: "contains", text: "", ci: true });
@@ -331,10 +332,10 @@ export function renderExplorer(root: HTMLElement): void {
           scheduleFilter();
         });
         return h("div", { class: "ex-step" }, idx > 0 ? h("span", { class: "ex-pipe mono" }, "|") : null, kind, input,
-          h("label", { class: "ex-ci" }, ci, "ignore case"), remove);
+          h("label", { class: "ex-ci" }, ci, T().exIgnoreCase), remove);
       }),
       (() => {
-        const add = h("button", { class: "btn btn-sm", type: "button" }, "+ add filter");
+        const add = h("button", { class: "btn btn-sm", type: "button" }, T().exAddFilter);
         add.addEventListener("click", () => addStep("contains", ""));
         return add;
       })(),
@@ -381,7 +382,7 @@ export function renderExplorer(root: HTMLElement): void {
       frag.appendChild(renderRow(r, entry, active));
     }
     rowsLayer.replaceChildren(frag);
-    if (count === 0 && total > 0) rowsLayer.replaceChildren(h("div", { class: "ex-empty" }, "No lines match this pipeline."));
+    if (count === 0 && total > 0) rowsLayer.replaceChildren(h("div", { class: "ex-empty" }, T().exNoMatch));
   }
 
   function renderRow(r: number, entry: [number, string] | undefined, active: FilterStep[]): HTMLElement {
@@ -441,11 +442,11 @@ export function renderExplorer(root: HTMLElement): void {
     const pattern = uniqInput.value;
     const err = regexError(pattern);
     if (err || pattern === "") {
-      uniqOut.replaceChildren(h("p", { class: "ex-err" }, err ? `Invalid regex: ${err}` : "Enter a regex with one capture group."));
+      uniqOut.replaceChildren(h("p", { class: "ex-err" }, err ? T().exInvalidRegex(err) : T().exEnterCapture));
       return;
     }
     aggJob = client.job();
-    uniqOut.replaceChildren(h("p", { class: "ex-muted" }, "Counting…"));
+    uniqOut.replaceChildren(h("p", { class: "ex-muted" }, T().exCounting));
     client.send({ type: "unique", job: aggJob, path: file.path, pattern, ci: false }, HARD_TIMEOUT_MS);
   }
 
@@ -460,7 +461,7 @@ export function renderExplorer(root: HTMLElement): void {
       });
       tbody.replaceChildren(
         ...sorted.map(([value, n]) => {
-          const add = h("button", { class: "ex-linkish mono", type: "button", title: "Add as a contains filter" }, value === "" ? "(empty)" : value);
+          const add = h("button", { class: "ex-linkish mono", type: "button", title: T().exAddAsContains }, value === "" ? T().exEmpty : value);
           add.addEventListener("click", () => addStep("contains", value));
           return h("tr", {}, h("td", {}, add), h("td", { class: "num mono" }, fmtCount(n)));
         }),
@@ -480,9 +481,9 @@ export function renderExplorer(root: HTMLElement): void {
     };
     paint();
     uniqOut.replaceChildren(
-      h("p", { class: "ex-big" }, h("strong", { class: "mono" }, fmtCount(distinct)), ` distinct values in ${fmtCount(matched)} matching lines`),
-      h("div", { class: "ex-table-wrap" }, h("table", { class: "ex-table" }, h("thead", {}, h("tr", {}, th("value", "value"), th("count", "count"))), tbody)),
-      ...(more > 0 ? [h("p", { class: "ex-muted" }, `${fmtCount(more)} more… (showing the top 500 by count)`)] : []),
+      h("p", { class: "ex-big" }, h("strong", { class: "mono" }, fmtCount(distinct)), T().exDistinctIn(fmtCount(matched))),
+      h("div", { class: "ex-table-wrap" }, h("table", { class: "ex-table" }, h("thead", {}, h("tr", {}, th(T().exValue, "value"), th(T().exCountCol, "count"))), tbody)),
+      ...(more > 0 ? [h("p", { class: "ex-muted" }, T().exMore(fmtCount(more)))] : []),
     );
   }
 
@@ -491,22 +492,22 @@ export function renderExplorer(root: HTMLElement): void {
     const pattern = histInput.value;
     const err = regexError(pattern);
     if (err || pattern === "") {
-      histOut.replaceChildren(h("p", { class: "ex-err" }, err ? `Invalid regex: ${err}` : "Enter a regex capturing a timestamp prefix."));
+      histOut.replaceChildren(h("p", { class: "ex-err" }, err ? T().exInvalidRegex(err) : T().exEnterTs));
       return;
     }
     aggJob = client.job();
-    histOut.replaceChildren(h("p", { class: "ex-muted" }, "Bucketing…"));
+    histOut.replaceChildren(h("p", { class: "ex-muted" }, T().exBucketing));
     client.send({ type: "histogram", job: aggJob, path: file.path, pattern }, HARD_TIMEOUT_MS);
   }
 
   function renderHistogram(result: HistogramResult): void {
     const max = result.buckets.reduce((m, b) => Math.max(m, b.count), 0);
     if (result.buckets.length === 0) {
-      histOut.replaceChildren(h("p", { class: "ex-muted" }, "No line matched the pattern."));
+      histOut.replaceChildren(h("p", { class: "ex-muted" }, T().exNoLineMatched));
       return;
     }
     histOut.replaceChildren(
-      h("p", { class: "ex-muted" }, `${fmtCount(result.buckets.length)} buckets${result.truncated ? " (capped)" : ""}, max ${fmtCount(max)}`),
+      h("p", { class: "ex-muted" }, T().exBuckets(fmtCount(result.buckets.length), result.truncated, fmtCount(max))),
       h("div", { class: "ex-hist" },
         ...result.buckets.map((b) => {
           const bar = h("span", { class: "ex-bar" });
@@ -524,12 +525,12 @@ export function renderExplorer(root: HTMLElement): void {
       return;
     }
     if (ms === null) {
-      timeOut.replaceChildren(h("dd", { class: "ex-err" }, "Unrecognised format"));
+      timeOut.replaceChildren(h("dd", { class: "ex-err" }, T().exBadFormat));
       return;
     }
     timeOut.replaceChildren(
       h("dt", {}, "UTC"), h("dd", {}, formatInZone(ms, "UTC")),
-      h("dt", {}, "Jerusalem"), h("dd", {}, formatInZone(ms, ZONE)),
+      h("dt", {}, T().exJerusalem), h("dd", {}, formatInZone(ms, ZONE)),
       h("dt", {}, "epoch"), h("dd", {}, String(ms / 1000)),
     );
   }
@@ -581,7 +582,7 @@ export function renderExplorer(root: HTMLElement): void {
   });
   shareBtn.addEventListener("click", () => {
     syncHash();
-    void copyText(window.location.href).then((ok) => showNotice(ok ? "Link to this view copied." : "Copy the address bar to share this view.", "info"));
+    void copyText(window.location.href).then((ok) => showNotice(ok ? T().exLinkCopied : T().exCopyAddress, "info"));
   });
   viewport.addEventListener("scroll", scheduleRender, { passive: true });
   const ro = new ResizeObserver(scheduleRender);
@@ -603,10 +604,10 @@ export function renderExplorer(root: HTMLElement): void {
     sideToggle.setAttribute("aria-expanded", String(open));
   });
 
-  const uniqBtn = h("button", { class: "btn btn-sm btn-primary", type: "button" }, "Count");
+  const uniqBtn = h("button", { class: "btn btn-sm btn-primary", type: "button" }, T().exCountBtn);
   uniqBtn.addEventListener("click", runUnique);
   uniqInput.addEventListener("keydown", (e) => { if (e.key === "Enter") runUnique(); });
-  const histBtn = h("button", { class: "btn btn-sm btn-primary", type: "button" }, "Plot");
+  const histBtn = h("button", { class: "btn btn-sm btn-primary", type: "button" }, T().exPlot);
   histBtn.addEventListener("click", runHistogram);
   histInput.addEventListener("keydown", (e) => { if (e.key === "Enter") runHistogram(); });
   const presetChips = (values: ReadonlyArray<{ label: string; pattern: string }>, input: HTMLInputElement): HTMLElement =>
@@ -617,30 +618,30 @@ export function renderExplorer(root: HTMLElement): void {
     }));
 
   sidebar.append(
-    h("h3", { class: "ex-side-h" }, "Evidence files"),
+    h("h3", { class: "ex-side-h" }, T().exEvidenceFiles),
     fileList,
-    h("section", { class: "ex-time" }, h("h3", { class: "ex-side-h" }, "Time converter"), timeInput, timeOut),
+    h("section", { class: "ex-time" }, h("h3", { class: "ex-side-h" }, T().exTimeConverter), timeInput, timeOut),
   );
 
   const main = h("section", { class: "ex-main" },
     h("div", { class: "ex-head" }, title, countEl),
     progress,
     pipeline,
-    h("div", { class: "ex-presets" }, h("span", { class: "ex-muted" }, "Examples:"), presets),
+    h("div", { class: "ex-presets" }, h("span", { class: "ex-muted" }, T().exExamples), presets),
     jsonBar,
     notice,
     h("div", { class: "ex-actions" }, firstBtn, lastBtn, copyBtn, shareBtn),
     h("div", { class: "ex-view" }, csvHead, viewport),
     h("div", { class: "ex-aggs" },
       h("details", { class: "ex-agg", open: true },
-        h("summary", {}, "Count unique values"),
-        h("p", { class: "ex-muted" }, "Regex with one capture group, run over the filtered lines (like grep -o | sort | uniq -c)."),
+        h("summary", {}, T().exUniqueTitle),
+        h("p", { class: "ex-muted" }, T().exUniqueHelp),
         h("div", { class: "ex-row-form" }, uniqInput, uniqBtn),
         presetChips(UNIQUE_PRESETS.map((p) => ({ label: p, pattern: p })), uniqInput),
         uniqOut),
       h("details", { class: "ex-agg" },
-        h("summary", {}, "Histogram by minute"),
-        h("p", { class: "ex-muted" }, "Capture a timestamp prefix (down to the minute) to bucket the filtered lines."),
+        h("summary", {}, T().exHistTitle),
+        h("p", { class: "ex-muted" }, T().exHistHelp),
         h("div", { class: "ex-row-form" }, histInput, histBtn),
         presetChips(HISTOGRAM_PRESETS, histInput),
         histOut)),
@@ -648,10 +649,10 @@ export function renderExplorer(root: HTMLElement): void {
 
   root.replaceChildren(
     h("div", { class: "explorer" },
-      h("div", { class: "ex-topbar" }, h("a", { class: "btn btn-sm btn-ghost", href: "#/case/3am-outage" }, "← Back to case"), h("strong", {}, "Evidence explorer"), status, sideToggle),
+      h("div", { class: "ex-topbar" }, h("a", { class: "btn btn-sm btn-ghost", href: "#/case/3am-outage" }, T().exBack), h("strong", {}, T().exTitle), status, sideToggle),
       h("div", { class: "ex-layout" }, sidebar, main)),
   );
-  status.textContent = "grep, uniq and friends — in your browser";
+  status.textContent = T().exTagline;
   renderPipeline();
   renderFileList();
 

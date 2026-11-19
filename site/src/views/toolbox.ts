@@ -1,6 +1,7 @@
 import type { Case } from "../content/schema";
 import { copyButton, h, html, setChildren } from "../lib/dom";
 import { md } from "../lib/markdown";
+import { T } from "../i18n/strings-player";
 
 type ToolItem = Case["toolbox"][number]["items"][number];
 type Shell = "bash" | "powershell";
@@ -49,28 +50,28 @@ export function commandCard(item: ToolItem): HTMLElement {
     tabs.set(k, btn);
     return btn;
   };
-  const tabBar = ps !== undefined ? h("div", { class: "shell-tabs", role: "tablist", "aria-label": "Shell" }, tab("bash", "Bash"), tab("powershell", "PowerShell")) : null;
+  const tabBar = ps !== undefined ? h("div", { class: "shell-tabs", role: "tablist", "aria-label": T().shell }, tab("bash", "Bash"), tab("powershell", "PowerShell")) : null;
   sync();
   return h(
     "div",
     { class: "cmd" },
     h("div", { class: "cmd-head" }, h("h4", {}, item.title), tabBar),
-    h("div", { class: "code-wrap" }, pre, copyButton(current, "Copy")),
+    h("div", { class: "code-wrap" }, pre, copyButton(current, T().copy)),
     html("div", { class: "prose small" }, md(item.explain)),
   );
 }
 
 export function renderToolbox(root: HTMLElement, c: Case): void {
-  document.title = `All commands · ${c.title} · IncidentLab`;
+  document.title = T().allCommandsTitle(c.title);
   setChildren(
     root,
     h(
       "section",
       { class: "stage-wrap" },
-      h("a", { class: "back-link", href: `#/case/${c.id}` }, "← Back to the case"),
-      h("h1", {}, "All commands"),
-      h("p", { class: "muted" }, "Every command for this case. Each stage already shows the ones it needs."),
-      h("nav", { class: "toc", "aria-label": "Sections" }, c.toolbox.map((sec, i) => h("a", { href: `#/case/${c.id}/toolbox`, "data-target": `tb-${i}`, onclick: (ev: Event) => { ev.preventDefault(); document.getElementById(`tb-${i}`)?.scrollIntoView({ behavior: "smooth" }); } }, sec.category))),
+      h("a", { class: "back-link", href: `#/case/${c.id}` }, T().backToCase),
+      h("h1", {}, T().allCommands),
+      h("p", { class: "muted" }, T().allCommandsSub),
+      h("nav", { class: "toc", "aria-label": T().sections }, c.toolbox.map((sec, i) => h("a", { href: `#/case/${c.id}/toolbox`, "data-target": `tb-${i}`, onclick: (ev: Event) => { ev.preventDefault(); document.getElementById(`tb-${i}`)?.scrollIntoView({ behavior: "smooth" }); } }, sec.category))),
       c.toolbox.map((sec, i) =>
         h("section", { class: "block", id: `tb-${i}` }, h("h2", {}, sec.category), h("div", { class: "tool-list" }, sec.items.map(commandCard))),
       ),

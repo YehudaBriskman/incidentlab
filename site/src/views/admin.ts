@@ -1,5 +1,6 @@
 // Instructor dashboard (#/admin). All API data is rendered via textContent / attributes only — never innerHTML.
 import "../admin.css";
+import { T } from "../i18n/strings-tools";
 import { z } from "zod";
 import { QUESTION_ORDER, type AdminPlayer, type QuestionId, type StageStatus } from "../../shared/contract";
 import caseJson from "../content/cases/3am-outage.json";
@@ -33,12 +34,12 @@ const QUESTION_TITLES = new Map<string, string>(
 );
 
 function stageLabel(stage: StageKey): string {
-  return stage === "setup" ? "Setup" : stage.toUpperCase();
+  return stage === "setup" ? T().admSetup : stage.toUpperCase();
 }
 
 function stageLongLabel(stage: AdminPlayer["currentStage"]): string {
-  if (stage === "done") return "Finished";
-  if (stage === "setup") return "Setup";
+  if (stage === "done") return T().admFinished;
+  if (stage === "setup") return T().admSetup;
   const title = QUESTION_TITLES.get(stage);
   return title ? `${stage.toUpperCase()} · ${title}` : stage.toUpperCase();
 }
@@ -95,13 +96,13 @@ function relativeAgo(iso: string | null, now: number): string {
   const t = ms(iso);
   if (t === null) return "—";
   const sec = Math.max(0, Math.round((now - t) / 1000));
-  if (sec < 10) return "just now";
-  if (sec < 60) return `${sec}s ago`;
+  if (sec < 10) return T().admJustNow;
+  if (sec < 60) return T().admAgo(`${sec}s`);
   const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
+  if (min < 60) return T().admAgo(`${min}m`);
   const hrs = Math.floor(min / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
+  if (hrs < 24) return T().admAgo(`${hrs}h`);
+  return T().admAgo(`${Math.floor(hrs / 24)}d`);
 }
 
 function median(values: readonly number[]): number | null {
@@ -120,20 +121,20 @@ function stageTooltip(p: AdminPlayer, stage: StageKey, now: number): string {
     const start = ms(p.createdAt);
     const end = ms(p.setupDoneAt) ?? now;
     const spent = start !== null ? formatDuration(end - start) : "—";
-    return `Setup: ${p.setupDoneAt ? "done" : "in progress"} · time ${spent}`;
+    return T().admSetupTip(p.setupDoneAt !== null, spent);
   }
   const sp = p.stages[stage];
   const title = QUESTION_TITLES.get(stage) ?? "";
-  if (!sp || status === "locked") return `${stage.toUpperCase()} ${title}: locked`;
+  if (!sp || status === "locked") return `${stage.toUpperCase()} ${title}: ${T().admStatus("locked")}`;
   const start = ms(sp.startedAt);
   const end = ms(sp.finishedAt) ?? now;
   const spent = start !== null ? formatDuration(end - start) : "—";
   return [
-    `${stage.toUpperCase()} ${title}: ${status}`,
-    `wrong attempts: ${sp.wrongAttempts}`,
-    `hints used: ${sp.hintsRevealed}`,
-    `time: ${spent}`,
-    status === "solved" ? `points: ${sp.points}` : "",
+    `${stage.toUpperCase()} ${title}: ${T().admStatus(status)}`,
+    T().admWrongAttempts(sp.wrongAttempts),
+    T().admHintsUsed(sp.hintsRevealed),
+    T().admTime(spent),
+    status === "solved" ? T().admPoints(sp.points) : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -254,11 +255,11 @@ export function renderAdmin(root: HTMLElement): void {
     const errorEl = h("p", { class: "admin-error", role: "alert" });
     if (error) errorEl.textContent = error;
     else errorEl.hidden = true;
-    const submit = h("button", { type: "submit", class: "btn btn-primary" }, "Open dashboard");
+    const submit = h("button", { type: "submit", class: "btn btn-primary" }, T().admOpenDashboard);
     const form = h(
       "form",
       { class: "admin-login-form" },
-      h("label", { for: "admin-key", class: "admin-label" }, "Admin key"),
+      h("label", { for: "admin-key", class: "admin-label" }, T().admAdminKey),
       input,
       errorEl,
       submit,
@@ -269,7 +270,7 @@ export function renderAdmin(root: HTMLElement): void {
       if (!key) return;
       setAdminKey(key);
       submit.disabled = true;
-      submit.textContent = "Checking…";
+      submit.textContent = T().admChecking;
       void start();
     });
     setChildren(
@@ -277,9 +278,9 @@ export function renderAdmin(root: HTMLElement): void {
       h(
         "section",
         { class: "admin-login panel" },
-        h("p", { class: "eyebrow" }, "Instructor"),
-        h("h1", { class: "admin-title" }, "IncidentLab dashboard"),
-        h("p", { class: "muted" }, "Enter the admin key to watch the class live. The key stays in this browser tab only."),
+        h("p", { class: "eyebrow" }, T().admInstructor),
+        h("h1", { class: "admin-title" }, T().admLoginTitle),
+        h("p", { class: "muted" }, T().admLoginIntro),
         form,
       ),
     );
@@ -290,12 +291,12 @@ export function renderAdmin(root: HTMLElement): void {
     if (!(err instanceof AdminApiError)) return false;
     if (err.status === 401) {
       clearAdminKey();
-      showLogin("That admin key was rejected. Check it and try again.");
+      showLogin(T().admKeyRejected);
       return true;
     }
     if (err.status === 503) {
       clearAdminKey();
-      showLogin("Admin is disabled: set the ADMIN_KEY env var on Netlify");
+      showLogin(T().admDisabled);
       return true;
     }
     return false;
@@ -304,23 +305,23 @@ export function renderAdmin(root: HTMLElement): void {
   // ---- dashboard shell (built once, regions re-rendered) ----------------------
 
   const updatedEl = h("span", { class: "admin-updated", "aria-live": "off" });
-  const pauseBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, "Pause");
-  const refreshBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, "Refresh now");
-  const boardBtn = h("button", { type: "button", class: "btn btn-primary btn-sm" }, "Leaderboard");
-  const logoutBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, "Sign out");
+  const pauseBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admPause);
+  const refreshBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admRefresh);
+  const boardBtn = h("button", { type: "button", class: "btn btn-primary btn-sm" }, T().admLeaderboard);
+  const logoutBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admSignOut);
   const bannerEl = h("div", { class: "admin-banner", role: "status" });
   const tilesEl = h("div", { class: "admin-tiles" });
   const funnelEl = h("div", { class: "admin-funnel" });
   const helpEl = h("div", { class: "admin-help" });
   const tableEl = h("div", { class: "admin-table-wrap" });
-  const leaderboardEl = h("div", { class: "admin-board", role: "dialog", "aria-modal": "true", "aria-label": "Leaderboard" });
+  const leaderboardEl = h("div", { class: "admin-board", role: "dialog", "aria-modal": "true", "aria-label": T().admLeaderboard });
   leaderboardEl.hidden = true;
 
   const searchInput = h("input", {
     type: "search",
     class: "admin-input admin-search",
-    placeholder: "Search players…",
-    "aria-label": "Search players by name",
+    placeholder: T().admSearchPlaceholder,
+    "aria-label": T().admSearchLabel,
   });
   searchInput.addEventListener("input", () => {
     state.filter = searchInput.value;
@@ -329,11 +330,11 @@ export function renderAdmin(root: HTMLElement): void {
 
   const sortSelect = h(
     "select",
-    { class: "admin-input admin-sort", "aria-label": "Sort players" },
-    h("option", { value: "score" }, "Sort: score"),
-    h("option", { value: "progress" }, "Sort: progress"),
-    h("option", { value: "stuck" }, "Sort: stuck longest"),
-    h("option", { value: "name" }, "Sort: name"),
+    { class: "admin-input admin-sort", "aria-label": T().admSortLabel },
+    h("option", { value: "score" }, T().admSortScore),
+    h("option", { value: "progress" }, T().admSortProgress),
+    h("option", { value: "stuck" }, T().admSortStuck),
+    h("option", { value: "name" }, T().admSortName),
   );
   sortSelect.addEventListener("change", () => {
     const v = sortSelect.value;
@@ -345,7 +346,7 @@ export function renderAdmin(root: HTMLElement): void {
 
   pauseBtn.addEventListener("click", () => {
     state.paused = !state.paused;
-    pauseBtn.textContent = state.paused ? "Resume" : "Pause";
+    pauseBtn.textContent = state.paused ? T().admResume : T().admPause;
     pauseBtn.setAttribute("aria-pressed", String(state.paused));
     renderUpdated();
     if (state.paused) {
@@ -369,11 +370,11 @@ export function renderAdmin(root: HTMLElement): void {
   const resetInput = h("input", {
     type: "text",
     class: "admin-input",
-    placeholder: "Type RESET",
-    "aria-label": "Type RESET to confirm deleting all players",
+    placeholder: T().admResetPlaceholder,
+    "aria-label": T().admResetLabel,
     autocomplete: "off",
   });
-  const resetBtn = h("button", { type: "button", class: "btn btn-danger btn-sm", disabled: true }, "Reset all players");
+  const resetBtn = h("button", { type: "button", class: "btn btn-danger btn-sm", disabled: true }, T().admResetAll);
   const resetMsg = h("span", { class: "muted small" });
   resetInput.addEventListener("input", () => {
     resetBtn.disabled = resetInput.value.trim() !== "RESET";
@@ -382,16 +383,16 @@ export function renderAdmin(root: HTMLElement): void {
     const key = getAdminKey();
     if (!key || resetInput.value.trim() !== "RESET") return;
     resetBtn.disabled = true;
-    resetMsg.textContent = "Resetting…";
+    resetMsg.textContent = T().admResetting;
     resetAllPlayers(key)
       .then(() => {
         resetInput.value = "";
-        resetMsg.textContent = "All players deleted.";
+        resetMsg.textContent = T().admAllDeleted;
         void load();
       })
       .catch((err: unknown) => {
         if (handleAuthError(err)) return;
-        resetMsg.textContent = err instanceof Error ? err.message : "Reset failed";
+        resetMsg.textContent = err instanceof Error ? err.message : T().admResetFailed;
         resetBtn.disabled = resetInput.value.trim() !== "RESET";
       });
   });
@@ -405,8 +406,8 @@ export function renderAdmin(root: HTMLElement): void {
         h(
           "div",
           { class: "admin-head-title" },
-          h("p", { class: "eyebrow" }, "Instructor · live"),
-          h("h1", { class: "admin-title" }, "Class dashboard"),
+          h("p", { class: "eyebrow" }, T().admInstructorLive),
+          h("h1", { class: "admin-title" }, T().admClassDashboard),
         ),
         h("div", { class: "admin-head-actions" }, updatedEl, pauseBtn, refreshBtn, boardBtn, logoutBtn),
       ),
@@ -415,8 +416,8 @@ export function renderAdmin(root: HTMLElement): void {
       h(
         "div",
         { class: "admin-grid" },
-        h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, "Stage funnel"), funnelEl),
-        h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, "Needs help"), helpEl),
+        h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, T().admStageFunnel), funnelEl),
+        h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, T().admNeedsHelp), helpEl),
       ),
       h(
         "section",
@@ -424,40 +425,40 @@ export function renderAdmin(root: HTMLElement): void {
         h(
           "div",
           { class: "admin-table-head" },
-          h("h2", { class: "admin-h2" }, "Players"),
+          h("h2", { class: "admin-h2" }, T().admPlayers),
           h("div", { class: "admin-controls" }, searchInput, sortSelect),
         ),
         h(
           "div",
           { class: "admin-legend", "aria-hidden": "true" },
-          h("span", { class: "cell is-solved" }), "solved",
-          h("span", { class: "cell is-revealed" }), "revealed",
-          h("span", { class: "cell is-active" }), "active",
-          h("span", { class: "cell is-locked" }), "locked",
+          h("span", { class: "cell is-solved" }), T().admStatus("solved"),
+          h("span", { class: "cell is-revealed" }), T().admStatus("revealed"),
+          h("span", { class: "cell is-active" }), T().admStatus("active"),
+          h("span", { class: "cell is-locked" }), T().admStatus("locked"),
         ),
         tableEl,
       ),
       h(
         "section",
         { class: "panel admin-panel admin-danger" },
-        h("h2", { class: "admin-h2" }, "Danger zone"),
-        h("p", { class: "muted small" }, "Deletes every player and their progress. This cannot be undone."),
+        h("h2", { class: "admin-h2" }, T().admDangerZone),
+        h("p", { class: "muted small" }, T().admDangerText),
         h("div", { class: "admin-reset" }, resetInput, resetBtn, resetMsg),
       ),
       leaderboardEl,
     );
-    pauseBtn.textContent = state.paused ? "Resume" : "Pause";
+    pauseBtn.textContent = state.paused ? T().admResume : T().admPause;
   }
 
   // ---- regions ---------------------------------------------------------------
 
   function renderUpdated(): void {
     if (!state.lastUpdated) {
-      updatedEl.textContent = "Loading…";
+      updatedEl.textContent = T().admLoading;
       return;
     }
     const sec = Math.max(0, Math.round((Date.now() - state.lastUpdated) / 1000));
-    updatedEl.textContent = `${state.paused ? "Paused · " : ""}updated ${sec}s ago`;
+    updatedEl.textContent = T().admUpdated(state.paused, sec);
     updatedEl.classList.toggle("is-stale", sec > 20);
   }
 
@@ -484,14 +485,14 @@ export function renderAdmin(root: HTMLElement): void {
     const stuck = players.filter((p) => stuckLevel(p) !== "none").length;
     setChildren(
       tilesEl,
-      tile("Players", String(players.length), stuck ? `${stuck} stuck` : "none stuck"),
+      tile(T().admPlayers, String(players.length), T().admStuckCount(stuck)),
       tile(
-        "Finished",
+        T().admFinished,
         String(finished.length),
         players.length ? `${Math.round((finished.length / players.length) * 100)}%` : undefined,
       ),
-      tile("Avg score", avg === null ? "—" : String(avg), maxScore ? `of ${maxScore}` : undefined),
-      tile("Median time", med === null ? "—" : formatDuration(med), "finished players"),
+      tile(T().admAvgScore, avg === null ? "—" : String(avg), maxScore ? T().admOf(maxScore) : undefined),
+      tile(T().admMedianTime, med === null ? "—" : formatDuration(med), T().admFinishedPlayers),
     );
   }
 
@@ -501,10 +502,10 @@ export function renderAdmin(root: HTMLElement): void {
       const reached = players.filter((p) => stageStatus(p, stage) !== "locked").length;
       const done = players.filter((p) => isFinishedStatus(stageStatus(p, stage))).length;
       const pct = (n: number): string => (total ? `${(n / total) * 100}%` : "0%");
-      const title = stage === "setup" ? "Setup" : QUESTION_TITLES.get(stage) ?? "";
+      const title = stage === "setup" ? T().admSetup : QUESTION_TITLES.get(stage) ?? "";
       return h(
         "div",
-        { class: "funnel-row", title: `${stageLabel(stage)} ${title}: ${reached} reached, ${done} finished` },
+        { class: "funnel-row", title: T().admFunnelTip(`${stageLabel(stage)} ${title}`, reached, done) },
         h("span", { class: "funnel-label" }, stageLabel(stage)),
         h(
           "div",
@@ -520,8 +521,8 @@ export function renderAdmin(root: HTMLElement): void {
       h(
         "p",
         { class: "muted small funnel-key" },
-        h("span", { class: "key-done" }), "finished ",
-        h("span", { class: "key-reached" }), "reached",
+        h("span", { class: "key-done" }), `${T().admKeyFinished} `,
+        h("span", { class: "key-reached" }), T().admKeyReached,
       ),
       rows,
     );
@@ -532,8 +533,8 @@ export function renderAdmin(root: HTMLElement): void {
     if (level === "none") return null;
     return h(
       "span",
-      { class: `stuck-badge is-${level}`, title: `${Math.floor(p.stuckMinutes)} minutes on the current stage` },
-      `stuck ${Math.floor(p.stuckMinutes)}m`,
+      { class: `stuck-badge is-${level}`, title: T().admStuckTip(Math.floor(p.stuckMinutes)) },
+      T().admStuckBadge(Math.floor(p.stuckMinutes)),
     );
   }
 
@@ -542,7 +543,7 @@ export function renderAdmin(root: HTMLElement): void {
       .filter((p) => stuckLevel(p) !== "none")
       .sort((a, b) => b.stuckMinutes - a.stuckMinutes);
     if (stuck.length === 0) {
-      setChildren(helpEl, h("p", { class: "muted admin-empty-small" }, "Nobody is stuck right now."));
+      setChildren(helpEl, h("p", { class: "muted admin-empty-small" }, T().admNobodyStuck));
       return;
     }
     setChildren(
@@ -553,7 +554,7 @@ export function renderAdmin(root: HTMLElement): void {
         stuck.map((p) => {
           const cur = p.currentStage;
           const sp = cur !== "setup" && cur !== "done" ? p.stages[cur] : undefined;
-          const detail = sp ? `${sp.wrongAttempts} wrong · ${sp.hintsRevealed} hints` : "";
+          const detail = sp ? T().admHelpDetail(sp.wrongAttempts, sp.hintsRevealed) : "";
           return h(
             "li",
             { class: `help-item is-${stuckLevel(p)}` },
@@ -570,7 +571,7 @@ export function renderAdmin(root: HTMLElement): void {
   function progressCells(p: AdminPlayer, now: number): HTMLElement {
     return h(
       "div",
-      { class: "progress-cells", role: "list", "aria-label": `Progress: ${progressCount(p)} of ${STAGES.length}` },
+      { class: "progress-cells", role: "list", "aria-label": T().admProgressLabel(progressCount(p), STAGES.length) },
       STAGES.map((stage) => {
         const status = stageStatus(p, stage);
         const tip = stageTooltip(p, stage, now);
@@ -586,21 +587,21 @@ export function renderAdmin(root: HTMLElement): void {
         {
           type: "button",
           class: "btn btn-ghost btn-sm",
-          "aria-label": `Delete ${p.name}`,
+          "aria-label": T().admDeleteLabel(p.name),
           onclick: () => {
             state.pendingDeleteId = p.id;
             renderTable();
           },
         },
-        "Delete",
+        T().admDelete,
       );
     }
-    const yes = h("button", { type: "button", class: "btn btn-danger btn-sm" }, "Confirm");
+    const yes = h("button", { type: "button", class: "btn btn-danger btn-sm" }, T().admConfirm);
     yes.addEventListener("click", () => {
       const key = getAdminKey();
       if (!key) return showLogin(null);
       yes.disabled = true;
-      yes.textContent = "Deleting…";
+      yes.textContent = T().admDeleting;
       deleteAdminPlayer(key, p.id)
         .then(() => {
           state.pendingDeleteId = null;
@@ -610,7 +611,7 @@ export function renderAdmin(root: HTMLElement): void {
         })
         .catch((err: unknown) => {
           if (handleAuthError(err)) return;
-          state.banner = err instanceof Error ? `Delete failed: ${err.message}` : "Delete failed";
+          state.banner = T().admDeleteFailed(err instanceof Error ? err.message : null);
           state.pendingDeleteId = null;
           renderBanner();
           renderTable();
@@ -626,9 +627,9 @@ export function renderAdmin(root: HTMLElement): void {
           renderTable();
         },
       },
-      "Cancel",
+      T().admCancel,
     );
-    return h("span", { class: "confirm-prompt", role: "group", "aria-label": `Confirm deleting ${p.name}` }, yes, no);
+    return h("span", { class: "confirm-prompt", role: "group", "aria-label": T().admConfirmDeleteLabel(p.name) }, yes, no);
   }
 
   // Persistent table; rows are keyed by player id and rebuilt only when their visible data changes,
@@ -643,12 +644,12 @@ export function renderAdmin(root: HTMLElement): void {
       h(
         "tr",
         {},
-        h("th", { scope: "col" }, "Name"),
-        h("th", { scope: "col" }, "Progress"),
-        h("th", { scope: "col", class: "num" }, "Score"),
-        h("th", { scope: "col" }, "Current stage"),
-        h("th", { scope: "col" }, "Last seen"),
-        h("th", { scope: "col" }, h("span", { class: "visually-hidden" }, "Actions")),
+        h("th", { scope: "col" }, T().admColName),
+        h("th", { scope: "col" }, T().admColProgress),
+        h("th", { scope: "col", class: "num" }, T().admColScore),
+        h("th", { scope: "col" }, T().admColStage),
+        h("th", { scope: "col" }, T().admColSeen),
+        h("th", { scope: "col" }, h("span", { class: "visually-hidden" }, T().admColActions)),
       ),
     ),
     tbody,
@@ -701,9 +702,9 @@ export function renderAdmin(root: HTMLElement): void {
         h(
           "div",
           { class: "admin-empty" },
-          h("p", { class: "admin-empty-title" }, "No players yet"),
-          h("p", { class: "muted" }, "Share this link with the class:"),
-          h("div", { class: "admin-share" }, h("code", { class: "admin-share-url" }, url), copyButton(() => url, "Copy link")),
+          h("p", { class: "admin-empty-title" }, T().admNoPlayers),
+          h("p", { class: "muted" }, T().admShareLink),
+          h("div", { class: "admin-share" }, h("code", { class: "admin-share-url" }, url), copyButton(() => url, T().admCopyLink)),
         ),
       );
       return;
@@ -711,7 +712,7 @@ export function renderAdmin(root: HTMLElement): void {
     const q = state.filter.trim().toLowerCase();
     const filtered = q ? players.filter((p) => p.name.toLowerCase().includes(q)) : players;
     if (filtered.length === 0) {
-      setChildren(tableEl, h("p", { class: "muted admin-empty-small" }, "No players match that search."));
+      setChildren(tableEl, h("p", { class: "muted admin-empty-small" }, T().admNoMatch));
       return;
     }
     if (tableNode.parentNode !== tableEl) setChildren(tableEl, tableNode);
@@ -759,16 +760,16 @@ export function renderAdmin(root: HTMLElement): void {
           renderLeaderboard();
         },
       },
-      "Close (Esc)",
+      T().admClose,
     );
     setChildren(
       leaderboardEl,
       h(
         "div",
         { class: "admin-board-inner" },
-        h("div", { class: "admin-board-head" }, h("h2", { class: "admin-board-title" }, "Leaderboard"), close),
+        h("div", { class: "admin-board-head" }, h("h2", { class: "admin-board-title" }, T().admLeaderboard), close),
         top.length === 0
-          ? h("p", { class: "muted admin-board-empty" }, "No players yet.")
+          ? h("p", { class: "muted admin-board-empty" }, T().admNoPlayersBoard)
           : h(
               "ol",
               { class: "admin-board-list" },
@@ -820,8 +821,8 @@ export function renderAdmin(root: HTMLElement): void {
       if (disposed) return;
       if (handleAuthError(err)) return;
       state.failures += 1;
-      const reason = err instanceof Error ? err.message : "unknown error";
-      state.banner = `Connection problem (${reason}), retrying in ${Math.round(nextDelay() / 1000)}s. Showing last known data.`;
+      const reason = err instanceof Error ? err.message : T().admUnknownError;
+      state.banner = T().admConnProblem(reason, Math.round(nextDelay() / 1000));
       renderBanner();
     } finally {
       state.loading = false;
@@ -857,7 +858,7 @@ export function renderAdmin(root: HTMLElement): void {
     } catch (err: unknown) {
       if (disposed) return;
       if (handleAuthError(err)) return;
-      showLogin(err instanceof Error ? err.message : "Could not load the dashboard");
+      showLogin(err instanceof Error ? err.message : T().admLoadFailed);
       return;
     }
     buildDashboard();
@@ -871,7 +872,7 @@ export function renderAdmin(root: HTMLElement): void {
   }
 
   if (getAdminKey()) {
-    setChildren(container, h("p", { class: "muted admin-loading" }, "Loading dashboard…"));
+    setChildren(container, h("p", { class: "muted admin-loading" }, T().admLoadingDashboard));
     void start();
   } else {
     showLogin(null);

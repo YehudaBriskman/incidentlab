@@ -1,3 +1,5 @@
+import { getLang } from "../i18n/i18n";
+const he = (): boolean => getLang() === "he";
 type Listener = (event: Event) => void;
 export type AttrValue = string | number | boolean | null | undefined | Listener;
 export type Attrs = Record<string, AttrValue>;
@@ -66,8 +68,8 @@ export function confirmButton(opts: {
   };
   const showConfirm = (): void => {
     const yes = h("button", { type: "button", class: "btn btn-danger", onclick: () => opts.onConfirm() }, opts.confirmLabel);
-    const no = h("button", { type: "button", class: "btn btn-ghost", onclick: () => { showIdle(); focusFirst(); } }, "Cancel");
-    wrap.replaceChildren(h("span", { class: "confirm-prompt", role: "group", "aria-label": "Confirm action" }, yes, no));
+    const no = h("button", { type: "button", class: "btn btn-ghost", onclick: () => { showIdle(); focusFirst(); } }, he() ? "ביטול" : "Cancel");
+    wrap.replaceChildren(h("span", { class: "confirm-prompt", role: "group", "aria-label": he() ? "אישור פעולה" : "Confirm action" }, yes, no));
     yes.focus();
   };
   const focusFirst = (): void => {
@@ -98,11 +100,11 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-export function copyButton(getText: () => string, label = "Copy"): HTMLButtonElement {
+export function copyButton(getText: () => string, label = he() ? "העתק" : "Copy"): HTMLButtonElement {
   const btn = h("button", { type: "button", class: "btn btn-copy", "aria-label": label }, label);
   btn.addEventListener("click", () => {
     void copyText(getText()).then((ok) => {
-      btn.textContent = ok ? "Copied" : "Copy failed";
+      btn.textContent = ok ? (he() ? "הועתק" : "Copied") : (he() ? "ההעתקה נכשלה" : "Copy failed");
       btn.classList.toggle("is-copied", ok);
       window.setTimeout(() => {
         btn.textContent = label;

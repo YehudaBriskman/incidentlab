@@ -288,3 +288,37 @@ code, pre, .mono { font-family: var(--mono); }
   --gutter: 16px;
   --shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 }
+
+/* ============ language toggle ============ */
+.lang-toggle { display: inline-flex; align-items: center; gap: 2px; font-size: 0.85rem; }
+.lang-btn { background: none; border: 0; padding: 4px 6px; border-radius: 6px; color: var(--muted); font: inherit; cursor: pointer; }
+.lang-btn[aria-pressed="true"] { color: var(--accent); font-weight: 700; }
+.lang-btn:hover { color: var(--text); }
+.lang-sep { color: var(--border); }
+.topbar { gap: 12px; }
+.topbar-status { margin-inline-start: auto; }
+
+/* ============ RTL (Hebrew) ============ */
+[dir=rtl] body { font-family: "Rubik", var(--sans); }
+[dir=rtl] .logo-mark { margin-right: 0; margin-inline-end: 4px; }
+[dir=rtl] .skip-link { left: auto; inset-inline-start: 8px; }
+[dir=rtl] .center-card.gate,
+[dir=rtl] .prose th, [dir=rtl] .prose td { text-align: start; }
+[dir=rtl] .look-for ul, [dir=rtl] .prose ul, [dir=rtl] .prose ol { padding-left: 0; padding-inline-start: 1.2em; }
+[dir=rtl] .tip { border-left: 0; border-inline-start: 3px solid var(--accent); padding: 4px 18px 4px 0; }
+[dir=rtl] .prose blockquote { border-left: 0; padding-left: 0; border-inline-start: 3px solid var(--border); padding-inline-start: 16px; }
+[dir=rtl] .code-wrap .btn-copy { right: 8px; left: auto; } /* code block itself is LTR, so the button stays on its right */
+
+/* Code, commands, answers and logs stay LTR in every language. */
+[dir=rtl] pre, [dir=rtl] code, [dir=rtl] .mono, [dir=rtl] .code-block,
+[dir=rtl] .answer-row .input, [dir=rtl] .input.mono, [dir=rtl] .share-text, [dir=rtl] .answer-code,
+[dir=rtl] .log-line, [dir=rtl] .ltr {
+  direction: ltr; text-align: left; unicode-bidi: isolate;
+}
+/* ...except mono-styled UI labels that carry translated text. */
+[dir=rtl] .stage-kicker, [dir=rtl] .featured-meta, [dir=rtl] .progress-stats, [dir=rtl] .eyebrow,
+[dir=rtl] .hint-label, [dir=rtl] .topbar-status, [dir=rtl] .footer, [dir=rtl] .center-card > .mono,
+[dir=rtl] .score-big, [dir=rtl] .lang-toggle, [dir=rtl] .how-n {
+  direction: rtl; text-align: start; unicode-bidi: normal;
+}
+[dir=rtl] .footer, [dir=rtl] .center-card > .mono { text-align: center; }
