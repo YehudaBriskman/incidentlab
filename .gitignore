@@ -4,3 +4,4 @@ site/dist/
 site/public/evidence/
 .netlify/
 __pycache__/
+site/server/generated/

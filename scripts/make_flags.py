@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Build salted answer hashes for the IncidentLab site.
+"""Build the server-side answer key for the IncidentLab site.
 
 Reads the generator truth files (build/truth/repo.json, build/truth/logs.json) plus the
 canonical constants in generator/timeline.py, cross-checks them, and writes:
 
-  site/src/generated/flags.json   salted SHA-256 hashes (deployed; contains no plaintext)
-  build/truth/answers.json        plaintext answers (instructor only; NEVER deployed)
+  site/server/generated/secrets.json  normalized answers + sealed debrief for the Netlify Function
+                                      (bundled server-side only; gitignored; NEVER served to browsers)
+  build/truth/answers.json            plaintext answers (instructor only; NEVER deployed)
 
 Normalization must match normalizeAnswer() in site/src/content/schema.ts:
   trim -> lowercase -> collapse runs of whitespace to a single space.
@@ -14,10 +15,8 @@ Python 3 stdlib only. Run from anywhere; paths are resolved from the repo root.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import re
-import secrets
 import sys
 from pathlib import Path
 
@@ -27,7 +26,8 @@ sys.path.insert(0, str(ROOT / "generator"))
 import timeline  # noqa: E402
 
 TRUTH_DIR = ROOT / "build" / "truth"
-FLAGS_OUT = ROOT / "site" / "src" / "generated" / "flags.json"
+SECRETS_OUT = ROOT / "site" / "server" / "generated" / "secrets.json"
+DEBRIEF_SRC = ROOT / "content-sealed" / f"{timeline.CASE_ID}.debrief.md"
 ANSWERS_OUT = TRUTH_DIR / "answers.json"
 
 _HMS_RE = re.compile(r"(\d{2}:\d{2}:\d{2})")
@@ -101,28 +101,21 @@ def build_answers(repo: dict, logs: dict) -> dict[str, str]:
     return {"q1": q1, "q2": q2, "q3": q3, "q4": q4, "q5": q5, "q6": q6}
 
 
-def hash_flag(normalized: str) -> dict[str, str]:
-    salt = secrets.token_hex(8)
-    digest = hashlib.sha256((salt + normalized).encode("utf-8")).hexdigest()
-    return {"salt": salt, "sha256": digest}
-
-
 def main() -> int:
     repo = load_json(TRUTH_DIR / "repo.json")
     logs = load_json(TRUTH_DIR / "logs.json")
     answers = build_answers(repo, logs)
+    normalized = {qid: normalize_answer(a) for qid, a in answers.items()}
 
-    flags = {qid: hash_flag(normalize_answer(ans)) for qid, ans in answers.items()}
+    if not DEBRIEF_SRC.is_file():
+        fail(f"missing {DEBRIEF_SRC.relative_to(ROOT)}")
+    debrief = DEBRIEF_SRC.read_text(encoding="utf-8")
 
-    # Self-check: every hash verifies against its normalized answer.
-    for qid, ans in answers.items():
-        salt, digest = flags[qid]["salt"], flags[qid]["sha256"]
-        if hashlib.sha256((salt + normalize_answer(ans)).encode("utf-8")).hexdigest() != digest:
-            fail(f"self-check failed for {qid}")
-
-    FLAGS_OUT.parent.mkdir(parents=True, exist_ok=True)
-    FLAGS_OUT.write_text(
-        json.dumps({"caseId": timeline.CASE_ID, "flags": flags}, indent=2) + "\n", encoding="utf-8"
+    SECRETS_OUT.parent.mkdir(parents=True, exist_ok=True)
+    SECRETS_OUT.write_text(
+        json.dumps({"caseId": timeline.CASE_ID, "answers": normalized, "debrief": debrief}, indent=2, ensure_ascii=False)
+        + "\n",
+        encoding="utf-8",
     )
     ANSWERS_OUT.parent.mkdir(parents=True, exist_ok=True)
     ANSWERS_OUT.write_text(
@@ -131,7 +124,7 @@ def main() -> int:
                 "caseId": timeline.CASE_ID,
                 "_warning": "PLAINTEXT ANSWERS. Instructor only. Never deploy or share with players.",
                 "answers": answers,
-                "normalized": {qid: normalize_answer(a) for qid, a in answers.items()},
+                "normalized": normalized,
             },
             indent=2,
         )
@@ -140,12 +133,11 @@ def main() -> int:
     )
 
     print(f"[make_flags] case: {timeline.CASE_ID}")
-    print(f"  {'id':<4} {'answer':<20} {'normalized':<20} {'salt':<17} sha256")
-    print(f"  {'-' * 4} {'-' * 20} {'-' * 20} {'-' * 17} {'-' * 16}")
+    print(f"  {'id':<4} {'answer':<20} normalized")
+    print(f"  {'-' * 4} {'-' * 20} {'-' * 20}")
     for qid, ans in answers.items():
-        f = flags[qid]
-        print(f"  {qid:<4} {ans:<20} {normalize_answer(ans):<20} {f['salt']:<17} {f['sha256'][:16]}...")
-    print(f"[make_flags] wrote {FLAGS_OUT.relative_to(ROOT)}")
+        print(f"  {qid:<4} {ans:<20} {normalized[qid]}")
+    print(f"[make_flags] wrote {SECRETS_OUT.relative_to(ROOT)} (server-only; gitignored)")
     print(f"[make_flags] wrote {ANSWERS_OUT.relative_to(ROOT)} (plaintext; do not deploy)")
     return 0
 
