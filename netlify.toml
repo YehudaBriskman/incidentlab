@@ -1,0 +1,46 @@
+# IncidentLab — Netlify config
+#
+# Why no real build command here?
+# The pipeline (generator/*.py -> scripts/make_flags.py -> scripts/package.sh -> vite build)
+# needs Python 3, git and zip, and it bakes per-build random salts into the flags. Netlify's
+# build image may not ship a matching Python/git setup, and rebuilding on every push would
+# reshuffle salts and regenerate the evidence pack. So we build locally and deploy the
+# PREBUILT output:
+#
+#   ./scripts/build-all.sh
+#   npx netlify-cli deploy --prod --dir=site/dist
+#
+# (or drag-and-drop site/dist onto https://app.netlify.com/drop)
+
+[build]
+  publish = "site/dist"
+  command = "echo 'prebuilt: run scripts/build-all.sh locally, then netlify deploy --dir=site/dist'"
+
+# SPA fallback: client-side routes (e.g. /cases/3am-outage) serve index.html.
+# Real files (assets, the evidence zip) still win because force = false.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+  force = false
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), interest-cohort=()"
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+
+# Vite emits content-hashed filenames under /assets, so they can be cached forever.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# The evidence zip is not content-hashed; keep it revalidating so a rebuild is picked up.
+[[headers]]
+  for = "/evidence/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
