@@ -1,0 +1,608 @@
+{
+  "id": "3am-outage",
+  "title": "The 3 AM Outage",
+  "subtitle": "Checkout went dark for 27 minutes on a Friday night. The rollback fixed it, but nobody knows why it broke.",
+  "difficulty": "medium",
+  "estMinutes": 50,
+  "tags": [
+    "log-forensics",
+    "nginx",
+    "jq",
+    "time-zones",
+    "git",
+    "nodejs",
+    "incident-response"
+  ],
+  "inspiredBy": {
+    "title": "Cloudflare global outage",
+    "year": 2019,
+    "summary": "On 2 July 2019, Cloudflare pushed a new WAF rule containing a regular expression vulnerable to catastrophic backtracking. Deployed globally at once, it pinned CPUs on every edge server and caused widespread 502 errors for about 27 minutes, until the WAF was disabled with a global kill switch."
+  },
+  "briefing": "**Monday, 09:12. Shipfast HQ.**\n\nFriday night, a little after 3 AM local time, checkout died. For roughly **27 minutes** customers could browse the shop all they liked, but almost nobody could pay. PagerDuty woke the on-call SRE, the incident channel filled with theories, and eventually someone rolled checkout back. Everything recovered.\n\nNobody actually knows *why* it broke.\n\nYour manager has dropped the RCA on your desk, due today. Leadership wants a timeline, a root cause and a list of who was affected. Engineering wants to know whether it can happen again.\n\nDownload the **evidence pack**. It holds everything the on-call team collected: nginx access logs, the checkout service's JSON logs, metrics, the Postgres slow log, the deploy log, the Slack incident channel and a git bundle of the service repo. **Read `README_FIRST.txt` before anything else**, and keep an eye on time zones. Not every source agrees on what time it is.\n\nThe six questions follow the shape of a real RCA:\n\n1. **When** did it start?\n2. **What changed?**\n3. **What triggered it?**\n4. **Where in the code** does it live?\n5. **Why did it keep going?**\n6. **What was the blast radius?**\n\nEach answer is a small, exact value (a timestamp, a SHA, a name, a number). Use the **Toolbox** tab if you get stuck on a command, and hints are available if you get stuck on the investigation. Good luck. The coffee machine is also down, but that one is a hardware issue.",
+  "evidenceZip": "/evidence/3am-outage-evidence.zip",
+  "evidence": [
+    {
+      "path": "README_FIRST.txt",
+      "format": "text",
+      "description": "Briefing notes from the on-call team, the file list and important notes on time formats. Start here."
+    },
+    {
+      "path": "nginx/access.log",
+      "format": "nginx log (UTC)",
+      "description": "Every HTTP request through the edge proxy during the night, with status, timings, request id (`rid`) and customer id (`cid`)."
+    },
+    {
+      "path": "nginx/nginx.conf.snippet",
+      "format": "nginx config",
+      "description": "The `log_format` definition and proxy timeouts, so you can tell what each field (and each timestamp) means."
+    },
+    {
+      "path": "app/checkout-service.log",
+      "format": "JSON lines",
+      "description": "Structured logs from the checkout service pods: request lifecycle, versions, warnings, restarts. Check the timestamp offset."
+    },
+    {
+      "path": "metrics/checkout_metrics.csv",
+      "format": "CSV (unix epoch)",
+      "description": "Checkout service metrics at 15-second resolution: pods ready, CPU, event-loop lag, p99 latency, RPS, error rate, restarts."
+    },
+    {
+      "path": "db/postgresql-slow.log",
+      "format": "Postgres log (UTC)",
+      "description": "Slow-query log and notable events from the primary database."
+    },
+    {
+      "path": "deploys/deploys.log",
+      "format": "text (UTC ISO-8601)",
+      "description": "Deploys and rollbacks across all services for the last few days."
+    },
+    {
+      "path": "slack/inc-checkout.json",
+      "format": "Slack export (JSON)",
+      "description": "The incident channel, as exported. `ts` is epoch seconds stored as a string. Treat opinions in it as hypotheses, not facts."
+    },
+    {
+      "path": "repo/shipfast-checkout.bundle",
+      "format": "git bundle",
+      "description": "The full history of the checkout service repo, tags included. Clone it with `git clone shipfast-checkout.bundle`."
+    }
+  ],
+  "rules": [
+    "Work only from the evidence pack. Don't read the generator source or the site's source code; that spoils the fun.",
+    "Answers are case-insensitive, and leading and trailing whitespace is ignored. Stick to the format shown under each question.",
+    "Each hint costs the points shown on it. Hints are revealed in order, from a gentle nudge to almost the full command.",
+    "Working in pairs is encouraged. Talk through your reasoning out loud, just like a real incident review.",
+    "Any tool is allowed: grep, awk, jq, Python, a spreadsheet, your favourite editor. The Toolbox tab lists commands that help.",
+    "Wrong answers cost nothing, so guess freely. Still, try to be able to explain *why* your answer is right.",
+    "Don't share flags with other teams until everyone is done. Sharing techniques is fine.",
+    "Careful with the code you find: some of it is slow on purpose. Read the Toolbox warning before you run any regex experiments."
+  ],
+  "questions": [
+    {
+      "id": "q1",
+      "title": "When did it start?",
+      "prompt": "Every RCA starts with an anchor: **when did users first start seeing errors?**\n\nFind the timestamp of the **first** request in `nginx/access.log` that returned a server error, meaning **any HTTP status from 500 to 599**, on any path.\n\nAnswer with the time as it appears in the nginx log, **in UTC**, formatted `HH:MM:SS` (no date, no milliseconds).",
+      "answerFormat": "HH:MM:SS (UTC)",
+      "placeholder": "04:20:00",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "The status code is a field of its own on every nginx line. Look at `nginx/nginx.conf.snippet` to see which position it sits in. The log is already in chronological order, so the first match is your answer."
+        },
+        {
+          "cost": 20,
+          "text": "Split each line on spaces. The status lands in field `$9` (count it against the `log_format`). Filter for statuses that start with `5`, then stop at the first hit."
+        },
+        {
+          "cost": 40,
+          "text": "Something like:\n\n```sh\nawk '$9 ~ /^5[0-9][0-9]$/ {print $4, $9, $7; exit}' nginx/access.log\n```\n\nThen strip the date part from the `[dd/Mon/yyyy:HH:MM:SS` field. Don't convert the time: nginx already logs UTC here."
+        }
+      ],
+      "successNote": "nginx's `$time_local` records when the request **finished**, not when it started. A request that hung for 30 seconds is logged 30 seconds after the damage began. Always ask *what moment a timestamp represents* and *which time zone it's in* before you line up sources."
+    },
+    {
+      "id": "q2",
+      "title": "What changed?",
+      "prompt": "Most outages follow a change. Several changes landed that night, and the Slack channel has opinions.\n\nWhich **commit was the checkout service actually running when the errors started**? Find the deployed release, then the commit behind it in the repo.\n\nAnswer with the **7-character short git SHA** (lowercase hex).",
+      "answerFormat": "7-char short SHA (hex)",
+      "placeholder": "a1b2c3d",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Put your Q1 timestamp next to `deploys/deploys.log`. Which checkout deploy was *live* at that moment? The most recent one, or one before it? The app log's `version` field per line confirms what each pod was really running."
+        },
+        {
+          "cost": 20,
+          "text": "Clone the bundle and match the deployed **version** to a **git tag**. `git show <tag>` tells you which commit a tag points to. The deploy log's `commit=` field should agree with it. If two candidates remain, read both diffs and ask which one could plausibly freeze a pod."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngit clone repo/shipfast-checkout.bundle && cd shipfast-checkout\ngit tag --sort=creatordate | tail -5\ngit log --oneline -1 <tag>      # short SHA of the tagged commit\ngit show <tag> --stat           # what did that release touch?\n```\n\nCross-check: `grep checkout deploys/deploys.log` and the `version` field in the app log right before the first error."
+        }
+      ],
+      "successNote": "The most recent deploy is the first suspect, not automatically the culprit. One release went out over half an hour before anything broke, so recency alone would have sent you the wrong way. Correlate *when each change went live* with *when symptoms began*, and then confirm it by reading the diff."
+    },
+    {
+      "id": "q3",
+      "title": "What triggered it?",
+      "prompt": "The bad code was live for a while before anything broke. Something had to **trigger** it.\n\nIn the checkout service log, one order shows up as a request that **started but never finished**: there's a `checkout.start` for it, with no matching `checkout.done`, and the pod went quiet afterwards.\n\nWhich **order ID** is that \"poison\" order?",
+      "answerFormat": "Order ID, e.g. ORD-XXXXXX",
+      "placeholder": "ORD-1A2B3C",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "`app/checkout-service.log` is JSON lines in **local time (+02:00)**, while nginx is UTC. Convert your Q1 time before you go looking. Remember nginx logged the *end* of a request that timed out after 30 seconds."
+        },
+        {
+          "cost": 20,
+          "text": "Look at `checkout.start` lines from about 30 seconds before the first 5xx. For each order, check whether a `checkout.done` with the same `order` ever appears. You can also follow the `rid` of the first failing nginx request into the app log."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\n# starts vs dones per order, then diff them\njq -r 'select(.msg==\"checkout.start\") | .order' app/checkout-service.log | sort -u > started\njq -r 'select(.msg==\"checkout.done\")  | .order' app/checkout-service.log | sort -u > done\ncomm -23 started done\n# or: grep '<rid-from-nginx>' app/checkout-service.log\n```"
+        }
+      ],
+      "successNote": "Some bugs only fire on specific input. A deploy can look healthy for 15 minutes until the one payload that triggers it arrives. A request that **starts and never ends** (no completion log, no error) is a classic sign that a thread or event loop is stuck rather than crashing."
+    },
+    {
+      "id": "q4",
+      "title": "Where in the code?",
+      "prompt": "You know the commit and you know the input. Now find the code.\n\nSomething in that release spends a very long time on certain input and blocks the whole Node.js process. Which **function** contains the dangerous code?\n\nAnswer with the **function name exactly as written in the source** (no parentheses, no file path).",
+      "answerFormat": "functionName (as in code)",
+      "placeholder": "validateCartItems",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Look at what the poison order had that most orders didn't. The app log has some extra fields on `checkout.start`. Then read the diff of the release you found in Q2."
+        },
+        {
+          "cost": 20,
+          "text": "The release added new input handling. Look for a **regular expression** in the diff, specifically one with a quantifier *inside* a group that is itself quantified, like `( ... + ... )*`."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngit show <bad-sha> --stat\ngit show <bad-sha> -- src/\ngit grep -n -E 'RegExp|/\\^.*\\)\\*' <bad-sha>\n```\n\nThe answer is the exported function that *uses* the suspicious regex, not the constant's name."
+        }
+      ],
+      "successNote": "**Catastrophic backtracking:** with nested quantifiers like `(\\w+\\s?)*`, a backtracking regex engine can split a string of words in exponentially many ways. When the final character makes the match fail, it tries **all** of them. 99 characters is enough to keep a CPU busy for far longer than anyone will wait, and in single-threaded Node.js that blocks everything."
+    },
+    {
+      "id": "q5",
+      "title": "Why did it keep going?",
+      "prompt": "One bad request should freeze one pod for a while. The outage lasted about 27 minutes across the whole fleet. Something kept **re-poisoning** the service.\n\nHow many times **in total** was the poison order submitted to the checkout service during the incident?\n\nAnswer with an **integer**: the total number of submissions, **including the first**.",
+      "answerFormat": "Integer (total, incl. the first)",
+      "placeholder": "3",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Every submission of an order produces a fresh request, with a new `rid`, but the order ID stays the same. Count how often that order *started*."
+        },
+        {
+          "cost": 20,
+          "text": "Count `checkout.start` lines for the poison order in the app log. Cross-check against nginx: the same customer's `POST /api/checkout` requests that ended in 5xx. Watch which pod each attempt landed on, and what happened to that pod next."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\njq -c 'select(.msg==\"checkout.start\" and .order==\"ORD-XXXXXX\") | {ts, pod, rid}' \\\n  app/checkout-service.log | wc -l\n```"
+        }
+      ],
+      "successNote": "Client **retries** (automatic, plus impatient users clicking again) kept sending the same poison payload. Round-robin load balancing spread it across every pod, and **liveness probes** restarted frozen pods straight back into the line of fire. Retries need backoff and caps, and the system needs a way to reject inputs that killed it before. Otherwise self-healing just becomes self-reinfecting."
+    },
+    {
+      "id": "q6",
+      "title": "Blast radius",
+      "prompt": "Support needs to email affected customers and finance wants an estimate. **How many real customers** were hit?\n\nCount the **distinct customer IDs** (`cid=` values) that received **at least one HTTP 5xx** (500–599) on **`POST /api/checkout`** anywhere in `nginx/access.log` (the whole file, not just a window).\n\nExclude `cid=-` (anonymous) and `cid=cus_synthetic` (our synthetic monitor). Answer with an **integer**.",
+      "answerFormat": "Integer (distinct customers)",
+      "placeholder": "42",
+      "points": 150,
+      "hints": [
+        {
+          "cost": 15,
+          "text": "You need three filters (method + path, status class, real customer), then a *distinct* count. Don't count requests: one customer retrying five times is still one customer."
+        },
+        {
+          "cost": 30,
+          "text": "Match lines with `\"POST /api/checkout ` and a status of `5xx` in field `$9`. Extract the `cid=` value (the last field), drop `-` and `cus_synthetic`, then `sort -u | wc -l`."
+        },
+        {
+          "cost": 50,
+          "text": "```sh\nawk '$6==\"\\\"POST\" && $7==\"/api/checkout\" && $9 ~ /^5/ {print $NF}' nginx/access.log \\\n  | sed 's/^cid=//' | grep -v -x -e '-' -e 'cus_synthetic' \\\n  | sort -u | wc -l\n```"
+        }
+      ],
+      "successNote": "Blast radius decides the response: who gets an apology email, whether the status page says \"some\" or \"most\" users, and whether failed payments need reconciling. Count **people**, not requests, and remember to filter out your own synthetic traffic, which would otherwise inflate the impact."
+    }
+  ],
+  "toolbox": [
+    {
+      "category": "Getting oriented",
+      "items": [
+        {
+          "title": "Unpack the evidence",
+          "command": "unzip 3am-outage-evidence.zip && cd 3am-outage",
+          "explain": "Extracts the pack. Everything lives under one top-level folder."
+        },
+        {
+          "title": "See what you've got",
+          "command": "ls -laR",
+          "explain": "Lists every file recursively with sizes. A huge file is usually the one worth sampling first."
+        },
+        {
+          "title": "Peek at the first lines",
+          "command": "head -n 5 nginx/access.log",
+          "explain": "Look at the format **before** you parse it. `tail -n 5` shows the end of the window."
+        },
+        {
+          "title": "How big is it?",
+          "command": "wc -l nginx/access.log app/checkout-service.log",
+          "explain": "Line counts tell you whether you can eyeball a file or need to aggregate it."
+        },
+        {
+          "title": "Browse without wrapping",
+          "command": "less -S nginx/access.log",
+          "explain": "`-S` chops long lines instead of wrapping them. Use `/pattern` to search, `n` for the next hit, `G` for the end of the file."
+        },
+        {
+          "title": "What kind of file is this?",
+          "command": "file repo/shipfast-checkout.bundle metrics/*.csv",
+          "explain": "Identifies file types: text, JSON, git bundle, and so on."
+        },
+        {
+          "title": "Read the README",
+          "command": "cat README_FIRST.txt",
+          "explain": "Seriously. It has notes on formats and time zones."
+        }
+      ]
+    },
+    {
+      "category": "grep & friends",
+      "items": [
+        {
+          "title": "Count matches",
+          "command": "grep -c ' 404 ' nginx/access.log",
+          "explain": "`-c` prints the number of matching lines instead of the lines themselves. Fast sanity checks."
+        },
+        {
+          "title": "Extended regex",
+          "command": "grep -E '\" (502|504) ' nginx/access.log | head",
+          "explain": "`-E` enables alternation `|`, `+`, `{n}` and so on without backslashes. The leading `\" ` anchors the match right after the request string."
+        },
+        {
+          "title": "Line numbers",
+          "command": "grep -n 'pattern' app/checkout-service.log | head",
+          "explain": "`-n` prefixes each hit with its line number, which helps you jump there in `less` (`<num>G`)."
+        },
+        {
+          "title": "Stop at the first match",
+          "command": "grep -m1 -E 'pattern' nginx/access.log",
+          "explain": "`-m1` exits after the first hit. On a chronologically sorted log, that gives you the *earliest* occurrence."
+        },
+        {
+          "title": "Invert / exclude",
+          "command": "grep -v -e 'kube-probe' -e 'Shipfast-Synthetic' nginx/access.log",
+          "explain": "`-v` keeps lines that do **not** match. Each `-e` adds another pattern. Great for removing health checks and synthetic noise."
+        },
+        {
+          "title": "Print only the match",
+          "command": "grep -o 'cid=[^ ]*' nginx/access.log | sort | uniq -c | sort -rn | head",
+          "explain": "`-o` outputs just the matched text, which makes it ideal for extracting one field from messy lines."
+        },
+        {
+          "title": "Context around a hit",
+          "command": "grep -n -B3 -A10 'ORD-XXXXXX' app/checkout-service.log",
+          "explain": "`-B`/`-A` show lines before and after each match, so you see what happened around an event."
+        },
+        {
+          "title": "Search compressed logs",
+          "command": "zgrep -c 'pattern' rotated.log.gz",
+          "explain": "In real life old logs are gzipped. `zgrep`/`zcat` read them without unpacking."
+        }
+      ]
+    },
+    {
+      "category": "awk / sort / uniq",
+      "items": [
+        {
+          "title": "Pull fields from nginx lines",
+          "command": "awk '{print $4, $6, $7, $9}' nginx/access.log | head",
+          "explain": "awk splits on whitespace. In this format: `$1` IP, `$4` `[time`, `$6` `\"METHOD`, `$7` path, `$9` status, `$NF` `cid=...`. Verify against the `log_format`."
+        },
+        {
+          "title": "Status code histogram",
+          "command": "awk '{print $9}' nginx/access.log | sort | uniq -c | sort -rn",
+          "explain": "The classic first look at any access log: how many of each status code."
+        },
+        {
+          "title": "Filter by field",
+          "command": "awk '$9 >= 500 && $9 <= 599' nginx/access.log | head",
+          "explain": "awk conditions on fields are more precise than grep, because a `500` can also show up in a byte count."
+        },
+        {
+          "title": "Bucket per minute",
+          "command": "awk '$9 ~ /^5/ {print substr($4, 14, 5)}' nginx/access.log | uniq -c",
+          "explain": "`substr($4,14,5)` pulls out `HH:MM` from `[13/Nov/2026:HH:MM:SS`. Since the log is sorted, `uniq -c` gives a per-minute count. Use `,8)` for per-second."
+        },
+        {
+          "title": "Per-minute with cut",
+          "command": "cut -d: -f2,3 nginx/access.log | sort | uniq -c | head",
+          "explain": "`cut` on `:` gives `HH:MM` from the timestamp. Cruder than awk, but quick."
+        },
+        {
+          "title": "Group by two fields",
+          "command": "awk '{print $7, $9}' nginx/access.log | sort | uniq -c | sort -rn | head -20",
+          "explain": "Which path + status combinations dominate? Great for seeing *which* endpoints fail."
+        },
+        {
+          "title": "Count unique values",
+          "command": "awk '{print $NF}' nginx/access.log | sort -u | wc -l",
+          "explain": "`sort -u` removes duplicates, and `wc -l` counts what's left. Distinct users, IPs, rids, and so on."
+        },
+        {
+          "title": "First and last occurrence",
+          "command": "awk '$9 ~ /^5/' nginx/access.log | sed -n '1p;$p'",
+          "explain": "Prints the first and last matching lines, which gives you the start and end of a phenomenon in one go."
+        }
+      ]
+    },
+    {
+      "category": "jq for JSON logs",
+      "items": [
+        {
+          "title": "Pretty-print one line",
+          "command": "head -n1 app/checkout-service.log | jq .",
+          "explain": "See every field a log line carries before you write filters."
+        },
+        {
+          "title": "Filter by message",
+          "command": "jq -c 'select(.msg==\"checkout.start\")' app/checkout-service.log | head",
+          "explain": "`select()` keeps matching objects, and `-c` keeps them one per line so you can still grep, head and wc."
+        },
+        {
+          "title": "Follow one order",
+          "command": "jq -c 'select(.order==\"ORD-XXXXXX\")' app/checkout-service.log",
+          "explain": "Every event for a single order. Is there a start *and* a done?"
+        },
+        {
+          "title": "Custom output with -r",
+          "command": "jq -r '\"\\(.ts) \\(.pod) \\(.msg) \\(.order // \"\")\"' app/checkout-service.log | less -S",
+          "explain": "`-r` prints raw strings, and `\\(...)` interpolates fields. `//` gives a default when a field is missing."
+        },
+        {
+          "title": "What message types exist?",
+          "command": "jq -r '.msg' app/checkout-service.log | sort | uniq -c | sort -rn",
+          "explain": "A histogram of event types. Rare warnings stand out immediately."
+        },
+        {
+          "title": "Group and count (slurp)",
+          "command": "jq -s 'map(select(.level==\"warn\")) | group_by(.msg) | map({msg: .[0].msg, n: length})' app/checkout-service.log",
+          "explain": "`-s` slurps all lines into one array, so you can `group_by`, `sort_by` and `length` across the whole file."
+        },
+        {
+          "title": "Filter on numbers",
+          "command": "jq -c 'select(.msg==\"eventloop.lag\" and .lag_ms > 1000) | {ts, pod, lag_ms}' app/checkout-service.log",
+          "explain": "Numeric comparisons and object construction `{a, b}` keep only the fields you care about."
+        },
+        {
+          "title": "Versions over time",
+          "command": "jq -r '[.ts, .pod, .version] | @tsv' app/checkout-service.log | uniq -f2 | less",
+          "explain": "`@tsv` turns arrays into tab-separated lines. Combined with `uniq`, you see when each pod switched version."
+        }
+      ]
+    },
+    {
+      "category": "Correlating sources",
+      "items": [
+        {
+          "title": "Grab a request id from nginx",
+          "command": "grep -m1 -E '\" 50[0-9] ' nginx/access.log | grep -o 'rid=[0-9a-f]*'",
+          "explain": "nginx and the checkout service share the `rid` (request id), which is the thread you pull to link both sides of a request."
+        },
+        {
+          "title": "Find that request in the app log",
+          "command": "grep '<rid>' app/checkout-service.log | jq .",
+          "explain": "The same request from the service's point of view: which pod, which order, which version, and did it finish?"
+        },
+        {
+          "title": "All requests for one customer",
+          "command": "grep 'cid=cus_XXXX' nginx/access.log | awk '{print $4, $6, $7, $9, $(NF-2)}'",
+          "explain": "Retries from the same person line up here. Watch the timing between attempts."
+        },
+        {
+          "title": "Line up two sources by time",
+          "command": "grep -h '01:2[0-9]' deploys/deploys.log db/postgresql-slow.log | sort | head",
+          "explain": "Merge events from different files into one view, **but only after they're all in the same time zone**."
+        },
+        {
+          "title": "Requests that never finished",
+          "command": "comm -23 <(jq -r 'select(.msg==\"x.start\")|.rid' app.log | sort -u) <(jq -r 'select(.msg==\"x.done\")|.rid' app.log | sort -u)",
+          "explain": "`comm -23` prints lines only in the first sorted list: things that started but have no matching end."
+        },
+        {
+          "title": "Pod timeline",
+          "command": "jq -r 'select(.pod==\"<pod>\") | \"\\(.ts) \\(.level) \\(.msg)\"' app/checkout-service.log | less",
+          "explain": "One pod's life story. Gaps (silence) can be as telling as errors."
+        }
+      ]
+    },
+    {
+      "category": "Time zones & timestamps",
+      "items": [
+        {
+          "title": "Epoch to UTC",
+          "command": "date -u -d @1794531600",
+          "explain": "Converts unix epoch seconds to a human UTC time (GNU date). On macOS: `date -u -r 1794531600`."
+        },
+        {
+          "title": "UTC to local (Israel)",
+          "command": "TZ=Asia/Jerusalem date -d '2026-11-13T00:30:00Z'",
+          "explain": "Shows what a UTC instant was on the office clock. In November, Israel is **UTC+02:00**."
+        },
+        {
+          "title": "Local to UTC",
+          "command": "date -u -d '2026-11-13T02:30:00+02:00' +%H:%M:%S",
+          "explain": "Normalizes an offset timestamp (like the app log's) to UTC. `+%H:%M:%S` sets the output format."
+        },
+        {
+          "title": "Python one-liner",
+          "command": "python3 -c 'from datetime import datetime, timezone; print(datetime.fromtimestamp(1794531600, timezone.utc))'",
+          "explain": "Same conversion, but portable. Swap in `timezone(timedelta(hours=2))` to get local time."
+        },
+        {
+          "title": "Human time to epoch",
+          "command": "date -u -d '2026-11-13 01:00:00' +%s",
+          "explain": "Handy for finding the matching row in an epoch-indexed file like the metrics CSV."
+        },
+        {
+          "title": "Convert a whole CSV column",
+          "command": "awk -F, 'NR>1 {cmd=\"date -u -d @\"$1\" +%H:%M:%S\"; cmd | getline t; close(cmd); print t, $0}' metrics/checkout_metrics.csv | head",
+          "explain": "Prefix every metrics row with a readable UTC time. Slow-ish (it forks `date` per row), but fine for a few hundred rows."
+        },
+        {
+          "title": "Slack timestamps",
+          "command": "jq -r '.[] | \"\\(.ts | tonumber | floor | todate) \\(.user): \\(.text)\"' slack/inc-checkout.json",
+          "explain": "Slack `ts` is an epoch *string* with a fractional part. `tonumber | floor | todate` gives ISO-8601 UTC."
+        }
+      ]
+    },
+    {
+      "category": "CSV metrics",
+      "items": [
+        {
+          "title": "Pretty table",
+          "command": "column -s, -t < metrics/checkout_metrics.csv | less -S",
+          "explain": "Aligns CSV columns so you can actually read them. `-s,` sets the separator and `-t` builds a table."
+        },
+        {
+          "title": "Show the header with column numbers",
+          "command": "head -1 metrics/checkout_metrics.csv | tr , '\\n' | nl",
+          "explain": "Numbers each column, so you know which `$N` to use in awk."
+        },
+        {
+          "title": "Select columns",
+          "command": "awk -F, '{print $1, $3, $4}' metrics/checkout_metrics.csv | head",
+          "explain": "`-F,` splits on commas. Print just the columns you're investigating."
+        },
+        {
+          "title": "First row over a threshold",
+          "command": "awk -F, 'NR>1 && $7 > 0.05 {print; exit}' metrics/checkout_metrics.csv",
+          "explain": "Finds when a metric first crosses a line (here, the error-rate column). Then convert `$1` with `date -u -d @...`."
+        },
+        {
+          "title": "All rows over a threshold",
+          "command": "awk -F, 'NR>1 && $4 > 1000 {print $1, $4}' metrics/checkout_metrics.csv",
+          "explain": "Shows the full span of an anomaly: when it started, when it ended, and whether it was continuous."
+        },
+        {
+          "title": "Min / max of a column",
+          "command": "awk -F, 'NR>1 {if($2<m||m==\"\")m=$2; if($2>M)M=$2} END{print m, M}' metrics/checkout_metrics.csv",
+          "explain": "Quick range check: did pods_ready ever hit zero?"
+        }
+      ]
+    },
+    {
+      "category": "git forensics",
+      "items": [
+        {
+          "title": "Clone a bundle",
+          "command": "git clone repo/shipfast-checkout.bundle && cd shipfast-checkout",
+          "explain": "A bundle is a whole repo in one file. Cloning it gives you a normal working copy with full history and tags."
+        },
+        {
+          "title": "History at a glance",
+          "command": "git log --oneline --decorate --graph | head -30",
+          "explain": "`--decorate` shows tags and branches next to commits, so you can see where each release sits."
+        },
+        {
+          "title": "List tags",
+          "command": "git tag --sort=creatordate",
+          "explain": "Releases in order. Match them against the versions in deploy logs."
+        },
+        {
+          "title": "What's in a release?",
+          "command": "git show <tag> --stat",
+          "explain": "Commit message, author, date and the files touched by the commit a tag points to."
+        },
+        {
+          "title": "Diff two releases",
+          "command": "git diff v2.13.4..v2.14.0 --stat",
+          "explain": "Everything that changed between two versions. Drop `--stat` for the full patch."
+        },
+        {
+          "title": "Find who added a string",
+          "command": "git log -p -S'pattern' --oneline",
+          "explain": "The \"pickaxe\": commits that added or removed occurrences of `pattern`, with their patches."
+        },
+        {
+          "title": "Search code at a revision",
+          "command": "git grep -n 'pattern' <tag>",
+          "explain": "Greps the tree as it was at that tag, without checking it out."
+        },
+        {
+          "title": "Blame a line range",
+          "command": "git blame -L 1,30 src/path/to/file.ts",
+          "explain": "Who last touched each line, and in which commit. Add `-w` to ignore whitespace changes."
+        }
+      ]
+    },
+    {
+      "category": "Regex sanity check (careful!)",
+      "items": [
+        {
+          "title": "Time a regex in Node (SAFE sizes only)",
+          "command": "node -e 'const re=/^(a+)+$/; for (let n=18;n<=26;n++){const s=\"a\".repeat(n)+\"!\"; const t=Date.now(); re.test(s); console.log(n, Date.now()-t, \"ms\")}'",
+          "explain": "Measures how long a regex takes to **fail** on inputs of growing length that end in a char it can't match. `(a+)+` is the textbook evil pattern; swap in any regex you're suspicious of (and an input shape that suits it). If the time roughly **doubles per extra character**, it's exponential.\n\n**WARNING: never go above ~28 characters.** Each extra char doubles the runtime, so a few more and your terminal is frozen for minutes, or years. If that happens, `Ctrl+C`, or `pkill node` from another terminal."
+        },
+        {
+          "title": "Same test in Python",
+          "command": "python3 -c '\nimport re, time\nfor n in range(18, 25):\n    s = \"a\" * n + \"!\"\n    t = time.time()\n    re.match(r\"^(a+)+$\", s)\n    print(n, round((time.time() - t) * 1000), \"ms\")\n'",
+          "explain": "Python's `re` is also a backtracking engine and blows up the same way. Paste it as-is: the multi-line string inside single quotes is fine in bash and zsh. **Same warning: keep n small.**"
+        },
+        {
+          "title": "Run with a hard timeout",
+          "command": "timeout 10s node -e '...your test...'",
+          "explain": "A safety net: kills the process after 10 seconds no matter what."
+        },
+        {
+          "title": "Compare to a linear version",
+          "command": "node -e 'const re=/^[\\w\\s]*$/; const s=\"a \".repeat(5000)+\"!\"; console.time(\"t\"); re.test(s); console.timeEnd(\"t\")'",
+          "explain": "A character class with a single quantifier can't backtrack exponentially. Even on 10,000 characters it finishes in well under a millisecond."
+        }
+      ]
+    },
+    {
+      "category": "Postgres slow log",
+      "items": [
+        {
+          "title": "All slow statements",
+          "command": "grep 'duration:' db/postgresql-slow.log | head",
+          "explain": "Every line that logged a query duration."
+        },
+        {
+          "title": "Queries slower than X ms",
+          "command": "awk '/duration:/ {for(i=1;i<=NF;i++) if($i==\"duration:\" && $(i+1)>2000) print $1, $2, $(i+1)}' db/postgresql-slow.log",
+          "explain": "Finds the `duration:` token and prints the timestamp and duration when it's above 2000 ms. Adjust the threshold to taste."
+        },
+        {
+          "title": "Slow queries per minute",
+          "command": "grep 'duration:' db/postgresql-slow.log | cut -c12-16 | uniq -c",
+          "explain": "Characters 12–16 are `HH:MM` in `2026-11-13 HH:MM:SS UTC`. A histogram shows *when* the DB was struggling, and also when it went *quiet*."
+        },
+        {
+          "title": "Who connected?",
+          "command": "grep -E 'connection authorized|application_name' db/postgresql-slow.log",
+          "explain": "Shows sessions opening, and which application opened them (backup jobs, migrations, apps)."
+        },
+        {
+          "title": "Non-query events",
+          "command": "grep -v 'duration:' db/postgresql-slow.log | head -40",
+          "explain": "Checkpoints, connections, COPY: the background activity around the queries."
+        }
+      ]
+    }
+  ],
+  "debrief": "_Sealed._ Solve all six questions to decrypt the debrief: it is AES-GCM encrypted with a key derived from your answers."
+}

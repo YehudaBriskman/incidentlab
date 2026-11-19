@@ -1,0 +1,186 @@
+{
+  "id": "3am-outage",
+  "title": "The 3 AM Outage (DEV SAMPLE)",
+  "subtitle": "Checkout is down, the pager is screaming, and nobody deployed anything. Or did they?",
+  "difficulty": "medium",
+  "estMinutes": 45,
+  "tags": [
+    "logs",
+    "git",
+    "regex",
+    "time zones"
+  ],
+  "inspiredBy": {
+    "title": "Sample real-world outage",
+    "year": 2019,
+    "summary": "A placeholder summary of the real incident this case is modeled on."
+  },
+  "briefing": "## You are on call\n\nIt is **03:07** and the pager just fired: `checkout-service 5xx > 20%`.\n\n- Find when it started\n- Find what changed\n- Find why it kept failing\n\n> This is dev sample content.",
+  "evidenceZip": "/evidence/3am-outage-evidence.zip",
+  "evidence": [
+    {
+      "path": "nginx/access.log",
+      "format": "nginx log (UTC)",
+      "description": "Edge access log."
+    },
+    {
+      "path": "app/checkout-service.log",
+      "format": "JSON lines (local time)",
+      "description": "Application log."
+    },
+    {
+      "path": "repo/shipfast-checkout/",
+      "format": "git repo",
+      "description": "Service source code with history."
+    }
+  ],
+  "rules": [
+    "Every answer can be derived from the evidence.",
+    "Hints cost points; wrong answers are free.",
+    "No answers in the page source. Don't bother."
+  ],
+  "questions": [
+    {
+      "id": "q1",
+      "title": "First blood",
+      "prompt": "DEV SAMPLE prompt for **q1**. Use `grep` on `nginx/access.log`.\n\nThe answer for every dev question is `test`.",
+      "answerFormat": "HH:MM:SS (UTC)",
+      "placeholder": "01:23:45",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "First hint: look at the `status` field."
+        },
+        {
+          "cost": 25,
+          "text": "Second hint: `awk '$9 >= 500'`."
+        }
+      ],
+      "successNote": "Correct. **Why this matters:** sample success note with `code`."
+    },
+    {
+      "id": "q2",
+      "title": "The deploy",
+      "prompt": "DEV SAMPLE prompt for **q2**. Use `grep` on `nginx/access.log`.\n\nThe answer for every dev question is `test`.",
+      "answerFormat": "7-char git SHA",
+      "placeholder": "a1b2c3d",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "First hint: look at the `status` field."
+        },
+        {
+          "cost": 25,
+          "text": "Second hint: `awk '$9 >= 500'`."
+        }
+      ],
+      "successNote": "Correct. **Why this matters:** sample success note with `code`."
+    },
+    {
+      "id": "q3",
+      "title": "Patient zero",
+      "prompt": "DEV SAMPLE prompt for **q3**. Use `grep` on `nginx/access.log`.\n\nThe answer for every dev question is `test`.",
+      "answerFormat": "Order ID",
+      "placeholder": "ORD-XXXXXX",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "First hint: look at the `status` field."
+        },
+        {
+          "cost": 25,
+          "text": "Second hint: `awk '$9 >= 500'`."
+        }
+      ],
+      "successNote": "Correct. **Why this matters:** sample success note with `code`."
+    },
+    {
+      "id": "q4",
+      "title": "The culprit",
+      "prompt": "DEV SAMPLE prompt for **q4**. Use `grep` on `nginx/access.log`.\n\nThe answer for every dev question is `test`.",
+      "answerFormat": "function name",
+      "placeholder": "myFunction",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "First hint: look at the `status` field."
+        },
+        {
+          "cost": 25,
+          "text": "Second hint: `awk '$9 >= 500'`."
+        }
+      ],
+      "successNote": "Correct. **Why this matters:** sample success note with `code`."
+    },
+    {
+      "id": "q5",
+      "title": "Groundhog day",
+      "prompt": "DEV SAMPLE prompt for **q5**. Use `grep` on `nginx/access.log`.\n\nThe answer for every dev question is `test`.",
+      "answerFormat": "integer",
+      "placeholder": "0",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "First hint: look at the `status` field."
+        },
+        {
+          "cost": 25,
+          "text": "Second hint: `awk '$9 >= 500'`."
+        }
+      ],
+      "successNote": "Correct. **Why this matters:** sample success note with `code`."
+    },
+    {
+      "id": "q6",
+      "title": "Blast radius",
+      "prompt": "DEV SAMPLE prompt for **q6**. Use `grep` on `nginx/access.log`.\n\nThe answer for every dev question is `test`.",
+      "answerFormat": "integer",
+      "placeholder": "0",
+      "points": 150,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "First hint: look at the `status` field."
+        },
+        {
+          "cost": 25,
+          "text": "Second hint: `awk '$9 >= 500'`."
+        }
+      ],
+      "successNote": "Correct. **Why this matters:** sample success note with `code`."
+    }
+  ],
+  "toolbox": [
+    {
+      "category": "grep & friends",
+      "items": [
+        {
+          "title": "Count status codes",
+          "command": "awk '{print $9}' nginx/access.log | sort | uniq -c | sort -rn",
+          "explain": "Field 9 is the status in the **combined** log format."
+        },
+        {
+          "title": "First 5xx",
+          "command": "grep -m1 -E '\" 5[0-9]{2} ' nginx/access.log",
+          "explain": "`-m1` stops after the first match."
+        }
+      ]
+    },
+    {
+      "category": "jq",
+      "items": [
+        {
+          "title": "Pretty-print errors",
+          "command": "jq -c 'select(.level == \"error\") | {ts, msg, order_id}' app/checkout-service.log | head",
+          "explain": "`-c` keeps one object per line, so it composes with `head`/`grep`."
+        }
+      ]
+    }
+  ],
+  "debrief": "Sealed. The debrief unlocks when all flags are captured."
+}

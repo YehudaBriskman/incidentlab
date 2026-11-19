@@ -1,0 +1,58 @@
+[
+  {
+    "id": "ghost-in-the-network",
+    "title": "Ghost in the Network",
+    "tagline": "Small requests work. Big ones hang forever. Half the fleet resolves an IP that hasn't existed since Tuesday. Nothing is down, yet nothing quite works.",
+    "skills": [
+      "tcpdump",
+      "Wireshark",
+      "MTU / PMTUD",
+      "DNS",
+      "dig",
+      "TTL & caching"
+    ],
+    "inspiredBy": "MTU black holes (ICMP filtered, Path MTU Discovery silently broken) and stale DNS caches outliving a migration"
+  },
+  {
+    "id": "the-insider-commit",
+    "title": "The Insider Commit",
+    "tagline": "SSH logins got 500 ms slower after a routine library update. A trusted, long-time maintainer. Release tarballs that don't quite match the repo. Follow the half-second.",
+    "skills": [
+      "supply-chain security",
+      "git archaeology",
+      "diffing release artifacts",
+      "build systems",
+      "binary analysis",
+      "profiling"
+    ],
+    "inspiredBy": "xz-utils / liblzma backdoor (CVE-2024-3094), 2024"
+  },
+  {
+    "id": "kubernetes-crime-scene",
+    "title": "Kubernetes Crime Scene",
+    "tagline": "Pods in CrashLoopBackOff, a node under pressure, a Service with no endpoints, and an HPA that can't make up its mind. Every one of them is a witness, and only one of them is telling the truth.",
+    "skills": [
+      "kubectl",
+      "events & describe",
+      "OOMKilled / limits",
+      "probes",
+      "Service selectors",
+      "scheduling"
+    ],
+    "inspiredBy": "Classic Kubernetes failure modes: OOMKills, misconfigured probes, selector mismatches, resource starvation"
+  },
+  {
+    "id": "who-deleted-prod",
+    "title": "Who Deleted Prod?",
+    "tagline": "100 million customer records walked out the door, and every API call was made with our own role. Reconstruct the attack from CloudTrail, WAF logs and one very chatty metadata endpoint.",
+    "skills": [
+      "cloud audit logs",
+      "SSRF",
+      "IAM",
+      "AWS IMDS",
+      "WAF logs",
+      "attack timelines"
+    ],
+    "inspiredBy": "Capital One breach, 2019: SSRF through a misconfigured WAF to the EC2 instance metadata service (IMDSv1) to stolen IAM credentials"
+  }
+]
