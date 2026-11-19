@@ -1,5 +1,7 @@
 # IncidentLab
 
+**Live:** https://incidentlab-3am-outage.netlify.app
+
 **Real incidents, as puzzles.** IncidentLab is a CTF-style training platform for engineers. Each case
 drops you into a production outage after the fact. You get a zip of evidence (web server logs, app
 logs, metrics, a deploy log, a chat export, and the service's git repo) and a set of questions.
