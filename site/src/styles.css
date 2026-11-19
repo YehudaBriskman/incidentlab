@@ -272,3 +272,19 @@ code, pre, .mono { font-family: var(--mono); }
 .prose th, .prose td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
 .prose ul, .prose ol { padding-left: 1.3em; }
 .prose img { max-width: 100%; }
+
+/* Aliases for the older palette names still used by admin.css / explorer.css.
+   They reference the theme tokens above, so light/dark switching keeps working. */
+:root {
+  --amber: var(--accent);
+  --amber-soft: var(--accent-soft);
+  --amber-ink: var(--accent-ink);
+  --green: var(--ok);
+  --green-soft: var(--ok-soft);
+  --red: var(--bad);
+  --red-soft: color-mix(in srgb, var(--bad) 14%, transparent);
+  --bg-2: var(--surface-2);
+  --border-strong: color-mix(in srgb, var(--border) 60%, var(--text) 40%);
+  --gutter: 16px;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}

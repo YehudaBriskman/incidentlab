@@ -63,7 +63,8 @@ let routeToken = 0;
 
 function route(): void {
   routeToken++;
-  const hash = window.location.hash.replace(/^#\/?/, "");
+  // Strip the "?query" part (Explorer deep links: #/case/<id>/explorer?f=...) before matching.
+  const hash = (window.location.hash.replace(/^#\/?/, "").split("?")[0]) ?? "";
   const parts = hash.split("/").filter((part) => part.length > 0).map(decodeURIComponent);
   stopCaseTimers();
   window.scrollTo(0, 0);
