@@ -177,8 +177,8 @@ v2.12.0 … v2.13.4, v2.14.0, v2.14.1.
 python3 generator/build_repo.py      -> build/repo/shipfast-checkout (repo), build/evidence/3am-outage/repo/shipfast-checkout.bundle, build/truth/repo.json
 python3 generator/gen_logs.py        -> nginx/access.log, nginx/nginx.conf.snippet, app/checkout-service.log, build/truth/logs.json
 python3 generator/gen_support.py     -> metrics, db, deploys (reads build/truth/repo.json), slack, README_FIRST.txt
-python3 scripts/make_flags.py        -> site/src/generated/flags.json (salted hashes), build/truth/answers.json
-scripts/package.sh                   -> site/public/evidence/3am-outage-evidence.zip
+python3 scripts/make_flags.py        -> site/server/generated/secrets.json (server-only answer key + debrief), build/truth/answers.json
+scripts/package.sh                   -> repo/git-log.txt, site/public/evidence/3am-outage-evidence.zip, site/public/evidence/files/ (Explorer)
 cd site && npm run build             -> site/dist (Netlify publish dir)
 ```
 All generators: Python 3 stdlib only, `random.Random(SEED)`, import constants from `generator/timeline.py`,
@@ -187,5 +187,5 @@ output root `build/evidence/3am-outage/`, and run from the repo root.
 ## 6. Site contract
 - `site/src/content/cases/3am-outage.json`: case content (schema in `site/src/content/schema.ts`). It contains NO answers.
 - `site/src/content/teasers.json`: the 4 "coming soon" cases.
-- `site/src/generated/flags.json`: `{"caseId":"3am-outage","flags":{"q1":{"salt":"…","sha256":"…"},…}}`
+- `site/server/generated/secrets.json`: `{"caseId","answers":{qN: normalized},"debrief"}`, bundled into the Netlify Function only (gitignored).
 - Evidence zip served from `/evidence/3am-outage-evidence.zip`.

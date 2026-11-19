@@ -60,6 +60,15 @@ queued behind the same frozen pod and timed out at the same moment. In total the
 
 **Answer: `01:13:14`**
 
+**In the browser / PowerShell.**
+- *Explorer:* `nginx/access.log`, **regex** filter `" 5\d\d `, then **First match** (and check **Last match** /
+  the **histogram by minute** for the shape). Read the time in `[...]`.
+- *PowerShell:*
+  ```powershell
+  Select-String -Path nginx\access.log -Pattern '" 5\d\d ' |
+    ForEach-Object { if ($_.Line -match ':(\d\d:\d\d:\d\d) ') { $Matches[1] } } | Sort-Object | Select-Object -First 1
+  ```
+
 **Traps.**
 - **UTC vs. local.** The answer is asked in UTC and nginx is already UTC. If you answer from the app
   log or from Slack (`03:1x` local), you are two hours off.
@@ -96,7 +105,7 @@ agrees: every `checkout.start` around the onset carries `"version":"v2.14.1"`.
 Cross-check against the repository (never trust a single source):
 
 ```bash
-git clone repo/shipfast-checkout.bundle shipfast-checkout
+git clone repo/shipfast-checkout.bundle shipfast-checkout   # or just read repo/git-log.txt
 cd shipfast-checkout
 git tag                                      # v2.12.0 … v2.14.0 v2.14.1
 git rev-parse --short=7 'v2.14.1^{commit}'   # the answer
@@ -106,6 +115,15 @@ git log --oneline -1 v2.14.1                 # feat(checkout): sanitize gift mes
 **Expected output.** A 7-character hex SHA that matches the `commit=` field of the 00:58:03Z line.
 The exact value comes from the generated repo; the current build gives
 **`df874c4`** (and the decoy v2.14.0 is `2ff7f28`). Both `deploys.log` and `git rev-parse` agree.
+
+**In the browser / PowerShell.**
+- *Explorer:* `deploys/deploys.log`, filter **contains** `service=checkout`; the last DEPLOY before 01:13:14Z
+  is v2.14.1. Then `repo/git-log.txt`, filter **contains** `tag: v2.14.1`, **First match** shows the commit.
+- *PowerShell (no git):*
+  ```powershell
+  Select-String -Path deploys\deploys.log -Pattern 'service=checkout'
+  Select-String -Path repo\git-log.txt -Pattern '^commit (\w{7}).*tag: v2\.14\.1\b' | ForEach-Object { $_.Matches[0].Groups[1].Value }
+  ```
 
 **Traps.**
 - **The decoy v2.14.0.** It shipped at 00:40:12Z (`chore: upgrade logger, add duration_ms field`) and
@@ -153,6 +171,20 @@ the same pod logs `eventloop.lag` warnings with growing `lag_ms` and nothing els
 nginx, if you want to prove the link.
 
 **Answer: `ORD-7Q4K9X`**
+
+**In the browser / PowerShell.**
+- *Explorer:* **time converter** 01:12:44Z -> 03:12:44+02:00. `app/checkout-service.log`, **JSON field filter**
+  `msg = checkout.start`, look around `T03:12`; then filter **contains** the candidate order: no
+  `checkout.done` appears.
+- *PowerShell:*
+  ```powershell
+  $done = @{}
+  Select-String -Path app\checkout-service.log -Pattern '"msg":"checkout.done"' |
+    ForEach-Object { $done[($_.Line | ConvertFrom-Json).order] = 1 }
+  Select-String -Path app\checkout-service.log -Pattern '"msg":"checkout.start"' |
+    ForEach-Object { $_.Line | ConvertFrom-Json } | Where-Object { -not $done.ContainsKey($_.order) } |
+    Select-Object -First 1 ts, order, customer, pod
+  ```
 
 **Traps.**
 - **Timezone.** Searching the app log for `01:12` finds nothing useful (it's local time).
@@ -207,6 +239,15 @@ is the one exported from the same file.
 
 **Answer: `sanitizeGiftMessage`**
 
+**In the browser / PowerShell.**
+- *Explorer:* `repo/git-log.txt`, filter **contains** `tag: v2.14.1` and use **First match**, or filter **regex**
+  `^\+.*(function|/\^)` to see only added functions and regexes; `giftMessage.ts` stands out.
+- *PowerShell:*
+  ```powershell
+  Select-String -Path repo\git-log.txt -Pattern '^\+\+\+ b/|^\+.*(function |RegExp|= /\^)' |
+    Select-Object -First 20 LineNumber, Line
+  ```
+
 **Traps.**
 - **The test passes.** `test/giftMessage.test.ts` only checks short strings, which match in microseconds.
   A green test suite is not evidence the regex is safe.
@@ -232,6 +273,14 @@ jq -r 'select(.msg=="checkout.start" and .order=="ORD-7Q4K9X")' -c app/checkout-
 
 **Answer: `9`**
 
+**In the browser / PowerShell.**
+- *Explorer:* `app/checkout-service.log`, **JSON field filter** `order = ORD-7Q4K9X` plus `msg = checkout.start`;
+  the match count is 9.
+- *PowerShell:*
+  ```powershell
+  (Select-String -Path app\checkout-service.log -Pattern '"msg":"checkout.start".*"order":"ORD-7Q4K9X"').Count
+  ```
+
 **Traps.**
 - **8 vs. 9.** Slack and the retry logic talk about "8 retries". The question asks for total
   *submissions*: 1 original + 8 retries = **9**.
@@ -256,6 +305,16 @@ awk -F'"' '{split($3,s," ")} $2 ~ /^POST \/api\/checkout / && s[1] ~ /^5/ {
 
 **Expected output.** A single number.  Dropping `sort -u` gives you the number of failed *requests*, which is
 much larger (retries and the poison customer's repeats count many times).
+
+**In the browser / PowerShell.**
+- *Explorer:* `nginx/access.log`, **regex** `"POST /api/checkout [^"]*" 5\d\d `, **NOT** `cid=-`, **NOT**
+  `cid=cus_synthetic`, then **Count unique** with `cid=(\S+)`.
+- *PowerShell:*
+  ```powershell
+  (Select-String -Path nginx\access.log -Pattern '"POST /api/checkout [^"]*" 5\d\d .*cid=(\S+)$' |
+    ForEach-Object { $_.Matches[0].Groups[1].Value } |
+    Where-Object { $_ -ne '-' -and $_ -ne 'cus_synthetic' } | Sort-Object -Unique | Measure-Object).Count
+  ```
 
 **Traps.**
 - **Requests vs. customers.** `wc -l` without `sort -u` counts failed requests.
