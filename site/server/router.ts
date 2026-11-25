@@ -17,6 +17,8 @@ import { GameService } from "./services/GameService.ts";
 import { RateLimiter } from "./services/RateLimiter.ts";
 import { ScheduleService } from "./services/ScheduleService.ts";
 import { StatsService } from "./services/StatsService.ts";
+import { TrashService } from "./services/TrashService.ts";
+import { TrashRepository } from "./repositories/trash-repository.ts";
 
 export type AppDeps = {
   readonly store: KvStore;
@@ -43,13 +45,15 @@ export const createApp = (deps: AppDeps): App => {
   const schedule = new ScheduleService({ repository: repos.schedule, releasedCaseIds: Object.keys(secrets.cases), now });
   const game = new GameService({ repository: repos.progress, firstBlood, secrets, schedule, events, now });
   const stats = new StatsService({ repos, secrets, now });
-  const accounts = new AccountAdminService({ repos, firstBlood, game, stats, now });
+  const trashRepo = new TrashRepository(deps.store);
+  const trash = new TrashService({ trash: trashRepo, repos, now });
+  const accounts = new AccountAdminService({ repos, firstBlood, game, stats, trash, trashRepo, now });
   const audit = new AuditService({ repository: new AuditRepository(deps.store), now });
 
   const authController = new AuthController({ auth, schedule, stats, events });
   const gameController = new GameController({ auth, game });
   const adminController = new AdminController({
-    accounts, schedule, stats, events, audit, guard: new AdminAuthService({ adminKey: deps.adminKey, auth }), now,
+    accounts, schedule, stats, events, audit, trash, guard: new AdminAuthService({ adminKey: deps.adminKey, auth }), now,
   });
 
   const route = (req: Request, ip: string): MethodTable | null => {
@@ -74,6 +78,7 @@ export const createApp = (deps: AppDeps): App => {
       "/api/admin/event": { GET: () => adminController.getEvent(req), PUT: () => adminController.putEvent(req) },
       "/api/admin/export.csv": { GET: () => adminController.exportCsv(req) },
       "/api/admin/audit": { GET: () => adminController.auditLog(req) },
+      "/api/admin/trash": { GET: () => adminController.listTrash(req) },
     };
     const found = exact[path];
     if (found) return found;
@@ -101,6 +106,9 @@ export const createApp = (deps: AppDeps): App => {
       if (segments.length === 5 && action === "approve") return { POST: () => adminController.approve(req, second) };
       if (segments.length === 5 && action === "reject") return { POST: () => adminController.reject(req, second) };
       if (segments.length === 5 && action === "reset-password") return { POST: () => adminController.resetPassword(req, second) };
+    }
+    if (area === "admin" && first === "trash" && second !== undefined && segments.length === 5 && segments[4] === "restore") {
+      return { POST: () => adminController.restoreTrash(req, second) };
     }
     if (area === "admin" && first === "progress" && second !== undefined && segments.length === 5) {
       const caseId = segments[4] ?? "";
