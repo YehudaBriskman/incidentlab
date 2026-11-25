@@ -20,7 +20,10 @@
       <a class="logo mono" href="#/" aria-label="IncidentLab home"><span class="logo-mark" aria-hidden="true">▲</span> incident<span class="accent">lab</span></a>
       <span class="topbar-status mono" aria-hidden="true"><span class="dot"></span> on-call: you</span>
     </header>
-    <main id="app" tabindex="-1"></main>
+    <main id="app" tabindex="-1">
+      <!-- Static first paint until main.ts renders the route (replaced on the first render). -->
+      <section class="center-card" aria-busy="true"><p class="muted mono">Loading…</p></section>
+    </main>
     <footer class="footer mono">IncidentLab · fictional companies, real failure modes · built for engineers who like a good outage</footer>
     <noscript>IncidentLab needs JavaScript to run.</noscript>
     <script type="module" src="/src/main.ts"></script>
