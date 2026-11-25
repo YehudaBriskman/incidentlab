@@ -8,6 +8,7 @@ import type { AuditService } from "../services/AuditService.ts";
 import type { EventService } from "../services/EventService.ts";
 import type { ScheduleService } from "../services/ScheduleService.ts";
 import type { StatsService } from "../services/StatsService.ts";
+import type { TrashService } from "../services/TrashService.ts";
 import { json, noContent, parseBody, sessionToken } from "./http.ts";
 
 const EmptyBodySchema = z.object({}).strict();
@@ -19,6 +20,7 @@ export type AdminControllerDeps = {
   readonly stats: StatsService;
   readonly events: EventService;
   readonly audit: AuditService;
+  readonly trash: TrashService;
   readonly guard: AdminAuthService;
   readonly now: () => Date;
 };
@@ -162,6 +164,20 @@ export class AdminController {
         "cache-control": "no-store",
       },
     });
+  }
+
+  async listTrash(req: Request): Promise<Response> {
+    await this.assertAdmin(req);
+    return json(200, { entries: await this.deps.trash.list() });
+  }
+
+  async restoreTrash(req: Request, id: string): Promise<Response> {
+    await parseBody(req, EmptyBodySchema);
+    let result = { restored: 0, skipped: 0, label: "" };
+    await this.mutation(req, { action: "trash.restore", target: id }, async () => {
+      result = await this.deps.trash.restore(id);
+    });
+    return json(200, { restored: result.restored, skipped: result.skipped });
   }
 
   async auditLog(req: Request): Promise<Response> {

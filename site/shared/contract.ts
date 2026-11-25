@@ -264,6 +264,29 @@ export const AuditEntrySchema = z.object({
 });
 export type AuditEntry = z.infer<typeof AuditEntrySchema>;
 
+// ---- trash (soft deletes) ---------------------------------------------------
+// Deleting an account or resetting progress moves the data to the trash first. Entries can be restored
+// for TRASH_RETENTION_DAYS; restore never overwrites newer data (409 or "skipped").
+
+export const TRASH_RETENTION_DAYS = 7;
+
+export const TrashEntrySchema = z.object({
+  id: z.string(),
+  kind: z.enum(["account", "progress"]),
+  /** what was removed, for humans: "account dana_k", "progress of 3am-outage (12 players)" */
+  label: z.string(),
+  deletedAt: z.string(),
+  expiresAt: z.string(),
+  /** how many progress records the entry holds */
+  records: z.number().int().min(0),
+});
+export type TrashEntry = z.infer<typeof TrashEntrySchema>;
+// GET  /api/admin/trash                 -> {entries: TrashEntry[]}   (newest first; expired entries are purged)
+// POST /api/admin/trash/:id/restore {}  -> {restored: number, skipped: number}  (409 code "conflict" if the
+//                                           account id or username was taken again since)
+export const TrashResponseSchema = z.object({ entries: z.array(TrashEntrySchema) });
+export const TrashRestoreResponseSchema = z.object({ restored: z.number().int().min(0), skipped: z.number().int().min(0) });
+
 // ---- requests / responses -------------------------------------------------
 // Player auth: HttpOnly session cookie `il_session` (set by register/login, cleared by logout).
 // Admin auth: header X-Admin-Key: <ADMIN_KEY env var>.
@@ -319,8 +342,8 @@ export const UserStatsResponseSchema = z.object({ stats: UserStatsSchema });
 // ---- admin ----------------------------------------------------------------
 // GET    /api/admin/accounts                    -> {accounts: UserStats[]}   (every account, with stats)
 // POST   /api/admin/accounts/:id/approve  {}    -> {account}
-// POST   /api/admin/accounts/:id/reject   {}    -> {account}   (also signs the account out)
-// DELETE /api/admin/accounts/:id                -> 204         (account, sessions and progress)
+// POST   /api/admin/accounts/:id/reject   {}    -> {account}   (the player sees the "not approved" screen)
+// DELETE /api/admin/accounts/:id                -> 204         (moves account + progress to the trash; sessions end)
 // GET    /api/admin/progress?caseId=<id>        -> {generatedAt, caseId, players: AdminProgress[]}
 // DELETE /api/admin/progress/:accountId/:caseId -> 204         (restart that player's case)
 // POST   /api/admin/reset {confirm:"RESET", caseId?} -> 204    (wipe progress: one case, or all; accounts stay)

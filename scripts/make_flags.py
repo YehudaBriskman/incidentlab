@@ -21,6 +21,7 @@ Python 3 stdlib only. Run from anywhere; paths are resolved from the repo root.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sys
@@ -210,6 +211,16 @@ def main() -> int:
 
     SECRETS_OUT.parent.mkdir(parents=True, exist_ok=True)
     SECRETS_OUT.write_text(json.dumps({"cases": cases}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    # Fingerprint of what scoring depends on, per case: answers, points, hint costs. deploy.sh compares it
+    # with the last deployed one, because changing these under players who are mid-case breaks their runs.
+    fingerprints = {
+        case_id: hashlib.sha256(
+            json.dumps({"answers": c["answers"], "questions": c["questions"]}, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        for case_id, c in cases.items()
+    }
+    (TRUTH_DIR / "fingerprints.json").write_text(json.dumps(fingerprints, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     legacy = all_answers[timeline.CASE_ID]
     ANSWERS_OUT.parent.mkdir(parents=True, exist_ok=True)

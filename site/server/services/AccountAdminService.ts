@@ -9,6 +9,8 @@ import { toAccountView } from "./AuthService.ts";
 import { ACCOUNT_ID_PATTERN, hashPassword, sha256Hex } from "./crypto.ts";
 import type { GameService } from "./GameService.ts";
 import type { StatsService } from "./StatsService.ts";
+import type { TrashService } from "./TrashService.ts";
+import type { TrashRepository } from "../repositories/trash-repository.ts";
 
 // No look-alike characters (0/O, 1/l/I) so a password read aloud or off a projector is typed right.
 const TEMP_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -37,13 +39,25 @@ export class AccountAdminService {
   private readonly firstBlood: FirstBloodRepository;
   private readonly game: GameService;
   private readonly stats: StatsService;
+  private readonly trash: TrashService;
+  private readonly trashRepo: TrashRepository;
   private readonly now: () => Date;
 
-  constructor(deps: { repos: Repositories; firstBlood: FirstBloodRepository; game: GameService; stats: StatsService; now: () => Date }) {
+  constructor(deps: {
+    repos: Repositories;
+    firstBlood: FirstBloodRepository;
+    game: GameService;
+    stats: StatsService;
+    trash: TrashService;
+    trashRepo: TrashRepository;
+    now: () => Date;
+  }) {
     this.repos = deps.repos;
     this.firstBlood = deps.firstBlood;
     this.game = deps.game;
     this.stats = deps.stats;
+    this.trash = deps.trash;
+    this.trashRepo = deps.trashRepo;
     this.now = deps.now;
   }
 
@@ -51,9 +65,9 @@ export class AccountAdminService {
     this.assertId(accountId);
     const found = await this.repos.accounts.get(accountId);
     if (!found) throw new AppError(404, "account not found");
+    // Rejecting keeps the session: the player then sees the "not approved" screen instead of a silent
+    // sign-out. Every case route already refuses rejected accounts, and they can't sign in again.
     const account = { ...found.data, status, decidedAt: this.now().toISOString() };
-    // Rejecting signs the account out everywhere.
-    if (status === "rejected") account.sessionEpoch += 1;
     if (!(await this.repos.accounts.saveIfMatch(account, found.etag))) throw new AppError(409, "concurrent update, please retry");
     return toAccountView(account);
   }
@@ -88,10 +102,14 @@ export class AccountAdminService {
     return password;
   }
 
+  /** Soft delete: the account and its progress go to the trash (restorable for 7 days), then are removed. */
   async delete(accountId: string): Promise<{ username: string }> {
     this.assertId(accountId);
     const found = await this.repos.accounts.get(accountId);
     if (!found) throw new AppError(404, "account not found");
+    const progress = (await this.repos.progress.list()).filter((r) => r.accountId === accountId);
+    // Trash first: if this write fails, nothing has been deleted yet.
+    await this.trash.put({ kind: "account", label: `account ${found.data.username}`, account: found.data, progress, firstBlood: {} });
     // Sessions die with the account (authenticate() rejects sessions whose account is gone).
     await this.repos.progress.deleteMany({ accountId });
     await this.repos.accounts.delete(accountId);
@@ -112,12 +130,22 @@ export class AccountAdminService {
     return { generatedAt: this.now().toISOString(), caseId, players };
   }
 
-  /** Wipes progress (one player's case, one case, or everything). Resetting a whole case also frees its first bloods. */
+  /**
+   * Soft reset of progress (one player's case, one case, or everything): the records go to the trash
+   * first. Resetting a whole case also frees its first bloods (kept in the same trash entry).
+   */
   async resetProgress(filter: { caseId?: string; accountId?: string }): Promise<void> {
     if (filter.caseId !== undefined) this.game.caseSecrets(filter.caseId);
     if (filter.accountId !== undefined) this.assertId(filter.accountId);
+    const records = (await this.repos.progress.list(filter.caseId)).filter((r) => filter.accountId === undefined || r.accountId === filter.accountId);
+    const isWholeCase = filter.accountId === undefined;
+    const firstBlood = isWholeCase ? await this.trashRepo.readKeys(filter.caseId === undefined ? "firstblood:" : `firstblood:${filter.caseId}:`) : {};
+    if (records.length === 0 && Object.keys(firstBlood).length === 0) return;
+    const scope = filter.caseId ?? "all cases";
+    const label = filter.accountId === undefined ? `progress of ${scope} (${records.length} players)` : `progress of ${scope} for one player`;
+    await this.trash.put({ kind: "progress", label, account: null, progress: records, firstBlood });
     await this.repos.progress.deleteMany(filter);
-    if (filter.accountId === undefined) await this.firstBlood.clear(filter.caseId);
+    if (isWholeCase) await this.firstBlood.clear(filter.caseId);
   }
 
   /** One row per account per case the account has opened. */

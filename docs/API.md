@@ -69,8 +69,8 @@ at base + 30 + 10, plus 50); first blood can push a score above par. Each solved
 |---|---|---|---|
 | GET | `/api/admin/accounts` | | `{generatedAt, accounts: UserStats[]}` (every account with stats and rank; cached 2 s) |
 | POST | `/api/admin/accounts/:id/approve` | `{}` | `{account}` |
-| POST | `/api/admin/accounts/:id/reject` | `{}` | `{account}` (signs the account out) |
-| DELETE | `/api/admin/accounts/:id` | | 204 (account, sessions, progress; frees the username) |
+| POST | `/api/admin/accounts/:id/reject` | `{}` | `{account}` (the player sees the "not approved" screen; can't sign in again) |
+| DELETE | `/api/admin/accounts/:id` | | 204 (soft delete: account + progress go to the trash for 7 days; sessions end; username freed) |
 | GET | `/api/admin/progress?caseId=` | | `{generatedAt, caseId, players: AdminProgress[]}` |
 | DELETE | `/api/admin/progress/:accountId/:caseId` | | 204 (restart one player's case) |
 | POST | `/api/admin/reset` | `{confirm:"RESET", caseId?}` | 204 (wipe progress for one case or all; accounts stay) |
@@ -83,6 +83,8 @@ at base + 30 + 10, plus 50); first blood can push a score above par. Each solved
 | GET/PUT | `/api/admin/event` | `LiveEvent` | `{event, serverTime}` (window, freeze, announcement; `enforceWindow` refuses answers, hints and reveals outside it) |
 | GET | `/api/admin/export.csv` | | CSV, one row per account per opened case |
 | GET | `/api/admin/audit?limit=` | | `{entries}` newest first (every admin mutation is recorded) |
+| GET | `/api/admin/trash` | | `{entries}` soft-deleted accounts and progress resets, newest first (expire after 7 days) |
+| POST | `/api/admin/trash/:id/restore` | `{}` | `{restored, skipped}` (never overwrites newer data; 409 `conflict` if the account or username exists again) |
 
 ## Schedule ("incident of the day")
 
@@ -99,6 +101,9 @@ so nobody is cut off at midnight.
 - Writes use optimistic concurrency (Blobs etags, up to 3 retries), so parallel requests for one player stay consistent.
 
 ## Storage
+
+Rules for changing stored data, backups, restores and migrations: see `docs/DATA.md`.
+
 
 One Netlify Blobs store, `incidentlab-v2`, with key prefixes: `account:`, `username:` (index),
 `session:`, `progress:<caseId>:<accountId>`, `config:schedule`, `config:settings`, `config:event`,

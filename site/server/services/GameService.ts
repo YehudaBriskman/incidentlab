@@ -2,7 +2,7 @@
 // here only, and paid content (hint texts, full commands) leaves the server only once it is paid for.
 import { QUESTION_ORDER, SCORING, normalizeAnswer } from "../../shared/contract.ts";
 import type { AdminProgress, ProgressView, QuestionId, StageProgress } from "../../shared/contract.ts";
-import { AppError } from "../domain/types.ts";
+import { AppError, PROGRESS_SCHEMA_VERSION } from "../domain/types.ts";
 import type { AccountRecord, CaseSecrets, ProgressRecord, Secrets } from "../domain/types.ts";
 import type { FirstBloodRepository } from "../repositories/config-repositories.ts";
 import type { ProgressRepository } from "../repositories/repositories.ts";
@@ -262,6 +262,7 @@ export class GameService {
   private newRecord(accountId: string, caseId: string): ProgressRecord {
     const nowIso = this.now().toISOString();
     return {
+      schemaVersion: PROGRESS_SCHEMA_VERSION,
       accountId,
       caseId,
       startedAt: nowIso,
