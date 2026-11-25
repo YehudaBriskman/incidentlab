@@ -1059,6 +1059,51 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
   @starting-style { .toast { opacity: 0; } }
 }
 
+/* --- leaderboard --- */
+/* Hebrew: header and value cells share one direction, so "end" is the same side for both. */
+[dir=rtl] .lb-table td.num { direction: rtl; }
+.lb-table th.lb-rank { text-align: center; }
+.lb-frozen-banner {
+  display: flex; align-items: center; gap: var(--space-3); margin: 0 0 var(--space-4); padding: var(--space-3) var(--space-4);
+  border: 2px solid var(--info-fg); border-radius: var(--radius-lg); background: var(--info-bg); color: var(--text);
+}
+.lb-frozen-banner[hidden] { display: none; }
+.lb-frozen-icon { font-size: var(--step-2); line-height: 1; color: var(--info-fg); }
+.lb-frozen-title { margin: 0; font-size: var(--step-1); font-weight: 700; color: var(--info-fg); }
+.lb-frozen-body { margin: 0; color: var(--text-2); font-size: var(--step--1); }
+.lb-unranked-note { color: var(--text-2); font-size: var(--step--1); }
+.lb-table tr.is-unranked > * { border-block-start: 2px dashed var(--border-strong); }
+.lb-sub { margin: var(--space-3) 0 0; }
+.lb-event { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.lb-exit { position: fixed; inset-block-start: var(--space-2); inset-inline-end: var(--space-2); font-size: var(--step--1); color: var(--text-muted); padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); min-block-size: var(--target-min); display: inline-flex; align-items: center; }
+.lb-exit:hover { color: var(--text); background: var(--hover); }
+@media (max-width: 640px) {
+  .lb-select, .lb-tools .btn { min-height: var(--control-md); }
+  .lb-tools { width: 100%; }
+  .lb-select { flex: 1; max-width: none; }
+  .lb-event { white-space: normal; }
+}
+
+/* projector: the announcement leaves the big screen; the top 10 fits 1080p (sizes in vh) */
+body.projector .announce, body.projector .toast-host { display: none; }
+body.projector main { padding: 0 4vw 2vh; }
+.lb-page.is-projector { padding-top: 2.5vh; }
+.is-projector .lb-head { margin-bottom: 1.5vh; align-items: flex-end; }
+.is-projector .lb-brand { font-size: 2.2vh; }
+.is-projector .lb-head h1 { font-size: 6vh; line-height: 1.1; margin: 0; }
+.is-projector .lb-case-title { font-size: 2.8vh; }
+.is-projector .lb-event { font-size: 3vh; font-weight: 700; color: var(--text); margin: 0.5vh 0 0; }
+.is-projector .lb-frozen-banner { padding: 1vh 2vw; margin-bottom: 1.5vh; }
+.is-projector .lb-frozen-icon { font-size: 3.6vh; }
+.is-projector .lb-frozen-title { font-size: 3.4vh; }
+.is-projector .lb-table { font-size: 3.6vh; }
+.is-projector .lb-table th, .is-projector .lb-table td { padding-block: 0; padding-inline: 1.2vw; height: 5.6vh; line-height: 1.2; }
+.is-projector .lb-table thead th { font-size: 1.8vh; height: 3.6vh; }
+.is-projector .lb-table .lb-score { color: var(--text); }
+.is-projector .lb-table tr.rank-1 > * { background: var(--accent-soft); }
+.is-projector .lb-table tr.rank-1 .lb-name { color: var(--text); }
+.is-projector .lb-updated { font-size: 1.8vh; margin-top: 1vh; }
+@media (max-width: 640px) { .is-projector .lb-table th, .is-projector .lb-table td { height: auto; padding-block: var(--space-2); } }
 @media (forced-colors: active) {
   .error-summary, .lb-frozen-banner, .toast { border-color: CanvasText; }
   .resume-seg.is-done { forced-color-adjust: none; background: Highlight; }
