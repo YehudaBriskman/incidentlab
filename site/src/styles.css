@@ -795,3 +795,26 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
   .lb-table .lb-name { overflow-wrap: normal; word-break: normal; }
   .lb-you { margin-inline-start: var(--space-2); }
 }
+
+/* ============ forced colours (Windows high contrast) ============
+   Fills that carry meaning are background-only, which forced colours erase: give them system colours,
+   borders and a non-colour cue so progress, selection and status stay readable. */
+@media (forced-colors: active) {
+  :root { --focus-ring: Highlight; }
+  .btn, .input, .shell-tabs, .lang-btn, .announce, .notice, .question-box, .score-card, .hint, .briefing { border: 1px solid CanvasText; }
+  .progress-track, .meter-track, .bar { forced-color-adjust: none; background: Canvas; border: 1px solid CanvasText; }
+  .progress-track { height: 8px; }
+  .progress-fill, .meter-fill, .bar-fill { forced-color-adjust: none; background: Highlight; }
+  .bar { height: 8px; }
+  .shell-tab[aria-selected="true"], .lang-btn[aria-pressed="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; box-shadow: none; }
+  .step-solved .step-icon { forced-color-adjust: none; background: Highlight; border-color: Highlight; color: HighlightText; }
+  .step-active .step-icon { border-color: Highlight; border-width: 3px; }
+  .step.is-viewing { outline: 1px solid CanvasText; }
+  .chip, .meter-item, .event-clock, .stuck-badge, .status-pill, .via-pill, .today-tag, .hardest-badge,
+  .tab-badge, .count-badge, .admin-session-tag, .ex-chip, .board-frozen-chip, .board-live-chip { border: 1px solid CanvasText; }
+  .chip-completed, .chip-in-progress, .chip-frozen, .lb-you { border-width: 2px; }
+  .dot, .event-clock .dot, .today-kicker .dot { forced-color-adjust: none; background: CanvasText; }
+  .lb-table tr.is-me > * { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+  .cmd.is-revealed .code-block { border-inline-start: 3px solid CanvasText; }
+  .tip { border-inline-start-color: CanvasText; }
+}
