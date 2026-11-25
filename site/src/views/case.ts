@@ -187,7 +187,12 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, l
 
   const switchPlayer = (): void => {
     drafts.clear();
-    void signOut().finally(() => renderCase(root, c));
+    // One tap: sign out and go straight to the sign-in screen (the local session clears even if logout fails).
+    void signOut()
+      .catch(() => undefined)
+      .finally(() => {
+        location.hash = "#/login";
+      });
   };
 
   const elStats = h("span", { class: "progress-stats mono" });
@@ -960,7 +965,7 @@ function stageMeter(c: Case, q: Question, initial: StageProgress): { el: HTMLEle
     const bonus = timeBonus(elapsed, target);
     timeText.textContent = TP().meterTime(bonus);
     timeSub.textContent = elapsed < target ? TG().meterTimeFull(mmss(Math.ceil(target - elapsed))) : bonus > 0 ? TG().meterTimeFading : TG().meterTimeGone;
-    timeFill.style.width = `${(bonus / SCORING.TIME_BONUS_MAX) * 100}%`;
+    timeFill.style.transform = `scaleX(${bonus / SCORING.TIME_BONUS_MAX})`;
     const possible = Math.max(0, q.points - penalties) + bonus + (isCleanSoFar(stage) ? SCORING.CLEAN_BONUS : 0) + SCORING.FIRST_BLOOD_BONUS;
     upTo.textContent = TP().meterUpTo(possible);
   };
