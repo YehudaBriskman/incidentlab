@@ -1,6 +1,7 @@
 import type { CaseStats, TodayResponse } from "../../shared/contract";
-import { allCases, getCase, teasers } from "../content/load";
-import type { Case, Teaser } from "../content/schema";
+import { caseSummaries, caseSummary, teasers } from "../content/load";
+import type { CaseSummary } from "../content/catalog-schema";
+import type { Teaser } from "../content/schema";
 import { fetchMyStats } from "../lib/api";
 import { h, setChildren } from "../lib/dom";
 import { cachedAccount, isAccountKnown, loadAccount, loadToday } from "../lib/session";
@@ -65,14 +66,14 @@ function statusLine(stats: CaseStats | undefined): string | null {
 }
 
 /** Can this case be opened right now? (lock-to-today hides the button for other unstarted cases) */
-function isOpenToday(c: Case, state: HomeState): boolean {
+function isOpenToday(c: CaseSummary, state: HomeState): boolean {
   const today = state.today;
   if (!today?.lockToToday) return true;
   const started = state.stats.get(c.id);
   return today.caseId === c.id || (started !== undefined && started.status !== "not-started");
 }
 
-function caseCta(c: Case, state: HomeState, primary: boolean): HTMLElement {
+function caseCta(c: CaseSummary, state: HomeState, primary: boolean): HTMLElement {
   if (!isOpenToday(c, state)) return h("span", { class: "chip chip-muted mono" }, TA().lockedToday);
   const stats = state.stats.get(c.id);
   const label = !state.isSignedIn
@@ -85,13 +86,13 @@ function caseCta(c: Case, state: HomeState, primary: boolean): HTMLElement {
   return h("a", { class: `btn ${primary ? "btn-primary btn-lg" : "btn-sm"}`, href: `#/case/${c.id}` }, label);
 }
 
-function todayCard(c: Case, state: HomeState, date: string): HTMLElement {
+function todayCard(c: CaseSummary, state: HomeState, date: string): HTMLElement {
   const line = statusLine(state.stats.get(c.id));
   return h(
     "article",
     { class: "featured-card today-card", "aria-labelledby": "today-title" },
     h("p", { class: "today-kicker mono" }, h("span", { class: "dot", "aria-hidden": "true" }), TA().todayKicker(formatDate(date))),
-    h("p", { class: "featured-meta mono" }, T().featuredMeta(c.difficulty, c.estMinutes, c.questions.length)),
+    h("p", { class: "featured-meta mono" }, T().featuredMeta(c.difficulty, c.estMinutes, c.questionCount)),
     h("h2", { id: "today-title", class: "featured-title" }, c.title),
     h("p", { class: "featured-sub" }, c.subtitle),
     line ? h("p", { class: "case-status mono" }, line) : null,
@@ -99,13 +100,13 @@ function todayCard(c: Case, state: HomeState, date: string): HTMLElement {
   );
 }
 
-function caseCard(c: Case, state: HomeState): HTMLElement {
+function caseCard(c: CaseSummary, state: HomeState): HTMLElement {
   const line = statusLine(state.stats.get(c.id));
   const isToday = state.today?.caseId === c.id;
   return h(
     "article",
     { class: `case-card${isToday ? " is-today" : ""}` },
-    h("p", { class: "featured-meta mono" }, T().featuredMeta(c.difficulty, c.estMinutes, c.questions.length)),
+    h("p", { class: "featured-meta mono" }, T().featuredMeta(c.difficulty, c.estMinutes, c.questionCount)),
     h("h3", { class: "case-card-title" }, c.title),
     h("p", { class: "muted case-card-sub" }, c.subtitle),
     h("div", { class: "tag-row" }, c.tags.slice(0, 4).map((tag) => h("span", { class: "chip mono" }, tag))),
@@ -175,8 +176,8 @@ function heroSub(): HTMLElement {
 
 function draw(root: HTMLElement, state: HomeState): void {
   const released = state.today?.releasedCaseIds;
-  const playable = allCases().filter((c) => released === undefined || released.includes(c.id));
-  const todayCase = state.today?.caseId ? getCase(state.today.caseId) : undefined;
+  const playable = caseSummaries().filter((c) => released === undefined || released.includes(c.id));
+  const todayCase = state.today?.caseId ? caseSummary(state.today.caseId) : undefined;
 
   setChildren(
     root,
@@ -205,7 +206,7 @@ function draw(root: HTMLElement, state: HomeState): void {
       h("h2", { id: "cases-h", class: "section-title" }, TA().allCases),
       state.today?.lockToToday ? h("p", { class: "muted small" }, TA().casesLockedToday) : null,
       state.loading
-        ? h("div", { class: "case-grid" }, allCases().map(() => caseSkeleton()))
+        ? h("div", { class: "case-grid" }, caseSummaries().map(() => caseSkeleton()))
         : playable.length > 0
           ? h("div", { class: "case-grid" }, playable.map((c) => caseCard(c, state)))
           : h("p", { class: "muted" }, T().noCases),

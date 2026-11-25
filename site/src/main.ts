@@ -1,7 +1,7 @@
 import "./styles.css";
 import { applyLang, getLang, isRelabel, noteRoute, setLang } from "./i18n/i18n";
 import { T } from "./i18n/strings-player";
-import { getCase } from "./content/load";
+import { caseSummary, loadAllCases, loadCase } from "./content/load";
 import { onConnectivity } from "./lib/api";
 import { h, restoreFields, setChildren, snapshotFields, type FieldSnapshot } from "./lib/dom";
 import { cachedAccount, isAdmin, loadAccount, onAccountChange, signOut } from "./lib/session";
@@ -236,8 +236,12 @@ function loadingView(): void {
   setChildren(appRoot, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, T().loading)));
 }
 
+/**
+ * Render a view whose code or content loads asynchronously. A language switch keeps the current page up
+ * until the re-render is ready (no "Loading…" flash); a navigation shows the loading card at once.
+ */
 function lazyView(load: () => Promise<(root: HTMLElement) => void>): void {
-  loadingView();
+  if (!isRelabel() || appRoot.childElementCount === 0) loadingView();
   const token = routeToken;
   load()
     .then((render) => {
@@ -293,20 +297,31 @@ function route(): void {
       return;
     }
     if (parts[0] === "admin" && parts.length === 1) {
-      lazyView(() => import("./views/admin").then((m) => m.renderAdmin));
+      // Admin shows titles and question names of every case: load them all (in parallel with its code).
+      lazyView(() => Promise.all([import("./views/admin"), loadAllCases()]).then(([m]) => m.renderAdmin));
       return;
     }
     if (parts[0] === "case" && parts[1] !== undefined) {
-      const c = getCase(parts[1]);
-      if (!c) {
-        notFound(T().caseMissing(parts[1]));
+      const id = parts[1];
+      const sub = parts[2];
+      if (sub !== undefined && sub !== "toolbox" && sub !== "explorer") {
+        notFound(T().notOnRunbook);
         return;
       }
-      const sub = parts[2];
-      if (sub === undefined) renderCase(appRoot, c);
-      else if (sub === "toolbox") renderToolbox(appRoot, c);
-      else if (sub === "explorer") lazyView(() => import("./views/explorer").then((m) => (root: HTMLElement) => m.renderExplorer(root, c)));
-      else notFound(T().notOnRunbook);
+      if (caseSummary(id) === undefined) {
+        notFound(T().caseMissing(id));
+        return;
+      }
+      // The case's content is its own chunk (per language), fetched only now.
+      const missing = (): void => notFound(T().caseMissing(id));
+      if (sub === "explorer") {
+        lazyView(() =>
+          Promise.all([loadCase(id), import("./views/explorer")]).then(([c, m]) => (c === undefined ? missing : (root: HTMLElement) => m.renderExplorer(root, c))),
+        );
+      } else {
+        const render = sub === "toolbox" ? renderToolbox : renderCase;
+        lazyView(() => loadCase(id).then((c) => (c === undefined ? missing : (root: HTMLElement) => render(root, c))));
+      }
       return;
     }
     notFound(T().notOnRunbook);

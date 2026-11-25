@@ -24,7 +24,7 @@ import {
   type TrashEntry,
   type UserStats,
 } from "../../shared/contract";
-import { cases, getCase } from "../content/load";
+import { cachedCase } from "../content/load";
 import { copyButton, h, setChildren, type Child } from "../lib/dom";
 import {
   AdminApiError,
@@ -90,7 +90,7 @@ function readUrlState(): { tab: TabId | null; caseId: string | null } {
   const params = new URLSearchParams(location.hash.split("?")[1] ?? "");
   const tab = params.get("tab");
   const caseId = params.get("case");
-  return { tab: isTabId(tab) ? tab : null, caseId: caseId !== null && getCase(caseId) !== undefined ? caseId : null };
+  return { tab: isTabId(tab) ? tab : null, caseId: caseId !== null && cachedCase(caseId) !== undefined ? caseId : null };
 }
 
 function adminHash(tab: TabId, caseId: string | null): string {
@@ -104,27 +104,27 @@ const isAdminHash = (hash: string): boolean => /^#\/?admin(\?|$)/.test(hash);
 /** Unsaved drafts carried over when the view re-renders in place (the language toggle re-runs the route). */
 let carried: { schedule: Schedule | null; event: LiveEvent | null } | null = null;
 
-// ---- content lookups (titles come from the bundled case content, ids from the server) ----
+// ---- content lookups (titles come from the case content, all loaded before this view renders; ids from the server) ----
 
 const QUESTION_IDS: ReadonlySet<string> = new Set<string>(QUESTION_ORDER);
 const isQuestionId = (id: string): id is QuestionId => QUESTION_IDS.has(id);
 
 function caseTitle(caseId: string): string {
-  return getCase(caseId)?.title ?? caseId;
+  return cachedCase(caseId)?.title ?? caseId;
 }
 
 function caseQuestionIds(caseId: string): QuestionId[] {
-  const c = getCase(caseId);
+  const c = cachedCase(caseId);
   const ids = c ? c.questions.map((q) => q.id).filter(isQuestionId) : [];
   return ids.length > 0 ? ids : [...QUESTION_ORDER];
 }
 
 function questionTitle(caseId: string, q: QuestionId): string {
-  return getCase(caseId)?.questions.find((x) => x.id === q)?.title ?? "";
+  return cachedCase(caseId)?.questions.find((x) => x.id === q)?.title ?? "";
 }
 
 function caseMaxScore(caseId: string): number | null {
-  const c = cases.get(caseId);
+  const c = cachedCase(caseId);
   return c ? c.questions.reduce((sum, q) => sum + q.points, 0) : null;
 }
 
@@ -3379,7 +3379,7 @@ export function renderAdmin(root: HTMLElement): void {
 
   function caseSummaryPanel(s: CaseSummary): HTMLElement {
     const maxScore = s.maxScore > 0 ? s.maxScore : caseMaxScore(s.caseId);
-    const title = getCase(s.caseId)?.title ?? s.title;
+    const title = cachedCase(s.caseId)?.title ?? s.title;
     const funnel = questionFunnel(s, state.statsProgress.get(s.caseId) ?? null);
     const hardest = hardestQuestion(funnel);
     const isToday = state.today?.caseId === s.caseId;

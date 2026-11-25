@@ -3,7 +3,7 @@ import type { Case, Question } from "../content/schema";
 import { ApiError, getDebrief, getProgress, revealAnswer, revealHint, setupDone, submitAnswer } from "../lib/api";
 import { playErrorText } from "../lib/errors";
 import { loadAccount, loadToday, setAccount, signOut } from "../lib/session";
-import { getCase } from "../content/load";
+import { caseSummary } from "../content/load";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { withApprovedAccount } from "./auth";
@@ -255,7 +255,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, l
 
 /** "Go to today's incident" + "Back to all cases": the way out of a case that can't be started today. */
 function lockedActions(locked: LockedToday): HTMLElement {
-  const todayCase = locked.todayCaseId !== null ? getCase(locked.todayCaseId) : undefined;
+  const todayCase = locked.todayCaseId !== null ? caseSummary(locked.todayCaseId) : undefined;
   return h(
     "div",
     { class: "row-actions" },
@@ -265,7 +265,7 @@ function lockedActions(locked: LockedToday): HTMLElement {
 }
 
 function lockedCard(c: Case, locked: LockedToday): HTMLElement {
-  const todayCase = locked.todayCaseId !== null ? getCase(locked.todayCaseId) : undefined;
+  const todayCase = locked.todayCaseId !== null ? caseSummary(locked.todayCaseId) : undefined;
   return h(
     "div",
     { class: "notice locked-card", role: "status" },

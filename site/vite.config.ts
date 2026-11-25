@@ -1,4 +1,8 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
+import { summarize, type CatalogEntry } from "./src/content/catalog-schema.ts";
+import { CaseSchema } from "./src/content/schema.ts";
 
 /**
  * Paid content never ships to the browser. Case JSONs are authored with the full toolbox commands
@@ -47,8 +51,78 @@ const stripPaidContentPlugin = (): Plugin => ({
   },
 });
 
+/**
+ * `virtual:case-catalog`: the per-case fields the home page, leaderboard and stats need (title, subtitle,
+ * difficulty, estMinutes, tags, question count, in English and Hebrew), so the entry chunk carries a few KB
+ * instead of every case in both languages. Full case files are lazy chunks (src/content/load.ts).
+ * Invalid cases are left out here, as the runtime loader would reject them too. `_*.json` samples are only
+ * included under `vite dev`, and only when no real case has the same id.
+ */
+const CATALOG_ID = "virtual:case-catalog";
+const RESOLVED_CATALOG_ID = `\0${CATALOG_ID}`;
+const CASES_DIR = fileURLToPath(new URL("./src/content/cases/", import.meta.url));
+
+function readCase(file: string): ReturnType<typeof CaseSchema.safeParse> {
+  return CaseSchema.safeParse(JSON.parse(readFileSync(`${CASES_DIR}${file}`, "utf8")));
+}
+
+export function buildCatalog(includeDevSamples: boolean): CatalogEntry[] {
+  const all = readdirSync(CASES_DIR);
+  const files = all.filter((f) => f.endsWith(".json") && !f.endsWith(".he.json"))
+    .sort((a, b) => Number(a.startsWith("_")) - Number(b.startsWith("_")) || a.localeCompare(b)); // samples last
+  const entries = new Map<string, CatalogEntry>();
+  for (const file of files) {
+    const isSample = file.startsWith("_");
+    if (isSample && !includeDevSamples) continue;
+    const en = readCase(file);
+    if (!en.success) {
+      console.warn(`[case-catalog] ${file} failed schema validation; left out`);
+      continue;
+    }
+    if (isSample && entries.has(en.data.id)) continue;
+    const stem = file.slice(0, -".json".length);
+    const heFile = `${stem}.he.json`;
+    const he = all.includes(heFile) ? readCase(heFile) : null;
+    entries.set(en.data.id, {
+      file: stem,
+      en: summarize(en.data),
+      he: he?.success && he.data.id === en.data.id ? summarize(he.data) : undefined,
+      evidenceFormats: en.data.evidence.map((f) => ({ path: f.path, format: f.format })),
+    });
+  }
+  return [...entries.values()];
+}
+
+const caseCatalogPlugin = (): Plugin => {
+  let includeDevSamples = false;
+  return {
+    name: "incidentlab-case-catalog",
+    configResolved(config) {
+      includeDevSamples = config.command === "serve";
+    },
+    resolveId(id) {
+      return id === CATALOG_ID ? RESOLVED_CATALOG_ID : null;
+    },
+    load(id) {
+      if (id !== RESOLVED_CATALOG_ID) return null;
+      return `export default ${JSON.stringify(buildCatalog(includeDevSamples))};`;
+    },
+    configureServer(server) {
+      // Editing a case JSON changes the catalog too: rebuild it and reload the page.
+      const refresh = (file: string): void => {
+        if (!CASE_JSON.test(file)) return;
+        const mod = server.moduleGraph.getModuleById(RESOLVED_CATALOG_ID);
+        if (mod === undefined) return;
+        server.moduleGraph.invalidateModule(mod);
+        server.ws.send({ type: "full-reload" });
+      };
+      server.watcher.on("change", refresh).on("add", refresh).on("unlink", refresh);
+    },
+  };
+};
+
 export default defineConfig({
   base: "/",
-  plugins: [stripPaidContentPlugin()],
+  plugins: [stripPaidContentPlugin(), caseCatalogPlugin()],
   build: { outDir: "dist", sourcemap: false },
 });
