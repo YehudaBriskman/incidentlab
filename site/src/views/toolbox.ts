@@ -5,7 +5,7 @@
 import { QUESTION_ORDER, SCORING, type ProgressView, type StageProgress, type TodayResponse } from "../../shared/contract";
 import type { Case } from "../content/schema";
 import { getProgress, revealCommand } from "../lib/api";
-import { announce, confirmButton, copyButton, h, html, setChildren, type Child } from "../lib/dom";
+import { announce, confirmButton, copyButton, ensureAnnouncer, h, html, setChildren, type Child } from "../lib/dom";
 import { playErrorText } from "../lib/errors";
 import { md } from "../lib/markdown";
 import { isAdmin, loadAccount, loadToday } from "../lib/session";
@@ -252,7 +252,13 @@ function toolboxNote(c: Case, root: HTMLElement, state: PageState): HTMLElement 
   return stageNo !== null ? h("p", { class: "notice muted" }, TG().toolboxCostNote(SCORING.COMMAND_COST, stageNo)) : null;
 }
 
+/** The toolbox filter text per case, so a reveal (which redraws the page) keeps what the player typed. */
+const filters = new Map<string, string>();
+
+const prefersReducedMotion = (): boolean => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
+  ensureAnnouncer();
   const ctx: CommandContext = {
     caseId: c.id,
     progress: state.kind === "player" ? state.progress : null,
@@ -263,36 +269,102 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
       window.scrollTo(0, y);
     },
   };
+
+  const total = c.toolbox.reduce((n, sec) => n + sec.items.length, 0);
+  const sections = c.toolbox.map((sec, i) => {
+    const heading = h("h2", { id: `tb-${i}-h`, tabindex: "-1" }, sec.category);
+    const cards = sec.items.map((item) => {
+      const card = commandCard(item, ctx);
+      card.dataset.search = [item.title, item.syntax ?? "", item.syntaxPowershell ?? "", item.explain, sec.category].join(" ").toLowerCase();
+      return card;
+    });
+    const el = h("section", { class: "block tb-section", id: `tb-${i}`, "aria-labelledby": `tb-${i}-h` }, heading, h("div", { class: "tool-list" }, cards));
+    return { el, heading, cards };
+  });
+
+  const tocLinks = c.toolbox.map((sec, i) =>
+    h(
+      "a",
+      {
+        href: `#/case/${c.id}/toolbox`,
+        "data-target": `tb-${i}`,
+        onclick: (ev: Event) => {
+          ev.preventDefault();
+          const target = sections[i];
+          if (target === undefined) return;
+          target.el.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
+          target.heading.focus({ preventScroll: true });
+        },
+      },
+      sec.category,
+    ),
+  );
+
+  const filterId = `tb-filter-${c.id}`;
+  const filter = h("input", {
+    id: filterId,
+    class: "input",
+    type: "search",
+    autocomplete: "off",
+    autocapitalize: "off",
+    autocorrect: "off",
+    spellcheck: "false",
+    enterkeyhint: "search",
+    dir: "auto",
+    "aria-describedby": `${filterId}-hint ${filterId}-count`,
+  });
+  filter.value = filters.get(c.id) ?? "";
+  const count = h("p", { id: `${filterId}-count`, class: "muted small tb-count" });
+  const none = h("p", { class: "muted tb-none", hidden: true }, TP().filterNone);
+  let announceTimer: number | null = null;
+  const applyFilter = (speak: boolean): void => {
+    const words = filter.value.trim().toLowerCase().split(/\s+/).filter((w) => w.length > 0);
+    let shown = 0;
+    sections.forEach((sec, i) => {
+      let inSection = 0;
+      for (const card of sec.cards) {
+        const text = card.dataset.search ?? "";
+        const match = words.every((w) => text.includes(w));
+        card.hidden = !match;
+        if (match) inSection += 1;
+      }
+      sec.el.hidden = inSection === 0;
+      const link = tocLinks[i];
+      if (link !== undefined) link.hidden = inSection === 0;
+      shown += inSection;
+    });
+    count.textContent = TP().filterCount(shown, total);
+    none.hidden = shown > 0;
+    if (!speak) return;
+    if (announceTimer !== null) window.clearTimeout(announceTimer);
+    announceTimer = window.setTimeout(() => announce(shown > 0 ? TP().filterCount(shown, total) : TP().filterNone), 600);
+  };
+  filter.addEventListener("input", () => {
+    filters.set(c.id, filter.value);
+    applyFilter(true);
+  });
+  applyFilter(false);
+
   setChildren(
     root,
     h(
       "section",
-      { class: "stage-wrap" },
+      { class: "stage-wrap toolbox-page" },
       h("a", { class: "back-link", href: `#/case/${c.id}` }, T().backToCase),
       h("h1", {}, T().allCommands),
       h("p", { class: "muted" }, T().allCommandsSub),
       toolboxNote(c, root, state),
       h(
-        "nav",
-        { class: "toc", "aria-label": T().sections },
-        c.toolbox.map((sec, i) =>
-          h(
-            "a",
-            {
-              href: `#/case/${c.id}/toolbox`,
-              "data-target": `tb-${i}`,
-              onclick: (ev: Event) => {
-                ev.preventDefault();
-                document.getElementById(`tb-${i}`)?.scrollIntoView({ behavior: "smooth" });
-              },
-            },
-            sec.category,
-          ),
-        ),
+        "div",
+        { class: "tb-filter", role: "search" },
+        h("label", { class: "answer-label", for: filterId }, TP().filterLabel),
+        h("p", { id: `${filterId}-hint`, class: "muted small" }, TP().filterHint),
+        filter,
+        count,
       ),
-      c.toolbox.map((sec, i) =>
-        h("section", { class: "block", id: `tb-${i}` }, h("h2", {}, sec.category), h("div", { class: "tool-list" }, sec.items.map((item) => commandCard(item, ctx)))),
-      ),
+      h("nav", { class: "toc tb-toc", "aria-label": TP().jumpTo }, tocLinks),
+      none,
+      sections.map((sec) => sec.el),
     ),
   );
 }

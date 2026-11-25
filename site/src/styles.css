@@ -933,3 +933,20 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
 .confirm-text { font-size: var(--step--1); color: var(--text); }
 .confirm-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .reveal-trigger { color: var(--text-muted); font-weight: 500; }
+
+/* Toolbox page: filter, and a one-row sticky section list. */
+.tb-filter { display: flex; flex-direction: column; gap: var(--space-1); margin-block: var(--space-4) var(--space-3); max-inline-size: var(--read); }
+.tb-filter p { margin: 0; }
+.tb-count { margin-block-start: var(--space-1); }
+.tb-none { margin-block: var(--space-5); }
+@media screen {
+  .tb-toc {
+    position: sticky; inset-block-start: 0; z-index: 5; flex-wrap: nowrap; overflow-x: auto;
+    margin-block: var(--space-2) var(--space-5); padding-block: var(--space-1);
+    background: var(--canvas); border-block-end: 1px solid var(--border);
+  }
+  .tb-toc a { flex: none; white-space: nowrap; padding-inline: var(--space-1); }
+  .tb-toc a:focus-visible { outline-offset: calc(-1 * var(--focus-width)); }
+  .tb-section { scroll-margin-block-start: var(--space-8); }
+  html:has(.toolbox-page) { scroll-padding-block-start: var(--space-8); }
+}
