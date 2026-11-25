@@ -449,7 +449,8 @@ Session    for an EC2 instance role, the CloudTrail session name is the instance
 
 TIPS
 ----
-- grep, awk, sort, uniq and jq will get you a long way. No AWS account needed.
+- grep, sed, awk, sort and uniq (or Windows PowerShell) take you all the way.
+  Nothing to install, and no AWS account needed.
 - In CloudTrail, the same role can show up from more than one place. Ask WHERE
   each call came from, and with which user agent, not just WHO signed it.
 - People in the channel were stressed and guessing. Some of them were wrong.

@@ -34,8 +34,10 @@ Session shape: **10 min orientation, 40 min solve (pairs), then debrief and lect
 - **Nothing to install.** Every player picks one path (see "No-install path" below):
   - **Browser only:** the in-site Evidence Explorer. Works on any OS.
   - **Windows:** Windows PowerShell 5.1 (built in). Every Toolbox command has a PowerShell version.
-  - **macOS / Linux / WSL:** bash with `grep`, `awk`, `sort`, `date`. `jq` and `git` are nice to have
-    (`brew install jq` / `apt install jq`) but optional: `repo/git-log.txt` replaces the git bundle.
+  - **macOS / Linux / WSL / Git Bash:** bash with the tools that are already there: `grep`, `sed`, `awk`,
+    `sort`, `uniq`, `cut`, `date`. No `jq` and no `git` needed: JSON logs are filtered with `grep -o`, and
+    `repo/git-log.txt` replaces the git bundle. `scripts/check_commands.py` proves every command runs with
+    only these tools.
 - A browser, and a way to pair (one shares a screen, the other drives the terminal or the notes).
 
 **Room**
@@ -135,14 +137,16 @@ Nobody should lose the session to tooling. Point people at one of these during o
 2. **How it works (3 min).**
    - Six questions, each answer is a flag. Wrong answers cost nothing. Format matters (read the format
      line under each question). Case and extra spaces don't.
-   - Hints are free to open but cost points. Encourage them: the goal is learning, not the scoreboard.
-   - Everything runs in your browser. Progress is per browser.
+   - Hints and full commands cost points (command syntax is free). Encourage them: the goal is learning, not
+     the scoreboard.
+   - Nothing to install: the browser Explorer, built-in bash tools or Windows PowerShell all work. Progress
+     belongs to your account, so you can switch devices.
    - The chat export is a hint source, not an answer key. People in it are wrong sometimes.
 3. **Toolbox demo (3 min).** Demo exactly two commands from the toolbox **on a file that doesn't give
    anything away**. Good choices:
    - `head -3 nginx/access.log` plus reading the log format from `nginx/nginx.conf.snippet` ("know what each
      field means before you grep");
-   - `jq -c 'select(.level=="warn")' app/checkout-service.log | head` ("JSON logs: filter, don't eyeball").
+   - `grep '"level":"warn"' app/checkout-service.log | head` ("JSON logs are text too: filter, don't eyeball").
    Don't grep for 5xx, don't open the git repo, don't mention time zones beyond "check the format of every
    file".
 4. **Pairs (2 min).** Pair people up, ideally mixing backend, frontend and ops. Start the timer.

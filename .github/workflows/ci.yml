@@ -37,10 +37,10 @@ jobs:
             site/package-lock.json
             tests/e2e/package-lock.json
 
-      - name: Install system tools (zip, jq, GNU awk)
+      - name: Install system tools (zip, GNU awk for the POSIX-awk check)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends zip jq gawk
+          sudo apt-get install -y --no-install-recommends zip gawk
 
       - name: Configure git identity for the generated case repos
         run: |
