@@ -3,7 +3,7 @@
     "השיגו את הראיות: הורידו ופרסו את **חבילת הראיות**, *או* פתחו את ה-**Evidence Explorer** כדי לעבור על כל הקבצים בדפדפן (בלי התקנות).",
     "קראו את `README_FIRST.txt` מההתחלה ועד הסוף, ובמיוחד את טבלת אזורי הזמן.",
     "שימו לב לשעונים: ה-journals של ה-nodes, Flux, ה-JSON של ה-events והלוגים של ה-containers הם ב-**UTC**; `kubectl describe`, `helm history`, תאריכי git והצ'אט הם ב-**שעון מקומי (UTC+02:00)**; הגילים ב-`get pods` וב-`get events` הם **יחסיים** ל-`date -u` שמעל כל בלוק; המטריקות ב-**epoch seconds**.",
-    "בחרו מסלול: **bash** (Linux, macOS או WSL) עם `jq`, **Windows PowerShell** (לכל פקודה ב-Toolbox יש גרסת PowerShell), או ה-**Explorer בדפדפן**.",
+    "בחרו מסלול: **bash** (Linux, macOS, WSL או Git Bash ל-Windows), **Windows PowerShell** (לכל פקודה ב-Toolbox יש גרסת PowerShell), או ה-**Explorer בדפדפן**. אין מה להתקין: כל הפקודות משתמשות בכלים שכבר קיימים אצלכם.",
     "לא צריך קלאסטר: כל פקודות ה-`kubectl` כבר הורצו בשבילכם. התייחסו לפלט שלהן כטקסט רגיל."
   ],
   "id": "kubernetes-crime-scene",
@@ -20,7 +20,7 @@
     "scheduling",
     "helm",
     "gitops",
-    "jq",
+    "grep",
     "time-zones"
   ],
   "inspiredBy": {
@@ -177,7 +177,7 @@
     "התשובות לא רגישות לאותיות גדולות/קטנות, ורווחים בהתחלה ובסוף מתעלמים מהם. הקפידו על הפורמט שמופיע מתחת לכל שאלה.",
     "כל רמז עולה את הנקודות שמופיעות עליו. הרמזים נחשפים לפי הסדר, מדחיפה עדינה ועד כמעט הפקודה המלאה. התחביר של פקודות ה-Toolbox גלוי בחינם; חשיפת פקודה מלאה עולה 5 נקודות. אחרי שמסיימים את התיק, כל הפקודות בחינם.",
     "עבודה בזוגות מומלצת. דברו על ההיגיון שלכם בקול, בדיוק כמו ב-incident review אמיתי.",
-    "כל כלי מותר: grep, awk, jq, Python, גיליון אלקטרוני, העורך האהוב עליכם. בלשונית Toolbox יש פקודות שיעזרו.",
+    "אין מה להתקין: כל פקודה ב-Toolbox רצה עם מה שכבר מגיע עם Linux/WSL, macOS, Git Bash ל-Windows או Windows PowerShell 5.1. כל כלי אחר שאתם אוהבים מותר גם הוא: jq, Python, גיליון אלקטרוני, העורך האהוב עליכם.",
     "כל תשובה שגויה עולה 2 נקודות, ועד 20 נקודות לכל שלב. חשבו לפני שאתם שולחים, ותהיו מוכנים להסביר *למה* התשובה שלכם נכונה.",
     "מהירות ודיוק משתלמים: פתרון מהיר מזכה בבונוס זמן של עד +30 לכל שלב (הבונוס דועך אחרי שעוברים את זמן היעד של השלב), פתרון נקי בלי רמזים, פקודות או תשובות שגויות מזכה ב-+10, מי שפותר שלב ראשון מקבל +15 first blood, וסיום כל ששת השלבים בלי לחשוף תשובה מזכה ב-+50.",
     "אל תשתפו flags עם צוותים אחרים עד שכולם מסיימים. לשתף טכניקות זה בסדר.",
@@ -264,7 +264,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\ncolumn -t -s $'\\t' helm/history-pricing-api.txt\njq -r 'select(.controller==\"kustomization\" and (.output | has(\"HelmRelease/shop/pricing-api\"))) | \"\\(.ts) \\(.revision)\"' flux/flux-controllers.log\ngrep -A6 '^commit <first-7-chars>' gitops/git-log-p.txt\n```"
+          "text": "```sh\nawk -F'\\t' 'NR > 2 {print $1, $2}' helm/history-pricing-api.txt\ngrep '\"controller\":\"kustomization\"' flux/flux-controllers.log | grep 'HelmRelease/shop/pricing-api' | sed -E 's/.*\"ts\":\"([^\"]*)\".*\"revision\":\"([^\"]*)\".*/\\1 \\2/'\n```\n\nואז קראו את ה-commit: `grep -A6 '^commit <first-7-chars>' gitops/git-log-p.txt`."
         }
       ],
       "successNote": "ב-GitOps הדיפלוי *הוא* commit, אבל בשרשרת יש כמה קפיצות: commit, source fetch, kustomize apply, Helm upgrade, rollout של ReplicaSet. לכל קפיצה יש לוג משלה ושעון משלה. ותקראו שוב את הודעת ה-commit: \"No functional change intended.\" refactor של values יחד עם קפיצת major ב-chart הוא שינוי פונקציונלי עד שהוכח אחרת. תעשו diff ל-manifests ה**מרונדרים** (`helm diff`, `flux diff`), לא רק לקובץ ה-values.",
@@ -387,7 +387,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\ngrep -E '^Name:|^  MemoryPressure' kubectl/describe-nodes.txt\njq -c '.items[] | select(.reason==\"Evicted\") | {t: .lastTimestamp, host: .source.host, pod: .involvedObject.name, msg: .message}' kubectl/get-events-A.json\ngrep -h 'Eviction manager' nodes/*.journal.log\n```"
+          "text": "```sh\ngrep -E '^Name:|^  MemoryPressure' kubectl/describe-nodes.txt\ngrep Evicted kubectl/get-events-A-wide.txt\ngrep -h 'Eviction manager' nodes/*.journal.log\n```"
         }
       ],
       "successNote": "ה-pods החדשים של pricing ביקשו (requests) הרבה פחות זיכרון ממה שצרכו בפועל, וה-scheduler מסתכל רק על requests, אז הוא דחס אותם על node אחד. כשהצריכה האמיתית חצתה את סף ה-eviction, ה-kubelet פינה את ה-pod שהכי חרג מה-request שלו: job סנכרון של צוות אחר, לא ה-pods שיצרו את הבעיה. requests שלא תואמים לצריכה האמיתית הופכים באג של צוות אחד לאירוע של כולם. שמרו על requests קרובים לצריכה שנמדדה (או שווים ל-limits בשירותים קריטיים).",
@@ -539,41 +539,41 @@
       ]
     },
     {
-      "category": "Events של Kubernetes (jq)",
+      "category": "Events של Kubernetes (JSON עם grep ו-awk)",
       "items": [
         {
           "id": "events-sorted",
           "title": "Events לפי סדר זמן",
-          "command": "jq -r '.items | sort_by(.firstTimestamp)[] | [.firstTimestamp, .count, .involvedObject.name, .reason, .message] | @tsv' kubectl/get-events-A.json | less -S",
-          "syntax": "jq -r '.items | sort_by(.<time-field>)[] | [.<field>, .<field>, .<path>, .<field>, .<field>] | @tsv' <events-json> | less -S",
-          "explain": "`kubectl get events` **לא** ממוין לפי זמן כברירת מחדל. ב-JSON יש timestamps מוחלטים ב-UTC, אז מיינו בעצמכם.",
+          "command": "awk '{k = $1; gsub(/[\":]/, \"\", k); v = $0; sub(/^[^:]*: /, \"\", v); sub(/,$/, \"\", v); gsub(/^\"|\"$/, \"\", v)} k == \"firstTimestamp\" {t = v} k == \"count\" {c = v} k == \"name\" && o == \"\" {o = v} k == \"reason\" {r = v} k == \"message\" {m = v} k == \"type\" {print t, c, o, r, m; o = \"\"}' kubectl/get-events-A.json | sort | head -40",
+          "syntax": "awk '{k = $1; gsub(/[\":]/, \"\", k); v = $0; sub(/^[^:]*: /, \"\", v); sub(/,$/, \"\", v); gsub(/^\"|\"$/, \"\", v)} k == \"<time-key>\" {t = v} k == \"<key>\" {c = v} k == \"<key>\" && o == \"\" {o = v} k == \"<key>\" {r = v} k == \"<key>\" {m = v} k == \"<last-key>\" {print t, c, o, r, m; o = \"\"}' <events-json> | sort | head -<n>",
+          "explain": "`kubectl get events` **לא** ממוין לפי זמן כברירת מחדל. ב-JSON יש timestamps מוחלטים ב-UTC, אז מיינו בעצמכם. הוא מודפס יפה, `\"key\": value` אחד בכל שורה והמפתחות ממוינים, אז awk יכול לשטח אותו: הבלוק הראשון מפרק כל שורה למפתח `k` ולערך `v`, הבלוקים הבאים זוכרים את השדות שאתם רוצים, ו-`type` (המפתח האחרון בכל event) מדפיס את השורה. ה-`name` הראשון בכל event הוא `involvedObject.name`. הורידו את `| head -40` כדי לראות את כולם, או קראו את התאום הטקסטואלי `kubectl/get-events-A-wide.txt`.",
           "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Sort-Object firstTimestamp | Format-Table firstTimestamp, count, @{n='object'; e={$_.involvedObject.name}}, reason, message | Out-Host -Paging",
           "syntaxPowershell": "(Get-Content <events-json> -Raw | ConvertFrom-Json).items | Sort-Object <time-field> | Format-Table <columns> | Out-Host -Paging"
         },
         {
           "id": "events-reasons",
           "title": "אילו סוגי events יש?",
-          "command": "jq -r '.items[] | .reason' kubectl/get-events-A.json | sort | uniq -c | sort -rn",
-          "syntax": "jq -r '.items[] | .<field>' <events-json> | sort | uniq -c | sort -rn",
-          "explain": "היסטוגרמה של ה-reasons. שימו לב למה ש**חסר**: אין event בשם `OOMKilled`.",
+          "command": "grep -o '\"reason\": \"[^\"]*\"' kubectl/get-events-A.json | cut -d'\"' -f4 | sort | uniq -c | sort -rn",
+          "syntax": "grep -o '\"<key>\": \"[^\"]*\"' <events-json> | cut -d'\"' -f<n> | sort | uniq -c | sort -rn",
+          "explain": "היסטוגרמה של ה-reasons. `grep -o` שולף מפתח אחד מתוך ה-JSON ו-`cut -d'\"' -f4` משאיר את הטקסט שבין המירכאה השלישית לרביעית: הערך. שימו לב למה ש**חסר**: אין event בשם `OOMKilled`.",
           "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Group-Object reason | Sort-Object Count -Descending | Select-Object Count, Name",
           "syntaxPowershell": "(Get-Content <events-json> -Raw | ConvertFrom-Json).items | Group-Object <field> | Sort-Object Count -Descending | Select-Object Count, Name"
         },
         {
           "id": "events-by-reason",
           "title": "סינון events לפי reason",
-          "command": "jq -c '.items[] | select(.reason==\"Killing\") | {t: .lastTimestamp, n: .count, host: .source.host, obj: .involvedObject.name, msg: .message}' kubectl/get-events-A.json",
-          "syntax": "jq -c '.items[] | select(.<field> == \"<value>\") | {t: .<path>, n: .<path>, host: .<path>, obj: .<path>, msg: .<path>}' <events-json>",
-          "explain": "החליפו את `Killing` בכל reason מההיסטוגרמה. `source.host` הוא ה-node שדיווח.",
+          "command": "awk '{k = $1; gsub(/[\":]/, \"\", k); v = $0; sub(/^[^:]*: /, \"\", v); sub(/,$/, \"\", v); gsub(/^\"|\"$/, \"\", v)} k == \"count\" {c = v} k == \"name\" && o == \"\" {o = v} k == \"lastTimestamp\" {t = v} k == \"message\" {m = v} k == \"reason\" {r = v} k == \"host\" {h = v} k == \"type\" {if (r == \"Killing\") print t, c, h, o, m; o = \"\"; h = \"\"}' kubectl/get-events-A.json",
+          "syntax": "awk '{k = $1; gsub(/[\":]/, \"\", k); v = $0; sub(/^[^:]*: /, \"\", v); sub(/,$/, \"\", v); gsub(/^\"|\"$/, \"\", v)} k == \"<key>\" {c = v} k == \"<key>\" && o == \"\" {o = v} k == \"<key>\" {t = v} k == \"<key>\" {m = v} k == \"<filter-key>\" {r = v} k == \"<key>\" {h = v} k == \"<last-key>\" {if (r == \"<value>\") print t, c, h, o, m; o = \"\"; h = \"\"}' <events-json>",
+          "explain": "אותו שיטוח כמו למעלה, אבל מודפסים רק events עם reason אחד: זמן, count, ה-node שדיווח (`source.host`), האובייקט וההודעה. החליפו את `Killing` בכל reason מההיסטוגרמה.",
           "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Where-Object reason -eq 'Killing' | Format-Table lastTimestamp, count, @{n='host'; e={$_.source.host}}, @{n='object'; e={$_.involvedObject.name}}, message",
           "syntaxPowershell": "(Get-Content <events-json> -Raw | ConvertFrom-Json).items | Where-Object <field> -eq '<value>' | Format-Table <columns>"
         },
         {
           "id": "events-count-sum",
           "title": "Events מאוגדים",
-          "command": "jq '[.items[] | select(.reason==\"BackOff\") | .count] | add' kubectl/get-events-A.json",
-          "syntax": "jq '[.items[] | select(.<field> == \"<value>\") | .<count-field>] | add' <events-json>",
-          "explain": "events שחוזרים על עצמם מתמזגים לאובייקט אחד עם `count`. לספור אובייקטים זה לא לספור מופעים.",
+          "command": "awk '{k = $1; gsub(/[\":]/, \"\", k); v = $0; sub(/^[^:]*: /, \"\", v); sub(/,$/, \"\", v); gsub(/^\"|\"$/, \"\", v)} k == \"count\" {c = v} k == \"reason\" && v == \"BackOff\" {n++; s += c} END {print n, \"event objects,\", s, \"occurrences\"}' kubectl/get-events-A.json",
+          "syntax": "awk '{k = $1; gsub(/[\":]/, \"\", k); v = $0; sub(/^[^:]*: /, \"\", v); sub(/,$/, \"\", v); gsub(/^\"|\"$/, \"\", v)} k == \"<count-key>\" {c = v} k == \"<key>\" && v == \"<value>\" {n++; s += c} END {print n, \"event objects,\", s, \"occurrences\"}' <events-json>",
+          "explain": "events שחוזרים על עצמם מתמזגים לאובייקט אחד עם `count`. לספור אובייקטים זה לא לספור מופעים: הפקודה מדפיסה את שניהם. `count` מופיע לפני `reason` בכל event (המפתחות ממוינים), אז זכרו אותו וחברו אותו כשה-reason מתאים.",
           "powershell": "((Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Where-Object reason -eq 'BackOff' | Measure-Object count -Sum).Sum",
           "syntaxPowershell": "((Get-Content <events-json> -Raw | ConvertFrom-Json).items | Where-Object <field> -eq '<value>' | Measure-Object <count-field> -Sum).Sum"
         }
@@ -653,9 +653,9 @@
         {
           "id": "helm-history",
           "title": "היסטוריית ה-release ב-Helm",
-          "command": "column -t -s $'\\t' helm/history-pricing-api.txt",
-          "syntax": "column -t -s $'<separator>' <history-file>",
-          "explain": "שורה לכל revision. UPDATED הוא הרגע שבו ה-upgrade **התחיל**, מודפס בשעון המקומי של הלפטופ, בלי אזור זמן.",
+          "command": "awk -F'\\t' 'NR > 1 {printf \"%-9s| %-25s| %-11s| %-18s| %-12s| %s\\n\", $1, $2, $3, $4, $5, $6}' helm/history-pricing-api.txt",
+          "syntax": "awk -F'<separator>' 'NR > 1 {printf \"%-9s| %-25s| %s\\n\", $<field>, $<field>, $<field>}' <history-file>",
+          "explain": "שורה לכל revision. `awk -F'\\t'` מפצל לפי הטאבים ו-`printf \"%-25s\"` מרפד כל עמודה לרוחב קבוע. UPDATED הוא הרגע שבו ה-upgrade **התחיל**, מודפס בשעון המקומי של הלפטופ, בלי אזור זמן.",
           "powershell": "Get-Content helm\\history-pricing-api.txt | ForEach-Object { $_ -replace \"`t\", ' | ' }",
           "syntaxPowershell": "Get-Content <history-file> | ForEach-Object { $_ -replace \"<separator>\", ' | ' }"
         },
@@ -680,27 +680,27 @@
         {
           "id": "git-one-commit",
           "title": "לקרוא diff של commit אחד",
-          "command": "sed -n '/^commit abc1234/,/^commit /p' gitops/git-log-p.txt",
+          "command": "sed -n '/^commit 0599684/,/^commit /p' gitops/git-log-p.txt",
           "syntax": "sed -n '/^commit <sha-prefix>/,/^commit /p' <git-log-file>",
-          "explain": "מדפיס מהכותרת של ה-commit ועד ה-commit הבא. החליפו את `abc1234` בתחילת SHA אמיתי.",
-          "powershell": "$l = Get-Content gitops\\git-log-p.txt; $i = ($l | Select-String '^commit abc1234').LineNumber; $l[($i - 1)..($i + 80)]",
+          "explain": "מדפיס מהכותרת של ה-commit ועד ה-commit הבא. `0599684` הוא ה-commit החדש ביותר (התיקון); החליפו אותו בתחילת כל SHA מהרשימה למעלה.",
+          "powershell": "$l = Get-Content gitops\\git-log-p.txt; $i = ($l | Select-String '^commit 0599684').LineNumber; $l[($i - 1)..($i + 80)]",
           "syntaxPowershell": "$l = Get-Content <git-log-file>; $i = ($l | Select-String '^commit <sha-prefix>').LineNumber; $l[($i - 1)..($i + <n>)]"
         },
         {
           "id": "flux-applies",
           "title": "מה Flux החיל, ומאיזה commit?",
-          "command": "jq -c 'select(.controller==\"kustomization\" and (.output | length > 0)) | {ts, name, output, revision}' flux/flux-controllers.log",
-          "syntax": "jq -c 'select(.<field> == \"<value>\" and (.<field> | length > 0)) | {<fields>}' <flux-log>",
-          "explain": "ה-kustomize-controller כותב כל אובייקט ששינה ואת ה-`revision` ב-git שממנו הגיע.",
+          "command": "grep '\"controller\":\"kustomization\"' flux/flux-controllers.log | grep -v '\"output\":{}' | sed -E 's/.*\"ts\":\"([^\"]*)\".*\"name\":\"([^\"]*)\",.*\"output\":(\\{[^}]*\\}),\"revision\":\"([^\"]*)\".*/\\1 \\2 \\4 \\3/'",
+          "syntax": "grep '\"<field>\":\"<value>\"' <flux-log> | grep -v '\"<field>\":{}' | sed -E 's/.*\"<field>\":\"([^\"]*)\".*\"<field>\":\"([^\"]*)\",.*\"<field>\":(\\{[^}]*\\}),\"<field>\":\"([^\"]*)\".*/<group-refs>/'",
+          "explain": "ה-kustomize-controller כותב כל אובייקט ששינה ואת ה-`revision` ב-git שממנו הגיע. כל שורה היא אובייקט JSON אחד, אז `grep` בוחר את השורות ו-`sed -E 's/.*\"key\":\"([^\"]*)\".*/\\1/'` גוזר את הערכים: `\\1` עד `\\4` הן הקבוצות שנתפסו, לפי הסדר.",
           "powershell": "Get-Content flux\\flux-controllers.log | ConvertFrom-Json | Where-Object { $_.controller -eq 'kustomization' -and @($_.output.PSObject.Properties).Count -gt 0 } | Format-List ts, name, output, revision",
           "syntaxPowershell": "Get-Content <flux-log> | ConvertFrom-Json | Where-Object { $_.<field> -eq '<value>' -and @($_.<field>.PSObject.Properties).Count -gt 0 } | Format-List <fields>"
         },
         {
           "id": "flux-helm",
           "title": "מה ה-helm-controller עשה?",
-          "command": "jq -r 'select(.controller==\"helmrelease\") | \"\\(.ts) \\(.namespace)/\\(.name) \\(.msg)\"' flux/flux-controllers.log",
-          "syntax": "jq -r 'select(.<field> == \"<value>\") | \"\\(.<field>) \\(.<field>)/\\(.<field>) \\(.<field>)\"' <flux-log>",
-          "explain": "כל Helm upgrade ש-Flux הריץ: למה (סיבת ה-out-of-sync), מתי התחיל ואיך נגמר.",
+          "command": "grep '\"controller\":\"helmrelease\"' flux/flux-controllers.log | sed -E 's/.*\"ts\":\"([^\"]*)\",\"msg\":\"([^\"]*)\".*\"namespace\":\"([^\"]*)\",\"name\":\"([^\"]*)\".*/\\1 \\3\\/\\4 \\2/'",
+          "syntax": "grep '\"<field>\":\"<value>\"' <flux-log> | sed -E 's/.*\"<field>\":\"([^\"]*)\",\"<field>\":\"([^\"]*)\".*\"<field>\":\"([^\"]*)\",\"<field>\":\"([^\"]*)\".*/<group-refs>/'",
+          "explain": "כל Helm upgrade ש-Flux הריץ: למה (סיבת ה-out-of-sync), מתי התחיל ואיך נגמר. `.*` חמדן, אז `.*\"namespace\":` קופץ ל-`namespace` ה**אחרון** בשורה, זה שברמה העליונה.",
           "powershell": "Get-Content flux\\flux-controllers.log | ConvertFrom-Json | Where-Object controller -eq 'helmrelease' | ForEach-Object { \"$($_.ts) $($_.namespace)/$($_.name) $($_.msg)\" }",
           "syntaxPowershell": "Get-Content <flux-log> | ConvertFrom-Json | Where-Object <field> -eq '<value>' | ForEach-Object { \"$($_.<field>) $($_.<field>)/$($_.<field>) $($_.<field>)\" }"
         }
@@ -714,7 +714,7 @@
           "title": "מקומי (+02:00) ל-UTC",
           "command": "date -u -d '2026-11-17 09:30:00 +0200' '+%F %T'",
           "syntax": "date -u -d '<local-datetime> <offset>' '+%F %T'",
-          "explain": "בשביל `helm history`, `kubectl describe`, תאריכי git והצ'אט. להוריד שעתיים בראש גם עובד, אם נזהרים.",
+          "explain": "בשביל `helm history`, `kubectl describe`, תאריכי git והצ'אט. `date -d` הוא של GNU (Linux, WSL, Git Bash); ב-macOS: `date -u -j -f '%Y-%m-%d %H:%M:%S %z' '2026-11-17 09:30:00 +0200' '+%F %T'`. להוריד שעתיים בראש גם עובד, אם נזהרים.",
           "powershell": "([DateTimeOffset]'2026-11-17T09:30:00+02:00').UtcDateTime.ToString('yyyy-MM-dd HH:mm:ss')",
           "syntaxPowershell": "([DateTimeOffset]'<local-datetime><offset>').UtcDateTime.ToString('yyyy-MM-dd HH:mm:ss')"
         },
@@ -723,7 +723,7 @@
           "title": "גיל יחסי לשעה",
           "command": "date -u -d '2026-11-17 08:44:12 UTC - 47 minutes' +%T",
           "syntax": "date -u -d '<snapshot-time> UTC - <age>' +%T",
-          "explain": "זמן ה-snapshot (מה-`date -u` שמעל הבלוק) פחות הגיל. גילים מעל 10 דקות מעוגלים לדקות שלמות.",
+          "explain": "זמן ה-snapshot (מה-`date -u` שמעל הבלוק) פחות הגיל. גילים מעל 10 דקות מעוגלים לדקות שלמות. ב-macOS: `date -u -j -v-47M -f '%Y-%m-%d %H:%M:%S' '2026-11-17 08:44:12' +%T`.",
           "powershell": "([DateTimeOffset]'2026-11-17T08:44:12Z').AddMinutes(-47).UtcDateTime.ToString('HH:mm:ss')",
           "syntaxPowershell": "([DateTimeOffset]'<snapshot-time>Z').AddMinutes(-<minutes>).UtcDateTime.ToString('HH:mm:ss')"
         },
@@ -741,16 +741,16 @@
           "title": "UTC ל-epoch",
           "command": "date -u -d '2026-11-17 08:00:00' +%s",
           "syntax": "date -u -d '<utc-datetime>' +%s",
-          "explain": "כדי למצוא את השורות המתאימות ב-CSV שממופתח לפי epoch.",
+          "explain": "כדי למצוא את השורות המתאימות ב-CSV שממופתח לפי epoch. ב-macOS: `date -u -j -f '%Y-%m-%d %H:%M:%S' '2026-11-17 08:00:00' +%s`.",
           "powershell": "([DateTimeOffset]'2026-11-17T08:00:00Z').ToUnixTimeSeconds()",
           "syntaxPowershell": "([DateTimeOffset]'<utc-datetime>Z').ToUnixTimeSeconds()"
         },
         {
           "id": "csv-epoch-column",
           "title": "שעות קריאות לכל ה-CSV",
-          "command": "awk -F, 'NR>1 {cmd=\"date -u -d @\"$1\" +%T\"; cmd | getline t; close(cmd); print t, $0}' metrics/hpa-pricing-api.csv | head",
-          "syntax": "awk -F, 'NR>1 {cmd=\"date -u -d @\"$<epoch-column>\" +%T\"; cmd | getline t; close(cmd); print t, $0}' <metrics-csv> | head",
-          "explain": "מוסיף לכל שורה את שעת ה-UTC שלה. קצת איטי (`date` אחד לכל שורה), בסדר לכמה מאות שורות.",
+          "command": "awk -F, 'NR > 1 {s = $1 % 86400; printf \"%02d:%02d:%02d %s\\n\", s / 3600, s % 3600 / 60, s % 60, $0}' metrics/hpa-pricing-api.csv | head",
+          "syntax": "awk -F, 'NR > 1 {s = $<epoch-column> % 86400; printf \"%02d:%02d:%02d %s\\n\", s / 3600, s % 3600 / 60, s % 60, $0}' <metrics-csv> | head",
+          "explain": "מוסיף לכל שורה את שעת ה-UTC שלה. epoch סופר שניות מאז 1970-01-01 UTC ובכל יום יש 86400 כאלה, אז `% 86400` משאיר את השניות מאז חצות UTC. חשבון נקי: בלי קריאה ל-`date` בכל שורה, ועובד אותו דבר ב-Linux, Git Bash ו-macOS.",
           "powershell": "Import-Csv metrics\\hpa-pricing-api.csv | Select-Object -First 10 @{n='utc'; e={ [DateTimeOffset]::FromUnixTimeSeconds([long]$_.ts_epoch).ToString('HH:mm:ss') }}, *",
           "syntaxPowershell": "Import-Csv <metrics-csv> | Select-Object -First <n> @{n='utc'; e={ [DateTimeOffset]::FromUnixTimeSeconds([long]$_.<epoch-column>).ToString('HH:mm:ss') }}, *"
         }
@@ -762,9 +762,9 @@
         {
           "id": "csv-table",
           "title": "טבלה קריאה",
-          "command": "column -s, -t < metrics/hpa-pricing-api.csv | less -S",
-          "syntax": "column -s, -t < <metrics-csv> | less -S",
-          "explain": "מיישר את עמודות ה-CSV כדי שאפשר יהיה לקרוא אותן.",
+          "command": "awk -F, '{for (i = 1; i <= NF; i++) printf \"%-20s\", $i; print \"\"}' metrics/hpa-pricing-api.csv | head -40",
+          "syntax": "awk -F, '{for (i = 1; i <= NF; i++) printf \"%-<width>s\", $i; print \"\"}' <metrics-csv> | head -<n>",
+          "explain": "מיישר את עמודות ה-CSV כדי שאפשר יהיה לקרוא אותן: כל שדה מרופד ל-20 תווים. הורידו את `| head -40` בשביל הקובץ כולו.",
           "powershell": "Import-Csv metrics\\hpa-pricing-api.csv | Format-Table | Out-Host -Paging",
           "syntaxPowershell": "Import-Csv <metrics-csv> | Format-Table | Out-Host -Paging"
         },
@@ -803,11 +803,11 @@
         {
           "id": "join-lists",
           "title": "חיבור בין שתי רשימות",
-          "command": "awk 'NR==FNR {want[$1]; next} $1 in want' ids.txt other.txt",
-          "syntax": "awk 'NR==FNR {want[$<key-column>]; next} $<key-column> in want' <lookup-file> <data-file>",
-          "explain": "awk קלאסי על שני קבצים: הראשון בונה טבלת חיפוש, והשני מסונן (או מועשר) בעזרתה. אותו רעיון עובד גם בתוך קובץ אחד עם בלוק `END`.",
-          "powershell": "$want = Get-Content ids.txt; Get-Content other.txt | Where-Object { $want -contains (($_ -split ' ')[0]) }",
-          "syntaxPowershell": "$want = Get-Content <lookup-file>; Get-Content <data-file> | Where-Object { $want -contains (($_ -split ' ')[<index>]) }"
+          "command": "awk 'NR==FNR {want[$1]; next} $2 in want' <(grep -o 'pod/pricing-api-[^ ]*' kubectl/get-events-A-wide.txt | cut -d/ -f2 | sort -u) kubectl/get-pods-A.txt",
+          "syntax": "awk 'NR==FNR {want[$<key-column>]; next} $<key-column> in want' <(<command-that-lists-keys>) <data-file>",
+          "explain": "awk קלאסי על שני קלטים: הראשון בונה טבלת חיפוש, והשני מסונן (או מועשר) בעזרתה. `<(...)` (process substitution של bash) מעביר ל-awk את הפלט של פקודה כאילו היה קובץ, אז לא צריך קבצים זמניים. כאן: ה-pods של pricing-api שמוזכרים ב-events ועדיין קיימים בסוף, עם הסטטוס שלהם. אותו רעיון עובד גם בתוך קובץ אחד עם בלוק `END`.",
+          "powershell": "$want = Select-String -Path kubectl\\get-events-A-wide.txt -Pattern 'pod/(pricing-api-\\S+)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Sort-Object -Unique; Get-Content kubectl\\get-pods-A.txt | Where-Object { $want -contains (($_ -split '\\s+')[1]) }",
+          "syntaxPowershell": "$want = <command-that-lists-keys>; Get-Content <data-file> | Where-Object { $want -contains (($_ -split '\\s+')[<index>]) }"
         },
         {
           "id": "units",
