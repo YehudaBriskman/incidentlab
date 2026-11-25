@@ -1,41 +1,153 @@
 import "../explorer.css";
 import { h } from "../lib/dom";
+import { getLang } from "../i18n/i18n";
 import { WorkerClient } from "../explorer/client";
+import type { RestartReason } from "../explorer/client";
 import {
   decodeState,
   encodeState,
+  fmtBucket,
   fmtBytes,
   fmtCount,
   formatInZone,
   getJsonField,
   isEpochSeconds,
+  isYearless,
+  isZoneless,
   matchRanges,
   parseCsvLine,
   parseJsonFilter,
   parseJsonLine,
   parseTimeInput,
+  pluralCategory,
   regexError,
   stringifyField,
+  timeSeries,
+  wallClockToUtc,
+  yearInText,
 } from "../explorer/core";
-import type { FilterStep, HistogramResult, JsonFilter, StepKind } from "../explorer/core";
+import type { FilterStep, HistogramResult, JsonFilter, StepKind, TimeSeries } from "../explorer/core";
 import type { Case } from "../content/schema";
-import { FILTER_PRESETS, HISTOGRAM_PRESETS, UNIQUE_PRESETS, evidenceFilesFor, evidenceUrl } from "../explorer/files";
-import type { EvidenceFile } from "../explorer/files";
-import type { WorkerResponse } from "../explorer/protocol";
+import {
+  ALL_ZONES,
+  caseYearHint,
+  caseZones,
+  evidenceFilesFor,
+  evidenceUrl,
+  filterPresetsFor,
+  histogramPresetsFor,
+  uniquePresetsFor,
+  zoneLabel,
+} from "../explorer/files";
+import type { EvidenceFile, PatternPreset } from "../explorer/files";
+import type { WorkerErrorCode, WorkerResponse } from "../explorer/protocol";
 import { T } from "../i18n/strings-tools";
 
 const ROW_H = 20;
 const DEBOUNCE_MS = 250;
+const ANNOUNCE_MS = 900;
 const HARD_TIMEOUT_MS = 2500;
-const ZONE = "Asia/Jerusalem";
+const WRAP_KEY = "il.explorer.wrap";
+const NARROW = "(max-width: 600px)";
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/* ---------------------------------------------------------------- text helpers */
+
+type Values = Record<string, Node | string>;
+
+/** Fills `{key}` tokens of a translated template with nodes (numbers wrapped in <bdi>) so bidi order stays right. */
+function fill(template: string, values: Values): Node[] {
+  const out: Node[] = [];
+  const re = /\{(\w+)\}/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(template)) !== null) {
+    if (m.index > last) out.push(document.createTextNode(template.slice(last, m.index)));
+    const v = values[m[1] ?? ""];
+    out.push(v === undefined ? document.createTextNode(m[0]) : typeof v === "string" ? document.createTextNode(v) : v);
+    last = re.lastIndex;
+  }
+  if (last < template.length) out.push(document.createTextNode(template.slice(last)));
+  return out;
+}
+
+/** Same as fill, as plain text (screen-reader announcements, aria-labels). */
+function fillText(template: string, values: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (all, key: string) => values[key] ?? all);
+}
+
+/** An LTR-isolated number, size, time or path inside translated text. */
+const num = (s: string): HTMLElement => h("bdi", { dir: "ltr", class: "ex-num" }, s);
+const plural = (n: number): string => pluralCategory(n, getLang());
+
+function readWrapPref(): boolean | null {
+  try {
+    const v = localStorage.getItem(WRAP_KEY);
+    return v === "1" ? true : v === "0" ? false : null;
+  } catch {
+    return null;
+  }
+}
+function saveWrapPref(on: boolean): void {
+  try {
+    localStorage.setItem(WRAP_KEY, on ? "1" : "0");
+  } catch {
+    /* storage blocked: the toggle still works for this visit */
+  }
+}
 
 let activeTeardown: (() => void) | null = null;
+
+/* ---------------------------------------------------------------- state types */
+
+interface StepUi {
+  /** regex syntax error, or null */
+  error: string | null;
+  /** the step blew the time budget and is NOT applied until the player edits it */
+  slow: boolean;
+}
+
+type CountState =
+  | { kind: "none" }
+  | { kind: "loading" }
+  | { kind: "notLoaded" }
+  | { kind: "filtering" }
+  | { kind: "invalid"; step: number }
+  | { kind: "failed" }
+  | { kind: "done" };
+
+type AggState = "idle" | "running" | "done" | "stale" | "error";
+
+interface Agg {
+  kind: "unique" | "histogram";
+  input: HTMLInputElement;
+  err: HTMLElement;
+  strip: HTMLElement;
+  out: HTMLElement;
+  chips: HTMLElement;
+  job: number;
+  /** filter generation the last run was computed against */
+  gen: number;
+  /** pattern kept fresh across filter changes, or null */
+  wanted: string | null;
+  state: AggState;
+  /** announce the result: only when the player ran it, never for an automatic re-run */
+  announce: boolean;
+}
+
+type Progress =
+  | { kind: "hidden" }
+  | { kind: "loading"; loaded: number; total: number }
+  | { kind: "cancelled" }
+  | { kind: "failed"; message: string };
 
 export function renderExplorer(root: HTMLElement, c: Case): void {
   activeTeardown?.();
   activeTeardown = null;
   const ROUTE = `#/case/${c.id}/explorer`;
   const EVIDENCE_FILES = evidenceFilesFor(c);
+  const CASE_ZONES = caseZones(c);
+  const ZONES = ["UTC", ...CASE_ZONES, ...ALL_ZONES.filter((z) => z !== "UTC" && !CASE_ZONES.includes(z))];
   const ownsHash = (hash: string): boolean => hash === ROUTE || hash.startsWith(`${ROUTE}?`) || hash.startsWith(`${ROUTE}/`);
   document.title = T().exDocTitle;
 
@@ -45,12 +157,15 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
   let file: EvidenceFile | null = null;
   const inWorker = new Set<string>();
   const knownBytes = new Map<string, number>();
+  let loading: string | null = null;
   let loadJob = 0;
   let filterJob = 0;
+  let filterGen = 0;
   let windowJob = 0;
   let headerJob = 0;
-  let aggJob = 0;
   let copyJob = 0;
+  let copyKind: "view" | "line" = "view";
+  let locateJob = 0;
   let total = 0;
   let count = 0;
   let isJson = false;
@@ -58,149 +173,346 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
   let steps: FilterStep[] = initial.steps.length > 0 ? initial.steps : [{ kind: "contains", text: "", ci: true }];
   let json: JsonFilter | null = initial.json;
   let cols: string[] = initial.cols;
-  let suspendRegex = false;
+  let sentSteps: FilterStep[] = [];
+  let lastEdited: FilterStep | null = null;
+  let countState: CountState = { kind: "none" };
   let winStart = 0;
   let winRows: Array<[number, string]> = [];
-  let pendingWindow = false;
-  let flashRow = -1;
+  let cursor = -1;
+  let cursorLine = -1;
+  let pendingLine: number | null = initial.line !== undefined && initial.line !== null ? initial.line - 1 : null;
+  let locateIsDeepLink = false;
+  let focusCursor = false;
+  let headH = 0;
+  let wrap = readWrapPref() ?? window.matchMedia(NARROW).matches;
+  let avgH = ROW_H * 1.6;
+  let yearFromEvidence: number | null = caseYearHint(c);
+  let yearEdited = false;
   let debounce: number | null = null;
+  let announceTimer: number | null = null;
   let raf = 0;
+  const stepUi = new WeakMap<FilterStep, StepUi>();
+  const stepEls = new Map<FilterStep, { row: HTMLElement; input: HTMLInputElement; err: HTMLElement }>();
+
+  const ui = (s: FilterStep): StepUi => {
+    let u = stepUi.get(s);
+    if (!u) {
+      u = { error: null, slow: false };
+      stepUi.set(s, u);
+    }
+    return u;
+  };
 
   /* ---------------------------------------------------------------- dom */
-  const status = h("p", { class: "ex-status", role: "status", "aria-live": "polite" });
+  const tagline = h("p", { class: "ex-status" }, T().exTagline);
+  const announcer = h("p", { class: "ex-sr", role: "status", "aria-live": "polite", "aria-atomic": "true" });
   const notice = h("div", { class: "ex-notice", hidden: true });
   const fileList = h("ul", { class: "ex-files" });
-  const sidebar = h("aside", { class: "ex-sidebar" });
-  const sideToggle = h("button", { class: "btn btn-sm ex-side-toggle", type: "button", "aria-expanded": "false" }, T().exFilesTime);
+  const sidebar = h("aside", { class: "ex-sidebar", id: "ex-sidebar", "aria-label": T().exFilesTime });
+  const sideToggle = h("button", { class: "btn btn-sm ex-side-toggle", type: "button", "aria-expanded": "false", "aria-controls": "ex-sidebar" }, T().exFilesTime);
+
   const progressBar = h("div", { class: "ex-progress-bar" });
-  const progressText = h("span", { class: "ex-progress-text" });
-  const cancelBtn = h("button", { class: "btn btn-sm btn-ghost", type: "button" }, T().exCancel);
-  const progress = h("div", { class: "ex-progress", hidden: true }, h("div", { class: "ex-progress-track" }, progressBar), progressText, cancelBtn);
-  const title = h("h2", { class: "ex-title mono" }, T().exPickFile);
-  const countEl = h("span", { class: "ex-count mono" });
+  const progressText = h("p", { class: "ex-progress-text" });
+  const cancelBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exCancel);
+  const retryBtn = h("button", { class: "btn btn-sm btn-primary", type: "button" }, T().exRetry);
+  const progress = h("div", { class: "ex-progress", hidden: true },
+    h("div", { class: "ex-progress-track", role: "progressbar", "aria-label": T().exLoading }, progressBar),
+    h("div", { class: "ex-progress-body" }, progressText, h("div", { class: "ex-progress-actions" }, cancelBtn, retryBtn)));
+  const progressTrack = progress.firstElementChild as HTMLElement;
+
+  const title = h("h2", { class: "ex-title" }, T().exPickFile);
+  const fileFormat = h("span", { class: "ex-format" });
+  const countEl = h("p", { class: "ex-count" });
   const pipeline = h("div", { class: "ex-pipeline" });
   const presets = h("div", { class: "ex-chips" });
-  const jsonInput = h("input", { class: "ex-input mono", placeholder: T().exJsonPh, spellcheck: "false" });
-  const colsInput = h("input", { class: "ex-input mono", placeholder: T().exColsPh, spellcheck: "false" });
+  const presetsRow = h("div", { class: "ex-presets" }, h("span", { class: "ex-muted" }, T().exExamples), presets);
+  const jsonInput = h("input", { class: "ex-input mono", id: "ex-json", placeholder: T().exJsonPh, spellcheck: "false", autocomplete: "off" });
+  const colsInput = h("input", { class: "ex-input mono", id: "ex-cols", placeholder: T().exColsPh, spellcheck: "false", autocomplete: "off" });
   const jsonBar = h("div", { class: "ex-jsonbar", hidden: true },
-    h("label", {}, h("span", {}, T().exJsonFilter), jsonInput),
-    h("label", {}, h("span", {}, T().exColView), colsInput));
-  const viewport = h("div", { class: "ex-viewport", dir: "ltr", tabindex: "0", "aria-label": T().exFileLines });
+    h("label", { for: "ex-json" }, h("span", {}, T().exJsonFilter), jsonInput),
+    h("label", { for: "ex-cols" }, h("span", {}, T().exColView), colsInput));
+  const filtersBadge = h("span", { class: "ex-badge" });
+  const controlsSet = h("fieldset", { class: "ex-fieldset" }, h("legend", { class: "ex-sr" }, T().exFilters), pipeline, presetsRow, jsonBar);
+  const controls = h("details", { class: "ex-controls" }, h("summary", { class: "ex-controls-sum" }, T().exFilters, filtersBadge), controlsSet);
+
+  const keysHelp = h("p", { class: "ex-sr", id: "ex-keys-help" }, T().exLineKeysHelp);
+  const viewport = h("div", { class: "ex-viewport", dir: "ltr", tabindex: "0", role: "region", "aria-label": T().exFileLines, "aria-describedby": "ex-keys-help" });
+  const headEl = h("div", { class: "ex-colhead mono", "aria-hidden": "true", hidden: true });
   const spacer = h("div", { class: "ex-spacer" });
-  const rowsLayer = h("div", { class: "ex-rows" });
-  const csvHead = h("div", { class: "ex-csvhead mono", dir: "ltr", hidden: true });
-  viewport.append(spacer, rowsLayer);
+  const rowsLayer = h("div", { class: "ex-rows", role: "list", "aria-label": T().exFileLines });
+  viewport.append(headEl, spacer, rowsLayer);
+  const staleStrip = h("p", { class: "ex-stale-strip", hidden: true }, T().exStaleRows);
+  const view = h("div", { class: "ex-view" }, staleStrip, viewport, progress);
+
   const firstBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exFirst);
   const lastBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exLast);
   const copyBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exCopyLines);
   const shareBtn = h("button", { class: "btn btn-sm btn-ghost", type: "button" }, T().exCopyLink);
+  const copyLineBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exCopyLine);
+  const linkLineBtn = h("button", { class: "btn btn-sm btn-ghost", type: "button" }, T().exLinkLine);
+  const wrapCb = h("input", { type: "checkbox", id: "ex-wrap" });
+  wrapCb.checked = wrap;
+  const actionButtons = [firstBtn, lastBtn, copyBtn, shareBtn, copyLineBtn, linkLineBtn];
 
-  const uniqInput = h("input", { class: "ex-input mono", value: "cid=(\\S+)", spellcheck: "false", "aria-label": T().exCaptureRegex });
-  const uniqOut = h("div", { class: "ex-agg-out" });
-  const histInput = h("input", { class: "ex-input mono", value: "", spellcheck: "false", "aria-label": T().exTsRegex, placeholder: T().exHistPh });
-  const histOut = h("div", { class: "ex-agg-out" });
+  const makeAgg = (kind: Agg["kind"], label: string, placeholder: string): Agg => {
+    const id = `ex-${kind}`;
+    return {
+      kind,
+      input: h("input", { class: "ex-input mono", id, spellcheck: "false", autocomplete: "off", "aria-label": label, placeholder, "aria-describedby": `${id}-err` }),
+      err: h("p", { class: "ex-err", id: `${id}-err`, role: "alert", hidden: true }),
+      strip: h("p", { class: "ex-agg-strip", hidden: true }),
+      out: h("div", { class: "ex-agg-out" }),
+      chips: h("div", { class: "ex-chips" }),
+      job: 0,
+      gen: -1,
+      wanted: null,
+      state: "idle",
+      announce: false,
+    };
+  };
+  const uniq = makeAgg("unique", T().exCaptureRegex, T().exUniqPh);
+  const hist = makeAgg("histogram", T().exTsRegex, T().exHistPh);
+  const aggs: Agg[] = [uniq, hist];
+  const histDetails = h("details", { class: "ex-agg" });
 
-  const timeInput = h("input", { class: "ex-input mono", placeholder: "epoch / ISO / 13/Nov/2026:00:00:00 +0000", spellcheck: "false", "aria-label": T().exTimeToConvert });
-  const timeOut = h("dl", { class: "ex-time-out mono", dir: "ltr" });
+  const timeInput = h("input", { class: "ex-input mono", id: "ex-time", placeholder: "epoch / ISO / 13/Nov/2026:00:00:00 +0000 / Nov 18 07:00:07", spellcheck: "false", autocomplete: "off" });
+  const yearInput = h("input", { class: "ex-input mono ex-year", id: "ex-year", type: "number", min: "1970", max: "2100", inputmode: "numeric" });
+  const zoneSel = h("select", { class: "ex-select", id: "ex-zone" }, ...ZONES.map((z) => h("option", { value: z }, zoneLabel(z))));
+  const timeNote = h("p", { class: "ex-muted ex-time-note" });
+  const timeOut = h("dl", { class: "ex-time-out", dir: "ltr" });
 
   /* ---------------------------------------------------------------- worker */
-  const client = new WorkerClient(onMessage, (reason) => {
-    inWorker.clear();
-    showNotice(reason);
-    if (reason.startsWith("regex")) suspendRegex = true;
-    if (file) startLoad(file);
-  });
+  const client = new WorkerClient(onMessage, onRestart);
+
+  function say(text: string, delay = 0): void {
+    if (announceTimer !== null) window.clearTimeout(announceTimer);
+    announceTimer = window.setTimeout(() => {
+      announceTimer = null;
+      announcer.textContent = text;
+    }, delay);
+  }
 
   function showNotice(text: string, tone: "warn" | "info" = "warn"): void {
     notice.hidden = false;
     notice.className = `ex-notice ex-notice-${tone}`;
     notice.textContent = text;
+    say(text);
   }
   function clearNotice(): void {
     notice.hidden = true;
+  }
+
+  function errorText(code: WorkerErrorCode, status: number | undefined, detail: string | undefined): string {
+    switch (code) {
+      case "timeout":
+        return T().exPatternTooSlow;
+      case "http":
+        return T().exLoadFailed(`HTTP ${status ?? "?"}`);
+      case "cancelled":
+        return T().exLoadCancelled;
+      case "notLoaded":
+        return T().exNotLoaded;
+      case "unexpected":
+        return T().exUnexpected(detail ?? "");
+    }
+  }
+
+  function onRestart(reason: RestartReason): void {
+    inWorker.clear();
+    loading = null;
+    if (reason.kind === "timeout") {
+      if (reason.job === filterJob) suspendCulprits();
+      const culprit = aggs.find((a) => a.job === reason.job && a.state === "running");
+      if (culprit) aggFailed(culprit, T().exPatternTooSlow);
+      showNotice(T().exWorkerRestarted, "info");
+    } else {
+      showNotice(T().exWorkerCrashed);
+    }
+    // Aggregations that were merely queued behind the killed job re-run once the file is back.
+    for (const a of aggs) {
+      if (a.state === "running" || a.state === "done") {
+        a.gen = -1;
+        markAggStale(a, T().exAggUpdating);
+      }
+    }
+    renderFileList();
+    if (file) startLoad(file);
   }
 
   function onMessage(msg: WorkerResponse): void {
     switch (msg.type) {
       case "progress":
         if (msg.job !== loadJob) return;
-        progress.hidden = false;
-        progressBar.style.width = msg.total > 0 ? `${Math.min(100, (msg.loaded / msg.total) * 100).toFixed(1)}%` : "30%";
-        progressText.textContent = T().exLoadingOf(fmtBytes(msg.loaded), msg.total > 0 ? fmtBytes(msg.total) : "");
+        paintProgress({ kind: "loading", loaded: msg.loaded, total: msg.total });
         return;
       case "loaded":
         if (msg.job !== loadJob || !file || msg.path !== file.path) return;
-        progress.hidden = true;
+        loading = null;
+        paintProgress({ kind: "hidden" });
         inWorker.add(msg.path);
         knownBytes.set(msg.path, msg.bytes);
+        if (msg.year !== null && !yearEdited) {
+          yearFromEvidence = msg.year;
+          renderTime();
+        }
         renderFileList();
         isJson = msg.isJson;
         total = msg.lineCount;
-        if (file.mode === "csv") {
-          headerJob = client.job();
-          client.send({ type: "window", job: headerJob, path: file.path, start: 0, count: 1 });
-        }
+        requestCsvHeader();
         runFilter();
         return;
       case "filtered":
         if (msg.job !== filterJob) return;
         total = msg.total;
         count = msg.count;
-        updateCount();
+        countState = { kind: "done" };
+        setStale(false);
+        paintCount(true);
         winRows = [];
         winStart = 0;
-        spacer.style.height = `${count * ROW_H}px`;
-        if (flashRow >= count) flashRow = -1;
+        cursor = -1;
+        updateSpacer();
         scheduleRender();
+        updateLineButtons();
+        if (pendingLine !== null) {
+          locateLine(pendingLine, true);
+          pendingLine = null;
+        } else if (cursorLine >= 0) {
+          locateLine(cursorLine, false);
+        }
+        for (const a of aggs) {
+          if (a.wanted !== null && (a.state === "done" || a.state === "stale") && a.gen < filterGen) runAgg(a, a.wanted, false);
+        }
         return;
       case "window":
         if (msg.job === headerJob) {
           csvHeader = parseCsvLine(msg.rows[0]?.[1] ?? "");
-          renderCsvHead();
+          paintHeader();
+          scheduleRender();
           return;
         }
         if (msg.job !== windowJob) return;
-        pendingWindow = false;
         winStart = msg.start;
         winRows = msg.rows;
         renderRows();
         return;
+      case "located":
+        if (msg.job !== locateJob) return;
+        if (msg.row >= 0) {
+          cursorLine = msg.line;
+          setCursor(msg.row, false, true);
+        } else {
+          cursorLine = -1;
+          syncHash();
+          updateLineButtons();
+          if (locateIsDeepLink) showNotice(T().exLineHidden(fmtCount(msg.line + 1)), "info");
+        }
+        return;
       case "unique":
-        if (msg.job !== aggJob) return;
+        if (msg.job !== uniq.job) return;
+        uniq.state = "done";
+        markAggStale(uniq, null);
         renderUnique(msg.rows, msg.distinct, msg.matchedLines, msg.more);
         return;
       case "histogram":
-        if (msg.job !== aggJob) return;
+        if (msg.job !== hist.job) return;
+        hist.state = "done";
+        markAggStale(hist, null);
         renderHistogram(msg.result);
         return;
       case "copy":
         if (msg.job !== copyJob) return;
         void copyText(msg.text).then((ok) => {
-          showNotice(ok ? T().exCopied(fmtCount(msg.count), msg.capped) : T().exClipBlocked, ok ? "info" : "warn");
+          if (!ok) showNotice(T().exClipBlocked);
+          else if (copyKind === "line") {
+            flashButton(copyLineBtn);
+            showNotice(T().exCopiedLine(fmtCount(cursorLine + 1)), "info");
+          } else {
+            flashButton(copyBtn);
+            showNotice(fillText(T().exCopied(plural(msg.count), msg.capped), { n: fmtCount(msg.count) }), "info");
+          }
         });
         return;
-      case "error":
-        if (msg.notLoaded && file) {
-          inWorker.delete(file.path);
-          startLoad(file);
+      case "error": {
+        if (msg.code === "notLoaded") {
+          if (file && loading !== file.path) {
+            inWorker.delete(file.path);
+            startLoad(file);
+          }
           return;
         }
         if (msg.job === loadJob) {
-          progress.hidden = true;
-          showNotice(msg.cancelled ? T().exLoadCancelled : T().exLoadFailed(msg.message));
+          loading = null;
+          paintProgress(msg.code === "cancelled" ? { kind: "cancelled" } : { kind: "failed", message: errorText(msg.code, msg.status, msg.detail) });
+          countState = { kind: "notLoaded" };
+          paintCount(false);
           return;
         }
         if (msg.job === filterJob) {
-          count = 0;
-          updateCount();
+          if (msg.code === "timeout" && suspendCulprits()) {
+            runFilter();
+            return;
+          }
+          countState = { kind: "failed" };
+          setStale(true);
+          paintCount(false);
+          showNotice(errorText(msg.code, msg.status, msg.detail));
+          return;
         }
-        showNotice(msg.message === "regex took too long" ? T().exRegexSlow : msg.message);
-        if (msg.job === aggJob) {
-          uniqOut.replaceChildren();
-          histOut.replaceChildren();
+        const agg = aggs.find((a) => a.job === msg.job);
+        if (agg) {
+          aggFailed(agg, errorText(msg.code, msg.status, msg.detail));
+          return;
         }
+        showNotice(errorText(msg.code, msg.status, msg.detail));
         return;
+      }
     }
+  }
+
+  /* ---------------------------------------------------------------- loading */
+  function paintProgress(p: Progress): void {
+    progress.hidden = p.kind === "hidden";
+    cancelBtn.hidden = p.kind !== "loading";
+    retryBtn.hidden = p.kind === "loading" || p.kind === "hidden";
+    progressTrack.hidden = p.kind !== "loading";
+    progress.classList.toggle("is-error", p.kind === "failed");
+    if (p.kind === "loading") {
+      // Only a known, consistent total gives a real bar; otherwise say so with an indeterminate one.
+      const known = p.total > 0 && p.loaded <= p.total;
+      progressTrack.classList.toggle("is-indeterminate", !known);
+      progressBar.style.width = known ? `${((p.loaded / p.total) * 100).toFixed(1)}%` : "";
+      if (known) {
+        progressTrack.setAttribute("aria-valuemin", "0");
+        progressTrack.setAttribute("aria-valuemax", "100");
+        progressTrack.setAttribute("aria-valuenow", String(Math.round((p.loaded / p.total) * 100)));
+      } else {
+        progressTrack.removeAttribute("aria-valuenow");
+      }
+      const loaded = p.loaded > 0 ? fmtBytes(p.loaded) : "";
+      progressText.replaceChildren(...(loaded === ""
+        ? [document.createTextNode(T().exLoading)]
+        : fill(T().exLoadingOf(known), { loaded: num(loaded), total: num(known ? fmtBytes(p.total) : "") })));
+    } else if (p.kind === "cancelled") {
+      progressText.textContent = T().exLoadCancelled;
+    } else if (p.kind === "failed") {
+      progressText.textContent = p.message;
+    }
+  }
+
+  function startLoad(f: EvidenceFile): void {
+    loadJob = client.job();
+    loading = f.path;
+    paintProgress({ kind: "loading", loaded: 0, total: 0 });
+    countState = { kind: "loading" };
+    paintCount(false);
+    client.send({ type: "load", job: loadJob, path: f.path, url: evidenceUrl(c.id, f.path) });
+  }
+
+  function requestCsvHeader(): void {
+    if (!file || file.mode !== "csv") return;
+    headerJob = client.job();
+    client.send({ type: "window", job: headerJob, path: file.path, start: 0, count: 1 });
   }
 
   /* ---------------------------------------------------------------- files */
@@ -208,11 +520,16 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     fileList.replaceChildren(
       ...EVIDENCE_FILES.map((f) => {
         const bytes = knownBytes.get(f.path);
+        const size = bytes !== undefined ? fmtBytes(bytes) : f.size;
+        const active = file?.path === f.path;
         const btn = h(
           "button",
-          { class: `ex-file${file?.path === f.path ? " is-active" : ""}`, type: "button", "aria-current": file?.path === f.path ? "true" : null },
-          h("span", { class: "ex-file-name mono" }, f.path),
-          h("span", { class: "ex-file-meta" }, bytes !== undefined ? fmtBytes(bytes) : f.size, inWorker.has(f.path) ? T().exLoadedTag : ""),
+          { class: `ex-file${active ? " is-active" : ""}`, type: "button", "aria-current": active ? "true" : null },
+          h("span", { class: "ex-file-name mono", dir: "ltr" }, f.path),
+          h("span", { class: "ex-file-meta" },
+            f.format !== "" ? h("span", {}, f.format) : null,
+            size !== "" ? [f.format !== "" ? " · " : "", num(size)] : null,
+            inWorker.has(f.path) ? [h("span", { class: "ex-dot", "aria-hidden": "true" }), h("span", {}, T().exLoadedTag)] : null),
           h("span", { class: "ex-file-desc" }, f.description),
         );
         btn.addEventListener("click", () => {
@@ -225,131 +542,336 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     );
   }
 
+  function setEnabled(on: boolean): void {
+    controlsSet.disabled = !on;
+    aggSet.disabled = !on;
+    for (const b of actionButtons) b.disabled = !on;
+    wrapCb.disabled = !on;
+    if (on) updateLineButtons();
+  }
+
+  function renderEmpty(): void {
+    const readme = EVIDENCE_FILES.find((f) => f.path === "README_FIRST.txt");
+    const open = readme ? h("button", { class: "btn btn-primary", type: "button" }, T().exOpenReadme) : null;
+    open?.addEventListener("click", () => {
+      if (readme) selectFile(readme);
+    });
+    rowsLayer.replaceChildren(h("div", { class: "ex-empty-card", role: "listitem" },
+      h("p", { class: "ex-empty-title" }, T().exEmptyTitle),
+      h("p", {}, T().exEmptyBody),
+      readme ? h("p", {}, T().exEmptyReadme) : null,
+      open));
+  }
+
   function selectFile(f: EvidenceFile): void {
-    if (file?.path === f.path) return;
-    if (file && file.path !== f.path) client.send({ type: "cancelLoad", path: file.path });
+    if (file?.path === f.path) {
+      // Re-picking the active file retries a cancelled or failed load (it used to do nothing).
+      if (!inWorker.has(f.path) && loading !== f.path) startLoad(f);
+      return;
+    }
+    if (file && loading === file.path) client.send({ type: "cancelLoad", path: file.path });
+    loading = null;
     file = f;
     title.textContent = f.path;
+    title.setAttribute("dir", "ltr");
+    fileFormat.textContent = f.format;
     csvHeader = [];
-    csvHead.hidden = f.mode !== "csv";
     jsonBar.hidden = f.mode !== "json";
     count = 0;
     total = 0;
     winRows = [];
-    spacer.style.height = "0px";
+    cursor = -1;
+    if (pendingLine === null) cursorLine = -1;
     viewport.scrollTop = 0;
+    viewport.scrollLeft = 0;
     rowsLayer.replaceChildren();
+    paintHeader();
+    updateSpacer();
     clearNotice();
+    setStale(false);
+    setEnabled(true);
+    renderPresets(f);
     renderFileList();
     syncHash();
     if (inWorker.has(f.path)) {
+      paintProgress({ kind: "hidden" });
       loadJob = client.job();
       isJson = f.mode === "json";
-      if (f.mode === "csv") {
-        headerJob = client.job();
-        client.send({ type: "window", job: headerJob, path: f.path, start: 0, count: 1 });
-      }
+      requestCsvHeader();
       runFilter();
     } else startLoad(f);
   }
 
-  function startLoad(f: EvidenceFile): void {
-    loadJob = client.job();
-    progress.hidden = false;
-    progressBar.style.width = "0%";
-    progressText.textContent = T().exLoading;
-    countEl.textContent = "";
-    client.send({ type: "load", job: loadJob, path: f.path, url: evidenceUrl(c.id, f.path) });
+  function renderPresets(f: EvidenceFile): void {
+    const fp = filterPresetsFor(f.profile);
+    presetsRow.hidden = fp.length === 0;
+    presets.replaceChildren(...fp.map((p) => {
+      const chip = h("button", { class: "ex-chip", type: "button", title: `${p.kind}: ${p.text}` }, p.label);
+      chip.addEventListener("click", () => addStep(p.kind, p.text));
+      return chip;
+    }));
+    resetAgg(uniq, uniquePresetsFor(f.profile));
+    const hp = histogramPresetsFor(f.profile);
+    resetAgg(hist, hp);
+    histDetails.open = hp.length > 0 && f.profile !== "text";
   }
 
   /* ---------------------------------------------------------------- filters */
   function effectiveSteps(): FilterStep[] {
-    return steps.filter((s) => !(suspendRegex && s.kind === "regex"));
+    return steps.filter((s) => !ui(s).slow);
+  }
+
+  function stepNo(s: FilterStep): number {
+    return steps.indexOf(s) + 1;
+  }
+
+  /** Marks the regex step(s) that blew the time budget as not applied. Returns false when none could be blamed. */
+  function suspendCulprits(): boolean {
+    const regexes = sentSteps.filter((s) => s.kind === "regex" && s.text !== "" && steps.includes(s));
+    if (regexes.length === 0) return false;
+    // The pipeline ran fine before the last edit, so the edited step is the one to blame when it is a regex.
+    const culprits = lastEdited !== null && regexes.includes(lastEdited) ? [lastEdited] : regexes;
+    for (const s of culprits) ui(s).slow = true;
+    paintSteps();
+    return true;
   }
 
   function runFilter(): void {
     if (!file || !inWorker.has(file.path)) return;
+    let firstBad: FilterStep | null = null;
     for (const s of steps) {
-      if (s.kind === "regex" && s.text !== "") {
-        const err = regexError(s.text);
-        if (err) {
-          showNotice(T().exInvalidRegex(err));
-          return;
-        }
-      }
+      const u = ui(s);
+      u.error = s.kind === "regex" && s.text !== "" ? regexError(s.text) : null;
+      if (u.error !== null && firstBad === null) firstBad = s;
     }
+    paintSteps();
+    if (firstBad !== null) {
+      filterJob = client.job(); // any reply still in flight no longer matches the pipeline
+      countState = { kind: "invalid", step: stepNo(firstBad) };
+      setStale(true);
+      paintCount(true);
+      for (const a of aggs) if (a.state === "done") markAggStale(a, T().exAggPipelineInvalid);
+      return;
+    }
+    filterGen++;
     filterJob = client.job();
-    countEl.textContent = T().exFiltering;
-    const hasRegex = effectiveSteps().some((s) => s.kind === "regex" && s.text !== "");
-    client.send({ type: "filter", job: filterJob, path: file.path, steps: effectiveSteps(), json: file.mode === "json" ? json : null }, hasRegex ? HARD_TIMEOUT_MS : 0);
+    sentSteps = effectiveSteps();
+    countState = { kind: "filtering" };
+    paintCount(false);
+    for (const a of aggs) if (a.state === "done") markAggStale(a, T().exAggUpdating);
+    const hasRegex = sentSteps.some((s) => s.kind === "regex" && s.text !== "");
+    client.send(
+      {
+        type: "filter",
+        job: filterJob,
+        path: file.path,
+        steps: sentSteps.map((s) => ({ kind: s.kind, text: s.text, ci: s.ci })),
+        json: file.mode === "json" ? json : null,
+        skipHeader: file.mode === "csv",
+      },
+      hasRegex ? HARD_TIMEOUT_MS : 0,
+    );
   }
 
   function scheduleFilter(): void {
+    paintBadge();
+    // Results computed for the old pipeline are marked at once, not only when the debounced filter runs.
+    for (const a of aggs) if (a.state === "done") markAggStale(a, T().exAggUpdating);
     if (debounce !== null) window.clearTimeout(debounce);
     debounce = window.setTimeout(() => {
       debounce = null;
-      suspendRegex = false;
       clearNotice();
       syncHash();
       runFilter();
     }, DEBOUNCE_MS);
   }
 
-  function updateCount(): void {
-    countEl.textContent = T().exCountOf(fmtCount(count), fmtCount(total));
+  function setStale(on: boolean): void {
+    view.classList.toggle("is-stale", on);
+    staleStrip.hidden = !on;
+  }
+
+  function paintCount(announce: boolean): void {
+    const t = T();
+    countEl.className = "ex-count";
+    switch (countState.kind) {
+      case "none":
+        countEl.replaceChildren();
+        return;
+      case "loading":
+        countEl.textContent = t.exLoading;
+        return;
+      case "notLoaded":
+        countEl.textContent = t.exNotLoaded;
+        return;
+      case "filtering":
+        countEl.textContent = t.exFiltering;
+        return;
+      case "failed":
+        countEl.classList.add("is-warn");
+        countEl.textContent = t.exFilterFailed;
+        return;
+      case "invalid": {
+        countEl.classList.add("is-warn");
+        const n = String(countState.step);
+        countEl.replaceChildren(...fill(t.exPipelineInvalid, { n: num(n) }));
+        if (announce) say(fillText(t.exPipelineInvalid, { n }), ANNOUNCE_MS);
+        return;
+      }
+      case "done": {
+        const vals = { c: fmtCount(count), t: fmtCount(total) };
+        const nodes = fill(t.exCountOf(plural(total)), { c: num(vals.c), t: num(vals.t) });
+        let spoken = fillText(t.exCountOf(plural(total)), vals);
+        const slow = steps.filter((s) => ui(s).slow).map(stepNo);
+        if (slow.length > 0) {
+          countEl.classList.add("is-warn");
+          const list = slow.join(", ");
+          nodes.push(document.createTextNode(" · "), ...fill(t.exStepsNotApplied(plural(slow.length)), { n: num(list) }));
+          spoken += ` · ${fillText(t.exStepsNotApplied(plural(slow.length)), { n: list })}`;
+        }
+        countEl.replaceChildren(...nodes);
+        // Polite, and only once the count has settled: typing a filter must not chatter.
+        if (announce) say(spoken, ANNOUNCE_MS);
+        return;
+      }
+    }
+  }
+
+  function paintBadge(): void {
+    const active = steps.filter((s) => s.text !== "").length + (json && file?.mode === "json" ? 1 : 0);
+    filtersBadge.textContent = active > 0 ? String(active) : "";
+    filtersBadge.hidden = active === 0;
+  }
+
+  function paintSteps(): void {
+    const t = T();
+    for (const s of steps) {
+      const els = stepEls.get(s);
+      if (!els) continue;
+      const u = ui(s);
+      const msg = u.error !== null ? t.exInvalidRegex(u.error) : u.slow ? t.exStepTooSlow : "";
+      els.input.setAttribute("aria-invalid", msg !== "" ? "true" : "false");
+      els.row.classList.toggle("is-invalid", msg !== "");
+      els.row.classList.toggle("is-slow", u.slow && u.error === null);
+      els.err.hidden = msg === "";
+      if (els.err.textContent !== msg) els.err.textContent = msg;
+    }
+  }
+
+  function edited(step: FilterStep): void {
+    lastEdited = step;
+    ui(step).slow = false; // an edited step gets another chance
+    scheduleFilter();
   }
 
   function renderPipeline(): void {
+    const t = T();
+    stepEls.clear();
     pipeline.replaceChildren(
       ...steps.map((step, idx) => {
-        const kind = h("select", { class: "ex-select", "aria-label": T().exFilterType },
-          h("option", { value: "contains" }, T().exContains),
-          h("option", { value: "not" }, T().exNotContains),
+        const n = String(idx + 1);
+        const errId = `ex-step-${n}-err`;
+        const kind = h("select", { class: "ex-select", "aria-label": fillText(t.exStepType, { n }) },
+          h("option", { value: "contains" }, t.exContains),
+          h("option", { value: "not" }, t.exNotContains),
           h("option", { value: "regex" }, "regex"));
         kind.value = step.kind;
-        kind.addEventListener("change", () => {
-          step.kind = kind.value === "not" ? "not" : kind.value === "regex" ? "regex" : "contains";
-          scheduleFilter();
+        const input = h("input", {
+          class: "ex-input mono",
+          placeholder: idx === 0 ? t.exTypeToFilter : t.exAndThen,
+          spellcheck: "false",
+          autocomplete: "off",
+          "aria-label": fillText(t.exStepText, { n }),
+          "aria-describedby": errId,
+          "aria-invalid": "false",
         });
-        const input = h("input", { class: "ex-input mono", placeholder: idx === 0 ? T().exTypeToFilter : T().exAndThen, spellcheck: "false", "aria-label": T().exFilterText });
         input.value = step.text;
         input.addEventListener("input", () => {
           step.text = input.value;
-          scheduleFilter();
+          edited(step);
+        });
+        input.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter") return;
+          if (debounce !== null) window.clearTimeout(debounce);
+          debounce = null;
+          clearNotice();
+          syncHash();
+          runFilter();
         });
         const ci = h("input", { type: "checkbox" });
         ci.checked = step.ci;
+        kind.addEventListener("change", () => {
+          step.kind = kind.value === "not" ? "not" : kind.value === "regex" ? "regex" : "contains";
+          // Same default as a freshly added step, so both routes to a regex step mean the same thing.
+          step.ci = step.kind !== "regex";
+          ci.checked = step.ci;
+          edited(step);
+        });
         ci.addEventListener("change", () => {
           step.ci = ci.checked;
-          scheduleFilter();
+          edited(step);
         });
-        const remove = h("button", { class: "btn btn-sm btn-ghost", type: "button", "aria-label": T().exRemoveFilter }, "×");
+        const remove = h("button", { class: "btn btn-sm btn-ghost ex-remove", type: "button", "aria-label": fillText(t.exRemoveStep, { n }) }, "×");
         remove.addEventListener("click", () => {
           steps.splice(idx, 1);
           if (steps.length === 0) steps.push({ kind: "contains", text: "", ci: true });
           renderPipeline();
           scheduleFilter();
         });
-        return h("div", { class: "ex-step" }, idx > 0 ? h("span", { class: "ex-pipe mono" }, "|") : null, kind, input,
-          h("label", { class: "ex-ci" }, ci, T().exIgnoreCase), remove);
+        const err = h("p", { class: "ex-step-err", id: errId, role: "alert", hidden: true });
+        const row = h("div", { class: "ex-step", role: "group", "aria-label": fillText(t.exStep, { n }) },
+          h("div", { class: "ex-step-line" },
+            idx > 0 ? h("span", { class: "ex-pipe mono", "aria-hidden": "true" }, "|") : null,
+            kind, input, h("label", { class: "ex-ci" }, ci, t.exIgnoreCase), remove),
+          err);
+        stepEls.set(step, { row, input, err });
+        return row;
       }),
       (() => {
-        const add = h("button", { class: "btn btn-sm", type: "button" }, T().exAddFilter);
+        const add = h("button", { class: "btn btn-sm", type: "button" }, t.exAddFilter);
         add.addEventListener("click", () => addStep("contains", ""));
         return add;
       })(),
     );
+    paintSteps();
+    paintBadge();
   }
 
   function addStep(kind: StepKind, text: string): void {
     const last = steps[steps.length - 1];
     if (last && last.text === "") steps.pop();
-    steps.push({ kind, text, ci: kind !== "regex" });
+    const step: FilterStep = { kind, text, ci: kind !== "regex" };
+    steps.push(step);
+    lastEdited = step;
     renderPipeline();
     scheduleFilter();
   }
 
   /* ---------------------------------------------------------------- virtual list */
+  function headerCells(): string[] | null {
+    if (!file) return null;
+    if (file.mode === "csv" && csvHeader.length > 0) return csvHeader;
+    if (isJson && cols.length > 0) return cols;
+    return null;
+  }
+
+  /** The column header lives INSIDE the scroller (sticky top), so it scrolls sideways with its columns. */
+  function paintHeader(): void {
+    const cells = headerCells();
+    headEl.hidden = cells === null;
+    headH = cells === null ? 0 : ROW_H;
+    const wide = file?.mode !== "csv";
+    if (cells) {
+      headEl.replaceChildren(h("span", { class: "ex-ln" }, "#"),
+        ...cells.map((name) => h("span", { class: `ex-cell${wide ? " ex-cell-wide" : ""}`, title: name }, name)));
+    }
+    updateSpacer();
+  }
+
+  function updateSpacer(): void {
+    spacer.style.height = wrap ? `${count * avgH + viewport.clientHeight * 0.5}px` : `${count * ROW_H}px`;
+  }
+
   function scheduleRender(): void {
     if (raf) return;
     raf = window.requestAnimationFrame(() => {
@@ -358,56 +880,101 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     });
   }
 
+  function firstVisibleRow(): number {
+    return Math.min(count - 1, Math.max(0, Math.floor(viewport.scrollTop / (wrap ? avgH : ROW_H))));
+  }
+
   function renderRows(): void {
-    if (!file) return;
-    const first = Math.floor(viewport.scrollTop / ROW_H);
-    const visible = Math.ceil(viewport.clientHeight / ROW_H) + 2;
+    if (!file) {
+      renderEmpty();
+      return;
+    }
+    if (count === 0) {
+      rowsLayer.style.transform = `translateY(${headH}px)`;
+      rowsLayer.replaceChildren(...(countState.kind === "done" && total > 0 ? [h("div", { class: "ex-empty", role: "listitem" }, T().exNoMatch)] : []));
+      return;
+    }
+    const hadFocus = rowsLayer.contains(document.activeElement);
+    const pos = viewport.scrollTop / (wrap ? avgH : ROW_H);
+    const first = Math.min(count - 1, Math.floor(pos));
+    const visible = Math.ceil((viewport.clientHeight - headH) / ROW_H) + 2;
     const last = Math.min(count, first + visible);
     const haveAll = first >= winStart && last <= winStart + winRows.length;
-    if (!haveAll && count > 0 && !pendingWindow) {
-      pendingWindow = true;
-      windowJob = client.job();
-      client.send({ type: "window", job: windowJob, path: file.path, start: Math.max(0, first - 60), count: visible + 120 });
-    } else if (!haveAll && pendingWindow) {
-      // a request is in flight; re-check once it lands
+    if (!haveAll) {
+      // one request in flight at a time; a newer position just re-targets it
       windowJob = client.job();
       client.send({ type: "window", job: windowJob, path: file.path, start: Math.max(0, first - 60), count: visible + 120 });
     }
-    rowsLayer.style.transform = `translateY(${first * ROW_H}px)`;
     const frag = document.createDocumentFragment();
-    const active = effectiveSteps();
-    for (let r = first; r < last; r++) {
-      const entry = winRows[r - winStart];
-      frag.appendChild(renderRow(r, entry, active));
-    }
+    const active = sentSteps.filter((s) => !ui(s).slow);
+    for (let r = first; r < last; r++) frag.appendChild(renderRow(r, winRows[r - winStart], active));
     rowsLayer.replaceChildren(frag);
-    if (count === 0 && total > 0) rowsLayer.replaceChildren(h("div", { class: "ex-empty" }, T().exNoMatch));
+    if (wrap) {
+      const firstEl = rowsLayer.firstElementChild;
+      const h0 = firstEl instanceof HTMLElement ? firstEl.offsetHeight : ROW_H;
+      rowsLayer.style.transform = `translateY(${headH + viewport.scrollTop - (pos - first) * h0}px)`;
+      const rendered = rowsLayer.children.length;
+      if (rendered >= 5 && haveAll) {
+        const measured = rowsLayer.offsetHeight / rendered;
+        if (Math.abs(measured - avgH) / avgH > 0.3) {
+          const keep = viewport.scrollTop / avgH;
+          avgH = Math.max(ROW_H, measured);
+          updateSpacer();
+          viewport.scrollTop = keep * avgH;
+        }
+      }
+    } else {
+      rowsLayer.style.transform = `translateY(${headH + first * ROW_H}px)`;
+    }
+    if (cursor >= first && cursor < last) {
+      const el = rowsLayer.children[cursor - first];
+      if (el instanceof HTMLElement && (hadFocus || focusCursor)) {
+        el.focus({ preventScroll: true });
+        focusCursor = false;
+      }
+    }
   }
 
   function renderRow(r: number, entry: [number, string] | undefined, active: FilterStep[]): HTMLElement {
-    const row = h("div", { class: `ex-row${r === flashRow ? " is-flash" : ""}` });
+    const isCursor = r === cursor;
+    const row = h("div", {
+      class: `ex-row${isCursor ? " is-cursor" : ""}`,
+      role: "listitem",
+      tabindex: "-1",
+      "aria-posinset": String(r + 1),
+      "aria-setsize": String(count),
+      "data-row": String(r),
+    });
     if (!entry) {
       row.appendChild(h("span", { class: "ex-ln" }, "…"));
       return row;
     }
     const [lineIdx, text] = entry;
+    if (isCursor && cursorLine !== lineIdx) {
+      cursorLine = lineIdx;
+      syncHash();
+      updateLineButtons();
+    }
     row.appendChild(h("span", { class: "ex-ln" }, String(lineIdx + 1)));
-    if (file?.mode === "csv" && csvHeader.length > 0 && lineIdx > 0) {
+    if (file?.mode === "csv" && csvHeader.length > 0) {
       for (const cell of parseCsvLine(text)) {
-        const c = h("span", { class: "ex-cell" }, cell);
+        const el = h("span", { class: `ex-cell${cell === "" ? " is-blank" : ""}`, title: cell }, cell === "" ? "—" : cell);
         if (isEpochSeconds(cell)) {
           const ms = Number(cell) * 1000;
-          c.title = `${formatInZone(ms, "UTC")}\n${formatInZone(ms, ZONE)}`;
-          c.classList.add("is-epoch");
+          el.title = `${cell}\n${formatInZone(ms, "UTC")}`;
+          el.classList.add("is-epoch");
         }
-        row.appendChild(c);
+        row.appendChild(el);
       }
       return row;
     }
     if (isJson && cols.length > 0) {
       const obj = parseJsonLine(text);
       if (obj !== undefined) {
-        for (const col of cols) row.appendChild(h("span", { class: "ex-cell ex-cell-wide" }, stringifyField(getJsonField(obj, col))));
+        for (const col of cols) {
+          const v = stringifyField(getJsonField(obj, col));
+          row.appendChild(h("span", { class: "ex-cell ex-cell-wide", title: v }, v));
+        }
         return row;
       }
     }
@@ -424,35 +991,186 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     return row;
   }
 
-  function renderCsvHead(): void {
-    csvHead.replaceChildren(h("span", { class: "ex-ln" }, "#"), ...csvHeader.map((c) => h("span", { class: "ex-cell" }, c)));
+  /** Moves the line cursor (keyboard focus) to view row `r` and scrolls it into view. */
+  function setCursor(r: number, focus: boolean, center = false): void {
+    if (count === 0) return;
+    const next = Math.max(0, Math.min(count - 1, r));
+    if (next !== cursor) cursorLine = -1;
+    cursor = next;
+    focusCursor = focus;
+    const rowH = wrap ? avgH : ROW_H;
+    const vh = viewport.clientHeight - headH;
+    const top = cursor * rowH;
+    if (center) viewport.scrollTop = Math.max(0, top - vh / 3);
+    else if (top < viewport.scrollTop) viewport.scrollTop = top;
+    else if (top + rowH > viewport.scrollTop + vh) viewport.scrollTop = top + rowH - vh;
+    const known = winRows[cursor - winStart];
+    if (known) cursorLine = known[0];
+    syncHash();
+    updateLineButtons();
+    scheduleRender();
   }
 
-  function jumpTo(row: number): void {
-    if (count === 0) return;
-    flashRow = Math.max(0, Math.min(count - 1, row));
-    viewport.scrollTop = Math.max(0, flashRow * ROW_H - viewport.clientHeight / 3);
+  function locateLine(line: number, deepLink: boolean): void {
+    if (!file || !inWorker.has(file.path)) return;
+    locateJob = client.job();
+    locateIsDeepLink = deepLink;
+    client.send({ type: "locate", job: locateJob, path: file.path, line });
+  }
+
+  function updateLineButtons(): void {
+    const on = file !== null && cursor >= 0 && cursorLine >= 0;
+    copyLineBtn.disabled = !on;
+    linkLineBtn.disabled = !on;
+    const has = file !== null && count > 0;
+    firstBtn.disabled = !has;
+    lastBtn.disabled = !has;
+    copyBtn.disabled = !has;
+  }
+
+  function copyLine(): void {
+    if (!file || cursor < 0 || !inWorker.has(file.path)) return;
+    copyJob = client.job();
+    copyKind = "line";
+    client.send({ type: "copy", job: copyJob, path: file.path, row: cursor });
+  }
+
+  function copyLineLink(): void {
+    if (cursorLine < 0) return;
+    syncHash();
+    void copyText(window.location.href).then((ok) => {
+      if (ok) flashButton(linkLineBtn);
+      showNotice(ok ? T().exLineLinkCopied(fmtCount(cursorLine + 1)) : T().exCopyAddress, "info");
+    });
+  }
+
+  function onViewportKey(e: KeyboardEvent): void {
+    if (!file || count === 0 || e.altKey) return;
+    const page = Math.max(1, Math.floor((viewport.clientHeight - headH) / ROW_H) - 1);
+    const from = cursor >= 0 ? cursor : firstVisibleRow();
+    let next: number | null = null;
+    switch (e.key) {
+      case "ArrowDown":
+        next = cursor < 0 ? from : from + 1;
+        break;
+      case "ArrowUp":
+        next = cursor < 0 ? from : from - 1;
+        break;
+      case "PageDown":
+        next = from + page;
+        break;
+      case "PageUp":
+        next = from - page;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = count - 1;
+        break;
+    }
+    if (next !== null) {
+      e.preventDefault();
+      setCursor(next, true);
+      return;
+    }
+    if (cursor < 0 || e.target === viewport) return;
+    const noSelection = window.getSelection()?.isCollapsed ?? true;
+    if ((e.key === "c" && !e.ctrlKey && !e.metaKey) || ((e.ctrlKey || e.metaKey) && e.key === "c" && noSelection)) {
+      e.preventDefault();
+      copyLine();
+    } else if (e.key === "l" && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      copyLineLink();
+    }
+  }
+
+  function setWrap(on: boolean): void {
+    const keep = firstVisibleRow();
+    wrap = on;
+    wrapCb.checked = on;
+    viewport.classList.toggle("is-wrap", on);
+    avgH = ROW_H * 1.6;
+    updateSpacer();
+    viewport.scrollTop = keep * (wrap ? avgH : ROW_H);
     scheduleRender();
   }
 
   /* ---------------------------------------------------------------- aggregations */
-  function runUnique(): void {
+  function resetAgg(a: Agg, presetsList: PatternPreset[]): void {
+    a.job = 0;
+    a.gen = -1;
+    a.wanted = null;
+    a.state = "idle";
+    a.input.value = presetsList[0]?.pattern ?? "";
+    a.input.setAttribute("aria-invalid", "false");
+    a.err.hidden = true;
+    a.out.replaceChildren(h("p", { class: "ex-muted" }, presetsList.length > 0 ? T().exAggReady : T().exNoTimePreset));
+    markAggStale(a, null);
+    a.chips.replaceChildren(...presetsList.map((p) => {
+      const chip = h("button", { class: "ex-chip", type: "button", title: p.pattern }, p.label);
+      chip.addEventListener("click", () => {
+        a.input.value = p.pattern;
+        runAgg(a, p.pattern);
+      });
+      return chip;
+    }));
+  }
+
+  function markAggStale(a: Agg, text: string | null): void {
+    a.strip.hidden = text === null;
+    a.strip.textContent = text ?? "";
+    a.out.classList.toggle("is-stale", text !== null);
+    if (text !== null && a.state === "done") a.state = "stale";
+  }
+
+  function aggFailed(a: Agg, message: string): void {
+    a.state = "error";
+    a.wanted = null;
+    a.input.setAttribute("aria-invalid", "true");
+    a.err.hidden = false;
+    a.err.textContent = message;
+    markAggStale(a, null);
+    a.out.replaceChildren(h("p", { class: "ex-muted" }, T().exAggNotApplied));
+  }
+
+  function runAgg(a: Agg, pattern: string, announce = true): void {
     if (!file || !inWorker.has(file.path)) return;
-    const pattern = uniqInput.value;
-    const err = regexError(pattern);
-    if (err || pattern === "") {
-      uniqOut.replaceChildren(h("p", { class: "ex-err" }, err ? T().exInvalidRegex(err) : T().exEnterCapture));
+    const err = pattern === "" ? (a.kind === "unique" ? T().exEnterCapture : T().exEnterTs) : regexError(pattern);
+    if (err !== null) {
+      a.state = "error";
+      a.wanted = null;
+      a.input.setAttribute("aria-invalid", "true");
+      a.err.hidden = false;
+      a.err.textContent = pattern === "" ? err : T().exInvalidRegex(err);
+      markAggStale(a, null);
+      a.out.replaceChildren();
       return;
     }
-    aggJob = client.job();
-    uniqOut.replaceChildren(h("p", { class: "ex-muted" }, T().exCounting));
-    client.send({ type: "unique", job: aggJob, path: file.path, pattern, ci: false }, HARD_TIMEOUT_MS);
+    if (countState.kind === "invalid") {
+      a.wanted = pattern;
+      a.state = "stale";
+      markAggStale(a, T().exAggPipelineInvalid);
+      return;
+    }
+    a.input.setAttribute("aria-invalid", "false");
+    a.err.hidden = true;
+    a.job = client.job();
+    a.gen = filterGen;
+    a.wanted = pattern;
+    a.state = "running";
+    a.announce = announce;
+    markAggStale(a, null);
+    a.out.replaceChildren(h("p", { class: "ex-muted" }, a.kind === "unique" ? T().exCounting : T().exBucketing));
+    if (a.kind === "unique") client.send({ type: "unique", job: a.job, path: file.path, pattern, ci: false }, HARD_TIMEOUT_MS);
+    else client.send({ type: "histogram", job: a.job, path: file.path, pattern, year: currentYear().year }, HARD_TIMEOUT_MS);
   }
 
   function renderUnique(rows: Array<[string, number]>, distinct: number, matched: number, more: number): void {
     let sortBy: "count" | "value" = "count";
     let asc = false;
     const tbody = h("tbody");
+    const heads: Array<{ th: HTMLElement; key: "count" | "value" }> = [];
     const paint = (): void => {
       const sorted = [...rows].sort((a, b) => {
         const d = sortBy === "count" ? a[1] - b[1] : a[0].localeCompare(b[0], undefined, { numeric: true });
@@ -460,14 +1178,17 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
       });
       tbody.replaceChildren(
         ...sorted.map(([value, n]) => {
-          const add = h("button", { class: "ex-linkish mono", type: "button", title: T().exAddAsContains }, value === "" ? T().exEmpty : value);
+          const add = h("button", { class: "ex-linkish mono", type: "button", title: T().exAddAsContains, dir: "ltr" }, value === "" ? T().exEmpty : value);
           add.addEventListener("click", () => addStep("contains", value));
           return h("tr", {}, h("td", {}, add), h("td", { class: "num mono" }, fmtCount(n)));
         }),
       );
+      for (const hd of heads) hd.th.setAttribute("aria-sort", hd.key === sortBy ? (asc ? "ascending" : "descending") : "none");
     };
-    const th = (label: string, key: "count" | "value"): HTMLElement => {
+    const th = (label: string, key: "count" | "value", cls: string): HTMLElement => {
       const b = h("button", { class: "ex-th", type: "button" }, label);
+      const cell = h("th", { scope: "col", class: cls }, b);
+      heads.push({ th: cell, key });
       b.addEventListener("click", () => {
         if (sortBy === key) asc = !asc;
         else {
@@ -476,67 +1197,141 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
         }
         paint();
       });
-      return h("th", {}, b);
+      return cell;
     };
+    const thead = h("thead", {}, h("tr", {}, th(T().exValue, "value", "ex-th-start"), th(T().exCountCol, "count", "num")));
     paint();
-    uniqOut.replaceChildren(
-      h("p", { class: "ex-big" }, h("strong", { class: "mono" }, fmtCount(distinct)), T().exDistinctIn(fmtCount(matched))),
-      h("div", { class: "ex-table-wrap" }, h("table", { class: "ex-table" }, h("thead", {}, h("tr", {}, th(T().exValue, "value"), th(T().exCountCol, "count"))), tbody)),
-      ...(more > 0 ? [h("p", { class: "ex-muted" }, T().exMore(fmtCount(more)))] : []),
+    const d = fmtCount(distinct);
+    const m = fmtCount(matched);
+    uniq.out.replaceChildren(
+      h("p", { class: "ex-big" }, ...fill(T().exDistinctIn(plural(distinct), plural(matched)), { d: h("strong", { class: "ex-num" }, d), m: num(m) })),
+      h("div", { class: "ex-table-wrap" }, h("table", { class: "ex-table" }, thead, tbody)),
+      ...(more > 0 ? [h("p", { class: "ex-muted" }, ...fill(T().exMore, { n: num(fmtCount(more)) }))] : []),
     );
+    if (uniq.announce) say(fillText(T().exDistinctIn(plural(distinct), plural(matched)), { d, m }));
   }
 
-  function runHistogram(): void {
-    if (!file || !inWorker.has(file.path)) return;
-    const pattern = histInput.value;
-    const err = regexError(pattern);
-    if (err || pattern === "") {
-      histOut.replaceChildren(h("p", { class: "ex-err" }, err ? T().exInvalidRegex(err) : T().exEnterTs));
-      return;
-    }
-    aggJob = client.job();
-    histOut.replaceChildren(h("p", { class: "ex-muted" }, T().exBucketing));
-    client.send({ type: "histogram", job: aggJob, path: file.path, pattern }, HARD_TIMEOUT_MS);
+  function stepLabel(step: number): string {
+    const t = T();
+    if (step % 1440 === 0) return step === 1440 ? t.exPerDay : fillText(t.exPerDays, { n: String(step / 1440) });
+    if (step % 60 === 0) return step === 60 ? t.exPerHour : fillText(t.exPerHours, { n: String(step / 60) });
+    return step === 1 ? t.exPerMinute : fillText(t.exPerMinutes, { n: String(step) });
   }
 
   function renderHistogram(result: HistogramResult): void {
-    const max = result.buckets.reduce((m, b) => Math.max(m, b.count), 0);
-    if (result.buckets.length === 0) {
-      histOut.replaceChildren(h("p", { class: "ex-muted" }, T().exNoLineMatched));
-      return;
+    const series = timeSeries(result.minutes);
+    const parts: HTMLElement[] = [];
+    if (series) parts.push(...renderChart(series));
+    if (result.buckets.length > 0) {
+      const max = result.buckets.reduce((acc, b) => Math.max(acc, b.count), 0);
+      parts.push(h("p", { class: "ex-muted" }, series ? T().exHistSomeKeys : T().exHistNoTimes),
+        h("div", { class: "ex-hist" },
+          ...result.buckets.map((b) => {
+            const bar = h("span", { class: "ex-bar" });
+            bar.style.width = `${max > 0 ? (b.count / max) * 100 : 0}%`;
+            return h("div", { class: "ex-hist-row" }, h("span", { class: "ex-hist-key mono", title: b.key }, b.key), h("span", { class: "ex-bar-track" }, bar), h("span", { class: "ex-hist-n mono" }, fmtCount(b.count)));
+          })));
+      if (result.truncated) parts.push(h("p", { class: "ex-muted" }, T().exHistCapped));
     }
-    histOut.replaceChildren(
-      h("p", { class: "ex-muted" }, T().exBuckets(fmtCount(result.buckets.length), result.truncated, fmtCount(max))),
-      h("div", { class: "ex-hist" },
-        ...result.buckets.map((b) => {
-          const bar = h("span", { class: "ex-bar" });
-          bar.style.width = `${max > 0 ? (b.count / max) * 100 : 0}%`;
-          return h("div", { class: "ex-hist-row" }, h("span", { class: "ex-hist-key mono" }, b.key), h("span", { class: "ex-bar-track" }, bar), h("span", { class: "ex-hist-n mono" }, fmtCount(b.count)));
-        })),
-    );
+    if (parts.length === 0) parts.push(h("p", { class: "ex-muted" }, T().exNoLineMatched));
+    hist.out.replaceChildren(...parts);
+  }
+
+  function renderChart(s: TimeSeries): HTMLElement[] {
+    const t = T();
+    const n = s.counts.length;
+    const max = Math.max(1, s.peak.count);
+    const stepMs = s.step * 60_000;
+    const per = stepLabel(s.step);
+    const peakAt = fmtBucket(s.peak.at);
+    const summary = fillText(t.exHistSummary(plural(s.total)), { per, total: fmtCount(s.total), n: fmtCount(n) });
+    const peakText = fillText(t.exHistPeak, { n: fmtCount(s.peak.count), at: peakAt });
+    const gapText = s.gap ? fillText(t.exHistGap(plural(s.gap.buckets)), { from: fmtBucket(s.gap.from), to: fmtBucket(s.gap.to), k: fmtCount(s.gap.buckets) }) : t.exHistNoGap;
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", `0 0 ${n} 100`);
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("class", "ex-chart");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", `${summary}. ${peakText}. ${gapText}.`);
+    for (let i = 0; i < n; i++) {
+      const v = s.counts[i] ?? 0;
+      if (v === 0) continue;
+      const hgt = Math.max(1.5, (v / max) * 100);
+      const rect = document.createElementNS(SVG_NS, "rect");
+      rect.setAttribute("x", String(i + 0.08));
+      rect.setAttribute("width", "0.84");
+      rect.setAttribute("y", String(100 - hgt));
+      rect.setAttribute("height", String(hgt));
+      const tip = document.createElementNS(SVG_NS, "title");
+      tip.textContent = `${fmtBucket(s.start + i * stepMs)} · ${fmtCount(v)}`;
+      rect.appendChild(tip);
+      svg.appendChild(rect);
+    }
+    const end = s.start + (n - 1) * stepMs;
+    const mid = s.start + Math.floor((n - 1) / 2) * stepMs;
+    const rowsTable = s.counts.map((v, i) => h("tr", {}, h("td", { class: "mono" }, fmtBucket(s.start + i * stepMs)), h("td", { class: "num mono" }, fmtCount(v))));
+    return [
+      h("p", { class: "ex-muted" }, ...fill(t.exHistSummary(plural(s.total)), { per, total: num(fmtCount(s.total)), n: num(fmtCount(n)) })),
+      h("div", { class: "ex-chart-wrap", dir: "ltr" },
+        h("div", { class: "ex-yaxis mono", "aria-hidden": "true" }, h("span", {}, fmtCount(s.peak.count)), h("span", {}, "0")),
+        h("div", { class: "ex-chart-box" }, svg,
+          h("div", { class: "ex-xaxis mono", "aria-hidden": "true" }, h("span", {}, fmtBucket(s.start)), n > 2 ? h("span", {}, fmtBucket(mid)) : null, h("span", {}, fmtBucket(end))))),
+      h("p", { class: "ex-hist-take" }, ...fill(t.exHistPeak, { n: num(fmtCount(s.peak.count)), at: num(peakAt) }), " · ",
+        ...(s.gap ? fill(t.exHistGap(plural(s.gap.buckets)), { from: num(fmtBucket(s.gap.from)), to: num(fmtBucket(s.gap.to)), k: num(fmtCount(s.gap.buckets)) }) : [document.createTextNode(t.exHistNoGap)])),
+      h("p", { class: "ex-muted" }, t.exHistWallClock),
+      h("details", { class: "ex-hist-table" }, h("summary", {}, t.exHistAsTable),
+        h("div", { class: "ex-table-wrap" }, h("table", { class: "ex-table" },
+          h("thead", {}, h("tr", {}, h("th", { scope: "col", class: "ex-th-start" }, t.exTimeCol), h("th", { scope: "col", class: "num" }, t.exCountCol))),
+          h("tbody", {}, ...rowsTable)))),
+    ];
   }
 
   /* ---------------------------------------------------------------- time */
+  function currentYear(): { year: number; source: string } {
+    const typed = Number(yearInput.value);
+    if (yearEdited && Number.isInteger(typed) && typed >= 1970 && typed <= 2100) return { year: typed, source: T().exYearYours };
+    if (yearFromEvidence !== null) return { year: yearFromEvidence, source: T().exYearEvidence };
+    return { year: new Date().getUTCFullYear(), source: T().exYearToday };
+  }
+
   function renderTime(): void {
-    const ms = parseTimeInput(timeInput.value);
-    if (timeInput.value.trim() === "") {
+    const y = currentYear();
+    if (!yearEdited) yearInput.value = String(y.year);
+    const raw = timeInput.value;
+    timeNote.replaceChildren();
+    if (raw.trim() === "") {
       timeOut.replaceChildren();
       return;
     }
+    const yearless = isYearless(raw);
+    let ms = parseTimeInput(raw, yearless ? y.year : null);
     if (ms === null) {
       timeOut.replaceChildren(h("dd", { class: "ex-err" }, T().exBadFormat));
       return;
     }
+    const notes: Node[] = [];
+    if (yearless) notes.push(...fill(T().exYearAssumed, { y: num(String(y.year)), src: y.source }));
+    if (isZoneless(raw)) {
+      const zone = zoneSel.value;
+      if (zone !== "UTC") ms = wallClockToUtc(ms, zone);
+      if (notes.length > 0) notes.push(document.createTextNode(" "));
+      notes.push(...fill(T().exZoneAssumed, { z: num(zoneLabel(zone)) }));
+    }
+    timeNote.replaceChildren(...notes);
+    const value = ms;
     timeOut.replaceChildren(
-      h("dt", {}, "UTC"), h("dd", {}, formatInZone(ms, "UTC")),
-      h("dt", {}, T().exJerusalem), h("dd", {}, formatInZone(ms, ZONE)),
-      h("dt", {}, "epoch"), h("dd", {}, String(ms / 1000)),
+      ...ZONES.flatMap((z) => [
+        h("dt", {}, zoneLabel(z), CASE_ZONES.includes(z) ? h("span", { class: "ex-zone-tag" }, ` · ${T().exCaseZone}`) : null),
+        h("dd", {}, formatInZone(value, z)),
+      ]),
+      h("dt", {}, T().exEpochS), h("dd", {}, String(value / 1000)),
+      h("dt", {}, T().exEpochMs), h("dd", {}, String(value)),
     );
   }
 
   /* ---------------------------------------------------------------- hash / copy */
   function stateQuery(): string {
-    return encodeState({ file: file?.path ?? null, steps, json, cols });
+    return encodeState({ file: file?.path ?? null, steps, json, cols, line: cursorLine >= 0 ? cursorLine + 1 : null });
   }
   function syncHash(): void {
     const q = stateQuery();
@@ -548,7 +1343,7 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
       await navigator.clipboard.writeText(text);
       return true;
     } catch {
-      const ta = h("textarea", { class: "ex-offscreen" });
+      const ta = h("textarea", { class: "ex-offscreen", "aria-hidden": "true" });
       ta.value = text;
       document.body.appendChild(ta);
       ta.select();
@@ -563,28 +1358,57 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     }
   }
 
-  /* ---------------------------------------------------------------- wiring */
-  for (const p of FILTER_PRESETS) {
-    const chip = h("button", { class: "ex-chip", type: "button", title: `${p.kind}: ${p.text}` }, p.label);
-    chip.addEventListener("click", () => addStep(p.kind, p.text));
-    presets.appendChild(chip);
+  /** Inline "Copied" on the button itself for 2 s, at the same size. */
+  function flashButton(btn: HTMLButtonElement): void {
+    const label = btn.dataset.label ?? btn.textContent ?? "";
+    btn.dataset.label = label;
+    btn.textContent = T().exCopiedShort;
+    btn.classList.add("is-copied");
+    window.setTimeout(() => {
+      btn.textContent = label;
+      btn.classList.remove("is-copied");
+    }, 2000);
   }
+
+  /* ---------------------------------------------------------------- wiring */
   cancelBtn.addEventListener("click", () => {
-    if (file) client.send({ type: "cancelLoad", path: file.path });
+    if (file && loading === file.path) client.send({ type: "cancelLoad", path: file.path });
   });
-  firstBtn.addEventListener("click", () => jumpTo(0));
-  lastBtn.addEventListener("click", () => jumpTo(count - 1));
+  retryBtn.addEventListener("click", () => {
+    if (file) startLoad(file);
+  });
+  firstBtn.addEventListener("click", () => setCursor(0, true));
+  lastBtn.addEventListener("click", () => setCursor(count - 1, true));
   copyBtn.addEventListener("click", () => {
     if (!file || !inWorker.has(file.path)) return;
     copyJob = client.job();
+    copyKind = "view";
     client.send({ type: "copy", job: copyJob, path: file.path });
   });
   shareBtn.addEventListener("click", () => {
     syncHash();
-    void copyText(window.location.href).then((ok) => showNotice(ok ? T().exLinkCopied : T().exCopyAddress, "info"));
+    void copyText(window.location.href).then((ok) => {
+      if (ok) flashButton(shareBtn);
+      showNotice(ok ? T().exLinkCopied : T().exCopyAddress, "info");
+    });
+  });
+  copyLineBtn.addEventListener("click", copyLine);
+  linkLineBtn.addEventListener("click", copyLineLink);
+  wrapCb.addEventListener("change", () => {
+    saveWrapPref(wrapCb.checked);
+    setWrap(wrapCb.checked);
   });
   viewport.addEventListener("scroll", scheduleRender, { passive: true });
-  const ro = new ResizeObserver(scheduleRender);
+  viewport.addEventListener("keydown", onViewportKey);
+  rowsLayer.addEventListener("click", (e) => {
+    const target = e.target instanceof Element ? e.target.closest("[data-row]") : null;
+    if (!(target instanceof HTMLElement) || !(window.getSelection()?.isCollapsed ?? true)) return;
+    setCursor(Number(target.dataset.row), true);
+  });
+  const ro = new ResizeObserver(() => {
+    updateSpacer();
+    scheduleRender();
+  });
   ro.observe(viewport);
   jsonInput.value = json ? `${json.field} = ${json.value}` : "";
   jsonInput.addEventListener("input", () => {
@@ -593,67 +1417,119 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
   });
   colsInput.value = cols.join(", ");
   colsInput.addEventListener("input", () => {
-    cols = colsInput.value.split(",").map((c) => c.trim()).filter((c) => c !== "");
+    cols = colsInput.value.split(",").map((col) => col.trim()).filter((col) => col !== "");
     syncHash();
+    paintHeader();
     scheduleRender();
   });
   timeInput.addEventListener("input", renderTime);
+  yearInput.addEventListener("input", () => {
+    yearEdited = yearInput.value.trim() !== "";
+    renderTime();
+  });
+  zoneSel.addEventListener("change", renderTime);
   sideToggle.addEventListener("click", () => {
     const open = sidebar.classList.toggle("is-open");
     sideToggle.setAttribute("aria-expanded", String(open));
   });
+  const narrow = window.matchMedia(NARROW);
+  const onNarrow = (): void => {
+    if (!narrow.matches) controls.open = true;
+  };
+  controls.open = !narrow.matches;
+  narrow.addEventListener("change", onNarrow);
 
-  const uniqBtn = h("button", { class: "btn btn-sm btn-primary", type: "button" }, T().exCountBtn);
-  uniqBtn.addEventListener("click", runUnique);
-  uniqInput.addEventListener("keydown", (e) => { if (e.key === "Enter") runUnique(); });
-  const histBtn = h("button", { class: "btn btn-sm btn-primary", type: "button" }, T().exPlot);
-  histBtn.addEventListener("click", runHistogram);
-  histInput.addEventListener("keydown", (e) => { if (e.key === "Enter") runHistogram(); });
-  const presetChips = (values: ReadonlyArray<{ label: string; pattern: string }>, input: HTMLInputElement): HTMLElement =>
-    h("div", { class: "ex-chips" }, ...values.map((v) => {
-      const c = h("button", { class: "ex-chip mono", type: "button" }, v.label);
-      c.addEventListener("click", () => { input.value = v.pattern; });
-      return c;
-    }));
+  const aggButton = (a: Agg, label: string): HTMLButtonElement => {
+    const b = h("button", { class: "btn btn-sm btn-primary", type: "button" }, label);
+    b.addEventListener("click", () => runAgg(a, a.input.value));
+    a.input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") runAgg(a, a.input.value);
+    });
+    a.input.addEventListener("input", () => {
+      if (a.state === "error") {
+        a.state = "idle";
+        a.input.setAttribute("aria-invalid", "false");
+        a.err.hidden = true;
+      }
+    });
+    return b;
+  };
+  const aggBody = (a: Agg, help: Node[], button: HTMLButtonElement): Node[] => [
+    h("p", { class: "ex-muted" }, ...help),
+    h("div", { class: "ex-row-form" }, a.input, button),
+    a.err,
+    a.chips,
+    a.strip,
+    a.out,
+  ];
 
   sidebar.append(
     h("h3", { class: "ex-side-h" }, T().exEvidenceFiles),
     fileList,
-    h("section", { class: "ex-time" }, h("h3", { class: "ex-side-h" }, T().exTimeConverter), timeInput, timeOut),
+    h("section", { class: "ex-time", "aria-labelledby": "ex-time-h" },
+      h("h3", { class: "ex-side-h", id: "ex-time-h" }, T().exTimeConverter),
+      h("label", { class: "ex-field", for: "ex-time" }, T().exTimeToConvert),
+      timeInput,
+      h("div", { class: "ex-time-opts" },
+        h("label", { class: "ex-field", for: "ex-year" }, T().exAssumeYear, yearInput),
+        h("label", { class: "ex-field", for: "ex-zone" }, T().exAssumeZone, zoneSel)),
+      timeNote,
+      timeOut),
   );
 
-  const main = h("section", { class: "ex-main" },
-    h("div", { class: "ex-head" }, title, countEl),
-    progress,
-    pipeline,
-    h("div", { class: "ex-presets" }, h("span", { class: "ex-muted" }, T().exExamples), presets),
-    jsonBar,
+  histDetails.append(
+    h("summary", {}, T().exHistTitle),
+    ...aggBody(hist, [document.createTextNode(T().exHistHelp)], aggButton(hist, T().exPlot)),
+  );
+  const aggSet = h("fieldset", { class: "ex-fieldset ex-aggs" },
+    h("legend", { class: "ex-sr" }, T().exAggsLegend),
+    h("details", { class: "ex-agg", open: true },
+      h("summary", {}, T().exUniqueTitle),
+      ...aggBody(uniq, fill(T().exUniqueHelp, { cmd: h("code", { dir: "ltr" }, "grep -o | sort | uniq -c") }), aggButton(uniq, T().exCountBtn))),
+    histDetails);
+
+  const main = h("section", { class: "ex-main", "aria-label": T().exTitle },
+    h("div", { class: "ex-head" }, h("div", { class: "ex-head-title" }, title, fileFormat), countEl),
+    controls,
     notice,
-    h("div", { class: "ex-actions" }, firstBtn, lastBtn, copyBtn, shareBtn),
-    h("div", { class: "ex-view" }, csvHead, viewport),
-    h("div", { class: "ex-aggs" },
-      h("details", { class: "ex-agg", open: true },
-        h("summary", {}, T().exUniqueTitle),
-        h("p", { class: "ex-muted" }, T().exUniqueHelp),
-        h("div", { class: "ex-row-form" }, uniqInput, uniqBtn),
-        presetChips(UNIQUE_PRESETS.map((p) => ({ label: p, pattern: p })), uniqInput),
-        uniqOut),
-      h("details", { class: "ex-agg" },
-        h("summary", {}, T().exHistTitle),
-        h("p", { class: "ex-muted" }, T().exHistHelp),
-        h("div", { class: "ex-row-form" }, histInput, histBtn),
-        presetChips(HISTOGRAM_PRESETS, histInput),
-        histOut)),
+    h("div", { class: "ex-actions" }, firstBtn, lastBtn, copyLineBtn, linkLineBtn, copyBtn, shareBtn,
+      h("label", { class: "ex-toggle", for: "ex-wrap" }, wrapCb, T().exWrap)),
+    keysHelp,
+    view,
+    aggSet,
   );
 
   root.replaceChildren(
     h("div", { class: "explorer" },
-      h("div", { class: "ex-topbar" }, h("a", { class: "btn btn-sm btn-ghost", href: `#/case/${c.id}` }, T().exBack), h("strong", {}, T().exTitle), h("span", { class: "ex-muted" }, c.title), status, sideToggle),
+      h("div", { class: "ex-topbar" },
+        h("a", { class: "btn btn-sm btn-ghost", href: `#/case/${c.id}` }, T().exBack),
+        h("strong", {}, T().exTitle),
+        h("span", { class: "ex-muted ex-case" }, c.title),
+        tagline,
+        sideToggle),
+      announcer,
       h("div", { class: "ex-layout" }, sidebar, main)),
   );
-  status.textContent = T().exTagline;
+  viewport.classList.toggle("is-wrap", wrap);
   renderPipeline();
   renderFileList();
+  renderTime();
+  setEnabled(false);
+  renderEmpty();
+
+  // Year-less syslog needs the case's year. When the case text has none, the README (2 KB) usually does.
+  if (yearFromEvidence === null && EVIDENCE_FILES.some((f) => f.path === "README_FIRST.txt")) {
+    void fetch(evidenceUrl(c.id, "README_FIRST.txt"))
+      .then((res) => (res.ok ? res.text() : ""))
+      .then((text) => {
+        const y = yearInText(text);
+        if (y !== null && yearFromEvidence === null) {
+          yearFromEvidence = y;
+          renderTime();
+        }
+      })
+      .catch(() => { /* offline: the converter says it assumed the current year */ });
+  }
 
   const startFile = EVIDENCE_FILES.find((f) => f.path === initial.file);
   if (startFile) selectFile(startFile);
@@ -661,7 +1537,9 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
   /* ---------------------------------------------------------------- teardown */
   function teardown(): void {
     window.removeEventListener("hashchange", onHashChange);
+    narrow.removeEventListener("change", onNarrow);
     if (debounce !== null) window.clearTimeout(debounce);
+    if (announceTimer !== null) window.clearTimeout(announceTimer);
     if (raf) window.cancelAnimationFrame(raf);
     ro.disconnect();
     client.dispose();

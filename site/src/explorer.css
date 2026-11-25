@@ -1,5 +1,12 @@
 /* ============ evidence explorer ============ */
-.explorer { display: flex; flex-direction: column; gap: 12px; padding: 12px var(--gutter) 32px; max-width: 1600px; margin: 0 auto; }
+/* The log pane is a deliberate always-dark "terminal" in both themes, so its text tokens are fixed:
+   --code-muted is >= 4.5:1 on both #06080b (dark) and #15181e (light), --code-accent is the dark-theme amber. */
+.explorer {
+  --code-muted: #8b95a7;
+  --code-accent: #f5a524;
+  display: flex; flex-direction: column; gap: 12px; padding: 12px var(--gutter) 32px; max-width: 1600px; margin: 0 auto;
+}
+.ex-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .ex-topbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .ex-status { color: var(--muted); font-size: 0.85rem; margin: 0; flex: 1; }
 .ex-side-toggle { display: none; }
@@ -7,72 +14,148 @@
 .ex-sidebar { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; }
 .ex-side-h { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 4px 0 8px; }
 .ex-files { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.ex-file { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--text); cursor: pointer; font: inherit; }
+.ex-file { width: 100%; text-align: start; display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--text); cursor: pointer; font: inherit; }
 .ex-file:hover { background: var(--surface-2); }
 .ex-file.is-active { border-color: var(--amber); background: var(--amber-soft); }
 .ex-file-name { font-size: 0.82rem; word-break: break-all; }
-.ex-file-meta { font-size: 0.72rem; color: var(--amber); }
+.ex-file-meta { font-size: 0.72rem; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; }
+.ex-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); margin-inline-start: 6px; }
 .ex-file-desc { font-size: 0.75rem; color: var(--text-2); }
-.ex-time { border-top: 1px solid var(--border); padding-top: 12px; }
-.ex-time-out { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 8px 0 0; font-size: 0.78rem; }
-.ex-time-out dt { color: var(--muted); }
-.ex-time-out dd { margin: 0; word-break: break-all; }
+.ex-num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* time converter */
+.ex-time { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.ex-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.75rem; color: var(--muted); }
+.ex-time-opts { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 8px; }
+.ex-time-opts .ex-input, .ex-time-opts .ex-select { width: 100%; }
+.ex-time-note { margin: 0; }
+.ex-time-out { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 2px 0 0; font-size: 0.78rem; }
+.ex-time-out dt { color: var(--muted); white-space: nowrap; }
+.ex-time-out dd { margin: 0; word-break: break-all; font-family: var(--mono); }
+.ex-zone-tag { color: var(--amber); }
+
+/* head */
 .ex-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.ex-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.ex-title { font-size: 1.05rem; margin: 0; word-break: break-all; }
-.ex-count { color: var(--amber); font-size: 0.9rem; }
-.ex-progress { display: flex; align-items: center; gap: 10px; font-size: 0.8rem; color: var(--text-2); }
-.ex-progress-track { flex: 1; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
-.ex-progress-bar { height: 100%; width: 0; background: var(--amber); transition: width 0.15s; }
+.ex-head { display: flex; align-items: baseline; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; }
+.ex-head-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.ex-title { font-size: 1.05rem; margin: 0; word-break: break-all; font-family: var(--mono); }
+.ex-format { color: var(--muted); font-size: 0.8rem; }
+.ex-count { color: var(--text); font-size: 0.9rem; margin: 0; }
+.ex-count.is-warn { color: var(--red); font-weight: 600; }
+
+/* controls */
+.ex-controls-sum { display: none; }
+.ex-fieldset { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.ex-fieldset:disabled { opacity: 0.55; }
 .ex-pipeline { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
-.ex-step { display: flex; align-items: center; gap: 6px; width: 100%; flex-wrap: wrap; }
+.ex-step { width: 100%; display: flex; flex-direction: column; gap: 2px; }
+.ex-step-line { display: flex; align-items: center; gap: 6px; width: 100%; flex-wrap: wrap; }
 .ex-step .ex-input { flex: 1; min-width: 160px; }
+.ex-step.is-invalid .ex-input { border-color: var(--red); outline: 1px solid var(--red); }
+.ex-step-err { margin: 0; color: var(--red); font-size: 0.8rem; padding-inline-start: 4px; }
+.ex-step-err::before { content: "⚠ "; }
 .ex-pipe { color: var(--muted); }
-.ex-ci { display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem; color: var(--text-2); }
-.ex-input, .ex-select { background: var(--code-bg); color: var(--code-text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 0.85rem; min-height: 32px; }
+.ex-ci { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 4px; font-size: 0.78rem; color: var(--text-2); cursor: pointer; }
+.ex-ci input, .ex-toggle input { width: 18px; height: 18px; margin: 0; accent-color: var(--amber); }
+.ex-remove { min-width: 34px; }
+.ex-input, .ex-select { background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 10px; font-size: 0.85rem; min-height: 34px; }
+.ex-input::placeholder { color: var(--muted); }
 .ex-input:focus, .ex-select:focus { outline: 2px solid var(--amber); outline-offset: 0; }
+.ex-input[aria-invalid="true"] { border-color: var(--red); }
+.ex-year { width: 100%; }
 .ex-presets { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.8rem; }
+.ex-presets[hidden] { display: none; }
 .ex-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
-.ex-chip { border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-2); border-radius: 999px; padding: 3px 10px; font-size: 0.75rem; cursor: pointer; }
+.ex-chips:empty { display: none; }
+.ex-chip { border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-2); border-radius: 999px; padding: 3px 12px; min-height: 28px; font-size: 0.78rem; cursor: pointer; }
 .ex-chip:hover { border-color: var(--amber); color: var(--text); }
 .ex-jsonbar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .ex-jsonbar label { display: flex; flex-direction: column; gap: 4px; font-size: 0.75rem; color: var(--muted); }
 .ex-jsonbar[hidden] { display: none; }
+.ex-badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; margin-inline-start: 6px; border-radius: 999px; background: var(--amber); color: var(--amber-ink); font-size: 0.72rem; font-weight: 700; }
+.ex-badge[hidden] { display: none; }
+
 .ex-notice { border-radius: 8px; padding: 8px 12px; font-size: 0.85rem; }
 .ex-notice-warn { background: var(--red-soft); color: var(--red); border: 1px solid var(--red); }
 .ex-notice-info { background: var(--green-soft); color: var(--green); border: 1px solid var(--green); }
-.ex-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.ex-view { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--code-bg); }
+.ex-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.ex-actions .btn.is-copied { color: var(--ok); border-color: var(--ok); }
+.ex-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 6px; font-size: 0.82rem; color: var(--text-2); cursor: pointer; margin-inline-start: auto; }
+
+/* log pane (always dark) */
+.ex-view { position: relative; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--code-bg); }
+.ex-view.is-stale .ex-rows { opacity: 0.4; }
+.ex-stale-strip { margin: 0; padding: 6px 12px; font-size: 0.8rem; color: #ffd28a; background: #2a1e08; border-bottom: 1px solid #5a4012; }
+.ex-stale-strip[hidden] { display: none; }
 .ex-viewport { position: relative; height: min(60vh, 560px); overflow: auto; font-family: var(--mono); font-size: 12px; color: var(--code-text); }
+.ex-viewport:focus-visible { outline: 2px solid var(--code-accent); outline-offset: -2px; }
 .ex-spacer { width: 1px; }
 .ex-rows { position: absolute; top: 0; left: 0; min-width: 100%; will-change: transform; }
-.ex-row, .ex-csvhead { display: flex; height: 20px; line-height: 20px; white-space: pre; }
-.ex-row.is-flash { background: var(--amber-soft); }
-.ex-row:hover { background: rgba(255, 255, 255, 0.04); }
-.ex-ln { flex: none; width: 7ch; padding-right: 1ch; text-align: right; color: #6f7a8f; user-select: none; position: sticky; left: 0; background: var(--code-bg); }
+.ex-row, .ex-colhead { display: flex; height: 20px; line-height: 20px; white-space: pre; }
+.ex-row { cursor: default; }
+.ex-row:hover { background: rgba(255, 255, 255, 0.05); }
+.ex-row.is-cursor { background: color-mix(in srgb, var(--code-accent) 24%, transparent); box-shadow: inset 3px 0 0 var(--code-accent); }
+.ex-row:focus { outline: 2px solid var(--code-accent); outline-offset: -2px; }
+.ex-ln { flex: none; width: 7ch; padding-right: 1ch; text-align: right; color: var(--code-muted); user-select: none; position: sticky; left: 0; background: var(--code-bg); z-index: 1; }
+.ex-row.is-cursor .ex-ln { color: var(--code-accent); }
 .ex-text { padding-right: 16px; }
-.ex-row mark { background: var(--amber); color: var(--amber-ink); border-radius: 2px; }
+.ex-row mark { background: var(--code-accent); color: #1a1203; border-radius: 2px; }
 .ex-cell { flex: none; width: 14ch; overflow: hidden; text-overflow: ellipsis; padding-right: 1ch; }
 .ex-cell-wide { width: 28ch; }
+.ex-cell.is-blank { color: var(--code-muted); }
 .ex-cell.is-epoch { text-decoration: underline dotted; cursor: help; }
-.ex-csvhead { color: var(--amber); border-bottom: 1px solid var(--border); font-size: 12px; overflow: hidden; }
-.ex-csvhead[hidden] { display: none; }
-.ex-empty { padding: 16px; color: #6f7a8f; font-family: var(--sans); }
+/* Sticky INSIDE the scroller: it scrolls sideways with its columns and stays on top vertically. */
+.ex-colhead { position: sticky; top: 0; z-index: 2; width: max-content; min-width: 100%; color: var(--code-accent); background: var(--code-bg); border-bottom: 1px solid #2b3340; font-weight: 600; }
+.ex-colhead[hidden] { display: none; }
+.ex-colhead .ex-ln { z-index: 3; }
+.ex-viewport.is-wrap .ex-rows { width: 100%; min-width: 0; }
+.ex-viewport.is-wrap .ex-row { height: auto; min-height: 20px; }
+.ex-viewport.is-wrap .ex-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; flex: 1; }
+.ex-empty { padding: 16px; color: var(--code-muted); font-family: var(--sans); }
+.ex-empty-card { margin: 24px; max-width: 440px; padding: 18px 20px; border: 1px dashed #3a4352; border-radius: var(--radius); font-family: var(--sans); font-size: 0.9rem; color: var(--code-text); white-space: normal; }
+.ex-empty-card p { margin: 0 0 10px; }
+.ex-empty-title { font-weight: 700; font-size: 1rem; }
+
+/* loading overlay: sits on the pane, so it never shifts the controls */
+.ex-progress { position: absolute; inset: 0; display: flex; flex-direction: column; background: color-mix(in srgb, var(--code-bg) 88%, transparent); color: var(--code-text); z-index: 4; }
+.ex-progress[hidden] { display: none; }
+.ex-progress-track { height: 3px; background: #1f2630; overflow: hidden; position: relative; }
+.ex-progress-track[hidden] { display: none; }
+.ex-progress-bar { height: 100%; width: 0; background: var(--code-accent); transition: width 0.15s; }
+.ex-progress-track.is-indeterminate .ex-progress-bar { width: 30%; position: absolute; animation: ex-indeterminate 1.2s ease-in-out infinite; }
+@keyframes ex-indeterminate { from { left: -30%; } to { left: 100%; } }
+.ex-progress-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; text-align: center; font-size: 0.9rem; }
+.ex-progress-text { margin: 0; }
+.ex-progress.is-error .ex-progress-text { color: #ff8a96; }
+.ex-progress-actions { display: flex; gap: 8px; }
+.ex-progress-actions [hidden] { display: none; }
+.ex-progress .btn { color: var(--code-text); background: #1a2029; border-color: #3a4352; }
+.ex-progress .btn-primary { background: var(--code-accent); border-color: var(--code-accent); color: #1a1203; }
+
+/* aggregations */
 .ex-aggs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .ex-agg { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; min-width: 0; }
 .ex-agg summary { cursor: pointer; font-weight: 600; }
+.ex-agg-strip { margin: 6px 0; padding: 4px 8px; border-radius: 6px; font-size: 0.78rem; background: var(--amber-soft); color: var(--text); }
+.ex-agg-strip[hidden] { display: none; }
+.ex-agg-out.is-stale { opacity: 0.5; }
 .ex-row-form { display: flex; gap: 6px; }
 .ex-row-form .ex-input { flex: 1; min-width: 0; }
 .ex-muted { color: var(--muted); font-size: 0.8rem; margin: 6px 0; }
 .ex-err { color: var(--red); font-size: 0.8rem; margin: 6px 0; }
+.ex-err[hidden] { display: none; }
 .ex-big { font-size: 0.9rem; margin: 8px 0; }
-.ex-big strong { font-size: 1.6rem; color: var(--amber); margin-right: 4px; }
+.ex-big strong { font-size: 1.6rem; color: var(--amber); }
 .ex-table-wrap { max-height: 320px; overflow: auto; }
 .ex-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
 .ex-table td { padding: 2px 6px; border-bottom: 1px solid var(--border); word-break: break-all; }
-.ex-table .num { text-align: right; white-space: nowrap; }
-.ex-th { background: none; border: 0; color: var(--muted); cursor: pointer; font: inherit; font-weight: 600; padding: 4px 6px; }
+.ex-table th { padding: 0; }
+.ex-table .ex-th-start, .ex-table .ex-th-start .ex-th { text-align: start; }
+.ex-table .num, .ex-table th.num .ex-th { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ex-th { background: none; border: 0; color: var(--muted); cursor: pointer; font: inherit; font-weight: 600; padding: 4px 6px; width: 100%; }
 .ex-th:hover { color: var(--amber); }
+th[aria-sort="ascending"] .ex-th::after { content: " ▲"; }
+th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
 .ex-linkish { background: none; border: 0; color: var(--text); cursor: pointer; text-align: left; padding: 0; font-size: 0.78rem; }
 .ex-linkish:hover { color: var(--amber); text-decoration: underline; }
 .ex-hist { max-height: 360px; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
@@ -81,7 +164,27 @@
 .ex-bar-track { height: 10px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
 .ex-bar { display: block; height: 100%; background: var(--amber); }
 .ex-hist-n { text-align: right; }
+.ex-chart-wrap { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px; margin: 8px 0 4px; }
+.ex-yaxis { display: flex; flex-direction: column; justify-content: space-between; height: 140px; font-size: 0.7rem; color: var(--muted); text-align: right; }
+.ex-chart-box { min-width: 0; }
+.ex-chart { display: block; width: 100%; height: 140px; background: var(--surface-2); border-bottom: 1px solid var(--border-strong); border-radius: 4px 4px 0 0; }
+.ex-chart rect { fill: var(--amber); }
+.ex-chart rect:hover { fill: var(--text); }
+.ex-xaxis { display: flex; justify-content: space-between; gap: 8px; font-size: 0.68rem; color: var(--muted); margin-top: 4px; }
+.ex-hist-take { font-size: 0.82rem; margin: 6px 0; }
+.ex-hist-table summary { font-size: 0.8rem; color: var(--text-2); cursor: pointer; }
 .ex-offscreen { position: fixed; left: -9999px; top: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ex-progress-bar { transition: none; }
+  .ex-progress-track.is-indeterminate .ex-progress-bar { animation: none; left: 0; width: 100%; opacity: 0.5; }
+}
+
+@media (pointer: coarse) {
+  .ex-chip { min-height: 40px; padding: 6px 14px; }
+  .ex-input, .ex-select { min-height: 44px; }
+  .ex-ci, .ex-toggle { min-height: 44px; }
+}
 
 @media (max-width: 860px) {
   .ex-layout { grid-template-columns: minmax(0, 1fr); }
@@ -89,22 +192,28 @@
   .ex-sidebar { display: none; position: static; max-height: none; }
   .ex-sidebar.is-open { display: block; }
   .ex-aggs, .ex-jsonbar { grid-template-columns: 1fr; }
-  .ex-viewport { height: 55vh; }
+  .ex-viewport { height: 60vh; height: 60svh; }
+}
+
+@media (max-width: 600px) {
+  .ex-status { display: none; }
+  .ex-case { flex: 1; }
+  .ex-controls { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  .ex-controls-sum { display: flex; align-items: center; min-height: 44px; padding: 0 12px; font-weight: 600; cursor: pointer; }
+  .ex-controls[open] > .ex-fieldset { padding: 0 10px 10px; }
+  .ex-step .ex-input { min-width: 0; flex-basis: 100%; }
+  .ex-toggle { margin-inline-start: 0; }
 }
 
 /* ============ RTL (Hebrew) ============ */
 /* Grid order follows dir, so the sidebar naturally flips to the right. */
-[dir=rtl] .ex-file,
 [dir=rtl] .ex-linkish { text-align: start; }
-[dir=rtl] .ex-big strong { margin-right: 0; margin-inline-end: 4px; }
-[dir=rtl] .ex-table th { text-align: start; }
 /* Log lines, the virtual line view, regex/code inputs, paths, numbers, time values stay LTR. */
 [dir=rtl] .ex-viewport,
 [dir=rtl] .ex-rows,
 [dir=rtl] .ex-row,
-[dir=rtl] .ex-csvhead,
+[dir=rtl] .ex-colhead,
 [dir=rtl] .ex-input,
-[dir=rtl] .ex-chip.mono,
 [dir=rtl] .ex-title,
 [dir=rtl] .ex-file-name,
 [dir=rtl] .ex-time-out,
@@ -113,10 +222,10 @@
 [dir=rtl] .ex-table .num,
 [dir=rtl] .ex-hist-key,
 [dir=rtl] .ex-hist-n,
-[dir=rtl] .ex-big strong,
 [dir=rtl] .ex-pipe,
 [dir=rtl] .explorer code { direction: ltr; unicode-bidi: isolate; }
 [dir=rtl] .ex-input { text-align: left; }
 [dir=rtl] .ex-rows { left: 0; right: auto; }
-[dir=rtl] .ex-table .num { text-align: left; }
 [dir=rtl] .ex-time-out { text-align: left; }
+/* Translated UI text that the global `.mono` rule would otherwise force LTR. */
+[dir=rtl] .ex-count, [dir=rtl] .ex-file-meta { direction: rtl; unicode-bidi: normal; }

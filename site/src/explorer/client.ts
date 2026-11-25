@@ -2,19 +2,23 @@ import type { WorkerRequest, WorkerResponse } from "./protocol";
 
 type Listener = (msg: WorkerResponse) => void;
 
+/** Why the worker was restarted: a job blew its hard time budget, or the worker crashed (e.g. out of memory). */
+export type RestartReason = { kind: "timeout"; job: number } | { kind: "crash" };
+
 /**
- * Owns the worker. Restarts it on crash or when a job blows its hard time budget,
- * calling `onRestart` so the UI can reload state and explain what happened.
+ * Owns the worker. Restarts it on crash or when a job blows its hard time budget, calling `onRestart`
+ * with the reason so the UI can reload state and say, in the player's language, what happened.
+ * Each timed job has its own timer, so an unrelated reply (a scroll window, another job) never cancels it.
  */
 export class WorkerClient {
   private worker: Worker | null = null;
   private listener: Listener;
-  private onRestart: (reason: string) => void;
-  private hardTimer: number | null = null;
+  private onRestart: (reason: RestartReason) => void;
+  private hardTimers = new Map<number, number>();
   private disposed = false;
   private nextJob = 1;
 
-  constructor(listener: Listener, onRestart: (reason: string) => void) {
+  constructor(listener: Listener, onRestart: (reason: RestartReason) => void) {
     this.listener = listener;
     this.onRestart = onRestart;
     this.spawn();
@@ -29,7 +33,7 @@ export class WorkerClient {
     w.onmessage = (ev: MessageEvent<WorkerResponse>) => {
       if (this.disposed || w !== this.worker) return;
       const msg = ev.data;
-      if (msg.type !== "progress" && msg.type !== "window") this.clearHardTimer();
+      if (msg.type !== "progress") this.clearHardTimer(msg.job);
       try {
         this.listener(msg);
       } catch (err) {
@@ -38,34 +42,41 @@ export class WorkerClient {
     };
     w.onerror = (ev) => {
       ev.preventDefault();
-      this.restart("The analysis worker crashed (probably out of memory). It has been restarted.");
+      this.restart({ kind: "crash" });
     };
     this.worker = w;
   }
 
-  /** Send a request. `hardTimeoutMs` kills the worker if it does not answer in time. */
+  /** Send a request. `hardTimeoutMs` kills the worker if this job does not answer in time. */
   send(msg: WorkerRequest, hardTimeoutMs = 0): void {
     if (this.disposed || !this.worker) return;
-    if (hardTimeoutMs > 0) {
-      this.clearHardTimer();
-      this.hardTimer = window.setTimeout(() => {
-        this.hardTimer = null;
-        this.restart("regex took too long — the search was stopped. Simplify the pattern and try again.");
-      }, hardTimeoutMs);
+    if (hardTimeoutMs > 0 && "job" in msg) {
+      const job = msg.job;
+      this.clearHardTimer(job);
+      this.hardTimers.set(job, window.setTimeout(() => {
+        this.hardTimers.delete(job);
+        this.restart({ kind: "timeout", job });
+      }, hardTimeoutMs));
     }
     this.worker.postMessage(msg);
   }
 
-  private clearHardTimer(): void {
-    if (this.hardTimer !== null) {
-      window.clearTimeout(this.hardTimer);
-      this.hardTimer = null;
+  private clearHardTimer(job: number): void {
+    const t = this.hardTimers.get(job);
+    if (t !== undefined) {
+      window.clearTimeout(t);
+      this.hardTimers.delete(job);
     }
   }
 
-  restart(reason: string): void {
+  private clearAllTimers(): void {
+    for (const t of this.hardTimers.values()) window.clearTimeout(t);
+    this.hardTimers.clear();
+  }
+
+  restart(reason: RestartReason): void {
     if (this.disposed) return;
-    this.clearHardTimer();
+    this.clearAllTimers();
     this.worker?.terminate();
     this.worker = null;
     this.spawn();
@@ -74,7 +85,7 @@ export class WorkerClient {
 
   dispose(): void {
     this.disposed = true;
-    this.clearHardTimer();
+    this.clearAllTimers();
     this.worker?.terminate();
     this.worker = null;
   }

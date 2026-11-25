@@ -1,8 +1,8 @@
 // Heavy lifting for the explorer. File contents live ONLY here; the UI asks for
 // windows of rows and aggregate results.
-import { applyFilters, countUnique, FilterTimeout, histogram, looksLikeJsonLines } from "./core";
+import { applyFilters, countUnique, FilterTimeout, histogram, looksLikeJsonLines, yearHint } from "./core";
 import { MAX_COPY_LINES, MAX_FILES_IN_WORKER, MAX_UNIQUE_ROWS } from "./protocol";
-import type { WorkerRequest, WorkerResponse } from "./protocol";
+import type { WorkerErrorCode, WorkerRequest, WorkerResponse } from "./protocol";
 
 const TIME_BUDGET_MS = 1500;
 
@@ -50,14 +50,32 @@ function lineAt(f: LoadedFile, row: number): number {
   return f.view ? (f.view[row] ?? 0) : row;
 }
 
+/** View row of file line `line`, or -1 when the filter hides it. The view is sorted, so binary search. */
+function locate(f: LoadedFile, line: number): number {
+  if (!f.view) return line >= 0 && line < f.lines.length ? line : -1;
+  let lo = 0;
+  let hi = f.view.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const v = f.view[mid] ?? 0;
+    if (v === line) return mid;
+    if (v < line) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return -1;
+}
+
 async function load(job: number, path: string, url: string): Promise<void> {
   loads.get(path)?.abort();
   const ac = new AbortController();
   loads.set(path, ac);
   try {
     const res = await fetch(url, { signal: ac.signal });
-    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} while fetching ${path}`);
-    const total = Number(res.headers.get("content-length") ?? "0");
+    if (!res.ok || !res.body) throw new HttpError(res.status);
+    // With gzip/br, content-length is the compressed size while `loaded` counts decoded bytes, so the
+    // total is unknown and the UI shows an indeterminate bar instead of one that lies.
+    const encoding = (res.headers.get("content-encoding") ?? "identity").toLowerCase();
+    const total = encoding === "identity" ? Number(res.headers.get("content-length") ?? "0") : 0;
     const lines: string[] = [];
     let rest = "";
     let loaded = 0;
@@ -81,25 +99,44 @@ async function load(job: number, path: string, url: string): Promise<void> {
     rest += decoder.decode();
     if (rest !== "") lines.push(rest.endsWith("\r") ? rest.slice(0, -1) : rest);
     store(path, { lines, view: null });
-    post({ type: "loaded", job, path, lineCount: lines.length, bytes: loaded, isJson: looksLikeJsonLines(lines) });
+    post({ type: "loaded", job, path, lineCount: lines.length, bytes: loaded, isJson: looksLikeJsonLines(lines), year: yearHint(lines) });
   } catch (err) {
-    const cancelled = ac.signal.aborted;
-    post({ type: "error", job, message: cancelled ? "Load cancelled." : errMsg(err), cancelled });
+    if (ac.signal.aborted) post({ type: "error", job, code: "cancelled" });
+    else post(errorFor(job, err));
   } finally {
     if (loads.get(path) === ac) loads.delete(path);
   }
 }
 
-function errMsg(err: unknown): string {
-  if (err instanceof FilterTimeout) return "regex took too long";
-  if (err instanceof Error) return err.message;
-  return "unexpected error";
+class HttpError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(`HTTP ${status}`);
+    this.status = status;
+  }
+}
+
+function errorFor(job: number, err: unknown): WorkerResponse {
+  const code: WorkerErrorCode = err instanceof FilterTimeout ? "timeout" : err instanceof HttpError ? "http" : "unexpected";
+  return {
+    type: "error",
+    job,
+    code,
+    status: err instanceof HttpError ? err.status : undefined,
+    detail: code === "unexpected" && err instanceof Error ? err.message : undefined,
+  };
 }
 
 function need(job: number, path: string): LoadedFile | null {
   const f = touch(path);
-  if (!f) post({ type: "error", job, message: "File is not loaded.", notLoaded: true });
+  if (!f) post({ type: "error", job, code: "notLoaded" });
   return f ?? null;
+}
+
+function rangeView(from: number, to: number): Uint32Array {
+  const out = new Uint32Array(Math.max(0, to - from));
+  for (let i = 0; i < out.length; i++) out[i] = from + i;
+  return out;
 }
 
 function handle(msg: WorkerRequest): void {
@@ -114,8 +151,10 @@ function handle(msg: WorkerRequest): void {
       const f = need(msg.job, msg.path);
       if (!f) return;
       const active = msg.steps.some((s) => s.text !== "") || msg.json !== null;
-      f.view = active ? applyFilters(f.lines, msg.steps, msg.json, Date.now() + TIME_BUDGET_MS) : null;
-      post({ type: "filtered", job: msg.job, path: msg.path, total: f.lines.length, count: viewLength(f) });
+      const skip = msg.skipHeader && f.lines.length > 0;
+      if (active) f.view = applyFilters(f.lines, msg.steps, msg.json, Date.now() + TIME_BUDGET_MS, skip);
+      else f.view = skip ? rangeView(1, f.lines.length) : null;
+      post({ type: "filtered", job: msg.job, path: msg.path, total: f.lines.length - (skip ? 1 : 0), count: viewLength(f) });
       return;
     }
     case "window": {
@@ -148,16 +187,27 @@ function handle(msg: WorkerRequest): void {
     case "histogram": {
       const f = need(msg.job, msg.path);
       if (!f) return;
-      post({ type: "histogram", job: msg.job, result: histogram(f.lines, f.view, msg.pattern, Date.now() + TIME_BUDGET_MS) });
+      post({ type: "histogram", job: msg.job, result: histogram(f.lines, f.view, msg.pattern, Date.now() + TIME_BUDGET_MS, msg.year) });
       return;
     }
     case "copy": {
       const f = need(msg.job, msg.path);
       if (!f) return;
+      if (msg.row !== undefined) {
+        const ok = msg.row >= 0 && msg.row < viewLength(f);
+        post({ type: "copy", job: msg.job, text: ok ? (f.lines[lineAt(f, msg.row)] ?? "") : "", count: ok ? 1 : 0, capped: false });
+        return;
+      }
       const n = Math.min(viewLength(f), MAX_COPY_LINES);
       const out: string[] = [];
       for (let r = 0; r < n; r++) out.push(f.lines[lineAt(f, r)] ?? "");
       post({ type: "copy", job: msg.job, text: out.join("\n"), count: n, capped: viewLength(f) > n });
+      return;
+    }
+    case "locate": {
+      const f = need(msg.job, msg.path);
+      if (!f) return;
+      post({ type: "located", job: msg.job, line: msg.line, row: locate(f, msg.line) });
       return;
     }
   }
@@ -169,6 +219,6 @@ ctx.onmessage = (ev: MessageEvent<WorkerRequest>) => {
     handle(msg);
   } catch (err) {
     const job = "job" in msg ? msg.job : -1;
-    post({ type: "error", job, message: errMsg(err) });
+    post(errorFor(job, err));
   }
 };
