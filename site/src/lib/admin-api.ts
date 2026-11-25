@@ -174,6 +174,30 @@ export async function setAccountStatus(id: string, action: "approve" | "reject")
   return body.account;
 }
 
+/** How many status changes run at once in a bulk action (the server is serverless: don't burst it). */
+const BULK_CONCURRENCY = 4;
+
+/**
+ * Approves or rejects several accounts, one request each (there is no bulk endpoint). Never throws: the caller
+ * gets the accounts that changed and the errors of the ones that didn't, so a partial failure can be reported.
+ */
+export async function setAccountsStatus(
+  ids: readonly string[],
+  action: "approve" | "reject",
+): Promise<{ ok: AccountView[]; errors: unknown[] }> {
+  const ok: AccountView[] = [];
+  const errors: unknown[] = [];
+  for (let i = 0; i < ids.length; i += BULK_CONCURRENCY) {
+    const batch = ids.slice(i, i + BULK_CONCURRENCY);
+    const results = await Promise.allSettled(batch.map((id) => setAccountStatus(id, action)));
+    for (const r of results) {
+      if (r.status === "fulfilled") ok.push(r.value);
+      else errors.push(r.reason);
+    }
+  }
+  return { ok, errors };
+}
+
 export async function approveAll(): Promise<number> {
   const path = "/api/admin/accounts/approve-all";
   return (await parseJson(await adminFetch(path, jsonInit("POST", {})), ApproveAllResponseSchema, path)).approved;
