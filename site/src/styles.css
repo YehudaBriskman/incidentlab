@@ -818,3 +818,39 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
   .cmd.is-revealed .code-block { border-inline-start: 3px solid CanvasText; }
   .tip { border-inline-start-color: CanvasText; }
 }
+
+/* ============ print: the debrief and case pages as a clean black-on-white document ============ */
+@media print {
+  /* html:root:not(...) out-ranks every theme block (dark, high contrast, data-theme), so paper is always light. */
+  html:root:not([data-theme="print-never"]) {
+    color-scheme: light;
+    --canvas: #fff; --surface: #fff; --surface-2: #fff; --surface-3: #fff; --sunken: #fff;
+    --text: #000; --text-muted: #333; --text-2: #111;
+    --border: #999; --border-strong: #555;
+    --accent: #000; --accent-strong: #000; --accent-soft: #fff; --accent-line: #555;
+    --success-fg: #000; --success-bg: #fff; --danger-fg: #000; --danger-bg: #fff;
+    --warning-fg: #000; --warning-bg: #fff; --info-fg: #000; --info-bg: #fff;
+    --code-bg: #fff; --code-text: #000; --code-muted: #444;
+  }
+  html, body { background: var(--canvas); color: var(--text); }
+  body { font-size: 11pt; line-height: 1.5; display: block; }
+  main { max-width: none; padding: 0; }
+  .topbar, .footer, .announce, .net-banner, .toast-host, .skip-link, .stepper, .progress,
+  .btn, .btn-copy, .link-btn, .shell-tabs, .cmd-actions, .row-actions, .answer-form, .lang-toggle,
+  .account-menu, .event-clock, .back-link, .primary-action, .stage-meter .meter-track { display: none !important; }
+  .case-head { border-bottom: 1px solid var(--text); margin-bottom: 12pt; }
+  .stage-wrap { max-width: none; }
+  .question-box, .result-panel, .score-card, .notice, .hint, .briefing, .featured-card, .case-card, .stat-tile, .ach { border: 1px solid var(--border); box-shadow: none; }
+  pre, .code-block, .prose pre, .answer-code {
+    background: var(--code-bg) !important; color: var(--code-text) !important; border: 1px solid var(--border-strong);
+    white-space: pre-wrap; overflow-wrap: anywhere; overflow: visible; box-shadow: none !important;
+  }
+  .prose code { background: none; border: 1px solid var(--border); }
+  .score-card, .breakdown tr, .question-box, .result-panel, pre, .code-block, .notice, table, figure { break-inside: avoid; }
+  h1, h2, h3, h4 { break-after: avoid; }
+  details > summary { list-style: none; }
+  details::details-content { content-visibility: visible; display: block; } /* collapsed briefings print open */
+  .prose a[href^="http"]::after, .stage a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 0.85em; overflow-wrap: anywhere; }
+  a { color: var(--text); }
+  .table-wrap, .prose table { overflow: visible; display: table; }
+}
