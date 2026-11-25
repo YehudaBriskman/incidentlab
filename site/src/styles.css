@@ -1059,6 +1059,37 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
   @starting-style { .toast { opacity: 0; } }
 }
 
+/* --- stats: 4 KPI cards with comparisons, then one compact details row --- */
+.kpi-grid { display: grid; gap: var(--space-3); grid-template-columns: repeat(4, minmax(0, 1fr)); margin: var(--space-5) 0 var(--space-4); }
+.stat-tile.kpi { padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-1); }
+.stat-value-row { margin: 0; display: flex; align-items: baseline; gap: var(--space-1); flex-wrap: wrap; }
+.stat-value-row .stat-value { margin: 0; font-size: var(--step-3); font-weight: 700; letter-spacing: var(--track-display); font-variant-numeric: tabular-nums; }
+.stat-unit { color: var(--text-muted); font-size: var(--step--1); font-weight: 600; }
+.stat-sub { margin: 0; font-variant-numeric: tabular-nums; }
+:lang(he) .stat-label { text-transform: none; letter-spacing: 0; }
+.detail-list { margin: 0 0 var(--space-6); display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--space-2) var(--space-4); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+.detail-list dt { color: var(--text-muted); font-size: var(--step--1); }
+.detail-list dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+[dir=rtl] .detail-list dd { direction: rtl; unicode-bidi: plaintext; }
+.no-data { color: var(--text-muted); }
+.per-case-wrap:focus-visible { outline-offset: var(--focus-offset); }
+.pw-section > summary { cursor: pointer; display: flex; align-items: center; min-block-size: var(--control-md); }
+.pw-section[open] > summary { margin-bottom: var(--space-3); }
+@media (max-width: 720px) { .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* phones: the per-case table becomes one card per case, each value labelled */
+@media (max-width: 600px) {
+  .per-case-wrap { border: 0; overflow: visible; }
+  .per-case-table, .per-case-table tbody { display: block; }
+  .per-case-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .per-case-table tr { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-1) var(--space-3); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+  .per-case-table th, .per-case-table td { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0; border: 0; text-align: start; white-space: normal; }
+  .per-case-table .case-cell { grid-column: 1 / -1; font-size: var(--step-0); font-weight: 700; }
+  .per-case-table td::before { content: attr(data-label); color: var(--text-muted); font-size: var(--step--2); font-weight: 600; font-family: var(--font-sans); }
+  .per-case-table tbody tr:last-child > * { border: 0; }
+  [dir=rtl] .per-case-table td.num { direction: rtl; text-align: start; }
+  .per-case-table .bar { margin-inline-start: 0; }
+}
+
 /* --- leaderboard --- */
 /* Hebrew: header and value cells share one direction, so "end" is the same side for both. */
 [dir=rtl] .lb-table td.num { direction: rtl; }

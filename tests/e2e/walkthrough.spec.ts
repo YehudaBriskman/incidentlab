@@ -112,7 +112,7 @@ test("player walkthrough: sign up to first solved stage, then admin sign-in", as
 
   await test.step("#/me shows a positive total score", async () => {
     await page.goto("/#/me");
-    await expect(ui.totalScore(page)).toHaveText(/^[1-9]\d*$/);
+    await expect(ui.totalScore(page)).toHaveText(/^[1-9][\d,]*$/);
   });
 
   await test.step("sign out", async () => {
