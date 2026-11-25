@@ -18,12 +18,12 @@ import {
   stringifyField,
 } from "../explorer/core";
 import type { FilterStep, HistogramResult, JsonFilter, StepKind } from "../explorer/core";
-import { EVIDENCE_FILES, FILTER_PRESETS, HISTOGRAM_PRESETS, UNIQUE_PRESETS, evidenceUrl } from "../explorer/files";
+import type { Case } from "../content/schema";
+import { FILTER_PRESETS, HISTOGRAM_PRESETS, UNIQUE_PRESETS, evidenceFilesFor, evidenceUrl } from "../explorer/files";
 import type { EvidenceFile } from "../explorer/files";
 import type { WorkerResponse } from "../explorer/protocol";
 import { T } from "../i18n/strings-tools";
 
-const ROUTE = "#/case/3am-outage/explorer";
 const ROW_H = 20;
 const DEBOUNCE_MS = 250;
 const HARD_TIMEOUT_MS = 2500;
@@ -31,13 +31,12 @@ const ZONE = "Asia/Jerusalem";
 
 let activeTeardown: (() => void) | null = null;
 
-function ownsHash(hash: string): boolean {
-  return hash === ROUTE || hash.startsWith(`${ROUTE}?`) || hash.startsWith(`${ROUTE}/`);
-}
-
-export function renderExplorer(root: HTMLElement): void {
+export function renderExplorer(root: HTMLElement, c: Case): void {
   activeTeardown?.();
   activeTeardown = null;
+  const ROUTE = `#/case/${c.id}/explorer`;
+  const EVIDENCE_FILES = evidenceFilesFor(c);
+  const ownsHash = (hash: string): boolean => hash === ROUTE || hash.startsWith(`${ROUTE}?`) || hash.startsWith(`${ROUTE}/`);
   document.title = T().exDocTitle;
 
   const initial = decodeState(window.location.hash.split("?")[1] ?? "");
@@ -260,7 +259,7 @@ export function renderExplorer(root: HTMLElement): void {
     progressBar.style.width = "0%";
     progressText.textContent = T().exLoading;
     countEl.textContent = "";
-    client.send({ type: "load", job: loadJob, path: f.path, url: evidenceUrl(f.path) });
+    client.send({ type: "load", job: loadJob, path: f.path, url: evidenceUrl(c.id, f.path) });
   }
 
   /* ---------------------------------------------------------------- filters */
@@ -649,7 +648,7 @@ export function renderExplorer(root: HTMLElement): void {
 
   root.replaceChildren(
     h("div", { class: "explorer" },
-      h("div", { class: "ex-topbar" }, h("a", { class: "btn btn-sm btn-ghost", href: "#/case/3am-outage" }, T().exBack), h("strong", {}, T().exTitle), status, sideToggle),
+      h("div", { class: "ex-topbar" }, h("a", { class: "btn btn-sm btn-ghost", href: `#/case/${c.id}` }, T().exBack), h("strong", {}, T().exTitle), h("span", { class: "ex-muted" }, c.title), status, sideToggle),
       h("div", { class: "ex-layout" }, sidebar, main)),
   );
   status.textContent = T().exTagline;

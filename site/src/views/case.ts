@@ -1,6 +1,10 @@
-import { PlayerNameSchema, QUESTION_ORDER, type PlayerView, type QuestionId, type StageProgress } from "../../shared/contract";
+import { QUESTION_ORDER, type ProgressView, type QuestionId, type StageProgress } from "../../shared/contract";
 import type { Case, Question } from "../content/schema";
-import { ApiError, clearToken, createPlayer, getDebrief, getMe, getToken, revealAnswer, revealHint, setupDone, submitAnswer } from "../lib/api";
+import { ApiError, getDebrief, getProgress, revealAnswer, revealHint, setupDone, submitAnswer } from "../lib/api";
+import { loadAccount, setAccount, signOut } from "../lib/session";
+import { getLang } from "../i18n/i18n";
+import { TA } from "../i18n/strings-account";
+import { withApprovedAccount } from "./auth";
 import { confirmButton, copyButton, h, html, setChildren, type Child } from "../lib/dom";
 import { md, mdInline } from "../lib/markdown";
 import { formatElapsed } from "../lib/time";
@@ -41,6 +45,7 @@ function writePref(key: string, value: string): void {
 }
 
 function errorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.code === "not-today") return TA().notToday;
   if (err instanceof ApiError) return err.message;
   return T().genericError;
 }
@@ -50,17 +55,18 @@ function errorMessage(err: unknown): string {
 export function renderCase(root: HTMLElement, c: Case): void {
   stopCaseTimers();
   document.title = `${c.title} · IncidentLab`;
-  if (getToken() === null) {
-    renderGate(root, c);
-    return;
-  }
+  withApprovedAccount(root, c.title, () => loadProgress(root, c));
+}
+
+function loadProgress(root: HTMLElement, c: Case): void {
   setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, T().loadingInvestigation)));
-  getMe()
-    .then((player) => renderStaged(root, c, player))
+  getProgress(c.id)
+    .then((progress) => renderStaged(root, c, progress))
     .catch((err: unknown) => {
-      if (err instanceof ApiError && err.isUnauthorized) {
-        clearToken();
-        renderGate(root, c);
+      // Session expired or approval revoked since the page loaded: re-run the gate with fresh state.
+      if (err instanceof ApiError && (err.isUnauthorized || err.isNotApproved)) {
+        if (err.isUnauthorized) setAccount(null);
+        void loadAccount(true).finally(() => renderCase(root, c));
         return;
       }
       setChildren(
@@ -76,62 +82,6 @@ export function renderCase(root: HTMLElement, c: Case): void {
     });
 }
 
-/* ================= name gate ================= */
-
-function renderGate(root: HTMLElement, c: Case): void {
-  const input = h("input", {
-    id: "player-name",
-    class: "input input-lg",
-    type: "text",
-    autocomplete: "nickname",
-    maxlength: "32",
-    required: true,
-    placeholder: T().namePlaceholder,
-    "aria-describedby": "name-help name-error",
-  });
-  const errorEl = h("p", { id: "name-error", class: "form-error", role: "alert" });
-  const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg btn-block" }, T().startInvestigating);
-
-  const form = h(
-    "form",
-    { class: "center-card gate", novalidate: true },
-    h("p", { class: "eyebrow mono" }, c.title),
-    h("h1", {}, T().whoInvestigating),
-    h("p", { id: "name-help", class: "muted" }, T().nameHelp),
-    h("label", { class: "visually-hidden", for: "player-name" }, T().yourName),
-    input,
-    errorEl,
-    submit,
-  );
-
-  form.addEventListener("submit", (ev) => {
-    ev.preventDefault();
-    const parsed = PlayerNameSchema.safeParse(input.value);
-    if (!parsed.success) {
-      errorEl.textContent = parsed.error.issues[0]?.message.includes("only")
-        ? (parsed.error.issues[0]?.message ?? "")
-        : T().nameLength;
-      input.setAttribute("aria-invalid", "true");
-      input.focus();
-      return;
-    }
-    input.removeAttribute("aria-invalid");
-    errorEl.textContent = "";
-    submit.disabled = true;
-    submit.textContent = T().starting;
-    createPlayer(parsed.data)
-      .then((player) => renderStaged(root, c, player))
-      .catch((err: unknown) => {
-        errorEl.textContent = errorMessage(err);
-        submit.disabled = false;
-        submit.textContent = T().startInvestigating;
-      });
-  });
-
-  setChildren(root, form);
-  input.focus();
-}
-
 /* ================= staged view ================= */
 
 function questionFor(c: Case, id: QuestionId): Question | undefined {
@@ -143,7 +93,7 @@ function stageLabel(c: Case, id: QuestionId): string {
   return q?.stage?.name ?? q?.title ?? id.toUpperCase();
 }
 
-function stageProgress(player: PlayerView, id: QuestionId): StageProgress | undefined {
+function stageProgress(player: ProgressView, id: QuestionId): StageProgress | undefined {
   return player.stages[id];
 }
 
@@ -151,7 +101,7 @@ function isDone(s: StageProgress | undefined): boolean {
   return s !== undefined && (s.status === "solved" || s.status === "revealed");
 }
 
-function currentStage(player: PlayerView): StageKey {
+function currentStage(player: ProgressView): StageKey {
   if (player.setupDoneAt === null) return "setup";
   for (const id of QUESTION_ORDER) {
     if (!isDone(stageProgress(player, id))) return id;
@@ -159,7 +109,7 @@ function currentStage(player: PlayerView): StageKey {
   return "debrief";
 }
 
-function stepState(player: PlayerView, key: StageKey): StepState {
+function stepState(player: ProgressView, key: StageKey): StepState {
   if (key === "setup") return player.setupDoneAt === null ? "active" : "solved";
   if (key === "debrief") return currentStage(player) === "debrief" ? "active" : "locked";
   const s = stageProgress(player, key);
@@ -169,29 +119,28 @@ function stepState(player: PlayerView, key: StageKey): StepState {
 
 const STAGE_KEYS: readonly StageKey[] = ["setup", ...QUESTION_ORDER, "debrief"];
 
-function renderStaged(root: HTMLElement, c: Case, initialPlayer: PlayerView): void {
+function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): void {
   stopCaseTimers();
   let player = initialPlayer;
   let viewing: StageKey = currentStage(player);
   let justSolved: QuestionId | null = null;
 
-  const update = (next: PlayerView, view?: StageKey): void => {
+  const update = (next: ProgressView, view?: StageKey): void => {
     player = next;
     viewing = view ?? currentStage(player);
     draw();
   };
 
   const switchPlayer = (): void => {
-    clearToken();
     drafts.clear();
-    renderGate(root, c);
+    void signOut().finally(() => renderCase(root, c));
   };
 
   const elStats = h("span", { class: "progress-stats mono" });
   const elFill = h("span", { class: "progress-fill" });
   const tick = (): void => {
     const solved = QUESTION_ORDER.filter((id) => isDone(stageProgress(player, id))).length;
-    const start = Date.parse(player.createdAt);
+    const start = Date.parse(player.setupDoneAt ?? player.startedAt ?? new Date().toISOString());
     const end = player.completedAt !== null ? Date.parse(player.completedAt) : Date.now();
     elStats.textContent = T().progressStats(solved, QUESTION_ORDER.length, player.score, formatElapsed(end - start));
     elFill.style.width = `${(solved / QUESTION_ORDER.length) * 100}%`;
@@ -243,7 +192,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: PlayerView): vo
           "span",
           { class: "player-tag" },
           T().playingAs,
-          h("strong", {}, player.name), // textContent only
+          h("strong", { dir: "auto" }, player.username), // textContent only
           " · ",
           h("button", { type: "button", class: "link-btn", onclick: switchPlayer }, T().switchPlayer),
         ),
@@ -277,7 +226,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: PlayerView): vo
 
 /* ================= Stage 0: setup ================= */
 
-function renderSetup(c: Case, player: PlayerView, update: (p: PlayerView) => void): HTMLElement {
+function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) => void): HTMLElement {
   const done = player.setupDoneAt !== null;
   const briefing = h(
     "details",
@@ -302,7 +251,7 @@ function renderSetup(c: Case, player: PlayerView, update: (p: PlayerView) => voi
   ready.addEventListener("click", () => {
     ready.disabled = true;
     errorEl.textContent = "";
-    setupDone()
+    setupDone(c.id)
       .then((p) => {
         writePref("briefingRead", "1");
         update(p);
@@ -367,11 +316,11 @@ function renderSetup(c: Case, player: PlayerView, update: (p: PlayerView) => voi
 
 function renderQuestionStage(
   c: Case,
-  player: PlayerView,
+  player: ProgressView,
   id: QuestionId,
   justSolved: boolean,
-  onAnswer: (p: PlayerView, correct: boolean) => void,
-  update: (p: PlayerView, view?: StageKey) => void,
+  onAnswer: (p: ProgressView, correct: boolean) => void,
+  update: (p: ProgressView, view?: StageKey) => void,
 ): HTMLElement {
   const q = questionFor(c, id);
   const s = stageProgress(player, id);
@@ -478,8 +427,8 @@ function renderQuestionStage(
       return;
     }
     submit.disabled = true;
-    submitAnswer(id, answer)
-      .then(({ correct, player: next }) => {
+    submitAnswer(c.id, id, answer)
+      .then(({ correct, progress: next }) => {
         if (correct) {
           drafts.delete(id);
           onAnswer(next, true);
@@ -520,7 +469,7 @@ function renderQuestionStage(
     : null;
   hintBtn?.addEventListener("click", () => {
     hintBtn.disabled = true;
-    revealHint(id)
+    revealHint(c.id, id)
       .then((p) => update(p, id))
       .catch((err: unknown) => {
         hintError.textContent = errorMessage(err);
@@ -535,7 +484,7 @@ function renderQuestionStage(
     className: "link-btn muted",
     onConfirm: () => {
       for (const b of reveal.querySelectorAll("button")) b.disabled = true;
-      revealAnswer(id)
+      revealAnswer(c.id, id)
         .then((p) => update(p, id))
         .catch((err: unknown) => {
           for (const b of reveal.querySelectorAll("button")) b.disabled = false;
@@ -575,15 +524,15 @@ function renderQuestionStage(
 
 /* ================= Debrief ================= */
 
-function shareText(c: Case, player: PlayerView): string {
+function shareText(c: Case, player: ProgressView): string {
   const hints = QUESTION_ORDER.reduce((n, id) => n + (player.stages[id]?.hintsRevealed ?? 0), 0);
   const end = player.completedAt !== null ? Date.parse(player.completedAt) : Date.now();
-  return T().shareText(c.title, player.score, player.maxScore, hints, formatElapsed(end - Date.parse(player.createdAt)));
+  return T().shareText(c.title, player.score, player.maxScore, hints, formatElapsed(end - Date.parse(player.setupDoneAt ?? player.startedAt ?? new Date().toISOString())));
 }
 
-function renderDebrief(c: Case, player: PlayerView): HTMLElement {
+function renderDebrief(c: Case, player: ProgressView): HTMLElement {
   const body = h("div", { class: "prose" }, h("p", { class: "muted" }, T().loadingDebrief));
-  getDebrief()
+  getDebrief(c.id, getLang())
     .then((markdown) => {
       body.replaceChildren(html("div", {}, md(markdown)));
     })
