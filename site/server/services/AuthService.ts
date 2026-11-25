@@ -3,7 +3,7 @@
 // Signing in as `admin` with the ADMIN_KEY creates an admin session (no account record behind it).
 import { ADMIN_USERNAME, RESERVED_USERNAMES, usernameKey } from "../../shared/contract.ts";
 import type { AccountView } from "../../shared/contract.ts";
-import { AppError } from "../domain/types.ts";
+import { ACCOUNT_SCHEMA_VERSION, AppError } from "../domain/types.ts";
 import type { AccountRecord, SessionRecord } from "../domain/types.ts";
 import type { SettingsRepository } from "../repositories/config-repositories.ts";
 import type { Repositories } from "../repositories/repositories.ts";
@@ -89,6 +89,7 @@ export class AuthService {
 
     const nowIso = this.now().toISOString();
     const account: AccountRecord = {
+      schemaVersion: ACCOUNT_SCHEMA_VERSION,
       id: generateAccountId(),
       username: input.username.trim(),
       usernameKey: key,

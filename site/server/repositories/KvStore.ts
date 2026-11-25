@@ -31,18 +31,35 @@ export const mapWithConcurrency = async <T, R>(items: readonly T[], fn: (item: T
 
 type BlobStore = ReturnType<typeof getStore>;
 
+/** The live data store. Never rename it: a new name means an empty store (that's how round-1 data was orphaned). */
+export const PRIMARY_STORE = "incidentlab-v2";
+/** Daily and pre-deploy snapshots live in a separate store so a bad write to the primary can't touch them. */
+export const BACKUP_STORE = "incidentlab-backups";
+/** Pre-accounts store (round 1). Read-only: only migration 002 reads it. */
+export const LEGACY_STORE = "incidentlab-players";
+
+/** Explicit credentials for scripts that run outside a Netlify Function (backup/restore/migrate CLI). */
+export type BlobsCredentials = { readonly siteID: string; readonly token: string };
+
 export class BlobsKvStore implements KvStore {
   private readonly injected: BlobStore | undefined;
+  private readonly name: string;
+  private readonly credentials: BlobsCredentials | undefined;
 
-  constructor(store?: BlobStore) {
-    this.injected = store;
+  constructor(options: { store?: BlobStore; name?: string; credentials?: BlobsCredentials } = {}) {
+    this.injected = options.store;
+    this.name = options.name ?? PRIMARY_STORE;
+    this.credentials = options.credentials;
   }
 
   // Resolve the store on EVERY call: getStore() reads the per-request Blobs token from the
   // function context, and a store cached at cold start keeps an expired token on warm
   // instances ("Failed to decode token: Token expired") -> every request 500s.
   private get store(): BlobStore {
-    return this.injected ?? getStore({ name: "incidentlab-v2", consistency: "strong" });
+    if (this.injected) return this.injected;
+    return this.credentials
+      ? getStore({ name: this.name, consistency: "strong", siteID: this.credentials.siteID, token: this.credentials.token })
+      : getStore({ name: this.name, consistency: "strong" });
   }
 
   async get(key: string): Promise<Versioned<unknown> | null> {

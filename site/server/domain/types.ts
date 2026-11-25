@@ -3,7 +3,16 @@ import { z } from "zod";
 import { AccountStatusSchema, QuestionIdSchema, StageProgressSchema } from "../../shared/contract.ts";
 import type { QuestionId } from "../../shared/contract.ts";
 
+/**
+ * Data-safety rules (see docs/DATA.md): record changes are additive with defaults, so old records still parse;
+ * a change that needs rewriting stored data ships as a numbered migration in server/migrations, and
+ * bumps the version below.
+ */
+export const ACCOUNT_SCHEMA_VERSION = 1;
+export const PROGRESS_SCHEMA_VERSION = 1;
+
 export const AccountRecordSchema = z.object({
+  schemaVersion: z.number().int().min(1).default(1),
   id: z.string(),
   username: z.string(),      // as the player typed it (display)
   usernameKey: z.string(),   // canonical, unique
@@ -30,6 +39,7 @@ export const SessionRecordSchema = z.object({
 export type SessionRecord = z.infer<typeof SessionRecordSchema>;
 
 export const ProgressRecordSchema = z.object({
+  schemaVersion: z.number().int().min(1).default(1),
   accountId: z.string(),
   caseId: z.string(),
   startedAt: z.string(),
