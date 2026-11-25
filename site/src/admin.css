@@ -374,6 +374,11 @@ html.admin-board-open { overflow: hidden; }
 .sched-invalid { color: var(--red); }
 .admin-input[aria-invalid="true"] { border-color: var(--red); }
 .sched-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; position: sticky; bottom: 8px; z-index: 2; }
+.sched-actions[hidden] { display: none; }
+/* While the save bar is up, focus scrolling keeps fields clear of it (WCAG 2.4.11). */
+html.admin-savebar-open { scroll-padding-bottom: 120px; }
+.field-error { margin: 0; font-weight: 600; }
+.field-error[hidden] { display: none; }
 .sched-actions .admin-error { flex-basis: 100%; }
 .sched-dirty { color: var(--amber); font-weight: 600; }
 .cal-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
@@ -409,9 +414,11 @@ html.admin-board-open { overflow: hidden; }
 .admin-tiles-sm .admin-tile { padding: 10px 14px; background: var(--surface-2); }
 .admin-tiles-sm .admin-tile-value { font-size: clamp(1.3rem, 2.6vw, 1.8rem); }
 .q-id { font-family: var(--mono); color: var(--muted); }
-.stats-q-table tr.is-hardest td { background: var(--red-soft); }
-.stats-q-table tr.is-hardest td:first-child { box-shadow: inset 3px 0 0 var(--red); }
-[dir="rtl"] .stats-q-table tr.is-hardest td:first-child { box-shadow: inset -3px 0 0 var(--red); }
+/* Hardest question: a neutral flag, not an error state. */
+.stats-q-table tr.is-hardest td { background: var(--surface-2); }
+.stats-q-table tr.is-hardest td:first-child { box-shadow: inset 3px 0 0 var(--text-2); }
+[dir="rtl"] .stats-q-table tr.is-hardest td:first-child { box-shadow: inset -3px 0 0 var(--text-2); }
+.stats-hardest { margin: 0; }
 .hardest-badge {
   display: inline-block;
   margin-inline-start: 8px;
@@ -421,8 +428,8 @@ html.admin-board-open { overflow: hidden; }
   letter-spacing: 0.06em;
   padding: 1px 7px;
   border-radius: 999px;
-  color: var(--red);
-  border: 1px solid var(--red);
+  color: var(--text-2);
+  border: 1px solid var(--border-strong);
 }
 .admin-table tr.is-first td { background: var(--amber-soft); }
 
@@ -470,7 +477,8 @@ html.admin-board-open { overflow: hidden; }
 .admin-dialog p { margin: 0 0 12px; }
 .admin-pw { display: flex; justify-content: flex-start; margin: 4px 0 16px; }
 .admin-pw-value { user-select: all; letter-spacing: 0.04em; }
-.admin-dialog-actions { display: flex; justify-content: flex-end; }
+.admin-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.admin-confirm .admin-h2 { font-size: 1.15rem; overflow-wrap: anywhere; }
 
 .adm-ev-body { gap: 20px; }
 .adm-ev-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0; font-size: 1.05rem; }
@@ -559,3 +567,63 @@ html.admin-board-open { overflow: hidden; }
   direction: ltr;
   unicode-bidi: isolate;
 }
+
+/* ---- accounts table: the username and the row actions stay on screen while the middle scrolls ----
+   Delete is never pressable on a row you can't identify. */
+.acct-table th:first-child,
+.acct-table td.col-name {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  background: var(--surface);
+  box-shadow: 6px 0 6px -6px rgba(0, 0, 0, 0.35);
+}
+.acct-table th:first-child { z-index: 3; }
+[dir="rtl"] .acct-table th:first-child,
+[dir="rtl"] .acct-table td.col-name { box-shadow: -6px 0 6px -6px rgba(0, 0, 0, 0.35); }
+.acct-table tr:hover td.col-name,
+.acct-table tr.is-expanded td.col-name { background: var(--surface-2); }
+@media (min-width: 901px) {
+  .acct-table th:last-child,
+  .acct-table td.col-actions {
+    position: sticky;
+    inset-inline-end: 0;
+    z-index: 1;
+    background: var(--surface);
+    box-shadow: -6px 0 6px -6px rgba(0, 0, 0, 0.35);
+  }
+  .acct-table th:last-child { z-index: 3; }
+  [dir="rtl"] .acct-table th:last-child,
+  [dir="rtl"] .acct-table td.col-actions { box-shadow: 6px 0 6px -6px rgba(0, 0, 0, 0.35); }
+  .acct-table tr:hover td.col-actions,
+  .acct-table tr.is-expanded td.col-actions { background: var(--surface-2); }
+}
+.btn-delete { color: var(--red); }
+
+/* ---- recently deleted ---- */
+.trash-msg { margin: -4px 0 10px; color: var(--green); font-weight: 600; }
+.trash-msg.is-error { color: var(--red); }
+.trash-msg[hidden] { display: none; }
+.trash-label { overflow-wrap: anywhere; }
+
+/* ---- projector board: scope + frozen state ---- */
+.admin-board-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.admin-board-scope { min-width: 12rem; }
+.admin-board-head { flex-wrap: wrap; }
+@media (max-width: 560px) {
+  .admin-board-tools { width: 100%; flex-wrap: nowrap; }
+  .admin-board-scope { min-width: 0; flex: 1 1 0; }
+}
+.admin-board-state { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: -1.5vh 0 2vh; font-size: clamp(1rem, 2vw, 1.4rem); }
+.board-frozen-chip,
+.board-live-chip {
+  display: inline-block;
+  font-weight: 700;
+  padding: 4px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--admin-blue);
+  background: var(--admin-blue-soft);
+  color: var(--text);
+}
+.board-live-chip { border-color: var(--green); background: var(--green-soft); }
+.board-frozen-at { color: var(--text-2); }

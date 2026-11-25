@@ -7,11 +7,13 @@ import { T } from "../i18n/strings-tools";
 import { getLang } from "../i18n/i18n";
 import {
   QUESTION_ORDER,
+  TRASH_RETENTION_DAYS,
   type AccountStatus,
   type AdminProgress,
   type AuditEntry,
   type CaseStats,
   type CaseSummary,
+  type LeaderboardResponse,
   type LiveEvent,
   type QuestionId,
   type Schedule,
@@ -19,6 +21,7 @@ import {
   type Settings,
   type StageStatus,
   type TodayResponse,
+  type TrashEntry,
   type UserStats,
 } from "../../shared/contract";
 import { cases, getCase } from "../content/load";
@@ -35,14 +38,17 @@ import {
   fetchExportCsv,
   fetchMe,
   fetchProgress,
+  fetchPublicLeaderboard,
   fetchSchedule,
   fetchSettings,
   fetchToday,
+  fetchTrash,
   getAdminKey,
   logoutSession,
   resetAccountPassword,
   resetProgress,
   restartPlayerCase,
+  restoreTrash,
   saveEvent,
   saveSchedule,
   saveSettings,
@@ -72,8 +78,31 @@ type StageKey = "setup" | QuestionId;
 type LiveSortKey = "score" | "progress" | "name" | "stuck";
 type AcctSortKey = "rank" | "newest" | "seen" | "name";
 type AcctFilter = "all" | AccountStatus;
-type ConfirmKind = "delete" | "restart" | "reset-password" | "approve-all" | "invite-clear";
 type AuthMode = "key" | "session";
+/** "Hardest question" needs at least this many players who reached it. */
+const HARDEST_MIN_PLAYERS = 3;
+/** How long a "saved" note stays in the save bar before the bar hides again. */
+const SAVED_NOTE_MS = 4000;
+
+// ---- URL state: #/admin?tab=live&case=<id> (deep links; Back moves between tabs) ----
+
+function readUrlState(): { tab: TabId | null; caseId: string | null } {
+  const params = new URLSearchParams(location.hash.split("?")[1] ?? "");
+  const tab = params.get("tab");
+  const caseId = params.get("case");
+  return { tab: isTabId(tab) ? tab : null, caseId: caseId !== null && getCase(caseId) !== undefined ? caseId : null };
+}
+
+function adminHash(tab: TabId, caseId: string | null): string {
+  const params = new URLSearchParams({ tab });
+  if (tab === "live" && caseId !== null) params.set("case", caseId);
+  return `#/admin?${params.toString()}`;
+}
+
+const isAdminHash = (hash: string): boolean => /^#\/?admin(\?|$)/.test(hash);
+
+/** Unsaved drafts carried over when the view re-renders in place (the language toggle re-runs the route). */
+let carried: { schedule: Schedule | null; event: LiveEvent | null } | null = null;
 
 // ---- content lookups (titles come from the bundled case content, ids from the server) ----
 
@@ -148,6 +177,17 @@ function relativeAgo(iso: string | null, now: number): string {
   const hrs = Math.floor(min / 60);
   if (hrs < 24) return T().admAgo(`${hrs}h`);
   return T().admAgo(`${Math.floor(hrs / 24)}d`);
+}
+
+/** "in 6 days" / "בעוד 6 ימים" for a future instant (localized by Intl). */
+function relativeIn(iso: string | null, now: number): string {
+  const t = ms(iso);
+  if (t === null) return "—";
+  const rtf = new Intl.RelativeTimeFormat(locale(), { numeric: "auto" });
+  const diffMin = Math.max(0, Math.round((t - now) / 60000));
+  if (diffMin >= 24 * 60) return rtf.format(Math.round(diffMin / (24 * 60)), "day");
+  if (diffMin >= 60) return rtf.format(Math.round(diffMin / 60), "hour");
+  return rtf.format(diffMin, "minute");
 }
 
 function median(values: readonly number[]): number | null {
@@ -300,20 +340,35 @@ function topPlayers(accounts: readonly UserStats[], n: number): UserStats[] {
 
 // ---- stats ------------------------------------------------------------------------
 
-type QuestionSummary = CaseSummary["questions"][QuestionId];
+type QuestionFunnel = { q: QuestionId; reached: number; solved: number; revealed: number; avgWrong: number; avgHints: number };
 
-/** Hardest = highest give-up rate, then most wrong attempts, then most hints. Needs at least one finished attempt. */
-function hardestQuestion(summary: CaseSummary): QuestionId | null {
-  let best: { q: QuestionId; score: number } | null = null;
-  for (const q of caseQuestionIds(summary.caseId)) {
-    const s: QuestionSummary | undefined = summary.questions[q];
-    if (!s) continue;
-    const finished = s.solved + s.revealed;
-    if (finished === 0) continue;
-    const score = (s.revealed / finished) * 10 + s.avgWrong + s.avgHints * 0.5;
-    if (best === null || score > best.score) best = { q, score };
+/**
+ * Per question: how many players reached it (from the per-player progress when we have it; otherwise the
+ * lower bound solved + gave up), and the server's solved / gave-up / averages.
+ */
+function questionFunnel(summary: CaseSummary, players: readonly AdminProgress[] | null): QuestionFunnel[] {
+  return caseQuestionIds(summary.caseId).map((q) => {
+    const s = summary.questions[q];
+    const solved = s?.solved ?? 0;
+    const revealed = s?.revealed ?? 0;
+    const reached = players ? players.filter((p) => (p.stages[q]?.status ?? "locked") !== "locked").length : solved + revealed;
+    return { q, reached: Math.max(reached, solved + revealed), solved, revealed, avgWrong: s?.avgWrong ?? 0, avgHints: s?.avgHints ?? 0 };
+  });
+}
+
+/**
+ * Hardest = the largest share of players who reached the question but haven't solved it (gave up or still
+ * on it: the drop-off), then the most wrong attempts. Only questions at least HARDEST_MIN_PLAYERS reached count.
+ */
+function hardestQuestion(rows: readonly QuestionFunnel[]): { row: QuestionFunnel; rate: number } | null {
+  let best: { row: QuestionFunnel; rate: number } | null = null;
+  for (const row of rows) {
+    if (row.reached < HARDEST_MIN_PLAYERS) continue;
+    const rate = (row.reached - row.solved) / row.reached;
+    if (rate === 0 && row.avgWrong === 0) continue;
+    if (best === null || rate > best.rate || (rate === best.rate && row.avgWrong > best.row.avgWrong)) best = { row, rate };
   }
-  return best && best.score > 0 ? best.q : null;
+  return best;
 }
 
 // ---- schedule ---------------------------------------------------------------------
@@ -446,12 +501,38 @@ const errMessage = (err: unknown): string => (err instanceof Error ? err.message
 
 let activeCleanup: (() => void) | null = null;
 
+/**
+ * The live dashboard. The router re-runs on every hash change (it runs before any listener registered here), so a
+ * Back/Forward between tabs (#/admin?tab=…) calls renderAdmin again: we re-attach the same instance instead of
+ * rebuilding it, which keeps drafts, focus and data. Only a language switch rebuilds (with the drafts carried over).
+ */
+type AdminInstance = {
+  container: HTMLElement;
+  lang: string;
+  alive: () => boolean;
+  reattach: () => void;
+  dirtyDrafts: () => { schedule: Schedule | null; event: LiveEvent | null };
+};
+let activeInstance: AdminInstance | null = null;
+
 export function renderAdmin(root: HTMLElement): void {
+  const prev = activeInstance;
+  if (prev && prev.alive()) {
+    if (isAdminHash(location.hash) && prev.lang === getLang()) {
+      root.replaceChildren(prev.container);
+      prev.reattach();
+      return;
+    }
+    carried = prev.dirtyDrafts();
+  }
   // A re-render of the same route must not leak the previous instance's timers.
   if (activeCleanup) activeCleanup();
 
   const container = h("div", { class: "admin" });
   root.replaceChildren(container);
+  const carry = carried;
+  carried = null;
+  const urlState = readUrlState();
 
   let pollId: number | null = null;
   let tickId: number | null = null;
@@ -459,12 +540,14 @@ export function renderAdmin(root: HTMLElement): void {
 
   const state = {
     auth: null as AuthMode | null,
-    tab: readStoredTab(),
+    tab: urlState.tab ?? readStoredTab(),
     accounts: null as AdminAccountsResult | null,
     today: null as TodayResponse | null,
     progress: null as AdminProgressResult | null,
     stats: null as AdminStatsResult | null,
-    liveCaseId: null as string | null,
+    /** per-case player progress for the Stats tab (how many reached each question) */
+    statsProgress: new Map<string, readonly AdminProgress[]>(),
+    liveCaseId: urlState.caseId,
     lastUpdated: 0,
     paused: false,
     loading: false,
@@ -472,6 +555,20 @@ export function renderAdmin(root: HTMLElement): void {
     banner: null as string | null,
     failures: 0,
     leaderboard: false,
+    /** projector board: public leaderboard (honours the freeze); null scope = overall */
+    board: {
+      scope: null as string | null,
+      data: null as LeaderboardResponse | null,
+      error: null as string | null,
+    },
+    // recently deleted (Accounts tab)
+    trash: {
+      entries: null as TrashEntry[] | null,
+      error: null as string | null,
+      unavailable: false,
+      busy: new Set<string>(),
+      msg: null as { text: string; ok: boolean } | null,
+    },
     // live tab
     liveSort: "score" as LiveSortKey,
     liveFilter: "",
@@ -485,8 +582,7 @@ export function renderAdmin(root: HTMLElement): void {
     exporting: false,
     // live tab: players whose score breakdown is open
     liveExpanded: new Set<string>(),
-    // shared: two-step confirmations and in-flight row actions
-    confirm: null as { kind: ConfirmKind; id: string } | null,
+    // shared: in-flight row actions
     busy: new Set<string>(),
     // schedule tab
     schedule: {
@@ -534,20 +630,96 @@ export function renderAdmin(root: HTMLElement): void {
     if (disposed) return;
     disposed = true;
     stopTimers();
+    if (savedNoteTimer !== null) window.clearTimeout(savedNoteTimer);
     window.removeEventListener("hashchange", onHashChange);
     window.removeEventListener("beforeunload", onBeforeUnload);
     document.removeEventListener("keydown", onKeyDown);
     document.removeEventListener("visibilitychange", onVisibility);
-    document.documentElement.classList.remove("admin-board-open");
+    document.removeEventListener("focusin", onFocusIn);
+    document.removeEventListener("click", onDocClick, { capture: true });
+    document.documentElement.classList.remove("admin-board-open", "admin-savebar-open");
     if (activeCleanup === dispose) activeCleanup = null;
+    if (activeInstance?.container === container) activeInstance = null;
   };
   activeCleanup = dispose;
 
-  function onHashChange(): void {
-    if (!location.hash.startsWith("#/admin")) dispose();
+  /** The URL this view last showed (to put back when the instructor stays). */
+  let shownUrl = location.href;
+  /** Set when a link click was already confirmed, so the hash change doesn't ask twice. */
+  let leaveConfirmed = false;
+  /** Last focused control in the dashboard (restored when the router re-attaches the view). */
+  let lastFocused: HTMLElement | null = null;
+
+  function setUrl(hash: string, mode: "push" | "replace"): void {
+    if (mode === "push") history.pushState(history.state, "", hash);
+    else history.replaceState(history.state, "", hash);
+    shownUrl = location.href;
   }
+
+  /** Names the editors with unsaved changes ("schedule", "event"), or "" when nothing is dirty. */
+  function dirtySections(): string {
+    const parts: string[] = [];
+    if (scheduleDirty()) parts.push(T().admSecSchedule);
+    if (eventDirty()) parts.push(T().admSecEvent);
+    return parts.join(" + ");
+  }
+
+  /**
+   * Runs after the router (which registered first). Leaving #/admin with unsaved edits asks; staying puts the
+   * old URL back and re-runs the route, which re-attaches this same instance (drafts intact).
+   */
+  function onHashChange(): void {
+    if (disposed || isAdminHash(location.hash)) return; // inside #/admin: renderAdmin re-attaches us
+    const dirty = dirtySections();
+    if (dirty !== "" && !leaveConfirmed && !window.confirm(T().admLeaveConfirm(dirty))) {
+      history.replaceState(history.state, "", shownUrl);
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+      return;
+    }
+    leaveConfirmed = false;
+    dispose();
+  }
+
+  /** Link clicks are caught before the hash changes, so staying doesn't even leave the page. */
+  function onDocClick(e: MouseEvent): void {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const link = e.target instanceof Element ? e.target.closest("a[href]") : null;
+    const href = link?.getAttribute("href") ?? "";
+    if (!href.startsWith("#") || isAdminHash(href) || link?.hasAttribute("download")) return;
+    const dirty = dirtySections();
+    if (dirty === "") return;
+    if (window.confirm(T().admLeaveConfirm(dirty))) {
+      leaveConfirmed = true;
+      window.setTimeout(() => (leaveConfirmed = false), 1000); // the link may not change the hash after all
+    } else {
+      e.preventDefault();
+    }
+  }
+
+  /** The URL changed inside #/admin (Back/Forward between tabs, or a pasted link): follow it. */
+  function applyUrlState(): void {
+    const next = readUrlState();
+    const tab = next.tab ?? "accounts";
+    if (tab !== state.tab && !selectTab(tab, { fromUrl: true })) {
+      history.replaceState(history.state, "", shownUrl);
+      return;
+    }
+    if (next.caseId !== null && next.caseId !== state.liveCaseId && tab === "live") selectLiveCase(next.caseId, false);
+    shownUrl = location.href;
+  }
+
+  activeInstance = {
+    container,
+    lang: getLang(),
+    alive: () => !disposed,
+    reattach: () => {
+      if (state.accounts) applyUrlState();
+      if (lastFocused && lastFocused.isConnected) lastFocused.focus({ preventScroll: true });
+    },
+    dirtyDrafts: () => ({ schedule: scheduleDirty() ? state.schedule.draft : null, event: eventDirty() ? state.event.draft : null }),
+  };
   function onKeyDown(e: KeyboardEvent): void {
-    if (e.key === "Escape" && state.leaderboard && !pwDialog.open) {
+    if (e.key === "Escape" && state.leaderboard && !pwDialog.open && !confirmDialog.open) {
       state.leaderboard = false;
       renderLeaderboard();
     }
@@ -563,10 +735,25 @@ export function renderAdmin(root: HTMLElement): void {
   function onBeforeUnload(e: BeforeUnloadEvent): void {
     if (scheduleDirty() || eventDirty()) e.preventDefault();
   }
+  /** A focused field must never sit under the sticky save bar (WCAG 2.4.11). */
+  function onFocusIn(e: FocusEvent): void {
+    const target = e.target;
+    if (!(target instanceof HTMLElement) || !container.contains(target)) return;
+    lastFocused = target;
+    // After the browser's own focus scrolling (which already honours scroll-padding-bottom).
+    window.requestAnimationFrame(() => {
+      const bar = container.querySelector<HTMLElement>(".admin-tabpanel:not([hidden]) .sched-actions:not([hidden])");
+      if (!bar || bar.contains(target) || document.activeElement !== target) return;
+      const overlap = target.getBoundingClientRect().bottom - bar.getBoundingClientRect().top + 12;
+      if (overlap > 0) window.scrollBy({ top: overlap });
+    });
+  }
   window.addEventListener("hashchange", onHashChange);
+  document.addEventListener("click", onDocClick, { capture: true });
   window.addEventListener("beforeunload", onBeforeUnload);
   document.addEventListener("keydown", onKeyDown);
   document.addEventListener("visibilitychange", onVisibility);
+  document.addEventListener("focusin", onFocusIn);
 
   // ---- login ---------------------------------------------------------------------
 
@@ -677,6 +864,7 @@ export function renderAdmin(root: HTMLElement): void {
   boardBtn.addEventListener("click", () => {
     state.leaderboard = true;
     renderLeaderboard();
+    void loadBoard();
   });
   logoutBtn.addEventListener("click", () => {
     const wasSession = state.auth === "session";
@@ -758,16 +946,36 @@ export function renderAdmin(root: HTMLElement): void {
     }
   }
 
-  function selectTab(tab: TabId): void {
-    if (tab === state.tab) return;
+  /**
+   * Leaving the Schedule or Event tab with unsaved edits asks first; confirming discards the draft.
+   * Returns false when the instructor chose to stay.
+   */
+  function selectTab(tab: TabId, opts: { fromUrl?: boolean } = {}): boolean {
+    if (tab === state.tab) return true;
+    const leaving = state.tab;
+    const dirty = leaving === "schedule" ? scheduleDirty() : leaving === "event" ? eventDirty() : false;
+    if (dirty) {
+      if (!window.confirm(T().admLeaveConfirm(leaving === "schedule" ? T().admSecSchedule : T().admSecEvent))) return false;
+      if (leaving === "schedule") discardSchedule();
+      else discardEvent();
+    }
     state.tab = tab;
-    state.confirm = null;
     storeTab(tab);
+    if (!opts.fromUrl) setUrl(adminHash(tab, state.liveCaseId), "push");
     syncTabs();
+    syncSaveBarClass();
     renderActiveTab();
     if (tab === "schedule" && !state.schedule.draft) void loadSchedule();
     if (tab === "event" && !state.event.draft) void loadEvent();
     void load();
+    return true;
+  }
+
+  /** The sticky save bar is visible on the active tab: leave room for it when the browser scrolls focus into view. */
+  function syncSaveBarClass(): void {
+    const open =
+      (state.tab === "schedule" && scheduleBarVisible()) || (state.tab === "event" && eventBarVisible());
+    document.documentElement.classList.toggle("admin-savebar-open", open);
   }
 
   function buildDashboard(): void {
@@ -798,6 +1006,7 @@ export function renderAdmin(root: HTMLElement): void {
       [...tabPanels.values()],
       leaderboardEl,
       pwDialog,
+      confirmDialog,
     );
     buildAccountsPanel();
     buildLivePanel();
@@ -836,75 +1045,83 @@ export function renderAdmin(root: HTMLElement): void {
     return h("th", { scope: "col", class: cls }, label);
   }
 
-  /** Inline two-step confirm (state-driven so it survives row rebuilds). */
-  function twoStep(opts: {
-    kind: ConfirmKind;
-    id: string;
-    label: string;
-    ariaLabel: string;
-    confirmAria: string;
-    busyLabel: string;
-    buttonClass?: string;
-    run: () => Promise<void>;
-    rerender: () => void;
-  }): HTMLElement {
-    const busyKey = `${opts.kind}:${opts.id}`;
-    const isConfirming = state.confirm?.kind === opts.kind && state.confirm.id === opts.id;
-    if (!isConfirming) {
-      return h(
+  // ---- confirm dialog (native modal <dialog>: focus trap, Esc = cancel) ---------------------
+  // The title names the target and the action, the button repeats it ("Delete dana_k"), focus starts on the
+  // safe choice, and only destructive actions are red.
+
+  const confirmDialog = h("dialog", { class: "admin-dialog admin-confirm", "aria-labelledby": "admin-confirm-title", "aria-describedby": "admin-confirm-body" });
+  let confirmBusy = false;
+  confirmDialog.addEventListener("cancel", (e) => {
+    // Esc while the action is running would hide its outcome.
+    if (confirmBusy) e.preventDefault();
+  });
+
+  function askConfirm(opts: {
+    title: string;
+    body: string;
+    note?: string;
+    confirmLabel: string;
+    cancelLabel?: string;
+    busyLabel?: string;
+    tone: "danger" | "primary";
+    /** runs while the dialog stays open (button shows busyLabel); an error closes it and shows the banner */
+    run?: () => Promise<void>;
+    /** where focus goes after the dialog closes (the trigger may have been re-rendered meanwhile) */
+    returnFocus?: () => HTMLElement | null;
+  }): Promise<boolean> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (ok: boolean): void => {
+        if (settled) return;
+        settled = true;
+        confirmBusy = false;
+        if (confirmDialog.open) confirmDialog.close();
+        confirmDialog.replaceChildren();
+        resolve(ok);
+        const target = opts.returnFocus?.() ?? null;
+        if (target && target.isConnected) target.focus();
+      };
+      const cancel = h("button", { type: "button", class: "btn btn-ghost", "data-confirm-cancel": "" }, opts.cancelLabel ?? T().admCancel);
+      const yes = h(
         "button",
-        {
-          type: "button",
-          class: opts.buttonClass ?? "btn btn-ghost btn-sm",
-          "aria-label": opts.ariaLabel,
-          onclick: () => {
-            state.confirm = { kind: opts.kind, id: opts.id };
-            opts.rerender();
-            container.querySelector<HTMLButtonElement>(`[data-confirm="${CSS.escape(busyKey)}"]`)?.focus();
-          },
-        },
-        opts.label,
+        { type: "button", class: `btn ${opts.tone === "danger" ? "btn-danger" : "btn-primary"}`, "data-confirm-ok": "" },
+        opts.confirmLabel,
       );
-    }
-    const busy = state.busy.has(busyKey);
-    const yes = h(
-      "button",
-      { type: "button", class: "btn btn-danger btn-sm", "data-confirm": busyKey, disabled: busy },
-      busy ? opts.busyLabel : T().admConfirm,
-    );
-    yes.addEventListener("click", () => {
-      state.busy.add(busyKey);
-      opts.rerender();
-      opts
-        .run()
-        .then(() => {
-          state.confirm = null;
-          void load();
-        })
-        .catch((err: unknown) => {
-          state.confirm = null;
-          showActionError(err);
-        })
-        .finally(() => {
-          state.busy.delete(busyKey);
-          opts.rerender();
-        });
+      cancel.addEventListener("click", () => finish(false));
+      yes.addEventListener("click", () => {
+        const run = opts.run;
+        if (!run) return finish(true);
+        confirmBusy = true;
+        yes.disabled = true;
+        cancel.disabled = true;
+        yes.textContent = opts.busyLabel ?? opts.confirmLabel;
+        run()
+          .then(() => finish(true))
+          .catch((err: unknown) => {
+            finish(false);
+            showActionError(err);
+          });
+      });
+      confirmDialog.onclose = () => {
+        if (!confirmDialog.open) finish(false); // Esc; a stale close event from an earlier dialog finds it open again
+      };
+      setChildren(
+        confirmDialog,
+        h("h2", { class: "admin-h2", id: "admin-confirm-title" }, opts.title),
+        h("p", { id: "admin-confirm-body" }, opts.body),
+        opts.note ? h("p", { class: "muted small" }, opts.note) : null,
+        h("div", { class: "admin-dialog-actions" }, cancel, yes),
+      );
+      if (!confirmDialog.open) confirmDialog.showModal();
+      cancel.focus();
     });
-    const no = h(
-      "button",
-      {
-        type: "button",
-        class: "btn btn-ghost btn-sm",
-        disabled: busy,
-        onclick: () => {
-          state.confirm = null;
-          opts.rerender();
-        },
-      },
-      T().admCancel,
-    );
-    return h("span", { class: "confirm-prompt", role: "group", "aria-label": opts.confirmAria }, yes, no);
   }
+
+  /** A row button that opens a confirm; `key` finds it again after a re-render (focus return). */
+  function rowAction(label: string, ariaLabel: string, key: string, cls: string, open: () => Promise<boolean>): HTMLButtonElement {
+    return h("button", { type: "button", class: cls, "aria-label": ariaLabel, "data-action": key, onclick: () => void open() }, label);
+  }
+  const rowActionEl = (key: string): HTMLElement | null => container.querySelector<HTMLElement>(`[data-action="${CSS.escape(key)}"]`);
 
   // =====================================================================================
   // Accounts tab
@@ -1144,6 +1361,117 @@ export function renderAdmin(root: HTMLElement): void {
     inviteMsgEl.hidden = !st.error && !st.msg;
   }
 
+  // ---- recently deleted (trash): deleted accounts and reset case progress, restorable for a few days ----
+  const trashBodyEl = h("div", { class: "admin-table-wrap" });
+  const trashMsgEl = h("p", { class: "small trash-msg", role: "status", hidden: true });
+  let trashSig = "";
+
+  async function restoreEntry(entry: TrashEntry): Promise<void> {
+    const t = state.trash;
+    if (t.busy.has(entry.id)) return;
+    t.busy.add(entry.id);
+    t.msg = null;
+    renderTrash();
+    try {
+      const res = await restoreTrash(entry.id);
+      if (disposed) return;
+      t.msg = { text: T().admRestored(entry.label, res.restored, res.skipped), ok: true };
+      t.entries = (t.entries ?? []).filter((e) => e.id !== entry.id);
+      void load();
+    } catch (err: unknown) {
+      if (disposed || handleAuthError(err)) return;
+      const conflict = err instanceof AdminApiError && (err.status === 409 || err.code === "conflict");
+      t.msg = { text: conflict ? T().admRestoreConflict(entry.label) : T().admActionFailed(errMessage(err)), ok: false };
+    } finally {
+      t.busy.delete(entry.id);
+    }
+    renderTrash();
+    // The restored row is gone from the list: keep keyboard focus in the section.
+    trashMsgEl.focus();
+  }
+
+  function renderTrash(): void {
+    const t = state.trash;
+    trashMsgEl.textContent = t.msg?.text ?? "";
+    trashMsgEl.hidden = t.msg === null;
+    trashMsgEl.classList.toggle("is-error", t.msg !== null && !t.msg.ok);
+    trashMsgEl.tabIndex = -1;
+    const now = Date.now();
+    const sig = JSON.stringify([
+      getLang(),
+      t.unavailable,
+      t.error,
+      t.entries,
+      [...t.busy],
+      // "expires in" changes slowly: re-render when its text would change
+      (t.entries ?? []).map((e) => relativeIn(e.expiresAt, now)),
+    ]);
+    if (sig === trashSig) return;
+    trashSig = sig;
+    if (t.unavailable) {
+      setChildren(trashBodyEl, h("p", { class: "muted admin-empty-small" }, T().admTrashUnavailable));
+      return;
+    }
+    if (t.entries === null) {
+      setChildren(trashBodyEl, h("p", { class: t.error ? "admin-error" : "muted admin-empty-small" }, t.error ? T().admTrashFailed(t.error) : T().admLoading));
+      return;
+    }
+    if (t.entries.length === 0) {
+      setChildren(trashBodyEl, h("p", { class: "muted admin-empty-small" }, T().admTrashEmpty(TRASH_RETENTION_DAYS)));
+      return;
+    }
+    setChildren(
+      trashBodyEl,
+      h(
+        "table",
+        { class: "admin-table trash-table" },
+        h(
+          "thead",
+          {},
+          h(
+            "tr",
+            {},
+            th(T().admColItem),
+            th(T().admColDeletedAt),
+            th(T().admColExpires),
+            th(T().admColRecords, "num"),
+            h("th", { scope: "col" }, h("span", { class: "visually-hidden" }, T().admColActions)),
+          ),
+        ),
+        h(
+          "tbody",
+          {},
+          t.entries.map((e) => {
+            const busy = t.busy.has(e.id);
+            return h(
+              "tr",
+              {},
+              h("td", { class: "trash-label" }, h("span", { dir: "auto" }, e.label)),
+              h("td", { class: "col-seen", title: e.deletedAt }, formatDateTime(e.deletedAt)),
+              h("td", { class: "col-seen", title: formatDateTime(e.expiresAt) }, relativeIn(e.expiresAt, now)),
+              h("td", { class: "num" }, String(e.records)),
+              h(
+                "td",
+                { class: "col-actions" },
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "btn btn-ghost btn-sm",
+                    disabled: busy,
+                    "aria-label": T().admRestoreLabel(e.label),
+                    onclick: () => void restoreEntry(e),
+                  },
+                  busy ? T().admRestoring : T().admRestore,
+                ),
+              ),
+            );
+          }),
+        ),
+      ),
+    );
+  }
+
   function buildAccountsPanel(): void {
     setChildren(
       tabPanels.get("accounts") ?? container,
@@ -1166,6 +1494,14 @@ export function renderAdmin(root: HTMLElement): void {
         ),
         h("p", { class: "muted small admin-hint" }, T().admAccountsHint),
         acctTableEl,
+      ),
+      h(
+        "section",
+        { class: "panel admin-panel trash-panel", "aria-labelledby": "admin-trash-title" },
+        h("h2", { class: "admin-h2", id: "admin-trash-title" }, T().admTrashTitle),
+        h("p", { class: "muted small admin-hint" }, T().admTrashHelp(TRASH_RETENTION_DAYS)),
+        trashMsgEl,
+        trashBodyEl,
       ),
       h(
         "section",
@@ -1229,7 +1565,7 @@ export function renderAdmin(root: HTMLElement): void {
             type: "button",
             class: "btn btn-ghost btn-sm",
             disabled: busy,
-            "aria-label": T().admRejectLabel(a.username),
+            "aria-label": a.status === "approved" ? T().admRevokeLabel(a.username) : T().admRejectLabel(a.username),
             title: a.status === "approved" ? T().admRevokeTip : undefined,
             onclick: () => void changeStatus(a, "reject"),
           },
@@ -1254,41 +1590,46 @@ export function renderAdmin(root: HTMLElement): void {
     pendingStatusEl.textContent = state.approvedMsg ?? "";
     pendingStatusEl.hidden = state.approvedMsg === null;
     // Rebuild only when something visible changed, so focus on Approve/Reject survives polling.
-    const approveAllConfirm = state.confirm?.kind === "approve-all";
     const sig = [
       getLang(),
-      approveAllConfirm ? "confirm" : "",
-      state.busy.has("approve-all:all") ? "busy" : "",
       ...pending.map((a) => `${a.accountId}:${a.username}:${state.busy.has(`status:${a.accountId}`) ? 1 : 0}`),
     ].join("|");
     if (sig === pendingSig) return;
     pendingSig = sig;
     if (pending.length === 0) {
-      if (approveAllConfirm) state.confirm = null;
       approveAllEl.replaceChildren();
       setChildren(pendingEl, h("p", { class: "muted admin-empty-small" }, T().admNoPending));
       return;
     }
     const n = pending.length;
+    // Approving is the intended, safe action: a primary confirm, never a red one.
     setChildren(
       approveAllEl,
-      twoStep({
-        kind: "approve-all",
-        id: "all",
-        label: T().admApproveAll(n),
-        ariaLabel: T().admApproveAllLabel(n),
-        confirmAria: T().admConfirmApproveAllLabel(n),
-        busyLabel: T().admApproving,
-        buttonClass: "btn btn-primary btn-sm",
-        run: async () => {
-          const approved = await approveAll();
-          state.approvedMsg = T().admApprovedN(approved);
+      h(
+        "button",
+        {
+          type: "button",
+          class: "btn btn-primary btn-sm",
+          id: "admin-approve-all",
+          "aria-label": T().admApproveAllLabel(n),
+          onclick: () =>
+            void askConfirm({
+              title: T().admApproveAllTitle(n),
+              body: T().admApproveAllBody,
+              confirmLabel: T().admApproveAll(n),
+              busyLabel: T().admApproving,
+              tone: "primary",
+              run: async () => {
+                const approved = await approveAll();
+                state.approvedMsg = T().admApprovedN(approved);
+                pendingSig = "";
+                void load();
+              },
+              returnFocus: () => document.getElementById("admin-approve-all") ?? pendingEl.querySelector("button"),
+            }),
         },
-        rerender: () => {
-          pendingSig = "";
-          renderPending(state.accounts?.accounts ?? []);
-        },
-      }),
+        T().admApproveAll(n),
+      ),
     );
     setChildren(
       pendingEl,
@@ -1383,10 +1724,6 @@ export function renderAdmin(root: HTMLElement): void {
       relativeAgo(a.lastSeenAt, now),
       state.expanded.has(id),
       state.expanded.has(id) ? a.cases : null,
-      state.confirm?.kind === "delete" && state.confirm.id === id,
-      state.confirm?.kind === "reset-password" && state.confirm.id === id,
-      state.busy.has(`delete:${id}`),
-      state.busy.has(`reset-password:${id}`),
       state.busy.has(`status:${id}`),
     ]);
   }
@@ -1439,39 +1776,40 @@ export function renderAdmin(root: HTMLElement): void {
           "span",
           { class: "row-actions" },
           statusButtons(a, true),
-          twoStep({
-            kind: "reset-password",
-            id: a.accountId,
-            label: T().admResetPw,
-            ariaLabel: T().admResetPwLabel(a.username),
-            confirmAria: T().admConfirmResetPwLabel(a.username),
-            busyLabel: T().admResettingPw,
-            run: async () => {
-              const password = await resetAccountPassword(a.accountId);
-              showTempPassword(a.username, password);
-            },
-            rerender: () => {
-              if (state.accounts) renderAccountsTable();
-            },
-          }),
-          twoStep({
-            kind: "delete",
-            id: a.accountId,
-            label: T().admDelete,
-            ariaLabel: T().admDeleteLabel(a.username),
-            confirmAria: T().admConfirmDeleteLabel(a.username),
-            busyLabel: T().admDeleting,
-            run: async () => {
-              await deleteAccount(a.accountId);
-              state.expanded.delete(a.accountId);
-              if (state.accounts) {
-                state.accounts = { ...state.accounts, accounts: state.accounts.accounts.filter((x) => x.accountId !== a.accountId) };
-              }
-            },
-            rerender: () => {
-              if (state.accounts) renderAccountsTable();
-            },
-          }),
+          rowAction(T().admResetPw, T().admResetPwLabel(a.username), `reset-password:${a.accountId}`, "btn btn-ghost btn-sm", () =>
+            askConfirm({
+              title: T().admResetPwTitle(a.username),
+              body: T().admResetPwBody,
+              confirmLabel: T().admResetPwLabel(a.username),
+              busyLabel: T().admResettingPw,
+              tone: "primary",
+              run: async () => {
+                const password = await resetAccountPassword(a.accountId);
+                showTempPassword(a.username, password);
+              },
+              returnFocus: () => rowActionEl(`reset-password:${a.accountId}`),
+            }),
+          ),
+          rowAction(T().admDelete, T().admDeleteLabel(a.username), `delete:${a.accountId}`, "btn btn-ghost btn-sm btn-delete", () =>
+            askConfirm({
+              title: T().admDeleteTitle(a.username),
+              body: T().admDeleteBody(TRASH_RETENTION_DAYS),
+              confirmLabel: T().admDeleteLabel(a.username),
+              cancelLabel: T().admKeepAccount,
+              busyLabel: T().admDeleting,
+              tone: "danger",
+              run: async () => {
+                await deleteAccount(a.accountId);
+                state.expanded.delete(a.accountId);
+                if (state.accounts) {
+                  state.accounts = { ...state.accounts, accounts: state.accounts.accounts.filter((x) => x.accountId !== a.accountId) };
+                }
+                renderAccounts();
+                void load();
+              },
+              returnFocus: () => acctSearchInput,
+            }),
+          ),
         ),
       ),
     );
@@ -1556,10 +1894,10 @@ export function renderAdmin(root: HTMLElement): void {
     );
     renderPending(all);
     renderInvite();
+    renderTrash();
     // Drop UI state for accounts that disappeared.
     const ids = new Set(all.map((a) => a.accountId));
     for (const id of state.expanded) if (!ids.has(id)) state.expanded.delete(id);
-    if ((state.confirm?.kind === "delete" || state.confirm?.kind === "reset-password") && !ids.has(state.confirm.id)) state.confirm = null;
     renderAccountsTable();
   }
 
@@ -1570,15 +1908,22 @@ export function renderAdmin(root: HTMLElement): void {
   const liveCaseSelect = h("select", { class: "admin-input", id: "admin-live-case" });
   liveCaseSelect.addEventListener("change", () => {
     const v = liveCaseSelect.value;
-    if (!v || v === state.liveCaseId) return;
-    state.liveCaseId = v;
+    if (v) selectLiveCase(v, true);
+  });
+
+  /** Switches the Live tab to another case; the case goes into the URL (replacing the entry: not a new Back step). */
+  function selectLiveCase(caseId: string, updateUrl: boolean): void {
+    if (caseId === state.liveCaseId) return;
+    state.liveCaseId = caseId;
     state.progress = null;
-    state.confirm = null;
     liveRowCache.clear();
     liveTbody.replaceChildren();
-    renderLive();
-    void load();
-  });
+    if (updateUrl && state.tab === "live") setUrl(adminHash("live", caseId), "replace");
+    if (state.accounts) {
+      renderLive();
+      void load();
+    }
+  }
   let liveCaseOptionsSig = "";
   const liveTodayTag = h("span", { class: "today-tag" }, T().admTodayTag);
   const liveTilesEl = h("div", { class: "admin-tiles" });
@@ -1748,8 +2093,13 @@ export function renderAdmin(root: HTMLElement): void {
       liveTilesEl,
       tile(T().admPlayers, String(players.length), T().admStuckCount(stuck)),
       tile(T().admFinished, String(finished.length), players.length ? `${Math.round((finished.length / players.length) * 100)}%` : undefined),
-      tile(T().admAvgScore, avg === null ? "—" : String(avg), maxScore ? T().admPar(maxScore) : undefined),
-      tile(T().admMedianTime, med === null ? "—" : formatDuration(med), T().admFinishedPlayers),
+      // Averaged over every player on the case (Stats averages finishers only): the label says which.
+      tile(
+        T().admAvgScoreAll,
+        avg === null ? "—" : String(avg),
+        [maxScore ? T().admPar(maxScore) : null, T().admSample(players.length)].filter((x) => x !== null).join(" · "),
+      ),
+      tile(T().admMedianTime, med === null ? "—" : formatDuration(med), `${T().admFinishedPlayers} · ${T().admSample(finished.length)}`),
     );
   }
 
@@ -1854,8 +2204,6 @@ export function renderAdmin(root: HTMLElement): void {
       relativeAgo(p.lastSeenAt, now),
       commandsUsed(p),
       state.liveExpanded.has(id) ? JSON.stringify(p.stages) : "",
-      state.confirm?.kind === "restart" && state.confirm.id === id ? "confirm" : "",
-      state.busy.has(`restart:${id}`) ? "busy" : "",
     ].join("|");
   }
 
@@ -1969,17 +2317,21 @@ export function renderAdmin(root: HTMLElement): void {
       h(
         "td",
         { class: "col-actions" },
-        twoStep({
-          kind: "restart",
-          id: p.accountId,
-          label: T().admRestart,
-          ariaLabel: T().admRestartLabel(p.username),
-          confirmAria: T().admConfirmRestartLabel(p.username),
-          busyLabel: T().admRestarting,
-          run: async () => {
-            await restartPlayerCase(p.accountId, caseId);
-          },
-          rerender: () => renderLiveTable(),
+        rowAction(T().admRestart, T().admRestartLabel(p.username), `restart:${p.accountId}`, "btn btn-ghost btn-sm", () => {
+          const solved = caseQuestionIds(caseId).filter((q) => isFinishedStatus(p.stages[q]?.status ?? "locked")).length;
+          return askConfirm({
+            title: T().admRestartTitle(p.username, caseTitle(caseId)),
+            body: T().admRestartBody(solved, p.score),
+            confirmLabel: T().admRestartLabel(p.username),
+            cancelLabel: T().admKeepProgress,
+            busyLabel: T().admRestarting,
+            tone: "danger",
+            run: async () => {
+              await restartPlayerCase(p.accountId, caseId);
+              void load();
+            },
+            returnFocus: () => rowActionEl(`restart:${p.accountId}`),
+          });
         }),
       ),
     );
@@ -2038,7 +2390,6 @@ export function renderAdmin(root: HTMLElement): void {
     resetTextEl.textContent = T().admResetCaseText(caseTitle(caseId));
     // A response for a previously selected case is ignored until the new one arrives.
     const players = state.progress?.caseId === caseId ? state.progress.players : [];
-    if (state.confirm?.kind === "restart" && !players.some((p) => p.accountId === state.confirm?.id)) state.confirm = null;
     for (const id of state.liveExpanded) if (!players.some((p) => p.accountId === id)) state.liveExpanded.delete(id);
     renderLiveTiles(players, caseId);
     renderFunnel(players, caseId);
@@ -2057,6 +2408,34 @@ export function renderAdmin(root: HTMLElement): void {
     return server !== null && draft !== null && scheduleSig(server) !== scheduleSig(draft);
   }
 
+  /** The save bar shows only while there is something to say: unsaved edits, an error, or a fresh "saved". */
+  function scheduleBarVisible(): boolean {
+    const sch = state.schedule;
+    return sch.draft !== null && (scheduleDirty() || sch.error !== null || sch.msg !== null);
+  }
+
+  function discardSchedule(): void {
+    const sch = state.schedule;
+    if (!sch.server) return;
+    sch.draft = cloneSchedule(sch.server);
+    sch.msg = null;
+    sch.error = null;
+  }
+
+  /** Hides a "saved" note after a moment (the bar goes away with it). */
+  let savedNoteTimer: number | null = null;
+  function clearSavedNoteLater(): void {
+    if (savedNoteTimer !== null) window.clearTimeout(savedNoteTimer);
+    savedNoteTimer = window.setTimeout(() => {
+      savedNoteTimer = null;
+      if (disposed) return;
+      state.schedule.msg = null;
+      state.event.msg = null;
+      if (state.tab === "schedule") withFocusKept(renderSchedule);
+      if (state.tab === "event") renderEventControls();
+    }, SAVED_NOTE_MS);
+  }
+
   async function loadSchedule(): Promise<void> {
     const sch = state.schedule;
     sch.loading = true;
@@ -2066,7 +2445,9 @@ export function renderAdmin(root: HTMLElement): void {
       const s = await fetchSchedule();
       if (disposed) return;
       sch.server = cloneSchedule(s);
-      sch.draft = cloneSchedule(s);
+      // A draft carried over from the previous render (language switch) wins over the fresh copy.
+      sch.draft = carry?.schedule ? cloneSchedule(carry.schedule) : cloneSchedule(s);
+      if (carry) carry.schedule = null;
       if (!sch.month) sch.month = monthOf(state.today?.date ?? null);
     } catch (err: unknown) {
       if (disposed || handleAuthError(err)) return;
@@ -2129,6 +2510,10 @@ export function renderAdmin(root: HTMLElement): void {
   async function onSaveSchedule(): Promise<void> {
     const sch = state.schedule;
     if (!sch.draft) return;
+    if (!isValidTimeZone(sch.draft.timezone)) {
+      document.getElementById("sched-tz")?.focus();
+      return;
+    }
     sch.saving = true;
     sch.error = null;
     sch.msg = null;
@@ -2139,6 +2524,7 @@ export function renderAdmin(root: HTMLElement): void {
       sch.server = cloneSchedule(saved);
       sch.draft = cloneSchedule(saved);
       sch.msg = T().admScheduleSaved;
+      clearSavedNoteLater();
       try {
         state.today = await fetchToday();
       } catch {
@@ -2282,6 +2668,16 @@ export function renderAdmin(root: HTMLElement): void {
       "aria-invalid": tzValid ? undefined : "true",
       "aria-describedby": "sched-tz-help",
     });
+    // Validate while typing (in place: re-rendering would move the caret); the draft updates on change.
+    const tzHelp = h("p", { class: tzValid ? "muted small" : "small sched-invalid", id: "sched-tz-help" }, tzValid ? T().admTimezoneHelp : T().admTimezoneInvalid);
+    tzInput.addEventListener("input", () => {
+      const v = tzInput.value.trim();
+      const ok = v === "" || isValidTimeZone(v);
+      if (ok) tzInput.removeAttribute("aria-invalid");
+      else tzInput.setAttribute("aria-invalid", "true");
+      tzHelp.className = ok ? "muted small" : "small sched-invalid";
+      tzHelp.textContent = ok ? T().admTimezoneHelp : T().admTimezoneInvalid;
+    });
     tzInput.addEventListener("change", () => {
       const v = tzInput.value.trim();
       updateDraft((d) => {
@@ -2300,7 +2696,7 @@ export function renderAdmin(root: HTMLElement): void {
 
     const saveBtn = h(
       "button",
-      { type: "button", class: "btn btn-primary", id: "sched-save", disabled: !dirty || sch.saving || !tzValid },
+      { type: "button", class: "btn btn-primary", id: "sched-save", disabled: !dirty || sch.saving },
       sch.saving ? T().admSaving : T().admSaveSchedule,
     );
     saveBtn.addEventListener("click", () => void onSaveSchedule());
@@ -2310,10 +2706,7 @@ export function renderAdmin(root: HTMLElement): void {
       T().admDiscard,
     );
     discardBtn.addEventListener("click", () => {
-      if (!sch.server) return;
-      sch.draft = cloneSchedule(sch.server);
-      sch.msg = null;
-      sch.error = null;
+      discardSchedule();
       renderSchedule();
     });
 
@@ -2341,7 +2734,7 @@ export function renderAdmin(root: HTMLElement): void {
             h("label", { class: "admin-label", for: "sched-tz" }, T().admTimezone),
             tzInput,
             tzList,
-            h("p", { class: tzValid ? "muted small" : "small sched-invalid", id: "sched-tz-help" }, tzValid ? T().admTimezoneHelp : T().admTimezoneInvalid),
+            tzHelp,
           ),
           h(
             "div",
@@ -2354,13 +2747,14 @@ export function renderAdmin(root: HTMLElement): void {
       calendar(draft, month),
       h(
         "div",
-        { class: "sched-actions panel admin-panel" },
+        { class: "sched-actions panel admin-panel", hidden: !scheduleBarVisible() },
         saveBtn,
         discardBtn,
         h("span", { class: `small ${dirty ? "sched-dirty" : "muted"}`, role: "status" }, dirty ? T().admUnsaved : sch.msg ?? T().admScheduledDays(entries)),
         sch.error ? h("p", { class: "admin-error", role: "alert" }, T().admScheduleSaveFailed(sch.error)) : null,
       ),
     );
+    syncSaveBarClass();
   }
 
   // =====================================================================================
@@ -2374,6 +2768,32 @@ export function renderAdmin(root: HTMLElement): void {
   function eventDirty(): boolean {
     const { server, draft } = state.event;
     return server !== null && draft !== null && eventSig(server) !== eventSig(draft);
+  }
+
+  function eventBarVisible(): boolean {
+    const ev = state.event;
+    return ev.draft !== null && (eventDirty() || ev.error !== null || ev.msg !== null || ev.saving);
+  }
+
+  function discardEvent(): void {
+    const ev = state.event;
+    if (!ev.server) return;
+    ev.draft = cloneEvent(ev.server);
+    ev.msg = null;
+    ev.error = null;
+    if (eventBuilt) syncEventForm();
+  }
+
+  /** Field-level problems the server would reject, shown next to the field (not only in the save bar). */
+  function eventFieldErrors(d: LiveEvent): { end: string | null; freeze: string | null; enforce: string | null } {
+    const start = ms(d.startsAt);
+    const end = ms(d.endsAt);
+    const freeze = ms(d.freezeAt);
+    return {
+      end: start !== null && end !== null && end <= start ? T().admErrEndBeforeStart : null,
+      freeze: freeze !== null && end !== null && freeze > end ? T().admErrFreezeAfterEnd : null,
+      enforce: d.enforceWindow && (start === null || end === null) ? T().admErrEnforceNeedsWindow : null,
+    };
   }
 
   const evStatusEl = h("p", { class: "adm-ev-status", "aria-live": "off" });
@@ -2403,6 +2823,19 @@ export function renderAdmin(root: HTMLElement): void {
   const evDiscard = h("button", { type: "button", class: "btn btn-ghost", id: "ev-discard" }, T().admDiscard);
   const evStateEl = h("span", { class: "small", role: "status" });
   const evErrorEl = h("p", { class: "admin-error", role: "alert" });
+  const evBar = h("div", { class: "sched-actions panel admin-panel" }, evSave, evDiscard, evStateEl, evErrorEl);
+  const fieldError = (id: string): HTMLParagraphElement => h("p", { class: "small sched-invalid field-error", id, hidden: true });
+  const evEndErr = fieldError("ev-end-err");
+  const evFreezeErr = fieldError("ev-freeze-err");
+  const evEnforceErr = fieldError("ev-enforce-err");
+  /** Puts (or clears) an inline error under a field and wires it to the input for screen readers. */
+  function setFieldError(input: HTMLInputElement, errEl: HTMLElement, baseDescribedBy: string, message: string | null): void {
+    errEl.textContent = message ?? "";
+    errEl.hidden = message === null;
+    if (message === null) input.removeAttribute("aria-invalid");
+    else input.setAttribute("aria-invalid", "true");
+    input.setAttribute("aria-describedby", message === null ? baseDescribedBy : `${errEl.id} ${baseDescribedBy}`);
+  }
 
   function clearTimeBtn(input: HTMLInputElement, label: string, apply: (d: LiveEvent) => void): HTMLButtonElement {
     return h(
@@ -2443,28 +2876,71 @@ export function renderAdmin(root: HTMLElement): void {
     editEvent((d) => (d.announcement = null));
     evAnnText.focus();
   });
-  evSave.addEventListener("click", () => void onSaveEvent());
-  evDiscard.addEventListener("click", () => {
-    const ev = state.event;
-    if (!ev.server) return;
-    ev.draft = cloneEvent(ev.server);
-    ev.msg = null;
-    ev.error = null;
-    syncEventForm();
-  });
-
-  /** Quick actions edit the draft with the server clock, then save it. */
-  function quickEvent(mutate: (d: LiveEvent, now: number) => void): void {
-    const ev = state.event;
-    if (!ev.draft || ev.saving) return;
-    const next = cloneEvent(ev.draft);
-    mutate(next, serverNow());
-    ev.draft = next;
-    syncEventForm();
+  evSave.addEventListener("click", () => {
+    const d = state.event.draft;
+    if (!d) return;
+    const errs = eventFieldErrors(d);
+    const first = errs.end ? evEnd : errs.freeze ? evFreeze : errs.enforce ? evEnforce : null;
+    if (first) {
+      state.event.msg = null;
+      renderEventControls();
+      evStateEl.textContent = T().admFixFields;
+      first.focus();
+      return;
+    }
     void onSaveEvent();
+  });
+  evDiscard.addEventListener("click", () => discardEvent());
+
+  /**
+   * Quick actions change only the timing of the SAVED event (server clock) and save just that; half-edited
+   * fields in the form are neither saved nor lost: they are re-applied on top of the result.
+   */
+  async function quickEvent(mutate: (d: LiveEvent, now: number) => void): Promise<void> {
+    const ev = state.event;
+    if (!ev.server || ev.saving) return;
+    const base = cloneEvent(ev.server);
+    const draftBefore = ev.draft ? cloneEvent(ev.draft) : null;
+    const next = cloneEvent(base);
+    mutate(next, serverNow());
+    ev.rev += 1;
+    ev.saving = true;
+    ev.error = null;
+    ev.msg = null;
+    renderEventControls();
+    try {
+      const res = await saveEvent(normalizeEvent(next));
+      if (disposed) return;
+      applyEventResult(res, false);
+      const merged = cloneEvent(res.event);
+      if (draftBefore) {
+        // Keep each field the instructor had edited (it differs from the old saved value) and the action didn't touch.
+        const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+        if (!same(draftBefore.name, base.name)) merged.name = draftBefore.name;
+        if (!same(draftBefore.startsAt, base.startsAt) && same(next.startsAt, base.startsAt)) merged.startsAt = draftBefore.startsAt;
+        if (!same(draftBefore.endsAt, base.endsAt) && same(next.endsAt, base.endsAt)) merged.endsAt = draftBefore.endsAt;
+        if (!same(draftBefore.freezeAt, base.freezeAt) && same(next.freezeAt, base.freezeAt)) merged.freezeAt = draftBefore.freezeAt;
+        if (draftBefore.enforceWindow !== base.enforceWindow) merged.enforceWindow = draftBefore.enforceWindow;
+        if (!same(draftBefore.announcement, base.announcement)) merged.announcement = draftBefore.announcement ? { ...draftBefore.announcement } : null;
+      }
+      ev.draft = merged;
+      ev.msg = T().admEventSaved;
+      clearSavedNoteLater();
+      syncEventForm();
+    } catch (err: unknown) {
+      if (disposed || handleAuthError(err)) return;
+      ev.error = errMessage(err);
+    } finally {
+      ev.saving = false;
+    }
+    if (state.tab === "event") renderEventControls();
   }
+
+  /** The "(other edits stay unsaved)" note, only when there are other edits. */
+  const draftNote = (): string | undefined => (eventDirty() ? T().admDraftStays : undefined);
+
   evStartNow.addEventListener("click", () =>
-    quickEvent((d, now) => {
+    void quickEvent((d, now) => {
       d.startsAt = isoAt(now);
       d.endsAt = isoAt(now + EVENT_QUICK_MINUTES * 60_000);
       // A freeze from an earlier run (or past the new end) would freeze the new event at the wrong moment.
@@ -2472,25 +2948,49 @@ export function renderAdmin(root: HTMLElement): void {
       if (f !== null && (f < now || f > now + EVENT_QUICK_MINUTES * 60_000)) d.freezeAt = null;
     }),
   );
-  evEndNow.addEventListener("click", () =>
-    quickEvent((d, now) => {
-      d.endsAt = isoAt(now);
-      const s = ms(d.startsAt);
-      if ((s !== null && s >= now) || (s === null && d.enforceWindow)) d.startsAt = isoAt(now - 60_000);
-      const f = ms(d.freezeAt);
-      if (f !== null && f > now) d.freezeAt = null; // never reached: the standings at the end are final anyway
-    }),
-  );
-  evFreezeBtn.addEventListener("click", () =>
-    quickEvent((d, now) => {
-      if (isFrozen()) {
-        d.freezeAt = null;
-        return;
-      }
-      const end = ms(d.endsAt);
-      d.freezeAt = end !== null && end < now ? isoAt(end) : isoAt(now);
-    }),
-  );
+  evEndNow.addEventListener("click", () => {
+    const saved = state.event.server;
+    if (!saved) return;
+    const name = saved.name.trim() || T().admTheEvent;
+    void askConfirm({
+      title: T().admEndTitle(name),
+      body: saved.enforceWindow ? T().admEndBodyEnforced : T().admEndBodyOpen,
+      note: draftNote(),
+      confirmLabel: T().admEndNow,
+      tone: "danger",
+      returnFocus: () => evEndNow,
+    }).then((ok) => {
+      if (!ok) return;
+      void quickEvent((d, now) => {
+        d.endsAt = isoAt(now);
+        const s = ms(d.startsAt);
+        if ((s !== null && s >= now) || (s === null && d.enforceWindow)) d.startsAt = isoAt(now - 60_000);
+        const f = ms(d.freezeAt);
+        if (f !== null && f > now) d.freezeAt = null; // never reached: the standings at the end are final anyway
+      });
+    });
+  });
+  evFreezeBtn.addEventListener("click", () => {
+    const unfreeze = isFrozen();
+    void askConfirm({
+      title: unfreeze ? T().admUnfreezeTitle : T().admFreezeTitle,
+      body: unfreeze ? T().admUnfreezeBody : T().admFreezeBody,
+      note: draftNote(),
+      confirmLabel: unfreeze ? T().admUnfreeze : T().admFreezeNow,
+      tone: unfreeze ? "primary" : "danger",
+      returnFocus: () => evFreezeBtn,
+    }).then((ok) => {
+      if (!ok) return;
+      void quickEvent((d, now) => {
+        if (unfreeze) {
+          d.freezeAt = null;
+          return;
+        }
+        const end = ms(d.endsAt);
+        d.freezeAt = end !== null && end < now ? isoAt(end) : isoAt(now);
+      });
+    });
+  });
 
   function isFrozen(): boolean {
     const f = ms(state.event.server?.freezeAt ?? null);
@@ -2521,6 +3021,11 @@ export function renderAdmin(root: HTMLElement): void {
       const res = await fetchEvent();
       if (disposed) return;
       if (rev === ev.rev) applyEventResult(res, false);
+      // A draft carried over from the previous render (language switch) wins over the fresh copy.
+      if (carry?.event) {
+        ev.draft = cloneEvent(carry.event);
+        carry.event = null;
+      }
     } catch (err: unknown) {
       if (disposed || handleAuthError(err)) return;
       ev.error = errMessage(err);
@@ -2544,6 +3049,7 @@ export function renderAdmin(root: HTMLElement): void {
       applyEventResult(res, false);
       ev.draft = cloneEvent(res.event);
       ev.msg = T().admEventSaved;
+      clearSavedNoteLater();
       syncEventForm();
     } catch (err: unknown) {
       if (disposed || handleAuthError(err)) return;
@@ -2582,6 +3088,12 @@ export function renderAdmin(root: HTMLElement): void {
     evStateEl.className = `small ${dirty ? "sched-dirty" : "muted"}`;
     evErrorEl.textContent = ev.error ? T().admSaveFailed(ev.error) : "";
     evErrorEl.hidden = ev.error === null;
+    const errs = ev.draft ? eventFieldErrors(ev.draft) : { end: null, freeze: null, enforce: null };
+    setFieldError(evEnd, evEndErr, "ev-tz", errs.end);
+    setFieldError(evFreeze, evFreezeErr, "ev-tz", errs.freeze);
+    setFieldError(evEnforce, evEnforceErr, "ev-enforce-help", errs.enforce);
+    evBar.hidden = !eventBarVisible();
+    syncSaveBarClass();
     renderEventStatus();
   }
 
@@ -2647,17 +3159,24 @@ export function renderAdmin(root: HTMLElement): void {
           { class: "sched-form adm-ev-form" },
           field("ev-name", T().admEventName, evName),
           field("ev-start", T().admStartsAt, h("div", { class: "ev-time-row" }, evStart, clearTimeBtn(evStart, T().admStartsAt, (d) => (d.startsAt = null)))),
-          field("ev-end", T().admEndsAt, h("div", { class: "ev-time-row" }, evEnd, clearTimeBtn(evEnd, T().admEndsAt, (d) => (d.endsAt = null)))),
+          field(
+            "ev-end",
+            T().admEndsAt,
+            h("div", { class: "ev-time-row" }, evEnd, clearTimeBtn(evEnd, T().admEndsAt, (d) => (d.endsAt = null))),
+            evEndErr,
+          ),
           field(
             "ev-freeze",
             T().admFreezeAt,
             h("div", { class: "ev-time-row" }, evFreeze, clearTimeBtn(evFreeze, T().admFreezeAt, (d) => (d.freezeAt = null))),
+            evFreezeErr,
             h("p", { class: "muted small" }, T().admFreezeHelp),
           ),
           h(
             "div",
             { class: "sched-field sched-lock" },
             h("label", { class: "sched-check", for: "ev-enforce" }, evEnforce, h("span", {}, T().admEnforce)),
+            evEnforceErr,
             h("p", { class: "muted small", id: "ev-enforce-help" }, T().admEnforceHelp),
           ),
           h("p", { class: "muted small ev-tz", id: "ev-tz" }, T().admTzNote(tz.name, tz.offset)),
@@ -2683,7 +3202,7 @@ export function renderAdmin(root: HTMLElement): void {
           ),
         ),
       ),
-      h("div", { class: "sched-actions panel admin-panel" }, evSave, evDiscard, evStateEl, evErrorEl),
+      evBar,
     );
   }
 
@@ -2861,7 +3380,8 @@ export function renderAdmin(root: HTMLElement): void {
   function caseSummaryPanel(s: CaseSummary): HTMLElement {
     const maxScore = s.maxScore > 0 ? s.maxScore : caseMaxScore(s.caseId);
     const title = getCase(s.caseId)?.title ?? s.title;
-    const hardest = hardestQuestion(s);
+    const funnel = questionFunnel(s, state.statsProgress.get(s.caseId) ?? null);
+    const hardest = hardestQuestion(funnel);
     const isToday = state.today?.caseId === s.caseId;
     const children: Child[] = [
       h(
@@ -2876,8 +3396,17 @@ export function renderAdmin(root: HTMLElement): void {
         { class: "admin-tiles admin-tiles-sm" },
         tile(T().admPlayers, String(s.players)),
         tile(T().admFinished, String(s.completed), s.players ? `${Math.round((s.completed / s.players) * 100)}%` : undefined),
-        tile(T().admAvgScore, s.avgScore === null ? "—" : String(Math.round(s.avgScore)), maxScore ? T().admPar(maxScore) : undefined),
-        tile(T().admAvgTime, s.avgDurationSeconds === null ? "—" : formatSeconds(Math.round(s.avgDurationSeconds)), T().admFinishedPlayers),
+        // The server averages finished players only (Live averages everyone): the label says which.
+        tile(
+          T().admAvgScoreFinishers,
+          s.avgScore === null ? "—" : String(Math.round(s.avgScore)),
+          [maxScore ? T().admPar(maxScore) : null, T().admSample(s.completed)].filter((x) => x !== null).join(" · "),
+        ),
+        tile(
+          T().admAvgTime,
+          s.avgDurationSeconds === null ? "—" : formatSeconds(Math.round(s.avgDurationSeconds)),
+          `${T().admFinishedPlayers} · ${T().admSample(s.completed)}`,
+        ),
       ),
     ];
     if (s.players === 0) {
@@ -2897,8 +3426,10 @@ export function renderAdmin(root: HTMLElement): void {
                 "tr",
                 {},
                 th(T().admColQuestion),
+                th(T().admColReached, "num"),
                 th(T().admColSolved, "num"),
                 th(T().admColRevealed, "num"),
+                th(T().admColNotSolved, "num"),
                 th(T().admColAvgWrong, "num"),
                 th(T().admColAvgHints, "num"),
               ),
@@ -2906,9 +3437,11 @@ export function renderAdmin(root: HTMLElement): void {
             h(
               "tbody",
               {},
-              caseQuestionIds(s.caseId).map((q) => {
+              funnel.map((row) => {
+                const q = row.q;
                 const qs = s.questions[q];
-                const isHardest = q === hardest;
+                const isHardest = hardest?.row.q === q;
+                const notSolved = row.reached - row.solved;
                 return h(
                   "tr",
                   { class: isHardest ? "is-hardest" : "" },
@@ -2918,16 +3451,29 @@ export function renderAdmin(root: HTMLElement): void {
                     h("span", { class: "q-id" }, q.toUpperCase()),
                     " ",
                     questionTitle(s.caseId, q),
-                    isHardest ? h("span", { class: "hardest-badge", title: T().admHardestTip }, T().admHardest) : null,
+                    isHardest ? h("span", { class: "hardest-badge", title: T().admHardestTip }, "⚑ ", T().admHardest) : null,
                   ),
+                  h("td", { class: "num" }, String(row.reached)),
                   h("td", { class: "num" }, qs ? String(qs.solved) : "—"),
                   h("td", { class: "num" }, qs ? String(qs.revealed) : "—"),
+                  h("td", { class: "num" }, row.reached > 0 ? `${notSolved} · ${formatPct(notSolved / row.reached)}` : "—"),
                   h("td", { class: "num" }, qs ? qs.avgWrong.toFixed(1) : "—"),
                   h("td", { class: "num" }, qs ? qs.avgHints.toFixed(1) : "—"),
                 );
               }),
             ),
           ),
+        ),
+        h(
+          "p",
+          { class: "muted small stats-hardest", title: T().admHardestTip },
+          hardest
+            ? T().admHardestLine(
+                `${hardest.row.q.toUpperCase()} ${questionTitle(s.caseId, hardest.row.q)}`.trim(),
+                Math.round(hardest.rate * 100),
+                hardest.row.reached,
+              )
+            : T().admHardestNotEnough(HARDEST_MIN_PLAYERS),
         ),
       );
     }
@@ -2951,8 +3497,38 @@ export function renderAdmin(root: HTMLElement): void {
   }
 
   // =====================================================================================
-  // Projector leaderboard (overall, from accounts)
+  // Projector leaderboard: the PUBLIC board (GET /api/leaderboard), so a freeze hides the live standings
+  // from the room exactly as it does for players. Never ranked from the admin's live account data.
   // =====================================================================================
+
+  let boardSeq = 0;
+  async function loadBoard(): Promise<void> {
+    const b = state.board;
+    const scope = b.scope;
+    const seq = ++boardSeq;
+    try {
+      const data = await fetchPublicLeaderboard(scope);
+      if (disposed || seq !== boardSeq) return;
+      b.data = data;
+      b.error = null;
+    } catch (err: unknown) {
+      if (disposed || seq !== boardSeq) return;
+      b.error = errMessage(err);
+    }
+    if (state.leaderboard) renderLeaderboard();
+  }
+
+  const boardScopeSelect = h("select", { class: "admin-input admin-board-scope", id: "admin-board-scope" });
+  boardScopeSelect.addEventListener("change", () => {
+    const v = boardScopeSelect.value;
+    const scope = v === "" ? null : v;
+    if (scope === state.board.scope) return;
+    state.board.scope = scope;
+    state.board.data = null;
+    state.board.error = null;
+    renderLeaderboard();
+    void loadBoard();
+  });
 
   function renderLeaderboard(): void {
     leaderboardEl.hidden = !state.leaderboard;
@@ -2962,7 +3538,16 @@ export function renderAdmin(root: HTMLElement): void {
       boardBtn.focus();
       return;
     }
-    const top = topPlayers(state.accounts?.accounts ?? [], 10);
+    const b = state.board;
+    // Scope options: overall + released cases (rebuilt each time; keeps the selection).
+    const released = state.today?.releasedCaseIds ?? [];
+    setChildren(
+      boardScopeSelect,
+      h("option", { value: "", selected: b.scope === null }, T().admBoardOverall),
+      released.map((id) => h("option", { value: id, selected: id === b.scope }, caseTitle(id))),
+    );
+    const data = b.data && b.data.caseId === b.scope ? b.data : null;
+    const top = data ? data.entries.slice(0, 10) : [];
     const close = h(
       "button",
       {
@@ -2975,31 +3560,61 @@ export function renderAdmin(root: HTMLElement): void {
       },
       T().admClose,
     );
+    const frozen = data?.frozen === true;
+    const stateChip = data
+      ? h(
+          "p",
+          { class: `admin-board-state${frozen ? " is-frozen" : ""}` },
+          frozen ? h("span", { class: "board-frozen-chip" }, "❄ ", T().admBoardFrozen) : h("span", { class: "board-live-chip" }, T().admBoardLive),
+          frozen && data.frozenAt ? h("span", { class: "board-frozen-at" }, T().admBoardFrozenAt(formatDateTime(data.frozenAt))) : null,
+        )
+      : null;
+    let body: HTMLElement;
+    if (b.error && !data) body = h("p", { class: "admin-error admin-board-empty", role: "alert" }, T().admBoardFailed(b.error));
+    else if (!data) body = h("p", { class: "muted admin-board-empty" }, T().admLoading);
+    else if (top.length === 0) body = h("p", { class: "muted admin-board-empty" }, T().admNoPlayersBoard);
+    else {
+      const overall = data.caseId === null;
+      body = h(
+        "ol",
+        { class: "admin-board-list" },
+        top.map((e) =>
+          h(
+            "li",
+            { class: `admin-board-row rank-${e.rank}` },
+            h("span", { class: "board-rank" }, String(e.rank)),
+            h("span", { class: "board-name" }, e.username),
+            h("span", { class: "board-time muted" }, overall ? T().admCasesDone(e.casesCompleted) : T().admStagesSolved(e.stagesSolved)),
+            h("span", { class: "board-score" }, String(e.score)),
+          ),
+        ),
+      );
+    }
+    const focusedScope = document.activeElement === boardScopeSelect;
     setChildren(
       leaderboardEl,
       h(
         "div",
         { class: "admin-board-inner" },
-        h("div", { class: "admin-board-head" }, h("h2", { class: "admin-board-title" }, T().admLeaderboard), close),
-        top.length === 0
-          ? h("p", { class: "muted admin-board-empty" }, T().admNoPlayersBoard)
-          : h(
-              "ol",
-              { class: "admin-board-list" },
-              top.map((a) =>
-                h(
-                  "li",
-                  { class: `admin-board-row rank-${a.rank ?? 0}` },
-                  h("span", { class: "board-rank" }, String(a.rank ?? "—")),
-                  h("span", { class: "board-name" }, a.username),
-                  h("span", { class: "board-time muted" }, T().admCasesDone(a.casesCompleted)),
-                  h("span", { class: "board-score" }, String(a.totalScore)),
-                ),
-              ),
-            ),
+        h(
+          "div",
+          { class: "admin-board-head" },
+          h("h2", { class: "admin-board-title" }, T().admLeaderboard),
+          h(
+            "div",
+            { class: "admin-board-tools" },
+            h("label", { class: "admin-label", for: "admin-board-scope" }, T().admBoardScope),
+            boardScopeSelect,
+            close,
+          ),
+        ),
+        stateChip,
+        body,
       ),
     );
-    if (document.activeElement === boardBtn || !leaderboardEl.contains(document.activeElement)) close.focus();
+    // Re-appending moves focus to <body>: put it back (Close on first open).
+    if (focusedScope) boardScopeSelect.focus();
+    else close.focus();
   }
 
   // ---- render dispatch ------------------------------------------------------------------
@@ -3034,7 +3649,6 @@ export function renderAdmin(root: HTMLElement): void {
     if (state.tab === "schedule") renderScheduleToday();
     else if (state.tab === "event") renderEventStatus();
     else renderActiveTab();
-    if (state.leaderboard) renderLeaderboard();
     renderUpdated();
     renderBanner();
   }
@@ -3044,6 +3658,28 @@ export function renderAdmin(root: HTMLElement): void {
   function ensureLiveCase(): void {
     if (state.liveCaseId || !state.today) return;
     state.liveCaseId = state.today.caseId ?? state.today.releasedCaseIds[0] ?? null;
+  }
+
+  /** Stats needs who reached each question (drop-off): one progress request per case that has players. */
+  async function loadStatsProgress(stats: AdminStatsResult): Promise<void> {
+    const ids = stats.cases.filter((c) => c.players > 0).map((c) => c.caseId);
+    const results = await Promise.all(ids.map((id) => fetchProgress(id).catch(() => null)));
+    const next = new Map<string, readonly AdminProgress[]>();
+    for (const r of results) if (r) next.set(r.caseId, r.players);
+    state.statsProgress = next;
+  }
+
+  function applyTrash(res: TrashEntry[] | Error): void {
+    const t = state.trash;
+    if (res instanceof Error) {
+      // 404: this server has no trash endpoint yet.
+      t.unavailable = res instanceof AdminApiError && res.status === 404;
+      t.error = t.unavailable ? null : errMessage(res);
+      return;
+    }
+    t.unavailable = false;
+    t.error = null;
+    t.entries = res;
   }
 
   async function load(): Promise<void> {
@@ -3059,6 +3695,11 @@ export function renderAdmin(root: HTMLElement): void {
     const liveCase = state.liveCaseId;
     const settingsRev = state.settings.rev;
     const eventRev = state.event.rev;
+    // The projector board refreshes with the dashboard (public endpoint; its errors stay on the board).
+    if (state.leaderboard) void loadBoard();
+    // Recently deleted is optional: a server without it (404) or a failure must not break the poll.
+    const trashReq: Promise<TrashEntry[] | AdminApiError | Error> | null =
+      tab === "accounts" ? fetchTrash().catch((err: unknown) => (err instanceof Error ? err : new Error(T().admUnknownError))) : null;
     try {
       const [accounts, today, progress, stats, settings, event, audit] = await Promise.all([
         fetchAccounts(),
@@ -3073,7 +3714,12 @@ export function renderAdmin(root: HTMLElement): void {
       state.accounts = accounts;
       state.today = today;
       if (progress && progress.caseId === state.liveCaseId) state.progress = progress;
-      if (stats) state.stats = stats;
+      if (stats) {
+        state.stats = stats;
+        await loadStatsProgress(stats);
+        if (disposed) return;
+      }
+      if (trashReq) applyTrash(await trashReq);
       if (settings && settingsRev === state.settings.rev && !state.settings.saving) state.settings.server = settings;
       if (event && eventRev === state.event.rev && !state.event.saving) applyEventResult(event, true);
       if (audit) state.audit = audit;
@@ -3135,13 +3781,15 @@ export function renderAdmin(root: HTMLElement): void {
       return;
     }
     buildDashboard();
+    // Canonical deep link for the current view (no new history entry).
+    if (isAdminHash(location.hash)) setUrl(adminHash(state.tab, state.liveCaseId), "replace");
     stopTimers();
     renderData();
     renderActiveTab();
     if (state.tab === "schedule") void loadSchedule();
     if (state.tab === "event") void loadEvent();
-    // Live, Stats and Audit need a second request before they have data.
-    if (state.tab === "live" || state.tab === "stats" || state.tab === "audit") void load();
+    // Live, Stats, Audit and Recently deleted (Accounts) need a second request before they have data.
+    if (state.tab === "live" || state.tab === "stats" || state.tab === "audit" || state.tab === "accounts") void load();
     else scheduleNext();
     tickId = window.setInterval(() => {
       if (!container.isConnected) return dispose();
