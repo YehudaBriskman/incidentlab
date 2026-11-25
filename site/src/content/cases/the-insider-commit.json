@@ -1,0 +1,726 @@
+{
+  "id": "the-insider-commit",
+  "title": "The Insider Commit",
+  "subtitle": "SSH logins got 500 ms slower after a routine library update. A trusted maintainer, a tarball that doesn't match the repo. Follow the half-second.",
+  "difficulty": "hard",
+  "estMinutes": 60,
+  "tags": [
+    "supply-chain",
+    "git-archaeology",
+    "release-artifacts",
+    "autotools",
+    "binary-analysis",
+    "profiling",
+    "dpkg",
+    "time-zones"
+  ],
+  "inspiredBy": {
+    "title": "xz-utils / liblzma backdoor (CVE-2024-3094)",
+    "year": 2024,
+    "summary": "In March 2024 an engineer investigating why SSH logins on Debian testing used more CPU and took about 500 ms longer found a backdoor in xz-utils 5.6.0 and 5.6.1. A co-maintainer who had built trust over roughly two years, helped by pressure from sockpuppet accounts, had hidden the payload in binary test files; a build script present only in the release tarballs extracted it and linked it into liblzma, where an ifunc resolver hijacked a cryptographic function that sshd calls during key authentication. It was caught before it reached most stable distributions."
+  },
+  "briefing": "**Friday, 08:30 CET. Halyard Cloud SecOps.**\n\nOn Tuesday Elif from performance engineering noticed that SSH logins to a benchmark box were about **half a second slower**. Not the network: the TCP connect time is flat. A sister box with the same routine updates is fine. She profiled sshd, found something odd inside a compression library that sshd loads through a distro patch, and escalated to you.\n\nSince then SecOps has pulled the upstream release tarballs and git history, the project's mailing list, the distro's package build logs, profiler output and the dpkg logs of the whole fleet. The distro has already shipped a rollback package.\n\nThe RCA is yours. Six stages: **which release**, **what's in the tarball that git doesn't have**, **where the payload hides**, **what it hooks**, **who planted it**, and **how many hosts ever ran it**. **Read `README_FIRST.txt` first** and note each source's time zone.\n\nEverything here is a fictional reconstruction for training. The payload is random bytes and the build script is defanged.",
+  "setupChecklist": [
+    "Get the evidence: download and unzip the **evidence pack**, *or* open the **Evidence Explorer** to browse every file in your browser (no installs).",
+    "Read `README_FIRST.txt` end to end, including the glossary.",
+    "Note each source's time zone: the fleet dpkg log is **CET (UTC+01:00)**, the timing CSV and chat are **epoch seconds**, perf/binary headers and distro logs are **UTC**, mail and git carry **their own offsets**.",
+    "Pick your path: **bash** (Linux, macOS or WSL), **Windows PowerShell** (every Toolbox command has a PowerShell version), or the **browser Explorer**.",
+    "Git is optional: `repo/git-log.txt` holds the full upstream history as text; `repo/zfold.bundle` is the same as a clonable bundle."
+  ],
+  "evidenceZip": "/evidence/the-insider-commit-evidence.zip",
+  "evidence": [
+    {
+      "path": "README_FIRST.txt",
+      "format": "text",
+      "description": "Briefing from SecOps, the file list, time zones and a glossary. Start here."
+    },
+    {
+      "path": "perf/sshd-auth-timing.csv",
+      "format": "CSV (epoch UTC)",
+      "description": "A probe login to each benchmark host every 10 minutes: connect time, auth time, total."
+    },
+    {
+      "path": "perf/hyperfine-ssh-login.txt",
+      "format": "benchmark (UTC)",
+      "description": "Client-side login benchmarks before and after, with a control host."
+    },
+    {
+      "path": "perf/perf-report-before.txt",
+      "format": "perf report (UTC)",
+      "description": "Where sshd spends CPU during 50 logins, before the slowdown."
+    },
+    {
+      "path": "perf/perf-report-after.txt",
+      "format": "perf report (UTC)",
+      "description": "The same capture after the slowdown, with call chains."
+    },
+    {
+      "path": "perf/gdb-got-audit.txt",
+      "format": "gdb output",
+      "description": "Library address ranges of a live sshd and where each of its GOT slots points."
+    },
+    {
+      "path": "perf/valgrind-zf.txt",
+      "format": "valgrind (UTC)",
+      "description": "valgrind on the distro build vs a build from git."
+    },
+    {
+      "path": "fleet/dpkg-all-hosts.log",
+      "format": "dpkg.log (CET)",
+      "description": "dpkg.log of every Halyard host, merged and sorted by time. Each line starts with the host name."
+    },
+    {
+      "path": "release/SHA256SUMS.txt",
+      "format": "text (UTC)",
+      "description": "Tarball hashes, signature checks and an attempt to reproduce the tarballs from git."
+    },
+    {
+      "path": "release/tarball-vs-git-tag.diff",
+      "format": "diff -ruN",
+      "description": "For two releases: git tag export vs the published release tarball."
+    },
+    {
+      "path": "release/fixture-strings.txt",
+      "format": "strings -a -f",
+      "description": "Printable strings in every binary test file of the newer release tarball."
+    },
+    {
+      "path": "release/stage1-recovered.txt",
+      "format": "text (defanged)",
+      "description": "What SecOps recovered by running the suspicious pipeline in a sandbox. Read after stage 3."
+    },
+    {
+      "path": "binary/nm-libzfold.txt",
+      "format": "nm listing",
+      "description": "Dynamic and debug symbol tables of two builds of the library."
+    },
+    {
+      "path": "binary/objdump-zf_crc64_resolve.txt",
+      "format": "objdump -d",
+      "description": "Disassembly of the library's CRC64 ifunc resolver in two builds."
+    },
+    {
+      "path": "distro/changelog",
+      "format": "Debian changelog",
+      "description": "The distro package changelog for zfold."
+    },
+    {
+      "path": "distro/buildd-logs.txt",
+      "format": "sbuild log (UTC)",
+      "description": "The distro's package build logs for two versions, verbose."
+    },
+    {
+      "path": "distro/bug-10442.txt",
+      "format": "bug report",
+      "description": "The distro bug asking for a fast upgrade."
+    },
+    {
+      "path": "mail/zfold-devel.mbox",
+      "format": "mbox",
+      "description": "Excerpt of the upstream mailing list, 2023 to 2026."
+    },
+    {
+      "path": "chat/incident-channel.json",
+      "format": "Slack-like JSON (epoch)",
+      "description": "Halyard's incident chat. Theories, not facts."
+    },
+    {
+      "path": "repo/git-log.txt",
+      "format": "git log -p",
+      "description": "Full upstream history with diffs, newest first. Binary files appear as `Binary files ... differ`."
+    }
+  ],
+  "rules": [
+    "Work only from the evidence pack. Don't read the generator source or the site's source code; that spoils the fun.",
+    "Answers are case-insensitive, and leading and trailing whitespace is ignored. Stick to the format shown under each question.",
+    "Each hint costs the points shown on it. Hints are revealed in order, from a gentle nudge to almost the full command.",
+    "Working in pairs is encouraged. Talk through your reasoning out loud, just like a real incident review.",
+    "Any tool is allowed: grep, awk, jq, git, Python, a spreadsheet, your favourite editor. The Toolbox tab lists commands that help.",
+    "Wrong answers cost nothing, so guess freely. Still, try to be able to explain *why* your answer is right.",
+    "Don't share flags with other teams until everyone is done. Sharing techniques is fine.",
+    "Nothing in the pack is executable malware: test files are random bytes and scripts are defanged. Still, don't pipe anything from the evidence into a shell."
+  ],
+  "questions": [
+    {
+      "stage": {
+        "name": "Follow the half-second",
+        "goal": "Find which zfold release was running when bench-01's logins became slow.",
+        "lookFor": [
+          "`perf/sshd-auth-timing.csv`: when does `auth_ms` on bench-01 jump and stay up?",
+          "`fleet/dpkg-all-hosts.log`: what finished installing on bench-01 just before?",
+          "dpkg is CET (UTC+01:00), the CSV is epoch (UTC)",
+          "bench-03 got the same routine updates minus one: a free control group"
+        ],
+        "tools": [
+          "csv-header",
+          "csv-sustained",
+          "csv-epoch-column",
+          "csv-daily-avg",
+          "epoch-to-utc",
+          "cet-to-utc",
+          "dpkg-one-host",
+          "grep-regex"
+        ],
+        "explorerTip": "Open `perf/sshd-auth-timing.csv` in **CSV table** view, filter **contains** `bench-01`, and scroll until `auth_ms` changes for good (ignore single spikes). Convert that `ts_epoch` to UTC with the Toolbox. Then open `fleet/dpkg-all-hosts.log`, filter **regex** `^bench-01 .*status installed` and find what landed in the ten minutes before, after converting CET to UTC."
+      },
+      "id": "q1",
+      "title": "Follow the half-second",
+      "prompt": "Logins to bench-01 got about half a second slower and stayed that way.\n\nWhich **upstream zfold release** was bench-01 running from the moment the slowdown began? Line the probe data up with what dpkg installed, and mind the time zones.\n\nAnswer with the **upstream version only**, `X.Y.Z`, without the Corvid revision (`-1`) or a leading `v`.",
+      "answerFormat": "Upstream version X.Y.Z (no distro revision)",
+      "placeholder": "1.2.3",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "`connect_ms` stays flat, so it is not the network. `auth_ms` on bench-01 jumps by roughly 500 ms and stays there. A few single slow probes are blips: you want the start of a *sustained* shift. Then ask dpkg what changed right before."
+        },
+        {
+          "cost": 20,
+          "text": "Several packages changed on bench-01 that week: openssh, libssl, the zfold library. The CSV is epoch (UTC); the dpkg log is **CET = UTC+01:00**. Convert the jump to UTC, convert each install to UTC, and take the last zfold install before the jump. If you skip the conversion, the right install looks like it happened *after* the slowdown."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\n# first probe of a sustained run of slow logins on bench-01\nawk -F, '$2==\"bench-01\" && $4==\"ok\" { if ($6>300) { if (++r==1) f=$1; if (r==6) {print f; exit} } else r=0 }' perf/sshd-auth-timing.csv\ndate -u -d @<that_epoch>\n# what finished installing on bench-01 (CET!)\ngrep '^bench-01 ' fleet/dpkg-all-hosts.log | grep 'status installed'\n```\nAdd one hour to the UTC jump time to compare in CET. Answer the zfold library's version without `-1`."
+        }
+      ],
+      "successNote": "A clean before/after needs a **sustained** change and a **control**: bench-03 got the same openssh and system updates and stayed fast. Converting every source to one time zone is what separates the real cause from the change that merely happened the same day. Here a CET/UTC slip makes the culprit look like it arrived *after* the symptom."
+    },
+    {
+      "stage": {
+        "name": "Tarball vs git",
+        "goal": "Find the file in that release's tarball that git never had and the previous tarball never shipped.",
+        "lookFor": [
+          "Release tarballs always contain generated files that git doesn't (configure, Makefile.in, build-aux/, libtool m4)",
+          "A file only in the tarball is diffed against an empty file dated `1970-01-01`",
+          "Compare the tarball-only list of both releases",
+          "Valid signatures and matching hashes prove who published a file, not what is in it"
+        ],
+        "tools": [
+          "diff-file-list",
+          "diff-only-right",
+          "diff-count-releases",
+          "diff-show-file",
+          "grep-only-match",
+          "buildlog-compare"
+        ],
+        "explorerTip": "Open `release/tarball-vs-git-tag.diff` and add a **regex** filter `^--- .*1970-01-01`: one line per tarball-only file, for both releases. Then run **Count unique** with the regex `^--- [^/]+/(\\S+)` and look for a path that shows up only once (normal autotools output shows up twice)."
+      },
+      "id": "q2",
+      "title": "Not in git",
+      "prompt": "The release you found in stage 1 was built from a **tarball**, not from git.\n\nIn `release/tarball-vs-git-tag.diff`, find the file that is **in that release's tarball but not in its git tag**, that the **previous release's tarball did not ship**, and that is **not** standard autotools/libtool/gettext output.\n\nAnswer with its **path relative to the tarball root**.",
+      "answerFormat": "Path relative to the tarball root, e.g. dir/file.ext",
+      "placeholder": "src/check/crc32.c",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Dozens of files are tarball-only in **both** releases: `configure`, `Makefile.in`, `aclocal.m4`, `build-aux/*`, libtool and gettext macros. That is normal. You are looking for what is tarball-only in the bad release and nowhere in the previous one."
+        },
+        {
+          "cost": 20,
+          "text": "`diff -ruN` prints a file that exists on the right only as `--- left/path<TAB>1970-01-01 ...` followed by `+++ right/path ...`. Collect those paths per release section (`######## zfold X.Y.Z`) and compare the two lists. Bonus: `distro/buildd-logs.txt` shows a configure hook with the same name."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\nawk '/^--- / && /1970-01-01/ {getline; p=$2; sub(/^[^\\/]*\\//, \"\", p); print p}' \\\n  release/tarball-vs-git-tag.diff | sort | uniq -c | sort -n | head\n```\nA count of `1` means only one release ships it. Ignore anything that only exists in the older release."
+        }
+      ],
+      "successNote": "Reviewers read git. Distros build from tarballs. Anything that lives only in the tarball skips code review, and autotools gives it plenty of company: thousands of generated lines nobody reads. **Reproducible releases** (tarball == `git archive` + a documented, rerunnable generation step) and building from the tag instead of the uploaded tarball close this gap."
+    },
+    {
+      "stage": {
+        "name": "Where the payload hides",
+        "goal": "Work out which test file the new build macro decodes.",
+        "lookFor": [
+          "Read the macro in the diff: it never names the file",
+          "It finds its input by **content**, with `grep -aErls` and a regex",
+          "`release/fixture-strings.txt` lists the printable strings in every test file",
+          "Some strings are near misses: count the characters"
+        ],
+        "tools": [
+          "diff-show-file",
+          "strings-regex",
+          "grep-fixed",
+          "gitlog-text-headers"
+        ],
+        "explorerTip": "Open `release/tarball-vs-git-tag.diff`, filter **contains** `grep -aErls` and read the regex in quotes. Then open `release/fixture-strings.txt` and add a **regex** filter with that exact pattern (`[[:alnum:]]` may need to become `[A-Za-z0-9]` in the browser). Exactly one file name should be left."
+      },
+      "id": "q3",
+      "title": "A test file that isn't",
+      "prompt": "The new macro feeds the contents of one file from the source tree through `tr` and the project's own decompressor, then into a shell.\n\nWhich **test file** is it?\n\nAnswer with the **file name only** (no directory).",
+      "answerFormat": "File name only, e.g. name.zf",
+      "placeholder": "good-1-empty.zf",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "The macro never names its input. Look for the `grep` that sets `zf_am_configmake`: it searches the source tree for a file containing a specific marker line."
+        },
+        {
+          "cost": 20,
+          "text": "The pattern is an ERE: `#{4}` is exactly four `#`, `[[:alnum:]]{5}` is five letters or digits, `$` is end of line. Run it against `release/fixture-strings.txt`. Several strings look close; only one matches."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\nre=$(grep -oE 'grep -aErls \"[^\"]+\"' release/tarball-vs-git-tag.diff | head -1 | sed -E 's/.*\"(.*)\"/\\1/')\necho \"$re\"\ngrep -E -- \"$re\" release/fixture-strings.txt\n```\nThe answer is the file name before the colon, without `tests/files/`."
+        }
+      ],
+      "successNote": "Binary test fixtures are the perfect hiding place: nobody reviews them, diffs show only `Binary files differ`, and a project needs them. Treat committed binaries as code: generate them from a script in the repo, check that the script reproduces them, and be suspicious when the generator is \"coming later\"."
+    },
+    {
+      "stage": {
+        "name": "What it hooks",
+        "goal": "Find the libcrypto function sshd now reaches through libzfold.",
+        "lookFor": [
+          "`perf/perf-report-after.txt`: a raw libzfold address appears in sshd's RSA verify path",
+          "`perf/gdb-got-audit.txt`: library address ranges at the top, GOT slots below",
+          "A slot should point into the library that defines the function",
+          "Offset = address minus library start; compare with perf and nm"
+        ],
+        "tools": [
+          "perf-grep-dso",
+          "perf-callchain",
+          "maps-range",
+          "got-in-range",
+          "hex-math",
+          "nm-sections"
+        ],
+        "explorerTip": "Open `perf/gdb-got-audit.txt`. Note the **Start** and **End** of the libzfold line in the mappings. Then add a **regex** filter `^0x[0-9a-f]+ ` to see only GOT slots and scan the last column for an address that falls inside that range (it starts with the same first digits as libzfold's start). Confirm the offset in `perf/perf-report-after.txt` and `binary/nm-libzfold.txt`."
+      },
+      "id": "q4",
+      "title": "The hooked function",
+      "prompt": "sshd calls into shared libraries through its **GOT** (Global Offset Table). In the live sshd on bench-01, one slot for a **libcrypto** function no longer points into libcrypto: it points into libzfold.\n\nWhich **imported function** has been redirected?\n\nAnswer with the exact **symbol name**.",
+      "answerFormat": "Exact symbol name as in the GOT audit",
+      "placeholder": "EVP_Example_fn",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "In the after profile, sshd's RSA verify code calls a raw address inside libzfold, which then calls into libcrypto. Something rewired that call. The GOT audit shows where every import really goes."
+        },
+        {
+          "cost": 20,
+          "text": "Take libzfold's start and end from the `info proc mappings` lines. Exactly one GOT slot's target falls in that range. Its offset (target minus start) is the same raw address perf shows, and `nm` has a symbol there that exists in no git source file."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngrep libzfold perf/gdb-got-audit.txt      # start and end of libzfold's code\nlo=<start>; hi=<end>\nawk '$1 ~ /^0x/ && NF==3' perf/gdb-got-audit.txt | while read s name t; do\n  (( t >= lo && t < hi )) && echo \"$name $t\"; done\n```"
+        }
+      ],
+      "successNote": "The slowdown and the hook are two different things: the half-second is the replacement **ifunc resolver** walking symbol tables inside ld.so while sshd starts, before any login. The hook is a single GOT entry rewritten during that walk. CRC64 still works and every test passes. Profilers catch what tests can't: a compression library had no business spending 90% of sshd's CPU, and one engineer refused to shrug it off."
+    },
+    {
+      "stage": {
+        "name": "Who planted it",
+        "goal": "Find the upstream commit that first put the payload file into git.",
+        "lookFor": [
+          "`repo/git-log.txt` (or the bundle) is the full upstream history",
+          "Binary files show as `Binary files /dev/null and b/... differ` when **added**",
+          "More than one commit touches that file; you want the first, the one that added it",
+          "The mailing list shows how its author got commit rights"
+        ],
+        "tools": [
+          "gitlog-text-headers",
+          "grep-context",
+          "git-clone",
+          "git-added",
+          "git-file-history",
+          "git-shortlog"
+        ],
+        "explorerTip": "Open `repo/git-log.txt` and add a **regex** filter `^commit |^new file mode|Binary files .*<file name>`. The log is newest first, so the oldest mention is near the **Last match**. Read the `commit` line just above the `new file mode` that belongs to your file."
+      },
+      "id": "q5",
+      "title": "The insider commit",
+      "prompt": "Which upstream **commit first added** the payload test file you found in stage 3?\n\nAnswer with the **7-character short SHA** (lowercase hex).",
+      "answerFormat": "7-char short SHA (hex)",
+      "placeholder": "a1b2c3d",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Two commits touch that file: one adds it, a later one \"regenerates\" it. A git log export lists newest first, so the *last* mention in the file is the oldest."
+        },
+        {
+          "cost": 20,
+          "text": "When a file is added, `git log -p` prints `new file mode 100644` and `index 0000000..` right after its `diff --git` line, and `Binary files /dev/null and b/...`. Walk up to the nearest `commit <sha>` line."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngit clone repo/zfold.bundle zfold && cd zfold\ngit log --all --diff-filter=A --format='%h %ad %an %s' --date=iso -- 'tests/files/<file>'\n```\nNo git? `grep -n -B12 'Binary files /dev/null and b/tests/files/<file>' repo/git-log.txt | grep commit`"
+        }
+      ],
+      "successNote": "The commit message was ordinary, the author was a trusted co-maintainer, and the change was \"test-only\". Now read `mail/zfold-devel.mbox`: two accounts that never contributed code pressured a tired volunteer for months until the newcomer got the keys. Supply-chain trust is social before it is technical. Funding and supporting maintainers, two-person review for releases, and watching for pressure campaigns are security controls."
+    },
+    {
+      "stage": {
+        "name": "Blast radius",
+        "goal": "Count the hosts in the fleet that ever had the bad build installed.",
+        "lookFor": [
+          "Only `status installed` means the package finished installing",
+          "Some `upgrade` attempts failed and left the old version in place",
+          "The rollback package's version string also contains the bad version number",
+          "Count hosts, not lines"
+        ],
+        "tools": [
+          "dpkg-pkg-history",
+          "dpkg-versions",
+          "dpkg-upgrade-lines",
+          "dpkg-distinct-hosts",
+          "grep-exclude"
+        ],
+        "explorerTip": "Open `fleet/dpkg-all-hosts.log` and add a **regex** filter `status installed libzfold5:amd64 <version>-1$` (escape the dots). Then use **Count unique** with the regex `^(\\S+)` to count distinct hosts."
+      },
+      "id": "q6",
+      "title": "Blast radius",
+      "prompt": "How many Halyard hosts **ever ran** the backdoored library?\n\nCount the **distinct hosts** in `fleet/dpkg-all-hosts.log` with at least one `status installed` line for `libzfold5:amd64` at **exactly** the bad Corvid version (your stage 1 version plus the `-1` revision).\n\nHosts that later got the rollback still count. Answer with an **integer**.",
+      "answerFormat": "Integer (distinct hosts)",
+      "placeholder": "7",
+      "points": 150,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Three traps: an `upgrade ... <bad>` line is only an attempt; the rollback version `<bad>+really<old>-1` contains the bad version as a substring; and each install writes several lines. You want hosts where the bad version reached `status installed`."
+        },
+        {
+          "cost": 20,
+          "text": "Match fields exactly: field 4 `status`, field 5 `installed`, field 6 `libzfold5:amd64`, field 7 the full bad version. Print field 1 (host), then `sort -u`."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\nawk -v v='<X.Y.Z>-1' '$4==\"status\" && $5==\"installed\" && $6==\"libzfold5:amd64\" && $7==v {print $1}' \\\n  fleet/dpkg-all-hosts.log | sort -u | wc -l\n```\nCompare with a naive `grep <X.Y.Z>` count to see how far off you would have been."
+        }
+      ],
+      "successNote": "\"Has the fix now\" is not \"was never exposed\". Every host that ran the bad build must be treated as potentially compromised: rotate host keys and credentials that sshd touched, review access logs for the exposure window, and rebuild rather than patch. The bastion host on that list is the one to start with."
+    }
+  ],
+  "toolbox": [
+    {
+      "category": "Getting oriented",
+      "items": [
+        {
+          "id": "unzip-evidence",
+          "title": "Unpack the evidence",
+          "command": "unzip the-insider-commit-evidence.zip && cd the-insider-commit",
+          "powershell": "Expand-Archive .\\the-insider-commit-evidence.zip -DestinationPath .\ncd .\\the-insider-commit",
+          "explain": "Everything lives under one top-level folder, `the-insider-commit/`."
+        },
+        {
+          "id": "list-files",
+          "title": "See what you've got",
+          "command": "find . -type f | sort | xargs wc -c",
+          "powershell": "Get-ChildItem -Recurse -File | Select-Object Length, FullName",
+          "explain": "Every file with its size. The big ones are the fleet dpkg log and the timing CSV."
+        },
+        {
+          "id": "read-readme",
+          "title": "Read the README",
+          "command": "less README_FIRST.txt",
+          "powershell": "Get-Content .\\README_FIRST.txt | more",
+          "explain": "Time zones, file formats and a short glossary (tarball, m4, ifunc, GOT). Read it first."
+        },
+        {
+          "id": "head-lines",
+          "title": "Peek at the first lines",
+          "command": "head -n 20 fleet/dpkg-all-hosts.log",
+          "powershell": "Get-Content .\\fleet\\dpkg-all-hosts.log -TotalCount 20",
+          "explain": "Learn a file's layout before you write a filter for it."
+        }
+      ]
+    },
+    {
+      "category": "grep & friends",
+      "items": [
+        {
+          "id": "grep-regex",
+          "title": "Extended regex",
+          "command": "grep -E 'status installed (openssh-server|libssl3t64|libzfold5)' fleet/dpkg-all-hosts.log",
+          "powershell": "Select-String -Path .\\fleet\\dpkg-all-hosts.log -Pattern 'status installed (openssh-server|libssl3t64|libzfold5)'",
+          "explain": "`-E` enables `|`, `+`, `{n}` and groups. Here: every completed install of three suspect packages, on every host."
+        },
+        {
+          "id": "grep-exclude",
+          "title": "Invert / exclude",
+          "command": "grep 'libzfold5' fleet/dpkg-all-hosts.log | grep -v -e ' half-' -e ' unpacked '",
+          "powershell": "Select-String -Path .\\fleet\\dpkg-all-hosts.log -Pattern 'libzfold5' | Where-Object { $_.Line -notmatch ' half-| unpacked ' }",
+          "explain": "`-v` drops lines. Chain several `-e` patterns to drop several kinds of noise at once."
+        },
+        {
+          "id": "grep-context",
+          "title": "Context around a hit",
+          "command": "grep -n -B10 -A3 'new file mode' repo/git-log.txt | less",
+          "powershell": "Select-String -Path .\\repo\\git-log.txt -Pattern 'new file mode' -Context 10,3",
+          "explain": "`-B` lines before, `-A` lines after. In a `git log -p` export the commit header sits a few lines above each diff."
+        },
+        {
+          "id": "grep-only-match",
+          "title": "Print only the match",
+          "command": "grep -oE '^diff -ruN [^ ]+' release/tarball-vs-git-tag.diff | sort | uniq -c",
+          "powershell": "Select-String -Path .\\release\\tarball-vs-git-tag.diff -Pattern '^diff -ruN [^ ]+' | ForEach-Object { $_.Matches.Value } | Group-Object | Select-Object Count, Name",
+          "explain": "`-o` prints just the matching part. Piped into `sort | uniq -c` it turns a long diff into a file list with counts."
+        },
+        {
+          "id": "grep-fixed",
+          "title": "Fixed string search",
+          "command": "grep -F -- '####' release/fixture-strings.txt",
+          "powershell": "Select-String -Path .\\release\\fixture-strings.txt -SimpleMatch '####'",
+          "explain": "`-F` treats the pattern literally: no regex surprises with `#`, `.` or `$`."
+        }
+      ]
+    },
+    {
+      "category": "Time zones & timestamps",
+      "items": [
+        {
+          "id": "epoch-to-utc",
+          "title": "Epoch to UTC",
+          "command": "date -u -d @1794300000 '+%F %T UTC'",
+          "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794300000).UtcDateTime",
+          "explain": "The timing CSV and the chat use Unix epoch seconds. `-u` keeps the output in UTC."
+        },
+        {
+          "id": "cet-to-utc",
+          "title": "CET to UTC",
+          "command": "date -u -d '2026-11-10 09:00:00 +0100' '+%F %T UTC'",
+          "powershell": "[DateTimeOffset]::Parse('2026-11-10T09:00:00+01:00').UtcDateTime",
+          "explain": "The fleet dpkg log is host local time, CET = UTC+01:00. Put the offset in the string and let `date` do the math."
+        },
+        {
+          "id": "utc-to-epoch",
+          "title": "UTC to epoch",
+          "command": "date -u -d '2026-11-10 08:00:00 UTC' +%s",
+          "powershell": "[DateTimeOffset]::Parse('2026-11-10T08:00:00Z').ToUnixTimeSeconds()",
+          "explain": "Handy for comparing a log time with CSV rows numerically."
+        },
+        {
+          "id": "csv-epoch-column",
+          "title": "Readable CSV timeline",
+          "command": "grep ',bench-02,' perf/sshd-auth-timing.csv | while IFS=, read ts h u r c a t; do\n  echo \"$(date -u -d @$ts '+%F %T') $h $r auth=$a\"\ndone | less",
+          "powershell": "Import-Csv .\\perf\\sshd-auth-timing.csv | Where-Object host -eq 'bench-02' |\n  Select-Object @{n='utc';e={[DateTimeOffset]::FromUnixTimeSeconds([long]$_.ts_epoch).UtcDateTime}}, result, auth_ms",
+          "explain": "Converts every probe of one host to UTC so you can eyeball where the numbers change."
+        },
+        {
+          "id": "chat-timestamps",
+          "title": "Chat with readable times",
+          "command": "jq -r '.[] | \"\\(.ts | tonumber | floor | todate) \\(.user): \\(.text)\"' chat/incident-channel.json",
+          "powershell": "(Get-Content .\\chat\\incident-channel.json -Raw | ConvertFrom-Json) | ForEach-Object {\n  '{0:u} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][double]$_.ts).UtcDateTime, $_.user, $_.text }",
+          "explain": "Slack-style `ts` is epoch seconds as a string. `todate` gives UTC."
+        }
+      ]
+    },
+    {
+      "category": "Login timing CSV",
+      "items": [
+        {
+          "id": "csv-header",
+          "title": "Header with column numbers",
+          "command": "head -1 perf/sshd-auth-timing.csv | tr , '\\n' | cat -n",
+          "powershell": "(Get-Content .\\perf\\sshd-auth-timing.csv -TotalCount 1).Split(',') | ForEach-Object -Begin { $i = 1 } -Process { \"$i $_\"; $i++ }",
+          "explain": "Know which `$N` is `auth_ms` before you write awk."
+        },
+        {
+          "id": "csv-over",
+          "title": "Rows over a threshold",
+          "command": "awk -F, '$2==\"bench-02\" && $6 > 300' perf/sshd-auth-timing.csv | head",
+          "powershell": "Import-Csv .\\perf\\sshd-auth-timing.csv | Where-Object { $_.host -eq 'bench-02' -and [int]$_.auth_ms -gt 300 } | Select-Object -First 10",
+          "explain": "Every probe on one host with an auth time over 300 ms. Expect a few one-off network blips."
+        },
+        {
+          "id": "csv-sustained",
+          "title": "First sustained shift",
+          "command": "awk -F, '$2==\"bench-02\" && $4==\"ok\" {\n  if ($6 > 300) { if (++run == 1) first = $1; if (run == 6) { print first; exit } } else run = 0\n}' perf/sshd-auth-timing.csv",
+          "powershell": "$run = 0; $first = $null\nforeach ($r in Import-Csv .\\perf\\sshd-auth-timing.csv | Where-Object { $_.host -eq 'bench-02' -and $_.result -eq 'ok' }) {\n  if ([int]$r.auth_ms -gt 300) { $run++; if ($run -eq 1) { $first = $r.ts_epoch }; if ($run -eq 6) { $first; break } } else { $run = 0 } }",
+          "explain": "Prints the epoch of the first probe that starts a run of 6 slow logins in a row: a real change, not a blip. Swap in the host you care about."
+        },
+        {
+          "id": "csv-daily-avg",
+          "title": "Daily average per host",
+          "command": "awk -F, 'NR > 1 && $4 == \"ok\" { k = $2 \" \" int($1 / 86400); s[k] += $6; n[k]++ }\n  END { for (k in s) print k, int(s[k] / n[k]) }' perf/sshd-auth-timing.csv | sort -k1,1 -k2,2n",
+          "powershell": "Import-Csv .\\perf\\sshd-auth-timing.csv | Where-Object result -eq 'ok' |\n  Group-Object host, { [math]::Floor([long]$_.ts_epoch / 86400) } |\n  ForEach-Object { '{0} avg={1:N0}' -f $_.Name, ($_.Group | Measure-Object auth_ms -Average).Average }",
+          "explain": "Average `auth_ms` per host per UTC day (day number = epoch / 86400). Compare hosts side by side; one of them is a control."
+        }
+      ]
+    },
+    {
+      "category": "dpkg logs",
+      "items": [
+        {
+          "id": "dpkg-one-host",
+          "title": "What changed on one host",
+          "command": "grep '^bench-02 ' fleet/dpkg-all-hosts.log | grep 'status installed'",
+          "powershell": "Select-String -Path .\\fleet\\dpkg-all-hosts.log -Pattern '^bench-02 .*status installed'",
+          "explain": "Only `status installed` lines: one line per package version that finished installing. Times are CET."
+        },
+        {
+          "id": "dpkg-pkg-history",
+          "title": "One package across the fleet",
+          "command": "awk '$4 == \"status\" && $5 == \"installed\" && $6 ~ /^libzfold5/' fleet/dpkg-all-hosts.log | less",
+          "powershell": "Get-Content .\\fleet\\dpkg-all-hosts.log | Where-Object { $f = $_ -split ' '; $f[3] -eq 'status' -and $f[4] -eq 'installed' -and $f[5] -like 'libzfold5*' }",
+          "explain": "Every completed install of the zfold library, all hosts, in time order."
+        },
+        {
+          "id": "dpkg-versions",
+          "title": "Version histogram",
+          "command": "awk '$4 == \"status\" && $5 == \"installed\" && $6 == \"libzfold5:amd64\" {print $7}' fleet/dpkg-all-hosts.log | sort | uniq -c",
+          "powershell": "Get-Content .\\fleet\\dpkg-all-hosts.log | ForEach-Object { $f = $_ -split ' '; if ($f[3] -eq 'status' -and $f[4] -eq 'installed' -and $f[5] -eq 'libzfold5:amd64') { $f[6] } } | Group-Object | Select-Object Count, Name",
+          "explain": "How many completed installs of each library version. Look closely at version strings that look alike."
+        },
+        {
+          "id": "dpkg-upgrade-lines",
+          "title": "Attempts, not results",
+          "command": "grep ' upgrade libzfold5' fleet/dpkg-all-hosts.log",
+          "powershell": "Select-String -Path .\\fleet\\dpkg-all-hosts.log -Pattern ' upgrade libzfold5'",
+          "explain": "An `upgrade` line means dpkg *started* an upgrade. It does not mean it finished. Compare with the `status installed` lines that follow."
+        },
+        {
+          "id": "dpkg-distinct-hosts",
+          "title": "Count distinct hosts",
+          "command": "awk -v v='<version>' '$4 == \"status\" && $5 == \"installed\" && $6 == \"libzfold5:amd64\" && $7 == v {print $1}' \\\n  fleet/dpkg-all-hosts.log | sort -u | wc -l",
+          "powershell": "$v = '<version>'\nGet-Content .\\fleet\\dpkg-all-hosts.log | ForEach-Object { $f = $_ -split ' '; if ($f[3] -eq 'status' -and $f[4] -eq 'installed' -and $f[5] -eq 'libzfold5:amd64' -and $f[6] -eq $v) { $f[0] } } |\n  Sort-Object -Unique | Measure-Object",
+          "explain": "Exact field match on package and version, then unique host names. Replace `<version>` with the full distro version."
+        }
+      ]
+    },
+    {
+      "category": "Release artifacts & diffs",
+      "items": [
+        {
+          "id": "diff-file-list",
+          "title": "List every file in the diff",
+          "command": "grep -nE '^(######## |diff -ruN |Binary files )' release/tarball-vs-git-tag.diff | less",
+          "powershell": "Select-String -Path .\\release\\tarball-vs-git-tag.diff -Pattern '^(######## |diff -ruN |Binary files )'",
+          "explain": "Section headers (`######## zfold ...`) separate the two releases. Each `diff -ruN` line is one file that differs between the git tag and the tarball."
+        },
+        {
+          "id": "diff-only-right",
+          "title": "Files only in the tarball",
+          "command": "awk '/^######## / {rel = $3}\n     /^--- / && /1970-01-01/ {getline; p = $2; sub(/^[^\\/]*\\//, \"\", p); print rel, p}' release/tarball-vs-git-tag.diff",
+          "powershell": "$rel = ''; $prev = ''\nforeach ($l in Get-Content .\\release\\tarball-vs-git-tag.diff) {\n  if ($l -like '######## *') { $rel = ($l -split ' ')[2] }\n  elseif ($l -like '+++ *' -and $prev -like '--- *1970-01-01*') { \"$rel \" + (($l -split '\\s+')[1] -replace '^[^/]*/', '') }\n  $prev = $l }",
+          "explain": "`diff -ruN` shows a file that exists on one side only against an empty file dated `1970-01-01`. This prints release + path for every file that is only in the tarball."
+        },
+        {
+          "id": "diff-count-releases",
+          "title": "Which tarball-only files are not in both releases?",
+          "command": "awk '/^--- / && /1970-01-01/ {getline; p = $2; sub(/^[^\\/]*\\//, \"\", p); print p}' release/tarball-vs-git-tag.diff \\\n  | sort | uniq -c | sort -n | head",
+          "powershell": "$prev = ''\n$(foreach ($l in Get-Content .\\release\\tarball-vs-git-tag.diff) {\n  if ($l -like '+++ *' -and $prev -like '--- *1970-01-01*') { ($l -split '\\s+')[1] -replace '^[^/]*/', '' }\n  $prev = $l }) | Group-Object | Sort-Object Count | Select-Object -First 10 Count, Name",
+          "explain": "Counts how many releases ship each tarball-only file. Normal autotools output appears in both (count 2). Anything with count 1 deserves a look."
+        },
+        {
+          "id": "diff-show-file",
+          "title": "Show one file's diff",
+          "command": "awk -v f='m4/<name>.m4' '/^(diff -ruN|Binary files|######## )/ {on = index($0, \"/\" f \" \") > 0} on' release/tarball-vs-git-tag.diff",
+          "powershell": "$f = 'm4/<name>.m4'; $on = $false\nforeach ($l in Get-Content .\\release\\tarball-vs-git-tag.diff) {\n  if ($l -match '^(diff -ruN|Binary files|######## )') { $on = $l.Contains(\"/$f \") }\n  if ($on) { $l } }",
+          "explain": "Prints the diff block of one file. Replace the path."
+        },
+        {
+          "id": "strings-regex",
+          "title": "Apply a regex to the strings dump",
+          "command": "grep -E '<regex copied from the macro>' release/fixture-strings.txt",
+          "powershell": "# .NET regex has no [[:alnum:]]: translate it to [A-Za-z0-9] first\nSelect-String -Path .\\release\\fixture-strings.txt -Pattern '<translated regex>' -CaseSensitive",
+          "explain": "Use the regex exactly as the macro does. POSIX classes like `[[:alnum:]]` work in `grep -E`; `{4}` means exactly four; `$` anchors the end of the line."
+        },
+        {
+          "id": "buildlog-compare",
+          "title": "Compare two package builds",
+          "command": "grep -nE 'config.status: executing|libtool: (compile|link)' distro/buildd-logs.txt | less",
+          "powershell": "Select-String -Path .\\distro\\buildd-logs.txt -Pattern 'config.status: executing|libtool: (compile|link)'",
+          "explain": "Every configure hook and every compiled and linked object, for both builds. An object that is linked but never compiled came from somewhere else."
+        }
+      ]
+    },
+    {
+      "category": "git archaeology",
+      "items": [
+        {
+          "id": "git-clone",
+          "title": "Clone the bundle",
+          "command": "git clone repo/zfold.bundle zfold && cd zfold",
+          "powershell": "git clone repo\\zfold.bundle zfold; cd zfold",
+          "explain": "Optional: `repo/git-log.txt` has the same history as text."
+        },
+        {
+          "id": "git-log-oneline",
+          "title": "History at a glance",
+          "command": "git log --oneline --decorate --all | head -40",
+          "powershell": "git log --oneline --decorate --all | Select-Object -First 40",
+          "explain": "Tags show up as `(tag: ...)`."
+        },
+        {
+          "id": "git-shortlog",
+          "title": "Who commits?",
+          "command": "git shortlog -sne --all",
+          "powershell": "git shortlog -sne --all",
+          "explain": "Commit counts per author and e-mail."
+        },
+        {
+          "id": "git-file-history",
+          "title": "History of a directory",
+          "command": "git log --format='%h %ad %an %s' --date=iso --stat -- tests/files/",
+          "powershell": "git log --format='%h %ad %an %s' --date=iso --stat -- tests/files/",
+          "explain": "Every commit that touched the test files, with the files changed."
+        },
+        {
+          "id": "git-added",
+          "title": "When was a file first added?",
+          "command": "git log --all --diff-filter=A --format='%h %ad %an %s' --date=iso -- 'tests/files/<file>'",
+          "powershell": "git log --all --diff-filter=A --format='%h %ad %an %s' --date=iso -- 'tests/files/<file>'",
+          "explain": "`--diff-filter=A` keeps only commits where the file was **added**, not modified."
+        },
+        {
+          "id": "gitlog-text-headers",
+          "title": "Same thing without git",
+          "command": "grep -nE '^commit |^Date: |^diff --git |^new file mode' repo/git-log.txt | less",
+          "powershell": "Select-String -Path .\\repo\\git-log.txt -Pattern '^commit |^Date: |^diff --git |^new file mode'",
+          "explain": "Commit headers, file headers and `new file mode` markers from the text export, with line numbers. An added file shows `new file mode` right after its `diff --git` line."
+        }
+      ]
+    },
+    {
+      "category": "Profiler & binary listings",
+      "items": [
+        {
+          "id": "perf-grep-dso",
+          "title": "Where does a library show up?",
+          "command": "grep -n 'libzfold' perf/perf-report-before.txt perf/perf-report-after.txt",
+          "powershell": "Select-String -Path .\\perf\\perf-report-*.txt -Pattern 'libzfold'",
+          "explain": "Compare how much sshd time a library gets before and after."
+        },
+        {
+          "id": "perf-callchain",
+          "title": "Read a call chain",
+          "command": "sed -n '/ssh_rsa_verify$/,/^    [0-9]/p' perf/perf-report-after.txt",
+          "powershell": "$on = $false\nforeach ($l in Get-Content .\\perf\\perf-report-after.txt) { if ($l -match 'ssh_rsa_verify$') { $on = $true }; if ($on) { $l }; if ($on -and $l -match '^\\s+[0-9.]+%\\s+[0-9.]+%' -and $l -notmatch 'ssh_rsa_verify') { break } }",
+          "explain": "Prints the call chain under sshd's RSA verify code in the after profile. Raw hex frames are code without symbols."
+        },
+        {
+          "id": "maps-range",
+          "title": "Library address ranges",
+          "command": "grep -E '^ +0x' perf/gdb-got-audit.txt",
+          "powershell": "Select-String -Path .\\perf\\gdb-got-audit.txt -Pattern '^ +0x'",
+          "explain": "Each line: start, end, size, offset, permissions, file. An address belongs to a library if start <= address < end."
+        },
+        {
+          "id": "got-in-range",
+          "title": "GOT slots that point into a range",
+          "command": "lo=0x7f0000000000; hi=0x7f0000010000   # paste one library's Start and End\nawk '$1 ~ /^0x/ && NF == 3' perf/gdb-got-audit.txt | while read slot name target; do\n  (( target >= lo && target < hi )) && echo \"$name -> $target\"\ndone",
+          "powershell": "$lo = [Convert]::ToInt64('0x7f0000000000', 16); $hi = [Convert]::ToInt64('0x7f0000010000', 16)\nGet-Content .\\perf\\gdb-got-audit.txt | Where-Object { $_ -match '^0x[0-9a-f]+\\s+\\S+\\s+0x' } | ForEach-Object {\n  $f = $_ -split '\\s+'; $t = [Convert]::ToInt64($f[2], 16); if ($t -ge $lo -and $t -lt $hi) { \"$($f[1]) -> $($f[2])\" } }",
+          "explain": "Paste a library's start and end, and it prints every imported function whose GOT slot points inside. bash arithmetic understands `0x` hex."
+        },
+        {
+          "id": "hex-math",
+          "title": "Hex arithmetic",
+          "command": "printf '0x%x\\n' $(( 0x7f0000012340 - 0x7f0000000000 ))",
+          "powershell": "'0x{0:x}' -f ([Convert]::ToInt64('0x7f0000012340', 16) - [Convert]::ToInt64('0x7f0000000000', 16))",
+          "explain": "Absolute address minus library start = offset inside the library, which is how perf, nm and objdump number things."
+        },
+        {
+          "id": "nm-sections",
+          "title": "Compare symbol tables",
+          "command": "grep -n '=====' binary/nm-libzfold.txt; grep -n '<offset>' binary/*.txt perf/*.txt",
+          "powershell": "Select-String -Path .\\binary\\nm-libzfold.txt -Pattern '====='\nSelect-String -Path .\\binary\\*.txt, .\\perf\\*.txt -Pattern '<offset>'",
+          "explain": "Find the sections, then search every listing for an offset you found elsewhere."
+        }
+      ]
+    }
+  ],
+  "debrief": "_Sealed._ Finish all six stages to unlock the debrief."
+}

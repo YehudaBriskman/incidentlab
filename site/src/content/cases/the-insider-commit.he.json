@@ -1,0 +1,726 @@
+{
+  "id": "the-insider-commit",
+  "title": "The Insider Commit – ה-commit של איש הפנים",
+  "subtitle": "ההתחברות ב-SSH נהייתה איטית ב-500 ms אחרי עדכון שגרתי של ספרייה. maintainer אמין, tarball שלא תואם ל-repo. עקבו אחרי חצי השנייה.",
+  "difficulty": "hard",
+  "estMinutes": 60,
+  "tags": [
+    "supply-chain",
+    "git-archaeology",
+    "release-artifacts",
+    "autotools",
+    "binary-analysis",
+    "profiling",
+    "dpkg",
+    "time-zones"
+  ],
+  "inspiredBy": {
+    "title": "xz-utils / liblzma backdoor (CVE-2024-3094)",
+    "year": 2024,
+    "summary": "במרץ 2024 מהנדס שחקר למה התחברויות SSH ב-Debian testing צורכות יותר CPU ולוקחות בערך 500 ms יותר, מצא backdoor ב-xz-utils 5.6.0 ו-5.6.1. co-maintainer שבנה אמון במשך כשנתיים, בעזרת לחץ מחשבונות sockpuppet, החביא את ה-payload בקבצי בדיקה בינאריים; סקריפט build שהיה קיים רק ב-tarballs של ה-release חילץ אותו וקישר אותו לתוך liblzma, שם ifunc resolver השתלט על פונקציה קריפטוגרפית ש-sshd קורא לה באימות מפתחות. הוא נתפס לפני שהגיע לרוב ההפצות היציבות."
+  },
+  "briefing": "**יום שישי, 08:30 CET. SecOps של Halyard Cloud.**\n\nביום שלישי אליף מצוות ה-performance engineering שמה לב שההתחברות ב-SSH לשרת benchmark נהייתה איטית בבערך **חצי שנייה**. זו לא הרשת: זמן ה-TCP connect שטוח. שרת אח עם אותם עדכונים שגרתיים בסדר גמור. היא הריצה profiler על sshd, מצאה משהו מוזר בתוך ספריית דחיסה ש-sshd טוען דרך patch של ההפצה, והעבירה את זה אליכם.\n\nמאז SecOps אספו את ה-tarballs של ה-release ואת היסטוריית ה-git של ה-upstream, את רשימת התפוצה של הפרויקט, את לוגי ה-build של חבילות ההפצה, פלט profiler ולוגי dpkg של כל הצי. ההפצה כבר שחררה חבילת rollback.\n\nה-RCA אצלכם. שישה שלבים: **איזה release**, **מה יש ב-tarball שאין ב-git**, **איפה ה-payload מתחבא**, **על מה הוא עושה hook**, **מי שתל אותו**, ו**כמה שרתים הריצו אותו אי פעם**. **קראו קודם את `README_FIRST.txt`** ורשמו את אזור הזמן של כל מקור.\n\nהכול כאן שחזור בדיוני לצורכי אימון. ה-payload הוא בייטים אקראיים וסקריפט ה-build נוטרל.",
+  "setupChecklist": [
+    "השיגו את הראיות: הורידו ופרסו את **חבילת הראיות**, *או* פתחו את ה-**Evidence Explorer** כדי לעיין בכל הקבצים בדפדפן (בלי התקנות).",
+    "קראו את `README_FIRST.txt` מההתחלה ועד הסוף, כולל מילון המונחים.",
+    "רשמו את אזור הזמן של כל מקור: לוג ה-dpkg של הצי ב-**CET (UTC+01:00)**, ה-CSV של התזמונים והצ'אט ב-**epoch seconds**, כותרות perf/binary ולוגי ההפצה ב-**UTC**, ול-mail ול-git יש **offset משלהם**.",
+    "בחרו מסלול: **bash** (Linux, macOS או WSL), **Windows PowerShell** (לכל פקודה ב-Toolbox יש גרסת PowerShell), או ה-**Explorer בדפדפן**.",
+    "git הוא אופציונלי: `repo/git-log.txt` מכיל את כל ההיסטוריה של ה-upstream כטקסט; `repo/zfold.bundle` הוא אותו דבר כ-bundle שאפשר לעשות לו clone."
+  ],
+  "evidenceZip": "/evidence/the-insider-commit-evidence.zip",
+  "evidence": [
+    {
+      "path": "README_FIRST.txt",
+      "format": "text",
+      "description": "תדריך מ-SecOps, רשימת הקבצים, אזורי זמן ומילון מונחים. מתחילים כאן."
+    },
+    {
+      "path": "perf/sshd-auth-timing.csv",
+      "format": "CSV (epoch UTC)",
+      "description": "התחברות probe לכל שרת benchmark כל 10 דקות: זמן connect, זמן auth, סך הכול."
+    },
+    {
+      "path": "perf/hyperfine-ssh-login.txt",
+      "format": "benchmark (UTC)",
+      "description": "benchmarks של התחברות מצד הלקוח, לפני ואחרי, עם שרת ביקורת."
+    },
+    {
+      "path": "perf/perf-report-before.txt",
+      "format": "perf report (UTC)",
+      "description": "איפה sshd מבזבז CPU במהלך 50 התחברויות, לפני ההאטה."
+    },
+    {
+      "path": "perf/perf-report-after.txt",
+      "format": "perf report (UTC)",
+      "description": "אותה הקלטה אחרי ההאטה, עם call chains."
+    },
+    {
+      "path": "perf/gdb-got-audit.txt",
+      "format": "gdb output",
+      "description": "טווחי הכתובות של הספריות ב-sshd חי, ולאן כל אחד מה-GOT slots שלו מצביע."
+    },
+    {
+      "path": "perf/valgrind-zf.txt",
+      "format": "valgrind (UTC)",
+      "description": "valgrind על ה-build של ההפצה מול build מ-git."
+    },
+    {
+      "path": "fleet/dpkg-all-hosts.log",
+      "format": "dpkg.log (CET)",
+      "description": "ה-dpkg.log של כל שרתי Halyard, ממוזג וממוין לפי זמן. כל שורה מתחילה בשם השרת."
+    },
+    {
+      "path": "release/SHA256SUMS.txt",
+      "format": "text (UTC)",
+      "description": "hashes של ה-tarballs, בדיקות חתימה וניסיון לשחזר את ה-tarballs מ-git."
+    },
+    {
+      "path": "release/tarball-vs-git-tag.diff",
+      "format": "diff -ruN",
+      "description": "לשני releases: export של ה-tag ב-git מול ה-tarball שפורסם."
+    },
+    {
+      "path": "release/fixture-strings.txt",
+      "format": "strings -a -f",
+      "description": "המחרוזות הקריאות בכל קובץ בדיקה בינארי ב-tarball של ה-release החדש יותר."
+    },
+    {
+      "path": "release/stage1-recovered.txt",
+      "format": "text (defanged)",
+      "description": "מה ש-SecOps שחזרו כשהריצו את ה-pipeline החשוד ב-sandbox. לקרוא אחרי שלב 3."
+    },
+    {
+      "path": "binary/nm-libzfold.txt",
+      "format": "nm listing",
+      "description": "טבלאות סימבולים (dynamic ו-debug) של שני builds של הספרייה."
+    },
+    {
+      "path": "binary/objdump-zf_crc64_resolve.txt",
+      "format": "objdump -d",
+      "description": "disassembly של ה-ifunc resolver של CRC64 בשני builds."
+    },
+    {
+      "path": "distro/changelog",
+      "format": "Debian changelog",
+      "description": "ה-changelog של חבילת zfold בהפצה."
+    },
+    {
+      "path": "distro/buildd-logs.txt",
+      "format": "sbuild log (UTC)",
+      "description": "לוגי ה-build של חבילות ההפצה לשתי גרסאות, במצב verbose."
+    },
+    {
+      "path": "distro/bug-10442.txt",
+      "format": "bug report",
+      "description": "הבאג בהפצה שביקש שדרוג מהיר."
+    },
+    {
+      "path": "mail/zfold-devel.mbox",
+      "format": "mbox",
+      "description": "קטע מרשימת התפוצה של ה-upstream, 2023 עד 2026."
+    },
+    {
+      "path": "chat/incident-channel.json",
+      "format": "Slack-like JSON (epoch)",
+      "description": "הצ'אט של האירוע ב-Halyard. תיאוריות, לא עובדות."
+    },
+    {
+      "path": "repo/git-log.txt",
+      "format": "git log -p",
+      "description": "ההיסטוריה המלאה של ה-upstream עם diffs, מהחדש לישן. קבצים בינאריים מופיעים כ-`Binary files ... differ`."
+    }
+  ],
+  "rules": [
+    "עובדים רק מתוך חבילת הראיות. אל תקראו את קוד הגנרטור או את קוד האתר; זה הורס את הכיף.",
+    "התשובות לא תלויות באותיות גדולות/קטנות, ורווחים בהתחלה ובסוף מתעלמים מהם. הקפידו על הפורמט שמופיע מתחת לכל שאלה.",
+    "כל רמז עולה את הנקודות שמופיעות עליו. הרמזים נחשפים לפי הסדר, מדחיפה עדינה ועד כמעט הפקודה המלאה.",
+    "עבודה בזוגות מומלצת. דברו את ההיגיון שלכם בקול, בדיוק כמו בתחקיר אמיתי.",
+    "כל כלי מותר: grep, awk, jq, git, Python, גיליון אלקטרוני, העורך האהוב עליכם. בלשונית Toolbox יש פקודות שעוזרות.",
+    "תשובה שגויה לא עולה כלום, אז נחשו בחופשיות. ובכל זאת, נסו להיות מסוגלים להסביר *למה* התשובה שלכם נכונה.",
+    "אל תשתפו flags עם צוותים אחרים עד שכולם מסיימים. לשתף טכניקות זה בסדר.",
+    "שום דבר בחבילה הוא לא malware שאפשר להריץ: קבצי הבדיקה הם בייטים אקראיים והסקריפטים נוטרלו. ובכל זאת, אל תעבירו שום דבר מהראיות לתוך shell."
+  ],
+  "questions": [
+    {
+      "stage": {
+        "name": "לעקוב אחרי חצי השנייה",
+        "goal": "למצוא איזה release של zfold רץ כשההתחברויות ל-bench-01 נהיו איטיות.",
+        "lookFor": [
+          "`perf/sshd-auth-timing.csv`: מתי `auth_ms` ב-bench-01 קופץ ונשאר למעלה?",
+          "`fleet/dpkg-all-hosts.log`: מה סיים להתקין ב-bench-01 ממש לפני?",
+          "dpkg ב-CET (UTC+01:00), ה-CSV ב-epoch (UTC)",
+          "bench-03 קיבל את אותם עדכונים שגרתיים חוץ מאחד: קבוצת ביקורת בחינם"
+        ],
+        "tools": [
+          "csv-header",
+          "csv-sustained",
+          "csv-epoch-column",
+          "csv-daily-avg",
+          "epoch-to-utc",
+          "cet-to-utc",
+          "dpkg-one-host",
+          "grep-regex"
+        ],
+        "explorerTip": "פתחו את `perf/sshd-auth-timing.csv` בתצוגת **CSV table**, הוסיפו פילטר **contains** `bench-01` וגללו עד ש-`auth_ms` משתנה לתמיד (התעלמו מקפיצות בודדות). המירו את ה-`ts_epoch` ל-UTC בעזרת ה-Toolbox. אחר כך פתחו את `fleet/dpkg-all-hosts.log`, הוסיפו פילטר **regex** `^bench-01 .*status installed` ומצאו מה נחת בעשר הדקות שלפני, אחרי שהמרתם CET ל-UTC."
+      },
+      "id": "q1",
+      "title": "לעקוב אחרי חצי השנייה",
+      "prompt": "ההתחברויות ל-bench-01 נהיו איטיות בבערך חצי שנייה ונשארו כך.\n\nאיזה **release של zfold מה-upstream** רץ על bench-01 מהרגע שההאטה התחילה? תיישרו את נתוני ה-probe מול מה ש-dpkg התקין, ושימו לב לאזורי הזמן.\n\nענו עם **גרסת ה-upstream בלבד**, `X.Y.Z`, בלי ה-revision של Corvid (`-1`) ובלי `v` בהתחלה.",
+      "answerFormat": "גרסת upstream X.Y.Z (בלי revision של ההפצה)",
+      "placeholder": "1.2.3",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "`connect_ms` נשאר שטוח, אז זו לא הרשת. `auth_ms` ב-bench-01 קופץ בבערך 500 ms ונשאר שם. כמה probes איטיים בודדים הם רעש: אתם מחפשים את תחילתו של שינוי *מתמשך*. אחר כך שאלו את dpkg מה השתנה ממש לפני."
+        },
+        {
+          "cost": 20,
+          "text": "כמה חבילות השתנו ב-bench-01 באותו שבוע: openssh, libssl, ספריית zfold. ה-CSV ב-epoch (UTC); לוג ה-dpkg ב-**CET = UTC+01:00**. המירו את הקפיצה ל-UTC, המירו כל התקנה ל-UTC, וקחו את התקנת ה-zfold האחרונה לפני הקפיצה. אם תדלגו על ההמרה, ההתקנה הנכונה תיראה כאילו קרתה *אחרי* ההאטה."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\n# first probe of a sustained run of slow logins on bench-01\nawk -F, '$2==\"bench-01\" && $4==\"ok\" { if ($6>300) { if (++r==1) f=$1; if (r==6) {print f; exit} } else r=0 }' perf/sshd-auth-timing.csv\ndate -u -d @<that_epoch>\n# what finished installing on bench-01 (CET!)\ngrep '^bench-01 ' fleet/dpkg-all-hosts.log | grep 'status installed'\n```\nהוסיפו שעה לזמן הקפיצה ב-UTC כדי להשוות ב-CET. ענו עם הגרסה של ספריית zfold בלי `-1`."
+        }
+      ],
+      "successNote": "לפני/אחרי נקי דורש שינוי **מתמשך** וקבוצת **ביקורת**: bench-03 קיבל את אותם עדכוני openssh ומערכת ונשאר מהיר. המרה של כל המקורות לאזור זמן אחד היא מה שמפריד בין הסיבה האמיתית לבין השינוי שפשוט קרה באותו יום. כאן, החלקה בין CET ל-UTC גורמת לאשמה להיראות כאילו הגיעה *אחרי* הסימפטום."
+    },
+    {
+      "stage": {
+        "name": "Tarball מול git",
+        "goal": "למצוא את הקובץ ב-tarball של ה-release הזה ש-git מעולם לא הכיל וה-tarball הקודם לא שלח.",
+        "lookFor": [
+          "tarballs של release תמיד מכילים קבצים שנוצרו אוטומטית ואין ב-git (configure, Makefile.in, build-aux/, m4 של libtool)",
+          "קובץ שקיים רק ב-tarball מוצג מול קובץ ריק עם תאריך `1970-01-01`",
+          "השוו את רשימת הקבצים-רק-ב-tarball של שני ה-releases",
+          "חתימות תקינות ו-hashes תואמים מוכיחים מי פרסם קובץ, לא מה יש בתוכו"
+        ],
+        "tools": [
+          "diff-file-list",
+          "diff-only-right",
+          "diff-count-releases",
+          "diff-show-file",
+          "grep-only-match",
+          "buildlog-compare"
+        ],
+        "explorerTip": "פתחו את `release/tarball-vs-git-tag.diff` והוסיפו פילטר **regex** `^--- .*1970-01-01`: שורה אחת לכל קובץ שקיים רק ב-tarball, בשני ה-releases. אחר כך הריצו **Count unique** עם ה-regex `^--- [^/]+/(\\S+)` וחפשו נתיב שמופיע רק פעם אחת (פלט רגיל של autotools מופיע פעמיים)."
+      },
+      "id": "q2",
+      "title": "לא ב-git",
+      "prompt": "ה-release שמצאתם בשלב 1 נבנה מ-**tarball**, לא מ-git.\n\nב-`release/tarball-vs-git-tag.diff`, מצאו את הקובץ ש**נמצא ב-tarball של ה-release הזה אבל לא ב-tag שלו ב-git**, ש**ה-tarball של ה-release הקודם לא הכיל**, ושהוא **לא** פלט סטנדרטי של autotools/libtool/gettext.\n\nענו עם **הנתיב שלו יחסית לשורש ה-tarball**.",
+      "answerFormat": "נתיב יחסית לשורש ה-tarball, למשל dir/file.ext",
+      "placeholder": "src/check/crc32.c",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "עשרות קבצים קיימים רק ב-tarball ב**שני** ה-releases: `configure`, `Makefile.in`, `aclocal.m4`, `build-aux/*`, ה-macros של libtool ו-gettext. זה תקין. אתם מחפשים מה שקיים רק ב-tarball של ה-release הרע ולא בקודם."
+        },
+        {
+          "cost": 20,
+          "text": "`diff -ruN` מציג קובץ שקיים רק בצד ימין כ-`--- left/path<TAB>1970-01-01 ...` ואחריו `+++ right/path ...`. אספו את הנתיבים האלה לכל סקשן של release (`######## zfold X.Y.Z`) והשוו בין שתי הרשימות. בונוס: ב-`distro/buildd-logs.txt` יש hook של configure עם אותו שם."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\nawk '/^--- / && /1970-01-01/ {getline; p=$2; sub(/^[^\\/]*\\//, \"\", p); print p}' \\\n  release/tarball-vs-git-tag.diff | sort | uniq -c | sort -n | head\n```\nספירה של `1` אומרת שרק release אחד מכיל אותו. התעלמו ממה שקיים רק ב-release הישן."
+        }
+      ],
+      "successNote": "Reviewers קוראים את git. הפצות בונות מ-tarballs. כל מה שחי רק ב-tarball עוקף את ה-code review, ו-autotools נותן לו הרבה חברה: אלפי שורות שנוצרו אוטומטית שאף אחד לא קורא. **releases רפרודוקטיביים** (tarball == `git archive` + שלב יצירה מתועד שאפשר להריץ שוב) ובנייה מה-tag במקום מה-tarball שהועלה סוגרים את הפער הזה."
+    },
+    {
+      "stage": {
+        "name": "איפה ה-payload מתחבא",
+        "goal": "להבין איזה קובץ בדיקה ה-macro החדש מפענח.",
+        "lookFor": [
+          "קראו את ה-macro ב-diff: הוא אף פעם לא מציין את שם הקובץ",
+          "הוא מוצא את הקלט שלו לפי **תוכן**, עם `grep -aErls` ו-regex",
+          "`release/fixture-strings.txt` מפרט את המחרוזות הקריאות בכל קובץ בדיקה",
+          "חלק מהמחרוזות הן כמעט-התאמות: ספרו תווים"
+        ],
+        "tools": [
+          "diff-show-file",
+          "strings-regex",
+          "grep-fixed",
+          "gitlog-text-headers"
+        ],
+        "explorerTip": "פתחו את `release/tarball-vs-git-tag.diff`, סננו **contains** `grep -aErls` וקראו את ה-regex שבמרכאות. אחר כך פתחו את `release/fixture-strings.txt` והוסיפו פילטר **regex** עם אותה תבנית בדיוק (בדפדפן ייתכן שתצטרכו להחליף `[[:alnum:]]` ב-`[A-Za-z0-9]`). אמור להישאר בדיוק שם קובץ אחד."
+      },
+      "id": "q3",
+      "title": "קובץ בדיקה שהוא לא באמת",
+      "prompt": "ה-macro החדש מעביר את התוכן של קובץ אחד מעץ המקור דרך `tr` ודרך ה-decompressor של הפרויקט עצמו, ומשם לתוך shell.\n\nאיזה **קובץ בדיקה** זה?\n\nענו עם **שם הקובץ בלבד** (בלי תיקייה).",
+      "answerFormat": "שם קובץ בלבד, למשל name.zf",
+      "placeholder": "good-1-empty.zf",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "ה-macro אף פעם לא מציין את הקלט שלו בשם. חפשו את ה-`grep` שמגדיר את `zf_am_configmake`: הוא סורק את עץ המקור בחיפוש אחרי קובץ שמכיל שורת סימון מסוימת."
+        },
+        {
+          "cost": 20,
+          "text": "התבנית היא ERE: `#{4}` זה בדיוק ארבעה `#`, `[[:alnum:]]{5}` זה חמש אותיות או ספרות, `$` זה סוף שורה. הריצו אותה על `release/fixture-strings.txt`. כמה מחרוזות נראות קרובות; רק אחת מתאימה."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\nre=$(grep -oE 'grep -aErls \"[^\"]+\"' release/tarball-vs-git-tag.diff | head -1 | sed -E 's/.*\"(.*)\"/\\1/')\necho \"$re\"\ngrep -E -- \"$re\" release/fixture-strings.txt\n```\nהתשובה היא שם הקובץ שלפני הנקודתיים, בלי `tests/files/`."
+        }
+      ],
+      "successNote": "קבצי בדיקה בינאריים הם מקום מסתור מושלם: אף אחד לא עושה להם review, ה-diff מציג רק `Binary files differ`, והפרויקט צריך אותם. התייחסו לקבצים בינאריים ב-repo כמו לקוד: צרו אותם מסקריפט שנמצא ב-repo, בדקו שהסקריפט משחזר אותם, והיו חשדנים כשהגנרטור \"יגיע בהמשך\"."
+    },
+    {
+      "stage": {
+        "name": "על מה ה-hook",
+        "goal": "למצוא את הפונקציה של libcrypto ש-sshd מגיע אליה עכשיו דרך libzfold.",
+        "lookFor": [
+          "`perf/perf-report-after.txt`: כתובת גולמית של libzfold מופיעה בנתיב ה-RSA verify של sshd",
+          "`perf/gdb-got-audit.txt`: טווחי כתובות של ספריות למעלה, GOT slots למטה",
+          "slot אמור להצביע לתוך הספרייה שמגדירה את הפונקציה",
+          "Offset = כתובת פחות תחילת הספרייה; השוו מול perf ו-nm"
+        ],
+        "tools": [
+          "perf-grep-dso",
+          "perf-callchain",
+          "maps-range",
+          "got-in-range",
+          "hex-math",
+          "nm-sections"
+        ],
+        "explorerTip": "פתחו את `perf/gdb-got-audit.txt`. רשמו את ה-**Start** וה-**End** של השורה של libzfold ב-mappings. אחר כך הוסיפו פילטר **regex** `^0x[0-9a-f]+ ` כדי לראות רק GOT slots, וסרקו את העמודה האחרונה בחיפוש כתובת שנופלת בתוך הטווח (היא מתחילה באותן ספרות כמו ה-start של libzfold). אמתו את ה-offset ב-`perf/perf-report-after.txt` וב-`binary/nm-libzfold.txt`."
+      },
+      "id": "q4",
+      "title": "הפונקציה שנחטפה",
+      "prompt": "sshd קורא לספריות משותפות דרך ה-**GOT** שלו (Global Offset Table). ב-sshd החי על bench-01, slot אחד של פונקציה מ-**libcrypto** כבר לא מצביע לתוך libcrypto: הוא מצביע לתוך libzfold.\n\nאיזו **פונקציה מיובאת** הוסטה?\n\nענו עם **שם הסימבול** המדויק.",
+      "answerFormat": "שם הסימבול המדויק כפי שמופיע ב-GOT audit",
+      "placeholder": "EVP_Example_fn",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "בפרופיל של אחרי, קוד ה-RSA verify של sshd קורא לכתובת גולמית בתוך libzfold, וזו קוראת ל-libcrypto. משהו חיווט מחדש את הקריאה הזו. ה-GOT audit מראה לאן כל import באמת הולך."
+        },
+        {
+          "cost": 20,
+          "text": "קחו את ה-start וה-end של libzfold משורות ה-`info proc mappings`. בדיוק slot אחד מצביע לתוך הטווח הזה. ה-offset שלו (יעד פחות start) הוא אותה כתובת גולמית ש-perf מציג, ול-`nm` יש שם סימבול שלא קיים באף קובץ מקור ב-git."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngrep libzfold perf/gdb-got-audit.txt      # start and end of libzfold's code\nlo=<start>; hi=<end>\nawk '$1 ~ /^0x/ && NF==3' perf/gdb-got-audit.txt | while read s name t; do\n  (( t >= lo && t < hi )) && echo \"$name $t\"; done\n```"
+        }
+      ],
+      "successNote": "ההאטה וה-hook הם שני דברים שונים: חצי השנייה היא ה-**ifunc resolver** המחליף שסורק טבלאות סימבולים בתוך ld.so בזמן ש-sshd עולה, לפני כל התחברות. ה-hook הוא רשומת GOT אחת שנכתבת מחדש במהלך הסריקה הזו. CRC64 עדיין עובד וכל הבדיקות עוברות. פרופיילרים תופסים את מה שבדיקות לא תופסות: לספריית דחיסה לא היה שום עניין לצרוך 90% מה-CPU של sshd, ומהנדסת אחת סירבה להתעלם מזה."
+    },
+    {
+      "stage": {
+        "name": "מי שתל את זה",
+        "goal": "למצוא את ה-commit ב-upstream שהכניס לראשונה את קובץ ה-payload ל-git.",
+        "lookFor": [
+          "`repo/git-log.txt` (או ה-bundle) הוא ההיסטוריה המלאה של ה-upstream",
+          "קבצים בינאריים מופיעים כ-`Binary files /dev/null and b/... differ` כשהם **נוספים**",
+          "יותר מ-commit אחד נוגע בקובץ הזה; אתם צריכים את הראשון, זה שהוסיף אותו",
+          "רשימת התפוצה מראה איך ה-author שלו קיבל הרשאות commit"
+        ],
+        "tools": [
+          "gitlog-text-headers",
+          "grep-context",
+          "git-clone",
+          "git-added",
+          "git-file-history",
+          "git-shortlog"
+        ],
+        "explorerTip": "פתחו את `repo/git-log.txt` והוסיפו פילטר **regex** `^commit |^new file mode|Binary files .*<file name>`. הלוג מסודר מהחדש לישן, כך שהאזכור הכי ישן נמצא ליד ה-**Last match**. קראו את שורת ה-`commit` שנמצאת ממש מעל ה-`new file mode` ששייך לקובץ שלכם."
+      },
+      "id": "q5",
+      "title": "ה-commit של איש הפנים",
+      "prompt": "איזה **commit ב-upstream הוסיף לראשונה** את קובץ הבדיקה עם ה-payload שמצאתם בשלב 3?\n\nענו עם **ה-short SHA בן 7 התווים** (hex באותיות קטנות).",
+      "answerFormat": "short SHA בן 7 תווים (hex)",
+      "placeholder": "a1b2c3d",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "שני commits נוגעים בקובץ הזה: אחד מוסיף אותו, ואחד מאוחר יותר \"מייצר אותו מחדש\". export של git log מסודר מהחדש לישן, אז האזכור *האחרון* בקובץ הוא הישן ביותר."
+        },
+        {
+          "cost": 20,
+          "text": "כשקובץ נוסף, `git log -p` מדפיס `new file mode 100644` ו-`index 0000000..` מיד אחרי שורת ה-`diff --git` שלו, וגם `Binary files /dev/null and b/...`. עלו למעלה עד שורת ה-`commit <sha>` הקרובה."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngit clone repo/zfold.bundle zfold && cd zfold\ngit log --all --diff-filter=A --format='%h %ad %an %s' --date=iso -- 'tests/files/<file>'\n```\nבלי git? `grep -n -B12 'Binary files /dev/null and b/tests/files/<file>' repo/git-log.txt | grep commit`"
+        }
+      ],
+      "successNote": "הודעת ה-commit הייתה רגילה, ה-author היה co-maintainer אמין, והשינוי היה \"רק בדיקות\". עכשיו קראו את `mail/zfold-devel.mbox`: שני חשבונות שמעולם לא תרמו קוד הפעילו לחץ במשך חודשים על מתנדב עייף, עד שהמצטרף החדש קיבל את המפתחות. אמון בשרשרת האספקה הוא חברתי לפני שהוא טכני. מימון ותמיכה ב-maintainers, review של שני אנשים ל-releases ומעקב אחרי קמפייני לחץ הם בקרות אבטחה."
+    },
+    {
+      "stage": {
+        "name": "Blast radius",
+        "goal": "לספור את השרתים בצי שאי פעם הותקן עליהם ה-build הרע.",
+        "lookFor": [
+          "רק `status installed` אומר שהחבילה סיימה להתקין",
+          "חלק מניסיונות ה-`upgrade` נכשלו והשאירו את הגרסה הישנה במקום",
+          "גם מחרוזת הגרסה של חבילת ה-rollback מכילה את מספר הגרסה הרעה",
+          "ספרו שרתים, לא שורות"
+        ],
+        "tools": [
+          "dpkg-pkg-history",
+          "dpkg-versions",
+          "dpkg-upgrade-lines",
+          "dpkg-distinct-hosts",
+          "grep-exclude"
+        ],
+        "explorerTip": "פתחו את `fleet/dpkg-all-hosts.log` והוסיפו פילטר **regex** `status installed libzfold5:amd64 <version>-1$` (עם escape לנקודות). אחר כך השתמשו ב-**Count unique** עם ה-regex `^(\\S+)` כדי לספור שרתים ייחודיים."
+      },
+      "id": "q6",
+      "title": "Blast radius",
+      "prompt": "כמה שרתים של Halyard **הריצו אי פעם** את הספרייה עם ה-backdoor?\n\nספרו את **השרתים הייחודיים** ב-`fleet/dpkg-all-hosts.log` שיש להם לפחות שורת `status installed` אחת של `libzfold5:amd64` בגרסת Corvid הרעה **בדיוק** (הגרסה משלב 1 ועוד ה-revision `-1`).\n\nשרתים שקיבלו אחר כך את ה-rollback עדיין נספרים. ענו עם **מספר שלם**.",
+      "answerFormat": "מספר שלם (שרתים ייחודיים)",
+      "placeholder": "7",
+      "points": 150,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "שלוש מלכודות: שורת `upgrade ... <bad>` היא רק ניסיון; גרסת ה-rollback `<bad>+really<old>-1` מכילה את הגרסה הרעה כתת-מחרוזת; וכל התקנה כותבת כמה שורות. אתם מחפשים שרתים שבהם הגרסה הרעה הגיעה ל-`status installed`."
+        },
+        {
+          "cost": 20,
+          "text": "התאימו שדות במדויק: שדה 4 `status`, שדה 5 `installed`, שדה 6 `libzfold5:amd64`, שדה 7 הגרסה הרעה המלאה. הדפיסו את שדה 1 (השרת), ואז `sort -u`."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\nawk -v v='<X.Y.Z>-1' '$4==\"status\" && $5==\"installed\" && $6==\"libzfold5:amd64\" && $7==v {print $1}' \\\n  fleet/dpkg-all-hosts.log | sort -u | wc -l\n```\nהשוו לספירה נאיבית של `grep <X.Y.Z>` כדי לראות כמה רחוק הייתם."
+        }
+      ],
+      "successNote": "\"יש לו עכשיו את התיקון\" זה לא \"מעולם לא נחשף\". כל שרת שהריץ את ה-build הרע צריך להיחשב כאילו נפרץ: להחליף host keys ו-credentials ש-sshd נגע בהם, לעבור על לוגי גישה מחלון החשיפה, ולבנות מחדש במקום לתקן. שרת ה-bastion שברשימה הוא המקום להתחיל בו."
+    }
+  ],
+  "toolbox": [
+    {
+      "category": "התמצאות ראשונית",
+      "items": [
+        {
+          "id": "unzip-evidence",
+          "title": "פריסת הראיות",
+          "command": "unzip the-insider-commit-evidence.zip && cd the-insider-commit",
+          "powershell": "Expand-Archive .\\the-insider-commit-evidence.zip -DestinationPath .\ncd .\\the-insider-commit",
+          "explain": "הכול נמצא תחת תיקייה עליונה אחת, `the-insider-commit/`."
+        },
+        {
+          "id": "list-files",
+          "title": "מה יש לנו כאן",
+          "command": "find . -type f | sort | xargs wc -c",
+          "powershell": "Get-ChildItem -Recurse -File | Select-Object Length, FullName",
+          "explain": "כל הקבצים עם הגודל שלהם. הגדולים הם לוג ה-dpkg של הצי וה-CSV של התזמונים."
+        },
+        {
+          "id": "read-readme",
+          "title": "קריאת ה-README",
+          "command": "less README_FIRST.txt",
+          "powershell": "Get-Content .\\README_FIRST.txt | more",
+          "explain": "אזורי זמן, פורמטים של קבצים ומילון מונחים קצר (tarball, m4, ifunc, GOT). קראו אותו קודם."
+        },
+        {
+          "id": "head-lines",
+          "title": "הצצה לשורות הראשונות",
+          "command": "head -n 20 fleet/dpkg-all-hosts.log",
+          "powershell": "Get-Content .\\fleet\\dpkg-all-hosts.log -TotalCount 20",
+          "explain": "הכירו את מבנה הקובץ לפני שאתם כותבים לו פילטר."
+        }
+      ]
+    },
+    {
+      "category": "grep וחברים",
+      "items": [
+        {
+          "id": "grep-regex",
+          "title": "Regex מורחב",
+          "command": "grep -E 'status installed (openssh-server|libssl3t64|libzfold5)' fleet/dpkg-all-hosts.log",
+          "powershell": "Select-String -Path .\\fleet\\dpkg-all-hosts.log -Pattern 'status installed (openssh-server|libssl3t64|libzfold5)'",
+          "explain": "`-E` מאפשר `|`, `+`, `{n}` וקבוצות. כאן: כל התקנה שהושלמה של שלוש חבילות חשודות, בכל השרתים."
+        },
+        {
+          "id": "grep-exclude",
+          "title": "היפוך / סינון החוצה",
+          "command": "grep 'libzfold5' fleet/dpkg-all-hosts.log | grep -v -e ' half-' -e ' unpacked '",
+          "powershell": "Select-String -Path .\\fleet\\dpkg-all-hosts.log -Pattern 'libzfold5' | Where-Object { $_.Line -notmatch ' half-| unpacked ' }",
+          "explain": "`-v` מוריד שורות. שרשרו כמה `-e` כדי לסנן כמה סוגי רעש בבת אחת."
+        },
+        {
+          "id": "grep-context",
+          "title": "הקשר סביב התאמה",
+          "command": "grep -n -B10 -A3 'new file mode' repo/git-log.txt | less",
+          "powershell": "Select-String -Path .\\repo\\git-log.txt -Pattern 'new file mode' -Context 10,3",
+          "explain": "`-B` שורות לפני, `-A` שורות אחרי. ב-export של `git log -p` כותרת ה-commit נמצאת כמה שורות מעל כל diff."
+        },
+        {
+          "id": "grep-only-match",
+          "title": "רק החלק שהתאים",
+          "command": "grep -oE '^diff -ruN [^ ]+' release/tarball-vs-git-tag.diff | sort | uniq -c",
+          "powershell": "Select-String -Path .\\release\\tarball-vs-git-tag.diff -Pattern '^diff -ruN [^ ]+' | ForEach-Object { $_.Matches.Value } | Group-Object | Select-Object Count, Name",
+          "explain": "`-o` מדפיס רק את החלק שהתאים. עם `sort | uniq -c` הוא הופך diff ארוך לרשימת קבצים עם ספירה."
+        },
+        {
+          "id": "grep-fixed",
+          "title": "חיפוש מחרוזת קבועה",
+          "command": "grep -F -- '####' release/fixture-strings.txt",
+          "powershell": "Select-String -Path .\\release\\fixture-strings.txt -SimpleMatch '####'",
+          "explain": "`-F` מתייחס לתבנית כפשוטה: בלי הפתעות של regex עם `#`, `.` או `$`."
+        }
+      ]
+    },
+    {
+      "category": "אזורי זמן וחותמות זמן",
+      "items": [
+        {
+          "id": "epoch-to-utc",
+          "title": "Epoch ל-UTC",
+          "command": "date -u -d @1794300000 '+%F %T UTC'",
+          "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794300000).UtcDateTime",
+          "explain": "ה-CSV של התזמונים והצ'אט משתמשים ב-Unix epoch seconds. `-u` משאיר את הפלט ב-UTC."
+        },
+        {
+          "id": "cet-to-utc",
+          "title": "CET ל-UTC",
+          "command": "date -u -d '2026-11-10 09:00:00 +0100' '+%F %T UTC'",
+          "powershell": "[DateTimeOffset]::Parse('2026-11-10T09:00:00+01:00').UtcDateTime",
+          "explain": "לוג ה-dpkg של הצי הוא בשעון המקומי של השרת, CET = UTC+01:00. שימו את ה-offset בתוך המחרוזת ותנו ל-`date` לעשות את החשבון."
+        },
+        {
+          "id": "utc-to-epoch",
+          "title": "UTC ל-epoch",
+          "command": "date -u -d '2026-11-10 08:00:00 UTC' +%s",
+          "powershell": "[DateTimeOffset]::Parse('2026-11-10T08:00:00Z').ToUnixTimeSeconds()",
+          "explain": "שימושי כדי להשוות זמן מלוג לשורות ב-CSV באופן מספרי."
+        },
+        {
+          "id": "csv-epoch-column",
+          "title": "ציר זמן קריא מה-CSV",
+          "command": "grep ',bench-02,' perf/sshd-auth-timing.csv | while IFS=, read ts h u r c a t; do\n  echo \"$(date -u -d @$ts '+%F %T') $h $r auth=$a\"\ndone | less",
+          "powershell": "Import-Csv .\\perf\\sshd-auth-timing.csv | Where-Object host -eq 'bench-02' |\n  Select-Object @{n='utc';e={[DateTimeOffset]::FromUnixTimeSeconds([long]$_.ts_epoch).UtcDateTime}}, result, auth_ms",
+          "explain": "ממיר כל probe של שרת אחד ל-UTC, כדי שתראו בעין איפה המספרים משתנים."
+        },
+        {
+          "id": "chat-timestamps",
+          "title": "צ'אט עם שעות קריאות",
+          "command": "jq -r '.[] | \"\\(.ts | tonumber | floor | todate) \\(.user): \\(.text)\"' chat/incident-channel.json",
+          "powershell": "(Get-Content .\\chat\\incident-channel.json -Raw | ConvertFrom-Json) | ForEach-Object {\n  '{0:u} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][double]$_.ts).UtcDateTime, $_.user, $_.text }",
+          "explain": "ה-`ts` בסגנון Slack הוא epoch seconds כמחרוזת. `todate` נותן UTC."
+        }
+      ]
+    },
+    {
+      "category": "ה-CSV של זמני ההתחברות",
+      "items": [
+        {
+          "id": "csv-header",
+          "title": "כותרת עם מספרי עמודות",
+          "command": "head -1 perf/sshd-auth-timing.csv | tr , '\\n' | cat -n",
+          "powershell": "(Get-Content .\\perf\\sshd-auth-timing.csv -TotalCount 1).Split(',') | ForEach-Object -Begin { $i = 1 } -Process { \"$i $_\"; $i++ }",
+          "explain": "דעו איזה `$N` הוא `auth_ms` לפני שאתם כותבים awk."
+        },
+        {
+          "id": "csv-over",
+          "title": "שורות מעל סף",
+          "command": "awk -F, '$2==\"bench-02\" && $6 > 300' perf/sshd-auth-timing.csv | head",
+          "powershell": "Import-Csv .\\perf\\sshd-auth-timing.csv | Where-Object { $_.host -eq 'bench-02' -and [int]$_.auth_ms -gt 300 } | Select-Object -First 10",
+          "explain": "כל probe בשרת אחד עם זמן auth מעל 300 ms. צפו לכמה קפיצות רשת חד-פעמיות."
+        },
+        {
+          "id": "csv-sustained",
+          "title": "השינוי המתמשך הראשון",
+          "command": "awk -F, '$2==\"bench-02\" && $4==\"ok\" {\n  if ($6 > 300) { if (++run == 1) first = $1; if (run == 6) { print first; exit } } else run = 0\n}' perf/sshd-auth-timing.csv",
+          "powershell": "$run = 0; $first = $null\nforeach ($r in Import-Csv .\\perf\\sshd-auth-timing.csv | Where-Object { $_.host -eq 'bench-02' -and $_.result -eq 'ok' }) {\n  if ([int]$r.auth_ms -gt 300) { $run++; if ($run -eq 1) { $first = $r.ts_epoch }; if ($run -eq 6) { $first; break } } else { $run = 0 } }",
+          "explain": "מדפיס את ה-epoch של ה-probe הראשון שפותח רצף של 6 התחברויות איטיות ברצף: שינוי אמיתי, לא קפיצה. החליפו בשרת שמעניין אתכם."
+        },
+        {
+          "id": "csv-daily-avg",
+          "title": "ממוצע יומי לכל שרת",
+          "command": "awk -F, 'NR > 1 && $4 == \"ok\" { k = $2 \" \" int($1 / 86400); s[k] += $6; n[k]++ }\n  END { for (k in s) print k, int(s[k] / n[k]) }' perf/sshd-auth-timing.csv | sort -k1,1 -k2,2n",
+          "powershell": "Import-Csv .\\perf\\sshd-auth-timing.csv | Where-Object result -eq 'ok' |\n  Group-Object host, { [math]::Floor([long]$_.ts_epoch / 86400) } |\n  ForEach-Object { '{0} avg={1:N0}' -f $_.Name, ($_.Group | Measure-Object auth_ms -Average).Average }",
+          "explain": "ממוצע `auth_ms` לכל שרת לכל יום UTC (מספר יום = epoch / 86400). השוו שרתים זה לצד זה; אחד מהם הוא קבוצת ביקורת."
+        }
+      ]
+    },
+    {
+      "category": "לוגים של dpkg",
+      "items": [
+        {
+          "id": "dpkg-one-host",
+          "title": "מה השתנה בשרת אחד",
+          "command": "grep '^bench-02 ' fleet/dpkg-all-hosts.log | grep 'status installed'",
+          "powershell": "Select-String -Path .\\fleet\\dpkg-all-hosts.log -Pattern '^bench-02 .*status installed'",
+          "explain": "רק שורות `status installed`: שורה אחת לכל גרסת חבילה שסיימה להתקין. השעות ב-CET."
+        },
+        {
+          "id": "dpkg-pkg-history",
+          "title": "חבילה אחת לאורך כל הצי",
+          "command": "awk '$4 == \"status\" && $5 == \"installed\" && $6 ~ /^libzfold5/' fleet/dpkg-all-hosts.log | less",
+          "powershell": "Get-Content .\\fleet\\dpkg-all-hosts.log | Where-Object { $f = $_ -split ' '; $f[3] -eq 'status' -and $f[4] -eq 'installed' -and $f[5] -like 'libzfold5*' }",
+          "explain": "כל התקנה שהושלמה של ספריית zfold, בכל השרתים, לפי סדר זמן."
+        },
+        {
+          "id": "dpkg-versions",
+          "title": "היסטוגרמת גרסאות",
+          "command": "awk '$4 == \"status\" && $5 == \"installed\" && $6 == \"libzfold5:amd64\" {print $7}' fleet/dpkg-all-hosts.log | sort | uniq -c",
+          "powershell": "Get-Content .\\fleet\\dpkg-all-hosts.log | ForEach-Object { $f = $_ -split ' '; if ($f[3] -eq 'status' -and $f[4] -eq 'installed' -and $f[5] -eq 'libzfold5:amd64') { $f[6] } } | Group-Object | Select-Object Count, Name",
+          "explain": "כמה התקנות שהושלמו יש לכל גרסה של הספרייה. שימו לב במיוחד למחרוזות גרסה שנראות דומות."
+        },
+        {
+          "id": "dpkg-upgrade-lines",
+          "title": "ניסיונות, לא תוצאות",
+          "command": "grep ' upgrade libzfold5' fleet/dpkg-all-hosts.log",
+          "powershell": "Select-String -Path .\\fleet\\dpkg-all-hosts.log -Pattern ' upgrade libzfold5'",
+          "explain": "שורת `upgrade` אומרת ש-dpkg *התחיל* שדרוג. היא לא אומרת שהוא הסתיים. השוו לשורות `status installed` שאחריה."
+        },
+        {
+          "id": "dpkg-distinct-hosts",
+          "title": "ספירת שרתים ייחודיים",
+          "command": "awk -v v='<version>' '$4 == \"status\" && $5 == \"installed\" && $6 == \"libzfold5:amd64\" && $7 == v {print $1}' \\\n  fleet/dpkg-all-hosts.log | sort -u | wc -l",
+          "powershell": "$v = '<version>'\nGet-Content .\\fleet\\dpkg-all-hosts.log | ForEach-Object { $f = $_ -split ' '; if ($f[3] -eq 'status' -and $f[4] -eq 'installed' -and $f[5] -eq 'libzfold5:amd64' -and $f[6] -eq $v) { $f[0] } } |\n  Sort-Object -Unique | Measure-Object",
+          "explain": "התאמה מדויקת לפי שדה על החבילה והגרסה, ואז שמות שרתים ייחודיים. החליפו את `<version>` בגרסת ההפצה המלאה."
+        }
+      ]
+    },
+    {
+      "category": "ארטיפקטים של release ו-diffs",
+      "items": [
+        {
+          "id": "diff-file-list",
+          "title": "כל הקבצים ב-diff",
+          "command": "grep -nE '^(######## |diff -ruN |Binary files )' release/tarball-vs-git-tag.diff | less",
+          "powershell": "Select-String -Path .\\release\\tarball-vs-git-tag.diff -Pattern '^(######## |diff -ruN |Binary files )'",
+          "explain": "כותרות הסקשנים (`######## zfold ...`) מפרידות בין שני ה-releases. כל שורת `diff -ruN` היא קובץ אחד ששונה בין ה-tag ב-git לבין ה-tarball."
+        },
+        {
+          "id": "diff-only-right",
+          "title": "קבצים שקיימים רק ב-tarball",
+          "command": "awk '/^######## / {rel = $3}\n     /^--- / && /1970-01-01/ {getline; p = $2; sub(/^[^\\/]*\\//, \"\", p); print rel, p}' release/tarball-vs-git-tag.diff",
+          "powershell": "$rel = ''; $prev = ''\nforeach ($l in Get-Content .\\release\\tarball-vs-git-tag.diff) {\n  if ($l -like '######## *') { $rel = ($l -split ' ')[2] }\n  elseif ($l -like '+++ *' -and $prev -like '--- *1970-01-01*') { \"$rel \" + (($l -split '\\s+')[1] -replace '^[^/]*/', '') }\n  $prev = $l }",
+          "explain": "`diff -ruN` מציג קובץ שקיים רק בצד אחד מול קובץ ריק עם תאריך `1970-01-01`. הפקודה מדפיסה release + נתיב לכל קובץ שקיים רק ב-tarball."
+        },
+        {
+          "id": "diff-count-releases",
+          "title": "אילו קבצי tarball לא מופיעים בשני ה-releases?",
+          "command": "awk '/^--- / && /1970-01-01/ {getline; p = $2; sub(/^[^\\/]*\\//, \"\", p); print p}' release/tarball-vs-git-tag.diff \\\n  | sort | uniq -c | sort -n | head",
+          "powershell": "$prev = ''\n$(foreach ($l in Get-Content .\\release\\tarball-vs-git-tag.diff) {\n  if ($l -like '+++ *' -and $prev -like '--- *1970-01-01*') { ($l -split '\\s+')[1] -replace '^[^/]*/', '' }\n  $prev = $l }) | Group-Object | Sort-Object Count | Select-Object -First 10 Count, Name",
+          "explain": "סופר כמה releases מכילים כל קובץ שקיים רק ב-tarball. פלט רגיל של autotools מופיע בשניהם (ספירה 2). כל מה שמופיע עם ספירה 1 שווה בדיקה."
+        },
+        {
+          "id": "diff-show-file",
+          "title": "ה-diff של קובץ אחד",
+          "command": "awk -v f='m4/<name>.m4' '/^(diff -ruN|Binary files|######## )/ {on = index($0, \"/\" f \" \") > 0} on' release/tarball-vs-git-tag.diff",
+          "powershell": "$f = 'm4/<name>.m4'; $on = $false\nforeach ($l in Get-Content .\\release\\tarball-vs-git-tag.diff) {\n  if ($l -match '^(diff -ruN|Binary files|######## )') { $on = $l.Contains(\"/$f \") }\n  if ($on) { $l } }",
+          "explain": "מדפיס את בלוק ה-diff של קובץ אחד. החליפו את הנתיב."
+        },
+        {
+          "id": "strings-regex",
+          "title": "הפעלת regex על פלט ה-strings",
+          "command": "grep -E '<regex copied from the macro>' release/fixture-strings.txt",
+          "powershell": "# .NET regex has no [[:alnum:]]: translate it to [A-Za-z0-9] first\nSelect-String -Path .\\release\\fixture-strings.txt -Pattern '<translated regex>' -CaseSensitive",
+          "explain": "השתמשו ב-regex בדיוק כמו שה-macro משתמש בו. מחלקות POSIX כמו `[[:alnum:]]` עובדות ב-`grep -E`; `{4}` זה בדיוק ארבע; `$` מעגן לסוף השורה."
+        },
+        {
+          "id": "buildlog-compare",
+          "title": "השוואה בין שני builds של החבילה",
+          "command": "grep -nE 'config.status: executing|libtool: (compile|link)' distro/buildd-logs.txt | less",
+          "powershell": "Select-String -Path .\\distro\\buildd-logs.txt -Pattern 'config.status: executing|libtool: (compile|link)'",
+          "explain": "כל hook של configure וכל אובייקט שקומפל וקושר, בשני ה-builds. אובייקט שמקושר אבל אף פעם לא קומפל הגיע ממקום אחר."
+        }
+      ]
+    },
+    {
+      "category": "ארכיאולוגיית git",
+      "items": [
+        {
+          "id": "git-clone",
+          "title": "Clone ל-bundle",
+          "command": "git clone repo/zfold.bundle zfold && cd zfold",
+          "powershell": "git clone repo\\zfold.bundle zfold; cd zfold",
+          "explain": "אופציונלי: `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט."
+        },
+        {
+          "id": "git-log-oneline",
+          "title": "ההיסטוריה במבט אחד",
+          "command": "git log --oneline --decorate --all | head -40",
+          "powershell": "git log --oneline --decorate --all | Select-Object -First 40",
+          "explain": "תגיות מופיעות כ-`(tag: ...)`."
+        },
+        {
+          "id": "git-shortlog",
+          "title": "מי עושה commit?",
+          "command": "git shortlog -sne --all",
+          "powershell": "git shortlog -sne --all",
+          "explain": "מספר commits לכל author ו-email."
+        },
+        {
+          "id": "git-file-history",
+          "title": "היסטוריה של תיקייה",
+          "command": "git log --format='%h %ad %an %s' --date=iso --stat -- tests/files/",
+          "powershell": "git log --format='%h %ad %an %s' --date=iso --stat -- tests/files/",
+          "explain": "כל commit שנגע בקבצי הבדיקה, עם הקבצים ששונו."
+        },
+        {
+          "id": "git-added",
+          "title": "מתי קובץ נוסף לראשונה?",
+          "command": "git log --all --diff-filter=A --format='%h %ad %an %s' --date=iso -- 'tests/files/<file>'",
+          "powershell": "git log --all --diff-filter=A --format='%h %ad %an %s' --date=iso -- 'tests/files/<file>'",
+          "explain": "`--diff-filter=A` משאיר רק commits שבהם הקובץ **נוסף**, לא שונה."
+        },
+        {
+          "id": "gitlog-text-headers",
+          "title": "אותו דבר בלי git",
+          "command": "grep -nE '^commit |^Date: |^diff --git |^new file mode' repo/git-log.txt | less",
+          "powershell": "Select-String -Path .\\repo\\git-log.txt -Pattern '^commit |^Date: |^diff --git |^new file mode'",
+          "explain": "כותרות commit, כותרות קבצים וסימוני `new file mode` מתוך ה-export הטקסטואלי, עם מספרי שורות. קובץ שנוסף מציג `new file mode` מיד אחרי שורת ה-`diff --git` שלו."
+        }
+      ]
+    },
+    {
+      "category": "פרופיילר ורשימות בינאריות",
+      "items": [
+        {
+          "id": "perf-grep-dso",
+          "title": "איפה ספרייה מופיעה?",
+          "command": "grep -n 'libzfold' perf/perf-report-before.txt perf/perf-report-after.txt",
+          "powershell": "Select-String -Path .\\perf\\perf-report-*.txt -Pattern 'libzfold'",
+          "explain": "השוו כמה זמן של sshd ספרייה מקבלת לפני ואחרי."
+        },
+        {
+          "id": "perf-callchain",
+          "title": "קריאת call chain",
+          "command": "sed -n '/ssh_rsa_verify$/,/^    [0-9]/p' perf/perf-report-after.txt",
+          "powershell": "$on = $false\nforeach ($l in Get-Content .\\perf\\perf-report-after.txt) { if ($l -match 'ssh_rsa_verify$') { $on = $true }; if ($on) { $l }; if ($on -and $l -match '^\\s+[0-9.]+%\\s+[0-9.]+%' -and $l -notmatch 'ssh_rsa_verify') { break } }",
+          "explain": "מדפיס את ה-call chain מתחת לקוד ה-RSA verify של sshd בפרופיל של אחרי. frames של hex גולמי הם קוד בלי סימבולים."
+        },
+        {
+          "id": "maps-range",
+          "title": "טווחי כתובות של ספריות",
+          "command": "grep -E '^ +0x' perf/gdb-got-audit.txt",
+          "powershell": "Select-String -Path .\\perf\\gdb-got-audit.txt -Pattern '^ +0x'",
+          "explain": "כל שורה: התחלה, סוף, גודל, offset, הרשאות, קובץ. כתובת שייכת לספרייה אם start <= address < end."
+        },
+        {
+          "id": "got-in-range",
+          "title": "GOT slots שמצביעים לתוך טווח",
+          "command": "lo=0x7f0000000000; hi=0x7f0000010000   # paste one library's Start and End\nawk '$1 ~ /^0x/ && NF == 3' perf/gdb-got-audit.txt | while read slot name target; do\n  (( target >= lo && target < hi )) && echo \"$name -> $target\"\ndone",
+          "powershell": "$lo = [Convert]::ToInt64('0x7f0000000000', 16); $hi = [Convert]::ToInt64('0x7f0000010000', 16)\nGet-Content .\\perf\\gdb-got-audit.txt | Where-Object { $_ -match '^0x[0-9a-f]+\\s+\\S+\\s+0x' } | ForEach-Object {\n  $f = $_ -split '\\s+'; $t = [Convert]::ToInt64($f[2], 16); if ($t -ge $lo -and $t -lt $hi) { \"$($f[1]) -> $($f[2])\" } }",
+          "explain": "הדביקו התחלה וסוף של ספרייה, והפקודה תדפיס כל פונקציה מיובאת שה-GOT slot שלה מצביע לתוכה. האריתמטיקה של bash מבינה hex עם `0x`."
+        },
+        {
+          "id": "hex-math",
+          "title": "חשבון hex",
+          "command": "printf '0x%x\\n' $(( 0x7f0000012340 - 0x7f0000000000 ))",
+          "powershell": "'0x{0:x}' -f ([Convert]::ToInt64('0x7f0000012340', 16) - [Convert]::ToInt64('0x7f0000000000', 16))",
+          "explain": "כתובת אבסולוטית פחות תחילת הספרייה = offset בתוך הספרייה, וכך perf, nm ו-objdump ממספרים דברים."
+        },
+        {
+          "id": "nm-sections",
+          "title": "השוואת טבלאות סימבולים",
+          "command": "grep -n '=====' binary/nm-libzfold.txt; grep -n '<offset>' binary/*.txt perf/*.txt",
+          "powershell": "Select-String -Path .\\binary\\nm-libzfold.txt -Pattern '====='\nSelect-String -Path .\\binary\\*.txt, .\\perf\\*.txt -Pattern '<offset>'",
+          "explain": "מצאו את הסקשנים, ואז חפשו בכל הרשימות offset שמצאתם במקום אחר."
+        }
+      ]
+    }
+  ],
+  "debrief": "_חתום._ סיימו את כל ששת השלבים כדי לפתוח את התחקיר."
+}
