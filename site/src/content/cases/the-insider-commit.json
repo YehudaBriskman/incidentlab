@@ -25,7 +25,7 @@
     "Read `README_FIRST.txt` end to end, including the glossary.",
     "Note each source's time zone: the fleet dpkg log is **CET (UTC+01:00)**, the timing CSV and chat are **epoch seconds**, perf/binary headers and distro logs are **UTC**, mail and git carry **their own offsets**.",
     "Pick your path: **bash** (Linux, macOS or WSL), **Windows PowerShell** (every Toolbox command has a PowerShell version), or the **browser Explorer**.",
-    "Git is optional: `repo/git-log.txt` holds the full upstream history as text; `repo/zfold.bundle` is the same as a clonable bundle."
+    "Nothing to install: every Toolbox command uses tools that ship with Linux/WSL, macOS, Git Bash or Windows PowerShell 5.1. `repo/git-log.txt` holds the full upstream history as text; `repo/zfold.bundle` is only for people who already have git."
   ],
   "evidenceZip": "/evidence/the-insider-commit-evidence.zip",
   "evidence": [
@@ -135,7 +135,7 @@
     "Answers are case-insensitive, and leading and trailing whitespace is ignored. Stick to the format shown under each question.",
     "Hints cost the points shown on them and are revealed in order, from a gentle nudge to almost the full command. In the Toolbox, each command's syntax is free; seeing the full runnable command costs 5 points. Once you finish the case, every command is free.",
     "Working in pairs is encouraged. Talk through your reasoning out loud, just like a real incident review.",
-    "Any tool is allowed: grep, awk, jq, git, Python, a spreadsheet, your favourite editor. The Toolbox tab lists commands that help.",
+    "Nothing needs installing: the Toolbox sticks to grep, sed, awk, sort, date and friends (or Windows PowerShell built-ins). Any other tool you already have is allowed too: git, jq, Python, a spreadsheet, your favourite editor.",
     "Each wrong answer costs 2 points (at most 20 per stage), so think before you guess, and try to be able to explain *why* your answer is right.",
     "Bonuses: a faster solve earns a time bonus (up to +30 per stage, fading once you pass the stage's target time); a clean solve with no hints, commands or wrong answers earns +10; the first player to solve a stage gets +15 first blood; finishing all six stages without revealing an answer earns +50.",
     "Don't share flags with other teams until everyone is done. Sharing techniques is fine.",
@@ -182,7 +182,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\n# first probe of a sustained run of slow logins on bench-01\nawk -F, '$2==\"bench-01\" && $4==\"ok\" { if ($6>300) { if (++r==1) f=$1; if (r==6) {print f; exit} } else r=0 }' perf/sshd-auth-timing.csv\ndate -u -d @<that_epoch>\n# what finished installing on bench-01 (CET!)\ngrep '^bench-01 ' fleet/dpkg-all-hosts.log | grep 'status installed'\n```\nAdd one hour to the UTC jump time to compare in CET. Answer the zfold library's version without `-1`."
+          "text": "```sh\n# first probe of a sustained run of slow logins on bench-01\nt=$(awk -F, '$2==\"bench-01\" && $4==\"ok\" { if ($6>300) { if (++r==1) f=$1; if (r==6) {print f; exit} } else r=0 }' perf/sshd-auth-timing.csv)\ndate -u -d \"@$t\"      # macOS: date -u -r \"$t\"\n# what finished installing on bench-01 (CET!)\ngrep '^bench-01 ' fleet/dpkg-all-hosts.log | grep 'status installed'\n```\nAdd one hour to the UTC jump time to compare in CET. Answer the zfold library's version without `-1`."
         }
       ],
       "successNote": "A clean before/after needs a **sustained** change and a **control**: bench-03 got the same openssh and system updates and stayed fast. Converting every source to one time zone is what separates the real cause from the change that merely happened the same day. Here a CET/UTC slip makes the culprit look like it arrived *after* the symptom."
@@ -309,7 +309,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\ngrep libzfold perf/gdb-got-audit.txt      # start and end of libzfold's code\nlo=<start>; hi=<end>\nawk '$1 ~ /^0x/ && NF==3' perf/gdb-got-audit.txt | while read s name t; do\n  (( t >= lo && t < hi )) && echo \"$name $t\"; done\n```"
+          "text": "```sh\ngrep libzfold perf/gdb-got-audit.txt      # start and end of libzfold's code\n# zero-padded lowercase hex of equal width compares correctly as text\nawk '/libzfold/ && $1 ~ /^0x/ {lo = $1; hi = $2}\n     $1 ~ /^0x/ && NF == 3 && $3\"\" >= lo\"\" && $3\"\" < hi\"\" {print $2, $3}' perf/gdb-got-audit.txt\n```"
         }
       ],
       "successNote": "The slowdown and the hook are two different things: the half-second is the replacement **ifunc resolver** walking symbol tables inside ld.so while sshd starts, before any login. The hook is a single GOT entry rewritten during that walk. CRC64 still works and every test passes. Profilers catch what tests can't: a compression library had no business spending 90% of sshd's CPU, and one engineer refused to shrug it off."
@@ -352,7 +352,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\ngit clone repo/zfold.bundle zfold && cd zfold\ngit log --all --diff-filter=A --format='%h %ad %an %s' --date=iso -- 'tests/files/<file>'\n```\nNo git? `grep -n -B12 'Binary files /dev/null and b/tests/files/<file>' repo/git-log.txt | grep commit`"
+          "text": "```sh\n# every file ever added, with the commit that added it (newest first)\nawk '/^commit / {sha = substr($2, 1, 7)} /^Date: / {d = $2 \" \" $3}\n     /^diff --git / {p = substr($4, 3)} /^new file mode/ {print sha, d, p}' repo/git-log.txt | grep 'tests/files/'\n```\nPick the line with your file from stage 3. Only if you already have git: `git log --all --diff-filter=A -- 'tests/files/<file>'` in a clone of the bundle says the same."
         }
       ],
       "successNote": "The commit message was ordinary, the author was a trusted co-maintainer, and the change was \"test-only\". Now read `mail/zfold-devel.mbox`: two accounts that never contributed code pressured a tired volunteer for months until the newcomer got the keys. Supply-chain trust is social before it is technical. Funding and supporting maintainers, two-person review for releases, and watching for pressure campaigns are security controls."
@@ -394,7 +394,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\nawk -v v='<X.Y.Z>-1' '$4==\"status\" && $5==\"installed\" && $6==\"libzfold5:amd64\" && $7==v {print $1}' \\\n  fleet/dpkg-all-hosts.log | sort -u | wc -l\n```\nCompare with a naive `grep <X.Y.Z>` count to see how far off you would have been."
+          "text": "```sh\n# distinct hosts per libzfold5 version that reached \"status installed\"\nawk '$4==\"status\" && $5==\"installed\" && $6==\"libzfold5:amd64\" {print $7, $1}' fleet/dpkg-all-hosts.log \\\n  | sort -u | cut -d' ' -f1 | uniq -c\n```\nRead the count next to the full bad version (`<X.Y.Z>-1`), not the `+really` rollback. Compare with a naive `grep <X.Y.Z>` count to see how far off you would have been."
         }
       ],
       "successNote": "\"Has the fix now\" is not \"was never exposed\". Every host that ran the bad build must be treated as potentially compromised: rotate host keys and credentials that sshd touched, review access logs for the exposure window, and rebuild rather than patch. The bastion host on that list is the one to start with."
@@ -425,11 +425,11 @@
         {
           "id": "read-readme",
           "title": "Read the README",
-          "syntax": "less <readme-file>",
-          "command": "less README_FIRST.txt",
-          "syntaxPowershell": "Get-Content .\\<readme-file> | more",
-          "powershell": "Get-Content .\\README_FIRST.txt | more",
-          "explain": "Time zones, file formats and a short glossary (tarball, m4, ifunc, GOT). Read it first."
+          "syntax": "cat <readme-file>",
+          "command": "cat README_FIRST.txt",
+          "syntaxPowershell": "Get-Content .\\<readme-file>",
+          "powershell": "Get-Content .\\README_FIRST.txt",
+          "explain": "Time zones, file formats and a short glossary (tarball, m4, ifunc, GOT). Read it first. Pipe it into `more` to page through it."
         },
         {
           "id": "head-lines",
@@ -466,8 +466,8 @@
         {
           "id": "grep-context",
           "title": "Context around a hit",
-          "syntax": "grep -n -B<before> -A<after> '<marker-text>' <git-log-export> | less",
-          "command": "grep -n -B10 -A3 'new file mode' repo/git-log.txt | less",
+          "syntax": "grep -n -B<before> -A<after> '<marker-text>' <git-log-export> | head -n <count>",
+          "command": "grep -n -B10 -A3 'new file mode' repo/git-log.txt | head -n 60",
           "syntaxPowershell": "Select-String -Path .\\<git-log-export> -Pattern '<marker-text>' -Context <before>,<after>",
           "powershell": "Select-String -Path .\\repo\\git-log.txt -Pattern 'new file mode' -Context 10,3",
           "explain": "`-B` lines before, `-A` lines after. In a `git log -p` export the commit header sits a few lines above each diff."
@@ -525,20 +525,20 @@
         {
           "id": "csv-epoch-column",
           "title": "Readable CSV timeline",
-          "syntax": "grep ',<host>,' <csv-file> | while IFS=<sep> read <col-vars...>; do\n  echo \"$(date -u -d @$<ts-var> '<format>') <fields-to-show>\"\ndone | less",
-          "command": "grep ',bench-02,' perf/sshd-auth-timing.csv | while IFS=, read ts h u r c a t; do\n  echo \"$(date -u -d @$ts '+%F %T') $h $r auth=$a\"\ndone | less",
+          "syntax": "grep ',<host>,' <csv-file> | awk 'NR % <every-nth> == 1' | while IFS=<sep> read <col-vars...>; do\n  echo \"$(date -u -d @$<ts-var> '<format>') <fields-to-show>\"\ndone",
+          "command": "grep ',bench-02,' perf/sshd-auth-timing.csv | awk 'NR % 36 == 1' | while IFS=, read ts h u r c a t; do\n  echo \"$(date -u -d @$ts '+%F %T') $h $r auth=$a\"\ndone",
           "syntaxPowershell": "Import-Csv .\\<csv-file> | Where-Object <host-column> -eq '<host>' |\n  Select-Object @{n='utc';e={[DateTimeOffset]::FromUnixTimeSeconds([long]$_.<epoch-column>).UtcDateTime}}, <columns...>",
           "powershell": "Import-Csv .\\perf\\sshd-auth-timing.csv | Where-Object host -eq 'bench-02' |\n  Select-Object @{n='utc';e={[DateTimeOffset]::FromUnixTimeSeconds([long]$_.ts_epoch).UtcDateTime}}, result, auth_ms",
-          "explain": "Converts every probe of one host to UTC so you can eyeball where the numbers change."
+          "explain": "Converts one probe every 6 hours (`NR % 36`, one probe per 10 minutes) of one host to UTC so you can eyeball where the numbers change; drop the `awk` to see every probe. `date -d @` is GNU date; on macOS write `date -u -r $ts '+%F %T'`."
         },
         {
           "id": "chat-timestamps",
           "title": "Chat with readable times",
-          "syntax": "jq -r '.[] | \"\\(.<ts-field> | tonumber | floor | todate) \\(.<user-field>): \\(.<text-field>)\"' <chat-json>",
-          "command": "jq -r '.[] | \"\\(.ts | tonumber | floor | todate) \\(.user): \\(.text)\"' chat/incident-channel.json",
+          "syntax": "awk -F'\"' '/\"<ts-field>\":/ {t = $<n>} /\"<user-field>\":/ {u = $<n>} /\"<text-field>\":/ {print t, u \": \" $<n>}' <chat-json> |\n  while read -r ts msg; do echo \"$(date -u -d \"@${ts%.*}\" '<format>') $msg\"; done",
+          "command": "awk -F'\"' '/\"ts\":/ {t = $4} /\"user\":/ {u = $4} /\"text\":/ {print t, u \": \" $4}' chat/incident-channel.json |\n  while read -r ts msg; do echo \"$(date -u -d \"@${ts%.*}\" '+%F %T') $msg\"; done",
           "syntaxPowershell": "(Get-Content .\\<chat-json> -Raw | ConvertFrom-Json) | ForEach-Object {\n  '{0:u} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][double]$_.<ts-field>).UtcDateTime, $_.<user-field>, $_.<text-field> }",
           "powershell": "(Get-Content .\\chat\\incident-channel.json -Raw | ConvertFrom-Json) | ForEach-Object {\n  '{0:u} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][double]$_.ts).UtcDateTime, $_.user, $_.text }",
-          "explain": "Slack-style `ts` is epoch seconds as a string. `todate` gives UTC."
+          "explain": "One JSON key per line, so splitting on `\"` puts each value in `$4`. Slack-style `ts` is epoch seconds as a string: cut the fraction and let `date` print UTC (on macOS: `date -u -r \"${ts%.*}\" '+%F %T'`)."
         }
       ]
     },
@@ -598,8 +598,8 @@
         {
           "id": "dpkg-pkg-history",
           "title": "One package across the fleet",
-          "syntax": "awk '$<f1> == \"<word1>\" && $<f2> == \"<word2>\" && $<pkg-field> ~ /^<package>/' <dpkg-log> | less",
-          "command": "awk '$4 == \"status\" && $5 == \"installed\" && $6 ~ /^libzfold5/' fleet/dpkg-all-hosts.log | less",
+          "syntax": "awk '$<f1> == \"<word1>\" && $<f2> == \"<word2>\" && $<pkg-field> ~ /^<package>/' <dpkg-log>",
+          "command": "awk '$4 == \"status\" && $5 == \"installed\" && $6 ~ /^libzfold5/' fleet/dpkg-all-hosts.log",
           "syntaxPowershell": "Get-Content .\\<dpkg-log> | Where-Object { $f = $_ -split ' '; $f[<i1>] -eq '<word1>' -and $f[<i2>] -eq '<word2>' -and $f[<pkg-index>] -like '<package>*' }",
           "powershell": "Get-Content .\\fleet\\dpkg-all-hosts.log | Where-Object { $f = $_ -split ' '; $f[3] -eq 'status' -and $f[4] -eq 'installed' -and $f[5] -like 'libzfold5*' }",
           "explain": "Every completed install of the zfold library, all hosts, in time order."
@@ -639,8 +639,8 @@
         {
           "id": "diff-file-list",
           "title": "List every file in the diff",
-          "syntax": "grep -nE '^(<section-marker>|<file-header>|<binary-marker>)' <diff-file> | less",
-          "command": "grep -nE '^(######## |diff -ruN |Binary files )' release/tarball-vs-git-tag.diff | less",
+          "syntax": "grep -nE '^(<section-marker>|<file-header>|<binary-marker>)' <diff-file>",
+          "command": "grep -nE '^(######## |diff -ruN |Binary files )' release/tarball-vs-git-tag.diff",
           "syntaxPowershell": "Select-String -Path .\\<diff-file> -Pattern '^(<section-marker>|<file-header>|<binary-marker>)'",
           "powershell": "Select-String -Path .\\release\\tarball-vs-git-tag.diff -Pattern '^(######## |diff -ruN |Binary files )'",
           "explain": "Section headers (`######## zfold ...`) separate the two releases. Each `diff -ruN` line is one file that differs between the git tag and the tarball."
@@ -684,8 +684,8 @@
         {
           "id": "buildlog-compare",
           "title": "Compare two package builds",
-          "syntax": "grep -nE '<configure-hook-marker>|<tool>: (<step-a>|<step-b>)' <build-log> | less",
-          "command": "grep -nE 'config.status: executing|libtool: (compile|link)' distro/buildd-logs.txt | less",
+          "syntax": "grep -nE '<configure-hook-marker>|<tool>: (<step-a>|<step-b>)' <build-log>",
+          "command": "grep -nE 'config.status: executing|libtool: (compile|link)' distro/buildd-logs.txt",
           "syntaxPowershell": "Select-String -Path .\\<build-log> -Pattern '<configure-hook-marker>|<tool>: (<step-a>|<step-b>)'",
           "powershell": "Select-String -Path .\\distro\\buildd-logs.txt -Pattern 'config.status: executing|libtool: (compile|link)'",
           "explain": "Every configure hook and every compiled and linked object, for both builds. An object that is linked but never compiled came from somewhere else."
@@ -697,54 +697,54 @@
       "items": [
         {
           "id": "git-clone",
-          "title": "Clone the bundle",
-          "syntax": "git clone <bundle-file> <dir> && cd <dir>",
-          "command": "git clone repo/zfold.bundle zfold && cd zfold",
-          "syntaxPowershell": "git clone <bundle-file> <dir>; cd <dir>",
-          "powershell": "git clone repo\\zfold.bundle zfold; cd zfold",
-          "explain": "Optional: `repo/git-log.txt` has the same history as text."
+          "title": "History as text (no git needed)",
+          "syntax": "head -n <count> <git-log-export>",
+          "command": "head -n 30 repo/git-log.txt",
+          "syntaxPowershell": "Get-Content .\\<git-log-export> -TotalCount <count>",
+          "powershell": "Get-Content .\\repo\\git-log.txt -TotalCount 30",
+          "explain": "`repo/git-log.txt` is `git log -p --decorate --all`: commit header, message, then the diff. Nothing to install. Only if you already have git: `git clone repo/zfold.bundle zfold` gives you the same history."
         },
         {
           "id": "git-log-oneline",
           "title": "History at a glance",
-          "syntax": "git log --oneline --decorate --all | head -<n>",
-          "command": "git log --oneline --decorate --all | head -40",
-          "syntaxPowershell": "git log --oneline --decorate --all | Select-Object -First <n>",
-          "powershell": "git log --oneline --decorate --all | Select-Object -First 40",
-          "explain": "Tags show up as `(tag: ...)`."
+          "syntax": "awk '/^<commit-marker>/ {sha = substr($<field>, 1, <len>); dec = $0; sub(/<sha-prefix-regex>/, \"\", dec); want = 1; next}\n     want && /^<indent>/ {sub(/^<indent>/, \"\"); print sha, dec, $0; want = 0}' <git-log-export> | head -n <n>",
+          "command": "awk '/^commit / {sha = substr($2, 1, 7); dec = $0; sub(/^commit [0-9a-f]+ ?/, \"\", dec); want = 1; next}\n     want && /^    / {sub(/^    /, \"\"); print sha, dec, $0; want = 0}' repo/git-log.txt | head -n 40",
+          "syntaxPowershell": "$sha = $null\n$(foreach ($l in Get-Content .\\<git-log-export>) {\n  if ($l -match '<commit-line-regex>') { $sha = $matches[1] + $matches[2] }\n  elseif ($sha -and $l -match '<subject-line-regex>') { \"$sha $($matches[1])\"; $sha = $null } }) | Select-Object -First <n>",
+          "powershell": "$sha = $null\n$(foreach ($l in Get-Content .\\repo\\git-log.txt) {\n  if ($l -match '^commit ([0-9a-f]{7})[0-9a-f]*(.*)$') { $sha = $matches[1] + $matches[2] }\n  elseif ($sha -and $l -match '^    (.+)$') { \"$sha $($matches[1])\"; $sha = $null } }) | Select-Object -First 40",
+          "explain": "One line per commit from the text export: short SHA, decorations, subject. Tags show up as `(tag: ...)`."
         },
         {
           "id": "git-shortlog",
           "title": "Who commits?",
-          "syntax": "git shortlog -<flags> --all",
-          "command": "git shortlog -sne --all",
-          "syntaxPowershell": "git shortlog -<flags> --all",
-          "powershell": "git shortlog -sne --all",
-          "explain": "Commit counts per author and e-mail."
+          "syntax": "grep '^<author-marker>' <git-log-export> | sort | uniq -c | sort -<flags>",
+          "command": "grep '^Author: ' repo/git-log.txt | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Select-String -Path .\\<git-log-export> -Pattern '^<author-marker>(.*)' | ForEach-Object { $_.Matches[0].Groups[1].Value } |\n  Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
+          "powershell": "Select-String -Path .\\repo\\git-log.txt -Pattern '^Author: (.*)' | ForEach-Object { $_.Matches[0].Groups[1].Value } |\n  Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
+          "explain": "Commit counts per author and e-mail, from the `Author:` lines."
         },
         {
           "id": "git-file-history",
           "title": "History of a directory",
-          "syntax": "git log --format='<format>' --date=<date-style> --stat -- <dir>",
-          "command": "git log --format='%h %ad %an %s' --date=iso --stat -- tests/files/",
-          "syntaxPowershell": "git log --format='<format>' --date=<date-style> --stat -- <dir>",
-          "powershell": "git log --format='%h %ad %an %s' --date=iso --stat -- tests/files/",
-          "explain": "Every commit that touched the test files, with the files changed."
+          "syntax": "awk '/^<commit-marker>/ {sha = substr($<field>, 1, <len>)} /^<date-marker>/ {d = $<field> \" \" $<field>}\n     /^<file-header> a\\/<dir>\\// {print sha, d, substr($<field>, <start>)}' <git-log-export>",
+          "command": "awk '/^commit / {sha = substr($2, 1, 7)} /^Date: / {d = $2 \" \" $3}\n     /^diff --git a\\/tests\\/files\\// {print sha, d, substr($4, 3)}' repo/git-log.txt",
+          "syntaxPowershell": "$sha = ''; $d = ''\nforeach ($l in Get-Content .\\<git-log-export>) {\n  if ($l -match '<commit-line-regex>') { $sha = $matches[1] }\n  elseif ($l -match '<date-line-regex>') { $d = $matches[1] }\n  elseif ($l -match '<file-header-regex>') { \"$sha $d $($matches[1])\" } }",
+          "powershell": "$sha = ''; $d = ''\nforeach ($l in Get-Content .\\repo\\git-log.txt) {\n  if ($l -match '^commit ([0-9a-f]{7})') { $sha = $matches[1] }\n  elseif ($l -match '^Date:\\s+(\\S+ \\S+)') { $d = $matches[1] }\n  elseif ($l -match '^diff --git a/tests/files/\\S+ b/(\\S+)') { \"$sha $d $($matches[1])\" } }",
+          "explain": "Every commit that touched the test files, with its date and the file it changed. The log is newest first."
         },
         {
           "id": "git-added",
           "title": "When was a file first added?",
-          "syntax": "git log --all --diff-filter=<filter> --format='<format>' --date=<date-style> -- '<path>'",
-          "command": "git log --all --diff-filter=A --format='%h %ad %an %s' --date=iso -- 'tests/files/<file>'",
-          "syntaxPowershell": "git log --all --diff-filter=<filter> --format='<format>' --date=<date-style> -- '<path>'",
-          "powershell": "git log --all --diff-filter=A --format='%h %ad %an %s' --date=iso -- 'tests/files/<file>'",
-          "explain": "`--diff-filter=A` keeps only commits where the file was **added**, not modified."
+          "syntax": "awk -v f='<path>' '/^<commit-marker>/ {sha = substr($<field>, 1, <len>)} /^<date-marker>/ {d = $<field> \" \" $<field>}\n     /^<file-header>/ {p = substr($<field>, <start>)} /^<added-marker>/ && p == f {print sha, d, p}' <git-log-export>",
+          "command": "awk -v f='tests/files/<file>' '/^commit / {sha = substr($2, 1, 7)} /^Date: / {d = $2 \" \" $3}\n     /^diff --git / {p = substr($4, 3)} /^new file mode/ && p == f {print sha, d, p}' repo/git-log.txt",
+          "syntaxPowershell": "$f = '<path>'; $sha = ''; $d = ''; $p = ''\nforeach ($l in Get-Content .\\<git-log-export>) {\n  if ($l -match '<commit-line-regex>') { $sha = $matches[1] }\n  elseif ($l -match '<date-line-regex>') { $d = $matches[1] }\n  elseif ($l -match '<file-header-regex>') { $p = $matches[1] }\n  elseif ($l -like '<added-marker>*' -and $p -eq $f) { \"$sha $d $p\" } }",
+          "powershell": "$f = 'tests/files/<file>'; $sha = ''; $d = ''; $p = ''\nforeach ($l in Get-Content .\\repo\\git-log.txt) {\n  if ($l -match '^commit ([0-9a-f]{7})') { $sha = $matches[1] }\n  elseif ($l -match '^Date:\\s+(\\S+ \\S+)') { $d = $matches[1] }\n  elseif ($l -match '^diff --git \\S+ b/(\\S+)') { $p = $matches[1] }\n  elseif ($l -like 'new file mode*' -and $p -eq $f) { \"$sha $d $p\" } }",
+          "explain": "An added file shows `new file mode` right after its `diff --git` line. Remembering the last commit and path lets awk print the commit that **added** the file, not the ones that modified it."
         },
         {
           "id": "gitlog-text-headers",
-          "title": "Same thing without git",
-          "syntax": "grep -nE '^<commit-marker>|^<date-marker>|^<file-header>|^<added-marker>' <git-log-export> | less",
-          "command": "grep -nE '^commit |^Date: |^diff --git |^new file mode' repo/git-log.txt | less",
+          "title": "Commit and file headers",
+          "syntax": "grep -nE '^<commit-marker>|^<date-marker>|^<file-header>|^<added-marker>' <git-log-export>",
+          "command": "grep -nE '^commit |^Date: |^diff --git |^new file mode' repo/git-log.txt",
           "syntaxPowershell": "Select-String -Path .\\<git-log-export> -Pattern '^<commit-marker>|^<date-marker>|^<file-header>|^<added-marker>'",
           "powershell": "Select-String -Path .\\repo\\git-log.txt -Pattern '^commit |^Date: |^diff --git |^new file mode'",
           "explain": "Commit headers, file headers and `new file mode` markers from the text export, with line numbers. An added file shows `new file mode` right after its `diff --git` line."
@@ -784,11 +784,11 @@
         {
           "id": "got-in-range",
           "title": "GOT slots that point into a range",
-          "syntax": "lo=<start>; hi=<end>   # one library's range\nawk '$1 ~ /<hex-regex>/ && NF == <n-fields>' <gdb-audit-file> | while read slot name target; do\n  (( target <cmp> lo && target <cmp> hi )) && echo \"$name -> $target\"\ndone",
-          "command": "lo=0x7f0000000000; hi=0x7f0000010000   # paste one library's Start and End\nawk '$1 ~ /^0x/ && NF == 3' perf/gdb-got-audit.txt | while read slot name target; do\n  (( target >= lo && target < hi )) && echo \"$name -> $target\"\ndone",
+          "syntax": "awk -v lo=<start> -v hi=<end> '$1 ~ /<slot-regex>/ && NF == <n-fields> && $<target-field>\"\" <cmp> lo\"\" && $<target-field>\"\" <cmp> hi\"\" {print $<name-field>, \"->\", $<target-field>}' <gdb-audit-file>",
+          "command": "# example range: libsdnotify. Paste another library's Start and End.\nawk -v lo=0x00007f3a9c100000 -v hi=0x00007f3a9c10c000 '$1 ~ /^0x/ && NF == 3 && $3\"\" >= lo\"\" && $3\"\" < hi\"\" {print $2, \"->\", $3}' perf/gdb-got-audit.txt",
           "syntaxPowershell": "$lo = [Convert]::ToInt64('<start>', 16); $hi = [Convert]::ToInt64('<end>', 16)\nGet-Content .\\<gdb-audit-file> | Where-Object { $_ -match '<slot-line-regex>' } | ForEach-Object {\n  $f = $_ -split '\\s+'; $t = [Convert]::ToInt64($f[<index>], 16); if ($t <cmp> $lo -and $t <cmp> $hi) { \"$($f[<index>]) -> $($f[<index>])\" } }",
-          "powershell": "$lo = [Convert]::ToInt64('0x7f0000000000', 16); $hi = [Convert]::ToInt64('0x7f0000010000', 16)\nGet-Content .\\perf\\gdb-got-audit.txt | Where-Object { $_ -match '^0x[0-9a-f]+\\s+\\S+\\s+0x' } | ForEach-Object {\n  $f = $_ -split '\\s+'; $t = [Convert]::ToInt64($f[2], 16); if ($t -ge $lo -and $t -lt $hi) { \"$($f[1]) -> $($f[2])\" } }",
-          "explain": "Paste a library's start and end, and it prints every imported function whose GOT slot points inside. bash arithmetic understands `0x` hex."
+          "powershell": "# example range: libsdnotify. Paste another library's Start and End.\n$lo = [Convert]::ToInt64('0x00007f3a9c100000', 16); $hi = [Convert]::ToInt64('0x00007f3a9c10c000', 16)\nGet-Content .\\perf\\gdb-got-audit.txt | Where-Object { $_ -match '^0x[0-9a-f]+\\s+\\S+\\s+0x' } | ForEach-Object {\n  $f = $_ -split '\\s+'; $t = [Convert]::ToInt64($f[2], 16); if ($t -ge $lo -and $t -lt $hi) { \"$($f[1]) -> $($f[2])\" } }",
+          "explain": "Paste a library's start and end, and it prints every imported function whose GOT slot points inside. The addresses are 16-digit, zero-padded lowercase hex, so they compare correctly as text (`\"\"` forces a string compare). PowerShell converts them with `[Convert]::ToInt64`."
         },
         {
           "id": "hex-math",
