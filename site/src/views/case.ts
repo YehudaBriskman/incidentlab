@@ -2,14 +2,16 @@ import { QUESTION_ORDER, SCORING, type ProgressView, type QuestionId, type Score
 import type { Case, Question } from "../content/schema";
 import { ApiError, getDebrief, getProgress, revealAnswer, revealHint, setupDone, submitAnswer } from "../lib/api";
 import { playErrorText } from "../lib/errors";
-import { loadAccount, setAccount, signOut } from "../lib/session";
+import { loadAccount, loadToday, setAccount, signOut } from "../lib/session";
+import { getCase } from "../content/load";
+import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { withApprovedAccount } from "./auth";
 import { confirmButton, copyButton, h, html, setChildren, type Child } from "../lib/dom";
 import { md, mdInline } from "../lib/markdown";
 import { formatElapsed } from "../lib/time";
 import { formatNumber, isRelabel } from "../i18n/i18n";
-import { commandCard, type CommandContext } from "./toolbox";
+import { commandCard, lockedToday, type CommandContext, type LockedToday } from "./toolbox";
 import { T } from "../i18n/strings-player";
 
 type StageKey = "setup" | QuestionId | "debrief";
@@ -78,10 +80,11 @@ export function renderCase(root: HTMLElement, c: Case): void {
   withApprovedAccount(root, c.title, () => loadProgress(root, c));
 }
 
-function loadProgress(root: HTMLElement, c: Case): void {
+function loadProgress(root: HTMLElement, c: Case, refreshToday = false): void {
   setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, T().loadingInvestigation)));
+  const today = loadToday(refreshToday).catch(() => null);
   getProgress(c.id)
-    .then((progress) => renderStaged(root, c, progress))
+    .then(async (progress) => renderStaged(root, c, progress, lockedToday(progress, await today, c.id)))
     .catch((err: unknown) => {
       // Session expired or approval revoked since the page loaded: re-run the gate with fresh state.
       if (err instanceof ApiError && (err.isUnauthorized || err.isNotApproved || err.needsGate)) {
@@ -139,7 +142,7 @@ function stepState(player: ProgressView, key: StageKey): StepState {
 
 const STAGE_KEYS: readonly StageKey[] = ["setup", ...QUESTION_ORDER, "debrief"];
 
-function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): void {
+function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, locked: LockedToday | null): void {
   stopCaseTimers();
   let player = initialPlayer;
   const kept = isRelabel() && lastView !== null && lastView.caseId === c.id ? lastView.stage : null;
@@ -230,7 +233,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
     );
 
     const main = h("section", { class: "stage-wrap", id: "stage", tabindex: "-1" });
-    if (viewing === "setup") main.append(renderSetup(c, player, update));
+    if (viewing === "setup") main.append(renderSetup(c, player, update, locked, () => loadProgress(root, c, true)));
     else if (viewing === "debrief") main.append(renderDebrief(c, player));
     else main.append(renderQuestionStage(c, player, viewing, justSolved === viewing, (next, correct) => {
       if (correct) justSolved = viewing === "setup" || viewing === "debrief" ? null : viewing;
@@ -248,7 +251,30 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
 
 /* ================= Stage 0: setup ================= */
 
-function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) => void): HTMLElement {
+/** "Go to today's incident" + "Back to all cases": the way out of a case that can't be started today. */
+function lockedActions(locked: LockedToday): HTMLElement {
+  const todayCase = locked.todayCaseId !== null ? getCase(locked.todayCaseId) : undefined;
+  return h(
+    "div",
+    { class: "row-actions" },
+    todayCase ? h("a", { class: "btn btn-primary", href: `#/case/${todayCase.id}` }, TA().lockedGoToday) : null,
+    h("a", { class: "btn", href: "#/" }, T().backToCases),
+  );
+}
+
+function lockedCard(c: Case, locked: LockedToday): HTMLElement {
+  const todayCase = locked.todayCaseId !== null ? getCase(locked.todayCaseId) : undefined;
+  return h(
+    "div",
+    { class: "notice locked-card", role: "status" },
+    h("p", { class: "stage-kicker mono" }, TA().lockedKicker),
+    h("p", { class: "notice-title" }, TA().lockedTitle(c.title)),
+    h("p", { class: "muted" }, TA().lockedBody, todayCase ? ` ${TA().lockedTodayIs(todayCase.title)}` : null),
+    lockedActions(locked),
+  );
+}
+
+function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) => void, locked: LockedToday | null, recheck: () => void): HTMLElement {
   const done = player.setupDoneAt !== null;
   const briefing = h(
     "details",
@@ -279,6 +305,11 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
         update(p);
       })
       .catch((err: unknown) => {
+        // The day rolled over (or the schedule changed) while reading: show the locked state with its link.
+        if (err instanceof ApiError && err.code === "not-today") {
+          recheck();
+          return;
+        }
         errorEl.textContent = errorMessage(err);
         ready.disabled = false;
       });
@@ -288,7 +319,7 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
     "div",
     { class: "stage" },
     h("p", { class: "stage-kicker mono" }, T().setupKicker),
-    h("h2", { class: "stage-goal" }, T().setupGoal),
+    locked ? lockedCard(c, locked) : h("h2", { class: "stage-goal" }, T().setupGoal),
     briefing,
     h(
       "div",
@@ -330,7 +361,9 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
     ),
     done
       ? h("p", { class: "done-note" }, T().setupComplete)
-      : h("div", { class: "primary-action" }, ready, errorEl),
+      : locked
+        ? h("div", { class: "primary-action" }, lockedActions(locked))
+        : h("div", { class: "primary-action" }, ready, errorEl),
   );
 }
 

@@ -55,6 +55,12 @@ export const TA = defineStrings({
     signInToPlay: "Sign in to play →",
     welcomeBack: (name: string): string => `Welcome back, ${name}.`,
     notToday: "This case isn't open today. Try the incident of the day.",
+    lockedKicker: "Not open today",
+    lockedTitle: (title: string): string => `${title} isn't open today.`,
+    lockedBody: "Only the incident of the day can be started today. You can still read the briefing below.",
+    lockedTodayIs: (title: string): string => `Today's incident is ${title}.`,
+    lockedGoToday: "Go to today's incident →",
+    lockedToolbox: "Its commands can't be revealed today. You can still read the syntax.",
 
     // stats page
     statsTitle: "Your stats",
@@ -131,6 +137,12 @@ export const TA = defineStrings({
     signInToPlay: "← היכנסו כדי לשחק",
     welcomeBack: (name: string): string => `ברוכים השבים, ${name}.`,
     notToday: "התיק הזה לא פתוח היום. נסו את התקלה של היום.",
+    lockedKicker: "לא פתוח היום",
+    lockedTitle: (title: string): string => `${title} לא פתוח היום.`,
+    lockedBody: "היום אפשר להתחיל רק את התקלה של היום. אפשר עדיין לקרוא את התדריך למטה.",
+    lockedTodayIs: (title: string): string => `התקלה של היום: ${title}.`,
+    lockedGoToday: "← לתקלה של היום",
+    lockedToolbox: "היום אי אפשר לחשוף את הפקודות שלו. אפשר עדיין לקרוא את התחביר.",
 
     statsTitle: "הסטטיסטיקות שלכם",
     statsLoading: "טוען סטטיסטיקות…",

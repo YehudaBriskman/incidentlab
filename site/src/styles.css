@@ -398,6 +398,9 @@ code, pre, .mono { font-family: var(--mono); }
 .notice { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 18px; margin: 16px 0 8px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .notice p { margin: 0; }
 .notice-title { font-weight: 700; color: var(--text); }
+.locked-card { border-color: var(--accent); margin: 0 0 16px; }
+.locked-card .stage-kicker { margin: 0; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .notice-ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); background: var(--ok-soft); }
 p.notice.form-error { display: block; }
 
