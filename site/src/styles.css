@@ -350,6 +350,20 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 @keyframes pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .today-kicker .dot { animation: none; } }
 .case-status { color: var(--ok); font-size: 0.82rem; margin: 0 0 16px; }
+/* Loading placeholders for the home cards: same footprint as the real cards (no layout shift). */
+.skeleton-card { display: flex; flex-direction: column; gap: 12px; box-shadow: none; border-color: var(--border); }
+.featured-card.skeleton-card { min-block-size: 340px; }
+.case-card.skeleton-card { min-block-size: 320px; }
+.skeleton-line, .skeleton-btn { display: block; height: 0.9rem; border-radius: 6px; background: var(--surface-2); }
+.skeleton-title { height: 1.8rem; }
+.skeleton-btn { height: 46px; width: 200px; margin-top: auto; border-radius: 10px; }
+.w-30 { width: 30%; } .w-40 { width: 40%; } .w-60 { width: 60%; } .w-70 { width: 70%; } .w-90 { width: 90%; }
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton-line, .skeleton-btn { animation: skeleton-pulse 1.4s ease-in-out infinite; }
+}
+@keyframes skeleton-pulse { 50% { opacity: 0.55; } }
+.hero-sub.is-pending { visibility: hidden; }
+@media (max-width: 640px) { .featured-card.skeleton-card { min-block-size: 380px; } }
 .case-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
 .case-card { display: flex; flex-direction: column; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
 .case-card.is-today { border-color: var(--accent); }

@@ -3,7 +3,7 @@ import { allCases, getCase, teasers } from "../content/load";
 import type { Case, Teaser } from "../content/schema";
 import { fetchMyStats } from "../lib/api";
 import { h, setChildren } from "../lib/dom";
-import { cachedAccount, loadAccount, loadToday } from "../lib/session";
+import { cachedAccount, isAccountKnown, loadAccount, loadToday } from "../lib/session";
 import { getLang } from "../i18n/i18n";
 import { cachedEvent, isEventActive, onEventChange } from "../lib/event";
 import { TA } from "../i18n/strings-account";
@@ -18,10 +18,37 @@ const steps = (): ReadonlyArray<{ title: string; body: string }> => [
 ];
 
 type HomeState = {
+  /** true until /api/today and the player's stats have both answered: draw skeletons, no CTAs */
+  loading: boolean;
   today: TodayResponse | null;
   stats: ReadonlyMap<string, CaseStats>;
   isSignedIn: boolean;
 };
+
+/** Placeholders with the real cards' footprint, so nothing jumps when today's case and the catalog arrive. */
+function todaySkeleton(): HTMLElement {
+  return h(
+    "div",
+    { class: "featured-card today-card skeleton-card", "aria-hidden": "true" },
+    h("span", { class: "skeleton-line w-40" }),
+    h("span", { class: "skeleton-line w-30" }),
+    h("span", { class: "skeleton-line skeleton-title w-60" }),
+    h("span", { class: "skeleton-line w-90" }),
+    h("span", { class: "skeleton-line w-70" }),
+    h("span", { class: "skeleton-btn" }),
+  );
+}
+
+function caseSkeleton(): HTMLElement {
+  return h(
+    "div",
+    { class: "case-card skeleton-card", "aria-hidden": "true" },
+    h("span", { class: "skeleton-line w-40" }),
+    h("span", { class: "skeleton-line skeleton-title w-70" }),
+    h("span", { class: "skeleton-line w-90" }),
+    h("span", { class: "skeleton-line w-60" }),
+  );
+}
 
 const formatDate = (isoDate: string): string => {
   const [y, m, d] = isoDate.split("-").map(Number);
@@ -139,8 +166,14 @@ function teaserCard(t: Teaser): HTMLElement {
   return h("article", { class: "teaser-card" }, h("h3", { class: "teaser-title" }, t.title), h("p", { class: "muted" }, t.tagline));
 }
 
-function draw(root: HTMLElement, state: HomeState): void {
+function heroSub(): HTMLElement {
   const account = cachedAccount();
+  // Until the server says who this is, keep the line's space but show nothing: no signed-out flash.
+  if (!isAccountKnown()) return h("p", { class: "hero-sub is-pending", "aria-hidden": "true" }, T().heroSub);
+  return h("p", { class: "hero-sub" }, account && account.status === "approved" ? TA().welcomeBack(account.username) : T().heroSub);
+}
+
+function draw(root: HTMLElement, state: HomeState): void {
   const released = state.today?.releasedCaseIds;
   const playable = allCases().filter((c) => released === undefined || released.includes(c.id));
   const todayCase = state.today?.caseId ? getCase(state.today.caseId) : undefined;
@@ -151,14 +184,16 @@ function draw(root: HTMLElement, state: HomeState): void {
       "section",
       { class: "hero" },
       h("h1", { class: "hero-title" }, T().heroA, h("span", { class: "accent" }, T().heroB)),
-      h("p", { class: "hero-sub" }, account && account.status === "approved" ? TA().welcomeBack(account.username) : T().heroSub),
+      heroSub(),
       h("p", { class: "hero-links" }, h("a", { href: "#/leaderboard" }, TG().homeLeaderboard)),
     ),
     eventStrip(),
     h(
       "section",
-      { class: "section", "aria-label": T().featuredCase },
-      todayCase && state.today
+      { class: "section", "aria-label": T().featuredCase, "aria-busy": state.loading ? "true" : null },
+      state.loading
+        ? todaySkeleton()
+        : todayCase && state.today
         ? todayCard(todayCase, state, state.today.date)
         : state.today
           ? h("p", { class: "muted" }, TA().todayNone)
@@ -166,10 +201,14 @@ function draw(root: HTMLElement, state: HomeState): void {
     ),
     h(
       "section",
-      { class: "section", "aria-labelledby": "cases-h" },
+      { class: "section", "aria-labelledby": "cases-h", "aria-busy": state.loading ? "true" : null },
       h("h2", { id: "cases-h", class: "section-title" }, TA().allCases),
       state.today?.lockToToday ? h("p", { class: "muted small" }, TA().casesLockedToday) : null,
-      playable.length > 0 ? h("div", { class: "case-grid" }, playable.map((c) => caseCard(c, state))) : h("p", { class: "muted" }, T().noCases),
+      state.loading
+        ? h("div", { class: "case-grid" }, allCases().map(() => caseSkeleton()))
+        : playable.length > 0
+          ? h("div", { class: "case-grid" }, playable.map((c) => caseCard(c, state)))
+          : h("p", { class: "muted" }, T().noCases),
     ),
     h(
       "section",
@@ -192,7 +231,7 @@ export function renderHome(root: HTMLElement): void {
   document.title = T().homeTitle;
   const token = Symbol("home");
   activeRender = token;
-  const state: HomeState = { today: null, stats: new Map(), isSignedIn: cachedAccount() !== null };
+  const state: HomeState = { loading: true, today: null, stats: new Map(), isSignedIn: cachedAccount() !== null };
   draw(root, state);
 
   // Today's case and (when signed in and approved) per-case status fill in as they arrive.
@@ -200,13 +239,25 @@ export function renderHome(root: HTMLElement): void {
     (value) => value,
     () => null,
   );
-  const stats = loadAccount().then(
-    (account) => (account?.status === "approved" ? fetchMyStats().then((s) => s.cases, () => []) : []),
+  const account = loadAccount();
+  let settled = false;
+  // Once we know who is signed in, put the right hero line up while the cards are still loading.
+  if (!isAccountKnown()) {
+    void account.then(
+      () => {
+        if (activeRender === token && !settled) draw(root, { ...state, isSignedIn: cachedAccount() !== null });
+      },
+      () => undefined,
+    );
+  }
+  const stats = account.then(
+    (acc) => (acc?.status === "approved" ? fetchMyStats().then((s) => s.cases, () => []) : []),
     () => [],
   );
   void Promise.all([today, stats]).then(([todayValue, caseStats]) => {
     if (activeRender !== token) return; // user navigated away
-    draw(root, { today: todayValue, stats: new Map(caseStats.map((c) => [c.caseId, c])), isSignedIn: cachedAccount() !== null });
+    settled = true;
+    draw(root, { loading: false, today: todayValue, stats: new Map(caseStats.map((c) => [c.caseId, c])), isSignedIn: cachedAccount() !== null });
   });
 }
 
