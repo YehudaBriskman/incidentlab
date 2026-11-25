@@ -238,6 +238,7 @@ Report: 300 pairs verified (WCAG 2 text 4.5:1, non-text 3:1; APCA Lc 75 body / 6
 | Leaderboard projector (`body.projector`, `.lb-page.is-projector`, admin board) | Display type in clamp() sizes, no chrome | Read across a room; the brief's projector modifier |
 | Explorer (`.explorer`) | Code island surfaces, smaller controls (36px, 44 on touch) | Dense tool next to a dark log pane |
 | Admin (`.admin`) | `--page-wide` 1280, panels with `--shadow-sm` | Instructor dashboard with wide tables |
+| Admin below 900px | `--control-xs`, `--control-sm` and `--target-min` set to 44px; Live and Accounts render as cards; checkboxes keep a 24px visible box inside a 44px hit area | The instructor walks the room with a phone or tablet; same values the `pointer: coarse` rule uses |
 | Print (`@media print`) | Forced light roles, black on white; chrome, buttons, stepper and progress hidden; code blocks bordered and wrapped; collapsed `details` open; external links print their URL | The debrief and case pages are printed and shared |
 
 ## Deviations
@@ -260,6 +261,7 @@ Report: 300 pairs verified (WCAG 2 text 4.5:1, non-text 3:1; APCA Lc 75 body / 6
 
 ## Decision log
 
+- **1.0.1 (2026-11-25):** admin below 900px uses 44px controls and card layouts (Page overrides); the 18px admin checkboxes became 24px with a 44px hit area on touch.
 - **1.0.0 (2026-11-25):** initial system from the generator inputs above, mapped onto the existing CSS through an alias layer. Light accent #a85f00 → #855602; warm light neutrals replaced by the hue-250 family; one control-height scale, pill, table header and focus ring; forced-colours and print layers; logical properties for RTL; self-hosted fonts.
 
 ## Rendered gate (design-review `gate.mjs`)

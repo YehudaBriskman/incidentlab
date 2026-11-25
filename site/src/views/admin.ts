@@ -53,6 +53,7 @@ import {
   saveSchedule,
   saveSettings,
   setAccountStatus,
+  setAccountsStatus,
   setAdminKey,
   type AdminAccountsResult,
   type AdminEventResult,
@@ -64,6 +65,18 @@ const POLL_MS = 5000;
 const MAX_BACKOFF_MS = 60000;
 const STUCK_WARN_MIN = 8;
 const STUCK_ALERT_MIN = 15;
+/** Wrong answers on the current stage that put a player on the "Needs help" list (and make it urgent). */
+const WRONG_HELP_MIN = 3;
+const WRONG_ALERT_MIN = 5;
+/** A player who started, hasn't finished and hasn't been seen for this long counts as idle. */
+const IDLE_MIN = 10;
+/** Needs help shows this many players before "Show all": the list must not push the grid off the screen. */
+const HELP_PREVIEW = 6;
+const DENSITY_STORAGE = "il.adminDensity";
+const ACCT_COLS_STORAGE = "il.adminAcctCols";
+const TILES_STORAGE = "il.adminTilesOpen";
+/** Below this width Live and Accounts render as cards and the header chrome compacts (phones and tablets). */
+const NARROW_QUERY = "(max-width: 900px)";
 const TAB_STORAGE = "il.adminTab";
 const DEFAULT_TIMEZONE = "Asia/Jerusalem";
 
@@ -79,6 +92,11 @@ type LiveSortKey = "score" | "progress" | "name" | "stuck";
 type AcctSortKey = "rank" | "newest" | "seen" | "name";
 type AcctFilter = "all" | AccountStatus;
 type AuthMode = "key" | "session";
+type AcctColId = "score" | "rank" | "completed" | "accuracy" | "seen" | "created" | "hints" | "wrong" | "commands" | "badges" | "streak";
+/** Optional account columns in display order; the default set answers "who is this and how are they doing". */
+const ACCT_COL_IDS: readonly AcctColId[] = ["score", "rank", "completed", "accuracy", "seen", "created", "hints", "wrong", "commands", "badges", "streak"];
+const ACCT_DEFAULT_COLS: readonly AcctColId[] = ["score", "rank", "completed", "accuracy", "seen"];
+const isAcctColId = (v: unknown): v is AcctColId => typeof v === "string" && ACCT_COL_IDS.some((id) => id === v);
 /** "Hardest question" needs at least this many players who reached it. */
 const HARDEST_MIN_PLAYERS = 3;
 /** How long a "saved" note stays in the save bar before the bar hides again. */
@@ -142,41 +160,93 @@ function ms(iso: string | null): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
+type DurationUnit = "hour" | "minute" | "second";
+const unitFormats = new Map<string, Intl.NumberFormat>();
+/** "33 min" / "33 דק׳": one Intl unit formatter per locale and unit (cached; the poll formats hundreds a minute). */
+function formatUnit(n: number, unit: DurationUnit | "day"): string {
+  const key = `${locale()}|${unit}`;
+  let f = unitFormats.get(key);
+  if (!f) {
+    f = new Intl.NumberFormat(locale(), { style: "unit", unit, unitDisplay: "short" });
+    unitFormats.set(key, f);
+  }
+  return f.format(n);
+}
+
+/** Localized duration with two units at most: "1 hr 05 min", "33 min 38 sec", "33 דק׳ 38 שנ׳". */
 function formatDuration(totalMs: number): string {
   const totalSec = Math.max(0, Math.round(totalMs / 1000));
   const hrs = Math.floor(totalSec / 3600);
   const mins = Math.floor((totalSec % 3600) / 60);
   const secs = totalSec % 60;
-  if (hrs > 0) return `${hrs}h ${String(mins).padStart(2, "0")}m`;
-  if (mins > 0) return `${mins}m ${String(secs).padStart(2, "0")}s`;
-  return `${secs}s`;
+  if (hrs > 0) return mins > 0 ? `${formatUnit(hrs, "hour")} ${formatUnit(mins, "minute")}` : formatUnit(hrs, "hour");
+  if (mins > 0) return secs > 0 ? `${formatUnit(mins, "minute")} ${formatUnit(secs, "second")}` : formatUnit(mins, "minute");
+  return formatUnit(secs, "second");
 }
+
+/** A finish time: under a minute reads "< 1 min", not a broken-looking "0 sec". */
+const formatFinish = (totalMs: number): string => (totalMs < 60000 ? T().admUnderMinute : formatDuration(totalMs));
+
+/** Whole minutes ("12 min" / "12 דק׳"), for stuck and idle times. */
+const formatMinutes = (min: number): string => formatUnit(Math.max(0, Math.floor(min)), "minute");
 
 function formatSeconds(sec: number | null): string {
   return sec === null ? "—" : formatDuration(sec * 1000);
 }
 
+/** Date and time in the app locale (en-GB / he-IL), never the browser's (often en-US) default. */
 function formatDateTime(iso: string | null): string {
   const t = ms(iso);
   if (t === null) return "—";
   return new Intl.DateTimeFormat(locale(), { dateStyle: "medium", timeStyle: "short" }).format(t);
 }
 
-function formatPct(ratio: number | null): string {
-  return ratio === null ? "—" : `${Math.round(ratio * 100)}%`;
+/** Same, with the time zone named ("25 Nov 2026, 18:30 GMT+2"): for values typed in a browser-formatted picker. */
+function formatDateTimeZone(iso: string | null): string {
+  const t = ms(iso);
+  if (t === null) return "—";
+  return new Intl.DateTimeFormat(locale(), {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(t);
 }
 
+const numFormats = new Map<string, Intl.NumberFormat>();
+function numFormat(key: string, opts: Intl.NumberFormatOptions): Intl.NumberFormat {
+  const k = `${locale()}|${key}`;
+  let f = numFormats.get(k);
+  if (!f) {
+    f = new Intl.NumberFormat(locale(), opts);
+    numFormats.set(k, f);
+  }
+  return f;
+}
+/** Counts and scores with locale grouping ("1,475"). */
+const fmtInt = (n: number): string => numFormat("int", { maximumFractionDigits: 0 }).format(n);
+/** Averages with one decimal ("2.3"). */
+const fmtDec1 = (n: number): string => numFormat("dec1", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(n);
+
+function formatPct(ratio: number | null): string {
+  return ratio === null ? "—" : numFormat("pct", { style: "percent", maximumFractionDigits: 0 }).format(ratio);
+}
+
+/** "6 min ago" / "לפני 6 דק׳": the unit comes from Intl, the sentence from the catalogue. */
 function relativeAgo(iso: string | null, now: number): string {
   const t = ms(iso);
   if (t === null) return "—";
   const sec = Math.max(0, Math.round((now - t) / 1000));
   if (sec < 10) return T().admJustNow;
-  if (sec < 60) return T().admAgo(`${sec}s`);
+  if (sec < 60) return T().admAgo(formatUnit(sec, "second"));
   const min = Math.floor(sec / 60);
-  if (min < 60) return T().admAgo(`${min}m`);
+  if (min < 60) return T().admAgo(formatUnit(min, "minute"));
   const hrs = Math.floor(min / 60);
-  if (hrs < 24) return T().admAgo(`${hrs}h`);
-  return T().admAgo(`${Math.floor(hrs / 24)}d`);
+  if (hrs < 24) return T().admAgo(formatUnit(hrs, "hour"));
+  return T().admAgo(formatUnit(Math.floor(hrs / 24), "day"));
 }
 
 /** "in 6 days" / "בעוד 6 ימים" for a future instant (localized by Intl). */
@@ -252,6 +322,47 @@ function stuckLevel(p: AdminProgress): "none" | "warn" | "alert" {
   if (p.stuckMinutes >= STUCK_ALERT_MIN) return "alert";
   if (p.stuckMinutes >= STUCK_WARN_MIN) return "warn";
   return "none";
+}
+
+function minutesSince(iso: string | null, now: number): number | null {
+  const t = ms(iso);
+  return t === null ? null : Math.max(0, (now - t) / 60000);
+}
+
+/** Started, not finished, and not seen for IDLE_MIN minutes (left the room, or the tab is closed). */
+function isIdle(p: AdminProgress, now: number): boolean {
+  if (isDone(p) || p.startedAt === null) return false;
+  const seen = minutesSince(p.lastSeenAt, now);
+  return seen !== null && seen >= IDLE_MIN;
+}
+
+function currentWrong(p: AdminProgress): number {
+  const cur = p.currentStage;
+  return cur !== "setup" && cur !== "done" ? (p.stages[cur]?.wrongAttempts ?? 0) : 0;
+}
+
+type HelpLevel = "alert" | "warn" | "idle";
+type HelpEntry = { p: AdminProgress; level: HelpLevel; stuck: boolean; wrong: number; idleMin: number | null; urgency: number };
+
+/**
+ * Who needs the instructor now: stuck >= STUCK_WARN_MIN on one stage, or >= WRONG_HELP_MIN wrong answers on it,
+ * or idle. Urgent (alert) first, then warnings, then idle; inside a level the longest-stuck first.
+ */
+function helpEntries(players: readonly AdminProgress[], now: number): HelpEntry[] {
+  const out: HelpEntry[] = [];
+  for (const p of players) {
+    if (isDone(p)) continue;
+    const wrong = currentWrong(p);
+    const stuck = p.stuckMinutes >= STUCK_WARN_MIN;
+    const manyWrong = wrong >= WRONG_HELP_MIN;
+    const idle = isIdle(p, now);
+    if (!stuck && !manyWrong && !idle) continue;
+    const level: HelpLevel =
+      p.stuckMinutes >= STUCK_ALERT_MIN || wrong >= WRONG_ALERT_MIN ? "alert" : stuck || manyWrong ? "warn" : "idle";
+    const rank = level === "alert" ? 2 : level === "warn" ? 1 : 0;
+    out.push({ p, level, stuck, wrong, idleMin: idle ? minutesSince(p.lastSeenAt, now) : null, urgency: rank * 1e6 + p.stuckMinutes * 10 + wrong });
+  }
+  return out.sort((a, b) => b.urgency - a.urgency || a.p.username.localeCompare(b.p.username));
 }
 
 /** Same definition the server uses for durationSeconds: setup done -> completed. */
@@ -451,10 +562,11 @@ function commandsUsed(p: AdminProgress): number {
 
 // ---- keyed table rows (keep focus/scroll across 5s refreshes) -------------------------
 
-type RowEntry = { rows: HTMLTableRowElement[]; sig: string };
-type RowItem = { key: string; sig: string; build: () => HTMLTableRowElement[] };
+type RowEntry<E extends Element = HTMLTableRowElement> = { rows: E[]; sig: string };
+type RowItem<E extends Element = HTMLTableRowElement> = { key: string; sig: string; build: () => E[] };
 
-function syncRows(tbody: HTMLTableSectionElement, cache: Map<string, RowEntry>, items: readonly RowItem[]): void {
+/** Keyed list sync for table bodies and card lists: only changed entries are rebuilt, so focus survives the poll. */
+function syncRows<E extends Element>(tbody: Element, cache: Map<string, RowEntry<E>>, items: readonly RowItem<E>[]): void {
   const keep = new Set<string>();
   let i = 0;
   for (const item of items) {
@@ -476,6 +588,38 @@ function syncRows(tbody: HTMLTableSectionElement, cache: Map<string, RowEntry>, 
     for (const r of entry.rows) r.remove();
     cache.delete(key);
   }
+}
+
+function readPref(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null; // storage blocked: defaults apply
+  }
+}
+
+function writePref(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // storage blocked: the preference lasts for this page only
+  }
+}
+
+function readAcctCols(): AcctColId[] {
+  const raw = readPref(ACCT_COLS_STORAGE);
+  if (raw !== null) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const chosen = new Set(parsed.filter(isAcctColId));
+        return ACCT_COL_IDS.filter((id) => chosen.has(id));
+      }
+    } catch {
+      // corrupt preference: fall back to the defaults
+    }
+  }
+  return [...ACCT_DEFAULT_COLS];
 }
 
 function readStoredTab(): TabId {
@@ -572,6 +716,17 @@ export function renderAdmin(root: HTMLElement): void {
     // live tab
     liveSort: "score" as LiveSortKey,
     liveFilter: "",
+    liveActiveOnly: false,
+    /** the Needs help list shows the most urgent HELP_PREVIEW players until "Show all" */
+    helpShowAll: false,
+    liveDensity: (readPref(DENSITY_STORAGE) === "compact" ? "compact" : "comfortable") as "compact" | "comfortable",
+    /** phone/tablet layout (cards instead of grids, compact chrome) */
+    narrow: window.matchMedia(NARROW_QUERY).matches,
+    /** the KPI tiles on phones/tablets: collapsed to a one-line summary unless opened (remembered) */
+    tilesOpen: readPref(TILES_STORAGE) === "1",
+    /** pending sign-ups ticked for a bulk approve/reject */
+    pendingSelected: new Set<string>(),
+    acctCols: readAcctCols(),
     // accounts tab
     acctSort: "rank" as AcctSortKey,
     acctFilter: "all" as AcctFilter,
@@ -637,7 +792,8 @@ export function renderAdmin(root: HTMLElement): void {
     document.removeEventListener("visibilitychange", onVisibility);
     document.removeEventListener("focusin", onFocusIn);
     document.removeEventListener("click", onDocClick, { capture: true });
-    document.documentElement.classList.remove("admin-board-open", "admin-savebar-open");
+    document.documentElement.classList.remove("admin-board-open", "admin-savebar-open", "admin-sticky-tabs");
+    narrowMq.removeEventListener("change", onNarrowChange);
     if (activeCleanup === dispose) activeCleanup = null;
     if (activeInstance?.container === container) activeInstance = null;
   };
@@ -682,6 +838,7 @@ export function renderAdmin(root: HTMLElement): void {
 
   /** Link clicks are caught before the hash changes, so staying doesn't even leave the page. */
   function onDocClick(e: MouseEvent): void {
+    if (colChooser.open && e.target instanceof Node && !colChooser.contains(e.target)) colChooser.open = false;
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const link = e.target instanceof Element ? e.target.closest("a[href]") : null;
     const href = link?.getAttribute("href") ?? "";
@@ -748,6 +905,14 @@ export function renderAdmin(root: HTMLElement): void {
       if (overlap > 0) window.scrollBy({ top: overlap });
     });
   }
+  /** Crossing the phone/tablet breakpoint swaps grids for cards (and back) without losing state. */
+  const narrowMq = window.matchMedia(NARROW_QUERY);
+  function onNarrowChange(): void {
+    state.narrow = narrowMq.matches;
+    if (rowMenu.matches(":popover-open")) rowMenu.hidePopover();
+    if (state.accounts) renderActiveTab();
+  }
+  narrowMq.addEventListener("change", onNarrowChange);
   window.addEventListener("hashchange", onHashChange);
   document.addEventListener("click", onDocClick, { capture: true });
   window.addEventListener("beforeunload", onBeforeUnload);
@@ -842,8 +1007,8 @@ export function renderAdmin(root: HTMLElement): void {
   const updatedEl = h("span", { class: "admin-updated", "aria-live": "off" });
   const pauseBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admPause);
   const refreshBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admRefresh);
-  const boardBtn = h("button", { type: "button", class: "btn btn-primary btn-sm" }, T().admLeaderboard);
-  const logoutBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admSignOut);
+  const boardBtn = h("button", { type: "button", class: "btn btn-primary btn-sm head-wide" }, T().admLeaderboard);
+  const logoutBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm head-wide" }, T().admSignOut);
   const bannerEl = h("div", { class: "admin-banner", role: "status" });
   const leaderboardEl = h("div", { class: "admin-board", role: "dialog", "aria-modal": "true", "aria-label": T().admLeaderboard });
   leaderboardEl.hidden = true;
@@ -963,6 +1128,7 @@ export function renderAdmin(root: HTMLElement): void {
     storeTab(tab);
     if (!opts.fromUrl) setUrl(adminHash(tab, state.liveCaseId), "push");
     syncTabs();
+    if (state.narrow) tabButtons.get(tab)?.scrollIntoView({ block: "nearest", inline: "nearest" });
     syncSaveBarClass();
     renderActiveTab();
     if (tab === "schedule" && !state.schedule.draft) void loadSchedule();
@@ -999,6 +1165,11 @@ export function renderAdmin(root: HTMLElement): void {
           refreshBtn,
           boardBtn,
           logoutBtn,
+          // Phones/tablets: the projector board and Sign out fold into one menu so the header is one short row.
+          menuButton(T().admMoreLabel, "head:more", () => [
+            { label: T().admLeaderboard, run: () => boardBtn.click() },
+            { label: T().admSignOut, run: () => logoutBtn.click() },
+          ], T().admMore),
         ),
       ),
       tabList,
@@ -1007,7 +1178,9 @@ export function renderAdmin(root: HTMLElement): void {
       leaderboardEl,
       pwDialog,
       confirmDialog,
+      rowMenu,
     );
+    document.documentElement.classList.add("admin-sticky-tabs");
     buildAccountsPanel();
     buildLivePanel();
     buildStatsPanel();
@@ -1022,7 +1195,8 @@ export function renderAdmin(root: HTMLElement): void {
       return;
     }
     const sec = Math.max(0, Math.round((Date.now() - state.lastUpdated) / 1000));
-    updatedEl.textContent = T().admUpdated(state.paused, sec);
+    updatedEl.textContent = T().admUpdated(state.paused, relativeAgo(new Date(state.lastUpdated).toISOString(), Date.now()));
+    updatedEl.title = formatDateTime(new Date(state.lastUpdated).toISOString());
     updatedEl.classList.toggle("is-stale", sec > 20);
   }
 
@@ -1117,17 +1291,144 @@ export function renderAdmin(root: HTMLElement): void {
     });
   }
 
-  /** A row button that opens a confirm; `key` finds it again after a re-render (focus return). */
-  function rowAction(label: string, ariaLabel: string, key: string, cls: string, open: () => Promise<boolean>): HTMLButtonElement {
-    return h("button", { type: "button", class: cls, "aria-label": ariaLabel, "data-action": key, onclick: () => void open() }, label);
+  // ---- row actions menu (APG menu button): one shared popover in the top layer, so table scrollers never clip it ----
+
+  type MenuItem = { label: string; danger?: boolean; run: () => void };
+  const rowMenu = h("div", { class: "row-menu", role: "menu", popover: "auto", id: "admin-row-menu" });
+  let rowMenuTrigger: HTMLElement | null = null;
+  const menuTriggerEl = (key: string): HTMLElement | null => container.querySelector<HTMLElement>(`[data-menu="${CSS.escape(key)}"]`);
+
+  rowMenu.addEventListener("toggle", (e) => {
+    const open = e instanceof ToggleEvent ? e.newState === "open" : rowMenu.matches(":popover-open");
+    const trigger = rowMenuTrigger;
+    trigger?.setAttribute("aria-expanded", String(open));
+    if (open) return;
+    rowMenuTrigger = null;
+    // Esc or a click outside: focus goes back to the button (unless an item moved it somewhere on purpose).
+    const active = document.activeElement;
+    if (trigger && trigger.isConnected && (active === null || active === document.body || rowMenu.contains(active))) trigger.focus();
+  });
+  rowMenu.addEventListener("keydown", (e) => {
+    const items = [...rowMenu.querySelectorAll<HTMLButtonElement>("[role=menuitem]")];
+    const idx = items.findIndex((x) => x === document.activeElement);
+    let next = -1;
+    if (e.key === "ArrowDown") next = (idx + 1) % items.length;
+    else if (e.key === "ArrowUp") next = (idx - 1 + items.length) % items.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = items.length - 1;
+    else if (e.key === "Tab") {
+      rowMenu.hidePopover();
+      return;
+    }
+    if (next < 0) return;
+    e.preventDefault();
+    items[next]?.focus();
+  });
+
+  function openRowMenu(trigger: HTMLElement, label: string, items: readonly MenuItem[]): void {
+    if (rowMenu.matches(":popover-open")) rowMenu.hidePopover();
+    rowMenuTrigger = trigger;
+    rowMenu.setAttribute("aria-label", label);
+    setChildren(
+      rowMenu,
+      items.map((item) =>
+        h(
+          "button",
+          {
+            type: "button",
+            role: "menuitem",
+            tabindex: -1,
+            class: `row-menu-item${item.danger ? " is-danger" : ""}`,
+            onclick: () => {
+              rowMenu.hidePopover();
+              item.run();
+            },
+          },
+          item.label,
+        ),
+      ),
+    );
+    rowMenu.showPopover();
+    // Under the button, aligned to its inline-end edge; flipped above when it would leave the viewport.
+    const r = trigger.getBoundingClientRect();
+    const m = rowMenu.getBoundingClientRect();
+    const gap = 4;
+    const rtl = document.documentElement.dir === "rtl";
+    const maxLeft = window.innerWidth - m.width - 8;
+    const left = Math.min(Math.max(8, rtl ? r.left : r.right - m.width), Math.max(8, maxLeft));
+    const below = r.bottom + gap + m.height <= window.innerHeight - 8;
+    rowMenu.style.left = `${left}px`;
+    rowMenu.style.top = `${below ? r.bottom + gap : Math.max(8, r.top - gap - m.height)}px`;
+    rowMenu.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
   }
-  const rowActionEl = (key: string): HTMLElement | null => container.querySelector<HTMLElement>(`[data-action="${CSS.escape(key)}"]`);
+
+  /** The "⋯" button that opens a row's actions; `key` finds it again after a re-render (focus return). */
+  function menuButton(label: string, key: string, items: () => readonly MenuItem[], text?: string): HTMLButtonElement {
+    const btn = h(
+      "button",
+      {
+        type: "button",
+        class: `btn btn-ghost btn-sm row-menu-btn${text ? "" : " is-icon"}`,
+        "aria-haspopup": "menu",
+        "aria-expanded": "false",
+        "aria-controls": "admin-row-menu",
+        "aria-label": label,
+        title: label,
+        "data-menu": key,
+      },
+      text ? h("span", {}, text) : null,
+      h("span", { class: "row-menu-dots", "aria-hidden": "true" }, "⋯"),
+    );
+    btn.addEventListener("click", () => {
+      if (rowMenuTrigger === btn && rowMenu.matches(":popover-open")) {
+        rowMenu.hidePopover();
+        return;
+      }
+      openRowMenu(btn, label, items());
+    });
+    btn.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      e.preventDefault();
+      openRowMenu(btn, label, items());
+      if (e.key === "ArrowUp") [...rowMenu.querySelectorAll<HTMLButtonElement>("[role=menuitem]")].pop()?.focus();
+    });
+    return btn;
+  }
+
+  // ---- KPI tiles that fold into a one-line summary on phones/tablets (the header chrome before content shrinks) ----
+
+  type FoldTiles = HTMLElement & { _summary?: HTMLElement };
+  function foldableTiles(tilesEl: HTMLElement): FoldTiles {
+    const summary = h("span", { class: "tiles-summary" });
+    const toggle = h(
+      "button",
+      { type: "button", class: "tiles-toggle", "aria-expanded": String(state.tilesOpen), "aria-controls": tilesEl.id },
+      h("span", { class: "acct-caret", "aria-hidden": "true" }, "▸"),
+      summary,
+    );
+    const wrap: FoldTiles = h("div", { class: `tiles-fold${state.tilesOpen ? "" : " is-folded"}` }, toggle, tilesEl);
+    wrap._summary = summary;
+    toggle.addEventListener("click", () => {
+      state.tilesOpen = !state.tilesOpen;
+      writePref(TILES_STORAGE, state.tilesOpen ? "1" : "0");
+      for (const w of container.querySelectorAll<HTMLElement>(".tiles-fold")) {
+        w.classList.toggle("is-folded", !state.tilesOpen);
+        w.querySelector(".tiles-toggle")?.setAttribute("aria-expanded", String(state.tilesOpen));
+      }
+    });
+    return wrap;
+  }
+  function setTilesSummary(wrap: FoldTiles, text: string): void {
+    if (wrap._summary) wrap._summary.textContent = text;
+  }
 
   // =====================================================================================
   // Accounts tab
   // =====================================================================================
 
-  const acctTilesEl = h("div", { class: "admin-tiles" });
+  const acctTilesEl = h("div", { class: "admin-tiles", id: "admin-acct-tiles" });
+  const acctTiles = foldableTiles(acctTilesEl);
+  const pendingBulkEl = h("div", { class: "pending-bulk" });
   const pendingEl = h("div", { class: "pending-wrap" });
   const approveAllEl = h("div", { class: "pending-approve-all" });
   const pendingStatusEl = h("p", { class: "muted small pending-status", role: "status" });
@@ -1139,6 +1440,8 @@ export function renderAdmin(root: HTMLElement): void {
   const acctSearchInput = h("input", {
     type: "search",
     class: "admin-input admin-search",
+    enterkeyhint: "search",
+    dir: "auto",
     placeholder: T().admSearchPlaceholder,
     "aria-label": T().admSearchLabel,
   });
@@ -1177,36 +1480,119 @@ export function renderAdmin(root: HTMLElement): void {
     }
   });
 
-  const ACCT_COLS = 14;
-  const acctTbody = h("tbody", {});
-  const acctTable = h(
-    "table",
-    { class: "admin-table acct-table" },
-    h(
-      "thead",
-      {},
+  // Columns: User and Status always lead and the actions menu always ends the row; the rest come from the chooser.
+  type AcctCol = { label: () => string; num: boolean; cell: (a: UserStats, now: number) => HTMLTableCellElement };
+  const ACCT_COL_DEFS: Record<AcctColId, AcctCol> = {
+    score: { label: () => T().admColScore, num: true, cell: (a) => h("td", { class: "num col-score" }, fmtInt(a.totalScore)) },
+    rank: { label: () => T().admColRank, num: true, cell: (a) => h("td", { class: "num" }, a.rank === null ? "—" : fmtInt(a.rank)) },
+    completed: {
+      label: () => T().admColCompleted,
+      num: true,
+      cell: (a) => h("td", { class: "num", title: T().admStartedCount(a.casesStarted) }, T().admOfN(fmtInt(a.casesCompleted), fmtInt(a.casesStarted))),
+    },
+    accuracy: { label: () => T().admColAccuracy, num: true, cell: (a) => h("td", { class: "num" }, formatPct(a.accuracy)) },
+    seen: {
+      label: () => T().admColSeen,
+      num: false,
+      cell: (a, now) => h("td", { class: "col-seen muted", title: formatDateTime(a.lastSeenAt) }, relativeAgo(a.lastSeenAt, now)),
+    },
+    created: { label: () => T().admColCreated, num: false, cell: (a) => h("td", { class: "col-seen muted" }, formatDateTime(a.createdAt)) },
+    hints: { label: () => T().admColHints, num: true, cell: (a) => h("td", { class: "num" }, fmtInt(a.hintsUsed)) },
+    wrong: { label: () => T().admColWrong, num: true, cell: (a) => h("td", { class: "num" }, fmtInt(a.wrongAttempts)) },
+    commands: { label: () => T().admColCommands, num: true, cell: (a) => h("td", { class: "num" }, fmtInt(a.commandsRevealed)) },
+    badges: {
+      label: () => T().admColBadges,
+      num: true,
+      cell: (a) =>
+        h("td", { class: "num", title: T().admBadgesTip(a.achievements.map((x) => T().admAchievement(x.id)).join(", ")) }, fmtInt(a.achievements.length)),
+    },
+    streak: {
+      label: () => T().admColStreak,
+      num: true,
+      cell: (a) => h("td", { class: "num", title: T().admStreakTip(a.streak.current, a.streak.best) }, T().admOfN(fmtInt(a.streak.current), fmtInt(a.streak.best))),
+    },
+  };
+  const acctColCount = (): number => state.acctCols.length + 3;
+  const acctThead = h("thead", {});
+  function renderAcctHead(): void {
+    setChildren(
+      acctThead,
       h(
         "tr",
         {},
         th(T().admColUser),
         th(T().admColStatus),
-        th(T().admColCreated),
-        th(T().admColSeen),
-        th(T().admColScore, "num"),
-        th(T().admColRank, "num"),
-        th(T().admColCompleted, "num"),
-        th(T().admColAccuracy, "num"),
-        th(T().admColHints, "num"),
-        th(T().admColWrong, "num"),
-        th(T().admColCommands, "num"),
-        th(T().admColBadges, "num"),
-        th(T().admColStreak, "num"),
+        state.acctCols.map((id) => th(ACCT_COL_DEFS[id].label(), ACCT_COL_DEFS[id].num ? "num" : undefined)),
         h("th", { scope: "col" }, h("span", { class: "visually-hidden" }, T().admColActions)),
       ),
-    ),
-    acctTbody,
-  );
+    );
+  }
+  renderAcctHead();
+  const acctTbody = h("tbody", {});
+  const acctTable = h("table", { class: "admin-table acct-table" }, acctThead, acctTbody);
   const acctRowCache = new Map<string, RowEntry>();
+  const acctCards = h("ul", { class: "acct-cards", "aria-labelledby": "admin-accounts-title" });
+  const acctCardCache = new Map<string, RowEntry<HTMLLIElement>>();
+
+  // Column chooser: a disclosure with one checkbox per optional column, remembered in localStorage.
+  const colChooserCount = h("span", { class: "muted" });
+  const colChooser = h(
+    "details",
+    { class: "col-chooser" },
+    h("summary", { class: "btn btn-ghost btn-sm" }, T().admColumns, " ", colChooserCount),
+    h(
+      "fieldset",
+      { class: "col-chooser-pop" },
+      h("legend", { class: "admin-label" }, T().admColumnsLegend),
+      ACCT_COL_IDS.map((id) => {
+        const box = h("input", { type: "checkbox", id: `acct-col-${id}`, checked: state.acctCols.includes(id) });
+        box.addEventListener("change", () => {
+          const on = new Set(state.acctCols);
+          if (box.checked) on.add(id);
+          else on.delete(id);
+          state.acctCols = ACCT_COL_IDS.filter((x) => on.has(x));
+          writePref(ACCT_COLS_STORAGE, JSON.stringify(state.acctCols));
+          syncColChooser();
+          renderAcctHead();
+          acctRowCache.clear();
+          acctTbody.replaceChildren();
+          renderAccountsTable();
+        });
+        return h("label", { class: "admin-check", for: `acct-col-${id}` }, box, h("span", {}, ACCT_COL_DEFS[id].label()));
+      }),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "btn btn-ghost btn-sm",
+          onclick: () => {
+            state.acctCols = [...ACCT_DEFAULT_COLS];
+            writePref(ACCT_COLS_STORAGE, JSON.stringify(state.acctCols));
+            for (const id of ACCT_COL_IDS) {
+              const box = colChooser.querySelector<HTMLInputElement>(`#acct-col-${id}`);
+              if (box) box.checked = state.acctCols.includes(id);
+            }
+            syncColChooser();
+            renderAcctHead();
+            acctRowCache.clear();
+            acctTbody.replaceChildren();
+            renderAccountsTable();
+          },
+        },
+        T().admColumnsReset,
+      ),
+    ),
+  );
+  colChooser.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !colChooser.open) return;
+    e.stopPropagation();
+    colChooser.open = false;
+    colChooser.querySelector("summary")?.focus();
+  });
+  function syncColChooser(): void {
+    colChooserCount.textContent = `(${T().admOfN(fmtInt(state.acctCols.length), fmtInt(ACCT_COL_IDS.length))})`;
+  }
+  syncColChooser();
 
   // ---- CSV export ----
   const exportBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm", title: T().admExportHint }, T().admExportCsv);
@@ -1449,7 +1835,7 @@ export function renderAdmin(root: HTMLElement): void {
               h("td", { class: "trash-label" }, h("span", { dir: "auto" }, e.label)),
               h("td", { class: "col-seen", title: e.deletedAt }, formatDateTime(e.deletedAt)),
               h("td", { class: "col-seen", title: formatDateTime(e.expiresAt) }, relativeIn(e.expiresAt, now)),
-              h("td", { class: "num" }, String(e.records)),
+              h("td", { class: "num" }, fmtInt(e.records)),
               h(
                 "td",
                 { class: "col-actions" },
@@ -1475,23 +1861,26 @@ export function renderAdmin(root: HTMLElement): void {
   function buildAccountsPanel(): void {
     setChildren(
       tabPanels.get("accounts") ?? container,
-      acctTilesEl,
+      acctTiles,
       h(
         "section",
-        { class: "panel admin-panel pending-panel" },
-        h("div", { class: "admin-table-head" }, h("h2", { class: "admin-h2" }, T().admPendingTitle, " ", pendingCountEl), approveAllEl),
+        { class: "panel admin-panel pending-panel", "aria-labelledby": "admin-pending-title" },
+        h("div", { class: "admin-table-head" }, h("h2", { class: "admin-h2", id: "admin-pending-title" }, T().admPendingTitle, " ", pendingCountEl), approveAllEl),
         pendingStatusEl,
+        pendingBulkEl,
         pendingEl,
       ),
       h(
         "section",
-        { class: "panel admin-panel" },
+        { class: "panel admin-panel acct-panel", "aria-labelledby": "admin-accounts-title" },
         h(
           "div",
           { class: "admin-table-head" },
-          h("h2", { class: "admin-h2" }, T().admAccountsTitle, " ", acctCountEl),
-          h("div", { class: "admin-controls" }, acctSearchInput, acctFilterSelect, acctSortSelect, exportBtn),
+          h("h2", { class: "admin-h2", id: "admin-accounts-title" }, T().admAccountsTitle, " ", acctCountEl),
+          h("div", { class: "admin-controls" }, acctFilterSelect, acctSortSelect, colChooser, exportBtn),
         ),
+        // Search stays in view while the list scrolls (sticky under the tab bar).
+        h("div", { class: "acct-searchbar" }, acctSearchInput),
         h("p", { class: "muted small admin-hint" }, T().admAccountsHint),
         acctTableEl,
       ),
@@ -1539,41 +1928,87 @@ export function renderAdmin(root: HTMLElement): void {
     }
   }
 
-  function statusButtons(a: UserStats, compact: boolean): HTMLElement[] {
-    const busy = state.busy.has(`status:${a.accountId}`);
-    const out: HTMLElement[] = [];
-    if (a.status !== "approved") {
-      out.push(
-        h(
-          "button",
-          {
-            type: "button",
-            class: compact ? "btn btn-ghost btn-sm btn-approve" : "btn btn-primary btn-sm",
-            disabled: busy,
-            "aria-label": T().admApproveLabel(a.username),
-            onclick: () => void changeStatus(a, "approve"),
-          },
-          T().admApprove,
-        ),
-      );
+  /** Bulk approve/reject of the ticked pending sign-ups (per-account calls; partial failures are reported). */
+  async function bulkStatus(action: "approve" | "reject"): Promise<void> {
+    const ids = [...state.pendingSelected];
+    if (ids.length === 0) return;
+    for (const id of ids) state.busy.add(`status:${id}`);
+    renderAccounts();
+    const res = await setAccountsStatus(ids, action);
+    if (disposed) return;
+    for (const id of ids) state.busy.delete(`status:${id}`);
+    const authFailure = res.errors.find((err) => err instanceof AdminApiError && (err.status === 401 || err.status === 503));
+    if (authFailure && handleAuthError(authFailure)) return;
+    state.pendingSelected.clear();
+    state.approvedMsg =
+      action === "approve" ? T().admBulkApproved(res.ok.length, res.errors.length) : T().admBulkRejected(res.ok.length, res.errors.length);
+    pendingSig = "";
+    if (state.accounts) {
+      const done = new Map(res.ok.map((v) => [v.id, v.status] as const));
+      state.accounts = {
+        ...state.accounts,
+        accounts: state.accounts.accounts.map((a) => {
+          const st = done.get(a.accountId);
+          return st ? { ...a, status: st } : a;
+        }),
+      };
     }
-    if (a.status !== "rejected") {
-      out.push(
-        h(
-          "button",
-          {
-            type: "button",
-            class: "btn btn-ghost btn-sm",
-            disabled: busy,
-            "aria-label": a.status === "approved" ? T().admRevokeLabel(a.username) : T().admRejectLabel(a.username),
-            title: a.status === "approved" ? T().admRevokeTip : undefined,
-            onclick: () => void changeStatus(a, "reject"),
+    renderAccounts();
+    pendingStatusEl.focus();
+    void load();
+  }
+
+  /** Menu items for one account: status changes first, then the password reset, Delete last (danger). */
+  function acctMenuItems(a: UserStats): MenuItem[] {
+    const key = `acct:${a.accountId}`;
+    const items: MenuItem[] = [];
+    if (a.status !== "approved") items.push({ label: T().admApprove, run: () => void changeStatus(a, "approve") });
+    if (a.status === "approved") items.push({ label: T().admRevoke, run: () => void changeStatus(a, "reject") });
+    else if (a.status === "pending") items.push({ label: T().admReject, run: () => void changeStatus(a, "reject") });
+    items.push({
+      label: T().admResetPwItem,
+      run: () =>
+        void askConfirm({
+          title: T().admResetPwTitle(a.username),
+          body: T().admResetPwBody,
+          confirmLabel: T().admResetPwLabel(a.username),
+          busyLabel: T().admResettingPw,
+          tone: "primary",
+          run: async () => {
+            const password = await resetAccountPassword(a.accountId);
+            showTempPassword(a.username, password);
           },
-          a.status === "approved" ? T().admRevoke : T().admReject,
-        ),
-      );
-    }
-    return out;
+          returnFocus: () => menuTriggerEl(key),
+        }),
+    });
+    items.push({
+      label: T().admDeleteItem,
+      danger: true,
+      run: () =>
+        void askConfirm({
+          title: T().admDeleteTitle(a.username),
+          body: T().admDeleteBody(TRASH_RETENTION_DAYS),
+          confirmLabel: T().admDeleteLabel(a.username),
+          cancelLabel: T().admKeepAccount,
+          busyLabel: T().admDeleting,
+          tone: "danger",
+          run: async () => {
+            await deleteAccount(a.accountId);
+            state.expanded.delete(a.accountId);
+            if (state.accounts) {
+              state.accounts = { ...state.accounts, accounts: state.accounts.accounts.filter((x) => x.accountId !== a.accountId) };
+            }
+            renderAccounts();
+            void load();
+          },
+          returnFocus: () => acctSearchInput,
+        }),
+    });
+    return items;
+  }
+
+  function acctMenu(a: UserStats): HTMLButtonElement {
+    return menuButton(T().admActionsFor(a.username), `acct:${a.accountId}`, () => acctMenuItems(a));
   }
 
   function statusPill(status: AccountStatus): HTMLElement {
@@ -1582,26 +2017,35 @@ export function renderAdmin(root: HTMLElement): void {
 
   function renderPending(list: readonly UserStats[]): void {
     const pending = list.filter((a) => a.status === "pending").sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    pendingCountEl.textContent = String(pending.length);
+    const pendingIds = new Set(pending.map((a) => a.accountId));
+    for (const id of state.pendingSelected) if (!pendingIds.has(id)) state.pendingSelected.delete(id);
+    pendingCountEl.textContent = fmtInt(pending.length);
     pendingCountEl.classList.toggle("is-zero", pending.length === 0);
-    pendingTabBadge.textContent = String(pending.length);
+    pendingTabBadge.textContent = fmtInt(pending.length);
     pendingTabBadge.hidden = pending.length === 0;
     pendingTabBadge.setAttribute("aria-label", T().admPendingBadge(pending.length));
     pendingStatusEl.textContent = state.approvedMsg ?? "";
     pendingStatusEl.hidden = state.approvedMsg === null;
+    pendingStatusEl.tabIndex = -1;
     // Rebuild only when something visible changed, so focus on Approve/Reject survives polling.
+    const now = Date.now();
     const sig = [
       getLang(),
-      ...pending.map((a) => `${a.accountId}:${a.username}:${state.busy.has(`status:${a.accountId}`) ? 1 : 0}`),
+      ...pending.map(
+        (a) =>
+          `${a.accountId}:${a.username}:${state.busy.has(`status:${a.accountId}`) ? 1 : 0}:${state.pendingSelected.has(a.accountId) ? 1 : 0}:${relativeAgo(a.createdAt, now)}`,
+      ),
     ].join("|");
     if (sig === pendingSig) return;
     pendingSig = sig;
     if (pending.length === 0) {
       approveAllEl.replaceChildren();
+      pendingBulkEl.replaceChildren();
       setChildren(pendingEl, h("p", { class: "muted admin-empty-small" }, T().admNoPending));
       return;
     }
     const n = pending.length;
+    const focusedId = document.activeElement instanceof HTMLElement ? document.activeElement.id : "";
     // Approving is the intended, safe action: a primary confirm, never a red one.
     setChildren(
       approveAllEl,
@@ -1622,6 +2066,7 @@ export function renderAdmin(root: HTMLElement): void {
               run: async () => {
                 const approved = await approveAll();
                 state.approvedMsg = T().admApprovedN(approved);
+                state.pendingSelected.clear();
                 pendingSig = "";
                 void load();
               },
@@ -1631,22 +2076,110 @@ export function renderAdmin(root: HTMLElement): void {
         T().admApproveAll(n),
       ),
     );
+    // Bulk: tick sign-ups, then approve or reject the selection.
+    const sel = state.pendingSelected.size;
+    const anyBusy = pending.some((a) => state.busy.has(`status:${a.accountId}`));
+    const allBox = h("input", { type: "checkbox", id: "pending-select-all", disabled: anyBusy });
+    allBox.checked = sel === n;
+    allBox.indeterminate = sel > 0 && sel < n;
+    allBox.addEventListener("change", () => {
+      if (allBox.checked) for (const a of pending) state.pendingSelected.add(a.accountId);
+      else state.pendingSelected.clear();
+      state.approvedMsg = null;
+      renderPending(state.accounts?.accounts ?? []);
+      document.getElementById("pending-select-all")?.focus();
+    });
+    setChildren(
+      pendingBulkEl,
+      h("label", { class: "admin-check", for: "pending-select-all" }, allBox, h("span", {}, T().admSelectAll)),
+      h("span", { class: "muted small", role: "status" }, sel > 0 ? T().admSelectedN(sel) : ""),
+      sel > 0
+        ? [
+            h(
+              "button",
+              { type: "button", class: "btn btn-primary btn-sm", id: "pending-bulk-approve", disabled: anyBusy, onclick: () => void bulkStatus("approve") },
+              T().admApproveSelected(sel),
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                class: "btn btn-ghost btn-sm",
+                id: "pending-bulk-reject",
+                disabled: anyBusy,
+                onclick: () =>
+                  void askConfirm({
+                    title: T().admRejectSelectedTitle(sel),
+                    body: T().admRejectSelectedBody,
+                    confirmLabel: T().admRejectSelected(sel),
+                    tone: "danger",
+                    run: () => bulkStatus("reject"),
+                    returnFocus: () => document.getElementById("pending-select-all"),
+                  }),
+              },
+              T().admRejectSelected(sel),
+            ),
+          ]
+        : null,
+    );
     setChildren(
       pendingEl,
       h(
         "ul",
         { class: "pending-list" },
-        pending.map((a) =>
-          h(
+        pending.map((a) => {
+          const busy = state.busy.has(`status:${a.accountId}`);
+          const box = h("input", {
+            type: "checkbox",
+            id: `pending-sel-${a.accountId}`,
+            disabled: busy,
+            "aria-label": T().admSelectLabel(a.username),
+          });
+          box.checked = state.pendingSelected.has(a.accountId);
+          box.addEventListener("change", () => {
+            if (box.checked) state.pendingSelected.add(a.accountId);
+            else state.pendingSelected.delete(a.accountId);
+            state.approvedMsg = null;
+            renderPending(state.accounts?.accounts ?? []);
+            document.getElementById(`pending-sel-${a.accountId}`)?.focus();
+          });
+          return h(
             "li",
-            { class: "pending-item" },
-            h("span", { class: "pending-name" }, a.username),
-            h("span", { class: "pending-meta muted small" }, T().admSignedUp(formatDateTime(a.createdAt))),
-            h("span", { class: "pending-actions" }, statusButtons(a, false)),
-          ),
-        ),
+            { class: `pending-item${box.checked ? " is-selected" : ""}` },
+            h("label", { class: "pending-check", for: `pending-sel-${a.accountId}` }, box),
+            h("span", { class: "pending-name", dir: "auto" }, a.username),
+            h("span", { class: "pending-meta muted small", title: formatDateTime(a.createdAt) }, T().admSignedUp(relativeAgo(a.createdAt, now))),
+            h(
+              "span",
+              { class: "pending-actions" },
+              h(
+                "button",
+                {
+                  type: "button",
+                  class: "btn btn-primary btn-sm",
+                  disabled: busy,
+                  "aria-label": T().admApproveLabel(a.username),
+                  onclick: () => void changeStatus(a, "approve"),
+                },
+                T().admApprove,
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  class: "btn btn-ghost btn-sm",
+                  disabled: busy,
+                  "aria-label": T().admRejectLabel(a.username),
+                  onclick: () => void changeStatus(a, "reject"),
+                },
+                T().admReject,
+              ),
+            ),
+          );
+        }),
       ),
     );
+    if (focusedId && !document.activeElement?.isConnected) document.getElementById(focusedId)?.focus();
   }
 
   function caseStatsTable(list: readonly CaseStats[]): HTMLElement {
@@ -1686,16 +2219,16 @@ export function renderAdmin(root: HTMLElement): void {
             h(
               "td",
               { class: "num", title: T().admScoreParTip(c.maxScore) },
-              String(c.score),
+              fmtInt(c.score),
               " ",
-              h("span", { class: "muted small" }, `(${T().admPar(c.maxScore)})`),
+              h("span", { class: "muted small" }, `(${T().admPar(fmtInt(c.maxScore))})`),
             ),
-            h("td", { class: "num" }, String(c.solved)),
-            h("td", { class: "num" }, String(c.revealed)),
-            h("td", { class: "num" }, String(c.hintsUsed)),
-            h("td", { class: "num" }, String(c.commandsRevealed)),
-            h("td", { class: "num" }, String(c.wrongAttempts)),
-            h("td", { class: "num" }, String(c.firstBloods)),
+            h("td", { class: "num" }, fmtInt(c.solved)),
+            h("td", { class: "num" }, fmtInt(c.revealed)),
+            h("td", { class: "num" }, fmtInt(c.hintsUsed)),
+            h("td", { class: "num" }, fmtInt(c.commandsRevealed)),
+            h("td", { class: "num" }, fmtInt(c.wrongAttempts)),
+            h("td", { class: "num" }, fmtInt(c.firstBloods)),
             h("td", { class: "num" }, formatSeconds(c.durationSeconds)),
             h("td", { class: "col-seen" }, formatDateTime(c.startedAt)),
             h("td", { class: "col-seen" }, formatDateTime(c.completedAt)),
@@ -1705,10 +2238,30 @@ export function renderAdmin(root: HTMLElement): void {
     );
   }
 
+  /** The per-case summary on a phone card: one line per case instead of a 12-column table. */
+  function caseStatsList(list: readonly CaseStats[]): HTMLElement {
+    if (list.length === 0) return h("p", { class: "muted small admin-empty-small" }, T().admNoCasesYet);
+    return h(
+      "ul",
+      { class: "case-lines" },
+      list.map((c) =>
+        h(
+          "li",
+          {},
+          h("span", { class: "case-line-title" }, caseTitle(c.caseId)),
+          h("span", { class: `case-status is-${c.status}` }, T().admCaseStatus(c.status)),
+          h("span", { class: "muted small" }, `${T().admPointsShort(fmtInt(c.score))} · ${formatSeconds(c.durationSeconds)}`),
+        ),
+      ),
+    );
+  }
+
   function acctSignature(a: UserStats, now: number): string {
     const id = a.accountId;
     return JSON.stringify([
       getLang(),
+      state.narrow,
+      state.acctCols,
       a.username,
       a.status,
       a.totalScore,
@@ -1728,10 +2281,9 @@ export function renderAdmin(root: HTMLElement): void {
     ]);
   }
 
-  function buildAcctRows(a: UserStats, now: number): HTMLTableRowElement[] {
+  function acctToggle(a: UserStats, detailId: string): HTMLButtonElement {
     const expanded = state.expanded.has(a.accountId);
-    const detailId = `acct-detail-${a.accountId}`;
-    const toggle = h(
+    return h(
       "button",
       {
         type: "button",
@@ -1747,71 +2299,20 @@ export function renderAdmin(root: HTMLElement): void {
         },
       },
       h("span", { class: "acct-caret", "aria-hidden": "true" }, "▸"),
-      h("span", { class: "player-name" }, a.username),
+      h("span", { class: "player-name", dir: "auto" }, a.username),
     );
+  }
+
+  function buildAcctRows(a: UserStats, now: number): HTMLTableRowElement[] {
+    const expanded = state.expanded.has(a.accountId);
+    const detailId = `acct-detail-${a.accountId}`;
     const row = h(
       "tr",
       { class: `acct-row is-${a.status}${expanded ? " is-expanded" : ""}`, "data-id": a.accountId },
-      h("td", { class: "col-name" }, toggle),
+      h("td", { class: "col-name" }, acctToggle(a, detailId)),
       h("td", {}, statusPill(a.status)),
-      h("td", { class: "col-seen muted" }, formatDateTime(a.createdAt)),
-      h("td", { class: "col-seen muted", title: formatDateTime(a.lastSeenAt) }, relativeAgo(a.lastSeenAt, now)),
-      h("td", { class: "num col-score" }, String(a.totalScore)),
-      h("td", { class: "num" }, a.rank === null ? "—" : `#${a.rank}`),
-      h("td", { class: "num", title: T().admStartedCount(a.casesStarted) }, `${a.casesCompleted}/${a.casesStarted}`),
-      h("td", { class: "num" }, formatPct(a.accuracy)),
-      h("td", { class: "num" }, String(a.hintsUsed)),
-      h("td", { class: "num" }, String(a.wrongAttempts)),
-      h("td", { class: "num" }, String(a.commandsRevealed)),
-      h(
-        "td",
-        { class: "num", title: T().admBadgesTip(a.achievements.map((x) => T().admAchievement(x.id)).join(", ")) },
-        String(a.achievements.length),
-      ),
-      h("td", { class: "num", title: T().admStreakTip(a.streak.current, a.streak.best) }, `${a.streak.current}/${a.streak.best}`),
-      h(
-        "td",
-        { class: "col-actions" },
-        h(
-          "span",
-          { class: "row-actions" },
-          statusButtons(a, true),
-          rowAction(T().admResetPw, T().admResetPwLabel(a.username), `reset-password:${a.accountId}`, "btn btn-ghost btn-sm", () =>
-            askConfirm({
-              title: T().admResetPwTitle(a.username),
-              body: T().admResetPwBody,
-              confirmLabel: T().admResetPwLabel(a.username),
-              busyLabel: T().admResettingPw,
-              tone: "primary",
-              run: async () => {
-                const password = await resetAccountPassword(a.accountId);
-                showTempPassword(a.username, password);
-              },
-              returnFocus: () => rowActionEl(`reset-password:${a.accountId}`),
-            }),
-          ),
-          rowAction(T().admDelete, T().admDeleteLabel(a.username), `delete:${a.accountId}`, "btn btn-ghost btn-sm btn-delete", () =>
-            askConfirm({
-              title: T().admDeleteTitle(a.username),
-              body: T().admDeleteBody(TRASH_RETENTION_DAYS),
-              confirmLabel: T().admDeleteLabel(a.username),
-              cancelLabel: T().admKeepAccount,
-              busyLabel: T().admDeleting,
-              tone: "danger",
-              run: async () => {
-                await deleteAccount(a.accountId);
-                state.expanded.delete(a.accountId);
-                if (state.accounts) {
-                  state.accounts = { ...state.accounts, accounts: state.accounts.accounts.filter((x) => x.accountId !== a.accountId) };
-                }
-                renderAccounts();
-                void load();
-              },
-              returnFocus: () => acctSearchInput,
-            }),
-          ),
-        ),
-      ),
+      state.acctCols.map((id) => ACCT_COL_DEFS[id].cell(a, now)),
+      h("td", { class: "col-actions" }, acctMenu(a)),
     );
     if (!expanded) return [row];
     const detail = h(
@@ -1819,31 +2320,59 @@ export function renderAdmin(root: HTMLElement): void {
       { class: "acct-detail", id: detailId },
       h(
         "td",
-        { colspan: ACCT_COLS },
+        { colspan: acctColCount() },
         h(
           "div",
           { class: "acct-detail-inner" },
           h("p", { class: "admin-label" }, T().admPerCaseTitle(a.username)),
           caseStatsTable(a.cases),
-          h(
-            "p",
-            { class: "muted small acct-detail-meta" },
-            T().admBadgesTip(a.achievements.map((x) => T().admAchievement(x.id)).join(", ")),
-            " · ",
-            T().admStreakTip(a.streak.current, a.streak.best),
-          ),
+          h("p", { class: "muted small acct-detail-meta" }, acctExtras(a)),
         ),
       ),
     );
     return [row, detail];
   }
 
+  /** The columns that are off in the chooser still show in the expanded row, so nothing is out of reach. */
+  function acctExtras(a: UserStats): string {
+    return [
+      T().admExtraLine(fmtInt(a.hintsUsed), fmtInt(a.wrongAttempts), fmtInt(a.commandsRevealed)),
+      T().admBadgesTip(a.achievements.map((x) => T().admAchievement(x.id)).join(", ")),
+      T().admStreakTip(a.streak.current, a.streak.best),
+      `${T().admColCreated}: ${formatDateTime(a.createdAt)}`,
+    ].join(" · ");
+  }
+
+  /** Phone/tablet card: name, status, the key numbers in one line, last seen, and the actions menu. */
+  function buildAcctCard(a: UserStats, now: number): HTMLLIElement[] {
+    const expanded = state.expanded.has(a.accountId);
+    const detailId = `acct-card-${a.accountId}`;
+    const facts = [
+      T().admPointsShort(fmtInt(a.totalScore)),
+      a.rank === null ? null : T().admRankShort(fmtInt(a.rank)),
+      T().admCasesShort(fmtInt(a.casesCompleted), fmtInt(a.casesStarted)),
+      a.accuracy === null ? null : T().admAccuracyShort(formatPct(a.accuracy)),
+    ].filter((x): x is string => x !== null);
+    return [
+      h(
+        "li",
+        { class: `acct-card is-${a.status}${expanded ? " is-expanded" : ""}`, "data-id": a.accountId },
+        h("div", { class: "pc-head" }, acctToggle(a, detailId), acctMenu(a)),
+        h("p", { class: "ac-facts" }, statusPill(a.status), " ", facts.join(" · ")),
+        h("p", { class: "muted small ac-seen", title: formatDateTime(a.lastSeenAt) }, T().admSeenLine(relativeAgo(a.lastSeenAt, now))),
+        expanded ? h("div", { class: "ac-detail", id: detailId }, caseStatsList(a.cases), h("p", { class: "muted small" }, acctExtras(a))) : null,
+      ),
+    ];
+  }
+
   function renderAccountsTable(): void {
     const all = state.accounts?.accounts ?? [];
-    acctCountEl.textContent = `(${all.length})`;
+    acctCountEl.textContent = `(${fmtInt(all.length)})`;
     if (all.length === 0) {
       acctRowCache.clear();
+      acctCardCache.clear();
       acctTbody.replaceChildren();
+      acctCards.replaceChildren();
       const url = location.origin;
       setChildren(
         acctTableEl,
@@ -1861,21 +2390,20 @@ export function renderAdmin(root: HTMLElement): void {
     const filtered = all.filter(
       (a) => (state.acctFilter === "all" || a.status === state.acctFilter) && (!q || a.username.toLowerCase().includes(q)),
     );
+    if (filtered.length !== all.length) acctCountEl.textContent = `(${T().admShownOf(fmtInt(filtered.length), fmtInt(all.length))})`;
     if (filtered.length === 0) {
       setChildren(acctTableEl, h("p", { class: "muted admin-empty-small" }, T().admNoMatch));
       return;
     }
-    if (acctTable.parentNode !== acctTableEl) setChildren(acctTableEl, acctTable);
     const now = Date.now();
-    syncRows(
-      acctTbody,
-      acctRowCache,
-      sortAccounts(filtered, state.acctSort).map((a) => ({
-        key: a.accountId,
-        sig: acctSignature(a, now),
-        build: () => buildAcctRows(a, now),
-      })),
-    );
+    const sorted = sortAccounts(filtered, state.acctSort);
+    if (state.narrow) {
+      if (acctCards.parentNode !== acctTableEl) setChildren(acctTableEl, acctCards);
+      syncRows(acctCards, acctCardCache, sorted.map((a) => ({ key: a.accountId, sig: acctSignature(a, now), build: () => buildAcctCard(a, now) })));
+      return;
+    }
+    if (acctTable.parentNode !== acctTableEl) setChildren(acctTableEl, acctTable);
+    syncRows(acctTbody, acctRowCache, sorted.map((a) => ({ key: a.accountId, sig: acctSignature(a, now), build: () => buildAcctRows(a, now) })));
   }
 
   function renderAccounts(): void {
@@ -1887,11 +2415,12 @@ export function renderAdmin(root: HTMLElement): void {
     }).length;
     setChildren(
       acctTilesEl,
-      tile(T().admTileAccounts, String(all.length), T().admActive24h(active)),
-      tile(T().admAcctStatus("pending"), String(count("pending")), T().admAwaitingApproval),
-      tile(T().admAcctStatus("approved"), String(count("approved"))),
-      tile(T().admAcctStatus("rejected"), String(count("rejected"))),
+      tile(T().admTileAccounts, fmtInt(all.length), T().admActive24h(active)),
+      tile(T().admAcctStatus("pending"), fmtInt(count("pending")), T().admAwaitingApproval),
+      tile(T().admAcctStatus("approved"), fmtInt(count("approved"))),
+      tile(T().admAcctStatus("rejected"), fmtInt(count("rejected"))),
     );
+    setTilesSummary(acctTiles, T().admAcctSummary(fmtInt(all.length), fmtInt(count("pending")), fmtInt(active)));
     renderPending(all);
     renderInvite();
     renderTrash();
@@ -1917,7 +2446,9 @@ export function renderAdmin(root: HTMLElement): void {
     state.liveCaseId = caseId;
     state.progress = null;
     liveRowCache.clear();
+    liveCardCache.clear();
     liveTbody.replaceChildren();
+    liveCards.replaceChildren();
     if (updateUrl && state.tab === "live") setUrl(adminHash("live", caseId), "replace");
     if (state.accounts) {
       renderLive();
@@ -1926,17 +2457,21 @@ export function renderAdmin(root: HTMLElement): void {
   }
   let liveCaseOptionsSig = "";
   const liveTodayTag = h("span", { class: "today-tag" }, T().admTodayTag);
-  const liveTilesEl = h("div", { class: "admin-tiles" });
+  const liveTilesEl = h("div", { class: "admin-tiles", id: "admin-live-tiles" });
+  const liveTiles = foldableTiles(liveTilesEl);
   const funnelEl = h("div", { class: "admin-funnel" });
-  const helpEl = h("div", { class: "admin-help" });
-  const liveTableEl = h("div", { class: "admin-table-wrap" });
+  const helpEl = h("section", { class: "help-panel", "aria-labelledby": "admin-help-title" });
+  const liveTableEl = h("div", { class: "admin-table-wrap live-table-wrap" });
   const liveBodyEl = h("div", { class: "admin-live-body" });
+  const playersCountEl = h("span", { class: "muted small" });
 
   const liveSearchInput = h("input", {
     type: "search",
     class: "admin-input admin-search",
     placeholder: T().admSearchPlaceholder,
     "aria-label": T().admSearchLabel,
+    enterkeyhint: "search",
+    dir: "auto",
   });
   liveSearchInput.addEventListener("input", () => {
     state.liveFilter = liveSearchInput.value;
@@ -1958,6 +2493,30 @@ export function renderAdmin(root: HTMLElement): void {
     }
   });
 
+  // "Active only": hides finished and idle players (the ones the instructor can't help right now).
+  const activeOnlyInput = h("input", { type: "checkbox", id: "admin-live-active" });
+  activeOnlyInput.addEventListener("change", () => {
+    state.liveActiveOnly = activeOnlyInput.checked;
+    renderLiveTable();
+  });
+  const activeOnlyLabel = h("label", { class: "admin-check", for: "admin-live-active" }, activeOnlyInput, h("span", {}, T().admActiveOnly));
+
+  // Density: a segmented control (two toggle buttons) that changes how the same rows are drawn. Remembered.
+  const densityBtns = (["comfortable", "compact"] as const).map((d) => {
+    const btn = h("button", { type: "button", class: "seg-btn", "data-density": d }, d === "compact" ? T().admDensityCompact : T().admDensityComfortable);
+    btn.addEventListener("click", () => {
+      state.liveDensity = d;
+      writePref(DENSITY_STORAGE, d);
+      syncDensity();
+    });
+    return btn;
+  });
+  const densityGroup = h("div", { class: "seg", role: "group", "aria-label": T().admDensityLabel }, densityBtns);
+  function syncDensity(): void {
+    for (const btn of densityBtns) btn.setAttribute("aria-pressed", String(btn.dataset.density === state.liveDensity));
+    liveTableEl.classList.toggle("is-compact", state.liveDensity === "compact");
+  }
+
   // Reset this case: typed confirmation.
   const resetInput = h("input", {
     type: "text",
@@ -1965,6 +2524,7 @@ export function renderAdmin(root: HTMLElement): void {
     placeholder: T().admResetPlaceholder,
     "aria-label": T().admResetLabel,
     autocomplete: "off",
+    dir: "ltr",
   });
   const resetBtn = h("button", { type: "button", class: "btn btn-danger btn-sm", disabled: true }, T().admResetCase);
   const resetMsg = h("span", { class: "muted small", role: "status" });
@@ -1990,10 +2550,11 @@ export function renderAdmin(root: HTMLElement): void {
       });
   });
 
+  const LIVE_COLS = 7;
   const liveTbody = h("tbody", {});
   const liveTable = h(
     "table",
-    { class: "admin-table" },
+    { class: "admin-table live-table" },
     h(
       "thead",
       {},
@@ -2003,8 +2564,8 @@ export function renderAdmin(root: HTMLElement): void {
         th(T().admColName),
         th(T().admColProgress),
         th(T().admColScore, "num"),
-        th(T().admColCommands, "num"),
         th(T().admColStage),
+        th(T().admColOnStage, "num"),
         th(T().admColSeen),
         h("th", { scope: "col" }, h("span", { class: "visually-hidden" }, T().admColActions)),
       ),
@@ -2012,38 +2573,38 @@ export function renderAdmin(root: HTMLElement): void {
     liveTbody,
   );
   const liveRowCache = new Map<string, RowEntry>();
+  // Phones and tablets: one card per player instead of the 7-column grid.
+  const liveCards = h("ul", { class: "player-cards", "aria-labelledby": "admin-players-title" });
+  const liveCardCache = new Map<string, RowEntry<HTMLLIElement>>();
 
   function buildLivePanel(): void {
     setChildren(
       tabPanels.get("live") ?? container,
       h(
-        "section",
-        { class: "panel admin-panel admin-toolbar" },
+        "div",
+        { class: "admin-toolbar" },
         h("label", { class: "admin-label", for: "admin-live-case" }, T().admCasePicker),
         liveCaseSelect,
         liveTodayTag,
       ),
       liveBodyEl,
     );
+    syncDensity();
   }
 
   function liveBodySkeleton(): HTMLElement[] {
     return [
-      liveTilesEl,
-      h(
-        "div",
-        { class: "admin-grid" },
-        h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, T().admStageFunnel), funnelEl),
-        h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, T().admNeedsHelp), helpEl),
-      ),
+      // The first question on this tab is "who needs me right now?": answered before anything else.
+      helpEl,
+      liveTiles,
       h(
         "section",
-        { class: "panel admin-panel" },
+        { class: "panel admin-panel", "aria-labelledby": "admin-players-title" },
         h(
           "div",
           { class: "admin-table-head" },
-          h("h2", { class: "admin-h2" }, T().admPlayers),
-          h("div", { class: "admin-controls" }, liveSearchInput, liveSortSelect),
+          h("h2", { class: "admin-h2", id: "admin-players-title" }, T().admPlayers, " ", playersCountEl),
+          h("div", { class: "admin-controls" }, liveSearchInput, liveSortSelect, activeOnlyLabel, densityGroup),
         ),
         h(
           "div",
@@ -2055,6 +2616,7 @@ export function renderAdmin(root: HTMLElement): void {
         ),
         liveTableEl,
       ),
+      h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, T().admStageFunnel), funnelEl),
       h(
         "section",
         { class: "panel admin-panel admin-danger" },
@@ -2083,24 +2645,25 @@ export function renderAdmin(root: HTMLElement): void {
     liveTodayTag.hidden = !state.liveCaseId || state.liveCaseId !== todayId;
   }
 
-  function renderLiveTiles(players: readonly AdminProgress[], caseId: string): void {
+  function renderLiveTiles(players: readonly AdminProgress[], caseId: string, help: readonly HelpEntry[]): void {
     const finished = players.filter(isDone);
     const avg = players.length ? Math.round(players.reduce((s, p) => s + p.score, 0) / players.length) : null;
     const maxScore = players[0]?.maxScore ?? caseMaxScore(caseId);
     const med = median(finished.map(finishDurationMs).filter((v): v is number => v !== null));
-    const stuck = players.filter((p) => stuckLevel(p) !== "none").length;
+    const needing = help.filter((e) => e.level !== "idle").length;
     setChildren(
       liveTilesEl,
-      tile(T().admPlayers, String(players.length), T().admStuckCount(stuck)),
-      tile(T().admFinished, String(finished.length), players.length ? `${Math.round((finished.length / players.length) * 100)}%` : undefined),
+      tile(T().admPlayers, fmtInt(players.length), T().admStuckCount(needing)),
+      tile(T().admFinished, fmtInt(finished.length), players.length ? formatPct(finished.length / players.length) : undefined),
       // Averaged over every player on the case (Stats averages finishers only): the label says which.
       tile(
         T().admAvgScoreAll,
-        avg === null ? "—" : String(avg),
-        [maxScore ? T().admPar(maxScore) : null, T().admSample(players.length)].filter((x) => x !== null).join(" · "),
+        avg === null ? "—" : fmtInt(avg),
+        [maxScore ? T().admPar(fmtInt(maxScore)) : null, T().admSample(fmtInt(players.length))].filter((x) => x !== null).join(" · "),
       ),
-      tile(T().admMedianTime, med === null ? "—" : formatDuration(med), `${T().admFinishedPlayers} · ${T().admSample(finished.length)}`),
+      tile(T().admMedianTime, med === null ? "—" : formatFinish(med), `${T().admFinishedPlayers} · ${T().admSample(fmtInt(finished.length))}`),
     );
+    setTilesSummary(liveTiles, T().admLiveSummary(fmtInt(players.length), fmtInt(finished.length), fmtInt(needing)));
   }
 
   function renderFunnel(players: readonly AdminProgress[], caseId: string): void {
@@ -2120,7 +2683,7 @@ export function renderAdmin(root: HTMLElement): void {
           h("div", { class: "funnel-reached", style: `width:${pct(reached)}` }),
           h("div", { class: "funnel-done", style: `width:${pct(done)}` }),
         ),
-        h("span", { class: "funnel-count" }, `${done}/${reached}`),
+        h("span", { class: "funnel-count" }, `${fmtInt(done)}/${fmtInt(reached)}`),
       );
     });
     setChildren(
@@ -2141,37 +2704,121 @@ export function renderAdmin(root: HTMLElement): void {
     return h(
       "span",
       { class: `stuck-badge is-${level}`, title: T().admStuckTip(Math.floor(p.stuckMinutes)) },
-      T().admStuckBadge(Math.floor(p.stuckMinutes)),
+      T().admStuckBadge(formatMinutes(p.stuckMinutes)),
     );
   }
 
-  function renderHelp(players: readonly AdminProgress[], caseId: string): void {
-    const stuck = players.filter((p) => stuckLevel(p) !== "none").sort((a, b) => b.stuckMinutes - a.stuckMinutes);
-    if (stuck.length === 0) {
-      setChildren(helpEl, h("p", { class: "muted admin-empty-small" }, T().admNobodyStuck));
+  /** The reasons a player is on the "Needs help" list, as text chips (never colour alone). */
+  function helpReasons(e: HelpEntry): HTMLElement[] {
+    const out: HTMLElement[] = [];
+    if (e.stuck) out.push(stuckBadge(e.p) ?? h("span", {}));
+    if (e.wrong >= WRONG_HELP_MIN) {
+      out.push(h("span", { class: `help-chip is-${e.wrong >= WRONG_ALERT_MIN ? "alert" : "warn"}` }, T().admWrongChip(fmtInt(e.wrong))));
+    }
+    if (e.idleMin !== null) out.push(h("span", { class: "help-chip is-idle" }, T().admIdleChip(formatMinutes(e.idleMin))));
+    return out;
+  }
+
+  let helpSig = "";
+  function renderHelp(help: readonly HelpEntry[] | null, caseId: string): void {
+    const sig = JSON.stringify([getLang(), caseId, state.helpShowAll, help === null ? null : help.map((e) => [e.p.accountId, e.p.username, e.level, e.p.currentStage, Math.floor(e.p.stuckMinutes), e.wrong, e.idleMin === null ? null : Math.floor(e.idleMin)])]);
+    if (sig === helpSig) return;
+    helpSig = sig;
+    if (help === null) {
+      helpEl.className = "help-panel is-empty";
+      setChildren(helpEl, h("h2", { class: "visually-hidden", id: "admin-help-title" }, T().admNeedsHelp), h("p", { class: "help-ok muted" }, T().admLoading));
       return;
     }
+    if (help.length === 0) {
+      // Nobody needs help: one quiet line, not an empty card.
+      helpEl.className = "help-panel is-empty";
+      setChildren(
+        helpEl,
+        h("h2", { class: "visually-hidden", id: "admin-help-title" }, T().admNeedsHelp),
+        h(
+          "p",
+          { class: "help-ok" },
+          h("span", { class: "help-ok-mark", "aria-hidden": "true" }, "✓"),
+          h("strong", {}, T().admEveryoneMoving),
+          h("span", { class: "muted small" }, T().admHelpThresholds(formatMinutes(STUCK_WARN_MIN), fmtInt(WRONG_HELP_MIN))),
+        ),
+      );
+      return;
+    }
+    helpEl.className = "help-panel panel admin-panel";
     setChildren(
       helpEl,
       h(
-        "ul",
-        { class: "help-list" },
-        stuck.map((p) => {
-          const cur = p.currentStage;
-          const sp = cur !== "setup" && cur !== "done" ? p.stages[cur] : undefined;
-          const detail = sp ? T().admHelpDetail(sp.wrongAttempts, sp.hintsRevealed) : "";
+        "div",
+        { class: "help-head" },
+        h("h2", { class: "admin-h2", id: "admin-help-title" }, T().admNeedsHelp, " ", h("span", { class: "count-badge is-warn" }, fmtInt(help.length))),
+        h("span", { class: "muted small" }, T().admHelpThresholds(formatMinutes(STUCK_WARN_MIN), fmtInt(WRONG_HELP_MIN))),
+      ),
+      h(
+        "ol",
+        { class: "help-list", id: "admin-help-list" },
+        (state.helpShowAll ? help : help.slice(0, HELP_PREVIEW)).map((e) => {
+          const p = e.p;
+          const stage = stageLongLabel(caseId, p.currentStage);
           return h(
             "li",
-            { class: `help-item is-${stuckLevel(p)}` },
-            h("span", { class: "help-name" }, p.username),
-            h("span", { class: "help-stage" }, stageLongLabel(caseId, cur)),
-            h("span", { class: "help-detail muted" }, detail),
-            stuckBadge(p),
+            { class: `help-item is-${e.level}`, "data-help": p.accountId },
+            h("span", { class: "help-name", dir: "auto", title: p.username }, p.username),
+            h("span", { class: "help-stage", title: stage }, stage),
+            h("span", { class: "help-reasons" }, helpReasons(e)),
+            h(
+              "button",
+              { type: "button", class: "btn btn-ghost btn-sm help-jump", "aria-label": T().admJumpLabel(p.username), onclick: () => jumpToPlayer(p.accountId) },
+              T().admJump,
+            ),
           );
         }),
       ),
+      help.length > HELP_PREVIEW
+        ? h(
+            "button",
+            {
+              type: "button",
+              class: "btn btn-ghost btn-sm help-more",
+              "aria-expanded": String(state.helpShowAll),
+              "aria-controls": "admin-help-list",
+              onclick: () => {
+                state.helpShowAll = !state.helpShowAll;
+                renderLive();
+                helpEl.querySelector<HTMLButtonElement>(".help-more")?.focus();
+              },
+            },
+            state.helpShowAll ? T().admHelpFewer : T().admHelpAll(fmtInt(help.length)),
+          )
+        : null,
     );
   }
+
+  /** "Jump" from Needs help: make sure the player is listed (clear filters that hide them), then scroll, focus and flash. */
+  function jumpToPlayer(id: string): void {
+    const p = state.progress?.players.find((x) => x.accountId === id);
+    if (!p) return;
+    const q = state.liveFilter.trim().toLowerCase();
+    if (q && !p.username.toLowerCase().includes(q)) {
+      state.liveFilter = "";
+      liveSearchInput.value = "";
+    }
+    if (state.liveActiveOnly && !isLiveActive(p, Date.now())) {
+      state.liveActiveOnly = false;
+      activeOnlyInput.checked = false;
+    }
+    renderLiveTable();
+    const target = liveTableEl.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"]`);
+    if (!target) return;
+    target.scrollIntoView({ block: "center", behavior: "auto" });
+    target.querySelector<HTMLElement>(".acct-toggle")?.focus({ preventScroll: true });
+    target.classList.remove("is-flash");
+    void target.offsetWidth; // restart the highlight
+    target.classList.add("is-flash");
+    window.setTimeout(() => target.classList.remove("is-flash"), 2000);
+  }
+
+  const isLiveActive = (p: AdminProgress, now: number): boolean => !isDone(p) && !isIdle(p, now);
 
   function progressCells(p: AdminProgress, stages: readonly StageKey[], now: number): HTMLElement {
     return h(
@@ -2202,12 +2849,11 @@ export function renderAdmin(root: HTMLElement): void {
       Math.floor(p.stuckMinutes),
       st,
       relativeAgo(p.lastSeenAt, now),
+      isIdle(p, now),
       commandsUsed(p),
       state.liveExpanded.has(id) ? JSON.stringify(p.stages) : "",
     ].join("|");
   }
-
-  const LIVE_COLS = 7;
 
   /** Per-stage scoring for one player (the same numbers as the cell tooltips, reachable by keyboard and touch). */
   function breakdownTable(p: AdminProgress): HTMLElement {
@@ -2245,32 +2891,31 @@ export function renderAdmin(root: HTMLElement): void {
             {},
             h("td", {}, h("span", { class: "q-id" }, q.toUpperCase()), " ", questionTitle(p.caseId, q)),
             h("td", {}, h("span", { class: `case-status is-${sp?.status ?? "locked"}` }, T().admStatus(sp?.status ?? "locked"))),
-            h("td", { class: "num" }, b ? String(b.base) : "—"),
+            h("td", { class: "num" }, b ? fmtInt(b.base) : "—"),
             h("td", { class: "num" }, num(b?.hints)),
             h("td", { class: "num", title: T().admCommandsUsed(sp?.commandsRevealed ?? 0) }, num(b?.commands)),
             h("td", { class: "num" }, num(b?.wrong)),
             h("td", { class: "num" }, num(b?.time)),
             h("td", { class: "num" }, num(b?.clean)),
             h("td", { class: "num" }, num(b?.firstBlood)),
-            h("td", { class: "num col-score" }, b ? String(b.total) : sp?.status === "solved" ? String(sp.points) : "—"),
-            h("td", { class: "num col-seen" }, b ? `${formatSeconds(b.solveSeconds)} / ${formatSeconds(b.targetSeconds)}` : "—"),
+            h("td", { class: "num col-score" }, b ? fmtInt(b.total) : sp?.status === "solved" ? fmtInt(sp.points) : "—"),
+            h("td", { class: "num col-seen" }, b ? T().admSolveVsTarget(formatSeconds(b.solveSeconds), formatSeconds(b.targetSeconds)) : "—"),
           );
         }),
       ),
     );
   }
 
-  function buildLiveRows(p: AdminProgress, stages: readonly StageKey[], now: number): HTMLTableRowElement[] {
+  function liveToggle(p: AdminProgress, detailId: string, title: string): HTMLButtonElement {
     const expanded = state.liveExpanded.has(p.accountId);
-    const detailId = `live-detail-${p.accountId}`;
-    const toggle = h(
+    return h(
       "button",
       {
         type: "button",
         class: "acct-toggle",
         "aria-expanded": String(expanded),
         "aria-controls": detailId,
-        title: T().admShowBreakdown,
+        title,
         onclick: () => {
           if (state.liveExpanded.has(p.accountId)) state.liveExpanded.delete(p.accountId);
           else state.liveExpanded.add(p.accountId);
@@ -2279,11 +2924,62 @@ export function renderAdmin(root: HTMLElement): void {
         },
       },
       h("span", { class: "acct-caret", "aria-hidden": "true" }, "▸"),
-      h("span", { class: "player-name" }, p.username),
+      h("span", { class: "player-name", dir: "auto" }, p.username),
     );
-    const row = buildLiveRow(p, stages, now, toggle);
+  }
+
+  /** Restart lives in the row's actions menu: a destructive per-player action, not a button on every row. */
+  function liveMenu(p: AdminProgress): HTMLButtonElement {
+    const caseId = p.caseId;
+    const key = `live:${p.accountId}`;
+    return menuButton(T().admActionsFor(p.username), key, () => [
+      {
+        label: T().admRestartItem,
+        danger: true,
+        run: () => {
+          const solved = caseQuestionIds(caseId).filter((q) => isFinishedStatus(p.stages[q]?.status ?? "locked")).length;
+          void askConfirm({
+            title: T().admRestartTitle(p.username, caseTitle(caseId)),
+            body: T().admRestartBody(solved, p.score),
+            confirmLabel: T().admRestartLabel(p.username),
+            cancelLabel: T().admKeepProgress,
+            busyLabel: T().admRestarting,
+            tone: "danger",
+            run: async () => {
+              await restartPlayerCase(p.accountId, caseId);
+              void load();
+            },
+            returnFocus: () => menuTriggerEl(key),
+          });
+        },
+      },
+    ]);
+  }
+
+  /** "12 min" on the current stage (nothing for finished players), toned like the stuck badge. */
+  function onStage(p: AdminProgress, now: number): HTMLElement {
+    if (isDone(p)) return h("span", { class: "muted" }, state.narrow ? "" : "—");
+    if (isIdle(p, now)) return h("span", { class: "help-chip is-idle" }, T().admIdleChip(formatMinutes(minutesSince(p.lastSeenAt, now) ?? 0)));
+    const level = stuckLevel(p);
+    return h("span", { class: level === "none" ? "" : `stuck-badge is-${level}`, title: T().admStuckTip(Math.floor(p.stuckMinutes)) }, formatMinutes(p.stuckMinutes));
+  }
+
+  function buildLiveRows(p: AdminProgress, stages: readonly StageKey[], now: number): HTMLTableRowElement[] {
+    const expanded = state.liveExpanded.has(p.accountId);
+    const detailId = `live-detail-${p.accountId}`;
+    const stage = stageLongLabel(p.caseId, p.currentStage);
+    const row = h(
+      "tr",
+      { class: `acct-row is-${stuckLevel(p)}${expanded ? " is-expanded" : ""}`, "data-id": p.accountId },
+      h("td", { class: "col-name" }, liveToggle(p, detailId, T().admShowBreakdown)),
+      h("td", {}, progressCells(p, stages, now)),
+      h("td", { class: "num col-score", title: T().admScoreParTip(p.maxScore) }, fmtInt(p.score)),
+      h("td", { class: "col-stage" }, h("span", { class: `stage-text${isDone(p) ? " stage-done" : ""}`, title: stage }, stage)),
+      h("td", { class: "num col-onstage" }, onStage(p, now)),
+      h("td", { class: "col-seen muted", title: formatDateTime(p.lastSeenAt) }, relativeAgo(p.lastSeenAt, now)),
+      h("td", { class: "col-actions" }, liveMenu(p)),
+    );
     if (!expanded) return [row];
-    row.classList.add("is-expanded");
     const detail = h(
       "tr",
       { class: "acct-detail", id: detailId },
@@ -2296,45 +2992,51 @@ export function renderAdmin(root: HTMLElement): void {
     return [row, detail];
   }
 
-  function buildLiveRow(p: AdminProgress, stages: readonly StageKey[], now: number, nameCell: HTMLElement): HTMLTableRowElement {
-    const caseId = p.caseId;
-    const cmds = commandsUsed(p);
-    return h(
-      "tr",
-      { class: `acct-row is-${stuckLevel(p)}`, "data-id": p.accountId },
-      h("td", { class: "col-name" }, nameCell),
-      h("td", {}, progressCells(p, stages, now)),
-      h("td", { class: "num col-score", title: T().admScoreParTip(p.maxScore) }, String(p.score)),
-      h("td", { class: "num", title: T().admCommandsUsed(cmds) }, String(cmds)),
+  /** Phone/tablet card: name, score, current stage, minutes on it, and an expandable labelled stage strip. */
+  function buildLiveCard(p: AdminProgress, stages: readonly StageKey[], now: number): HTMLLIElement[] {
+    const expanded = state.liveExpanded.has(p.accountId);
+    const detailId = `live-card-${p.accountId}`;
+    const stage = stageLongLabel(p.caseId, p.currentStage);
+    const strip = expanded
+      ? h(
+          "ol",
+          { class: "stage-strip", id: detailId },
+          stages.map((s) => {
+            const status = stageStatus(p, s);
+            const sp = s === "setup" ? undefined : p.stages[s];
+            const title = s === "setup" ? T().admSetup : questionTitle(p.caseId, s);
+            const extra = sp && status === "solved" ? T().admPointsShort(fmtInt(sp.points)) : sp && sp.wrongAttempts > 0 ? T().admWrongChip(fmtInt(sp.wrongAttempts)) : "";
+            return h(
+              "li",
+              { class: `strip-item is-${status}` },
+              h("span", { class: `cell is-${status}`, "aria-hidden": "true" }),
+              h("span", { class: "strip-label" }, s === "setup" ? T().admSetup : s.toUpperCase(), " ", h("span", { class: "muted" }, s === "setup" ? "" : title)),
+              h("span", { class: "strip-status" }, T().admStatus(status), extra ? ` · ${extra}` : ""),
+            );
+          }),
+        )
+      : null;
+    const card = h(
+      "li",
+      { class: `player-card is-${stuckLevel(p)}${expanded ? " is-expanded" : ""}`, "data-id": p.accountId },
       h(
-        "td",
-        { class: "col-stage" },
-        h("span", { class: isDone(p) ? "stage-done" : "" }, stageLongLabel(caseId, p.currentStage)),
-        " ",
-        stuckBadge(p),
+        "div",
+        { class: "pc-head" },
+        liveToggle(p, detailId, T().admShowStages),
+        h("span", { class: "pc-score", title: T().admScoreParTip(p.maxScore) }, T().admPointsShort(fmtInt(p.score))),
+        liveMenu(p),
       ),
-      h("td", { class: "col-seen muted" }, relativeAgo(p.lastSeenAt, now)),
       h(
-        "td",
-        { class: "col-actions" },
-        rowAction(T().admRestart, T().admRestartLabel(p.username), `restart:${p.accountId}`, "btn btn-ghost btn-sm", () => {
-          const solved = caseQuestionIds(caseId).filter((q) => isFinishedStatus(p.stages[q]?.status ?? "locked")).length;
-          return askConfirm({
-            title: T().admRestartTitle(p.username, caseTitle(caseId)),
-            body: T().admRestartBody(solved, p.score),
-            confirmLabel: T().admRestartLabel(p.username),
-            cancelLabel: T().admKeepProgress,
-            busyLabel: T().admRestarting,
-            tone: "danger",
-            run: async () => {
-              await restartPlayerCase(p.accountId, caseId);
-              void load();
-            },
-            returnFocus: () => rowActionEl(`restart:${p.accountId}`),
-          });
-        }),
+        "div",
+        { class: "pc-meta" },
+        h("span", { class: `pc-stage${isDone(p) ? " stage-done" : ""}`, title: stage }, stage),
+        onStage(p, now),
       ),
+      expanded ? null : progressCells(p, stages, now),
+      strip,
+      expanded ? h("p", { class: "muted small pc-seen" }, T().admSeenLine(relativeAgo(p.lastSeenAt, now))) : null,
     );
+    return [card];
   }
 
   function renderLiveTable(): void {
@@ -2343,7 +3045,10 @@ export function renderAdmin(root: HTMLElement): void {
     if (!caseId) return;
     if (players.length === 0) {
       liveRowCache.clear();
+      liveCardCache.clear();
       liveTbody.replaceChildren();
+      liveCards.replaceChildren();
+      playersCountEl.textContent = "";
       const url = location.origin;
       setChildren(
         liveTableEl,
@@ -2359,23 +3064,30 @@ export function renderAdmin(root: HTMLElement): void {
       );
       return;
     }
+    const now = Date.now();
     const q = state.liveFilter.trim().toLowerCase();
-    const filtered = q ? players.filter((p) => p.username.toLowerCase().includes(q)) : players;
+    const filtered = players.filter((p) => (!q || p.username.toLowerCase().includes(q)) && (!state.liveActiveOnly || isLiveActive(p, now)));
+    playersCountEl.textContent = filtered.length === players.length ? `(${fmtInt(players.length)})` : `(${T().admShownOf(fmtInt(filtered.length), fmtInt(players.length))})`;
     if (filtered.length === 0) {
-      setChildren(liveTableEl, h("p", { class: "muted admin-empty-small" }, T().admNoMatch));
+      setChildren(liveTableEl, h("p", { class: "muted admin-empty-small" }, state.liveActiveOnly && !q ? T().admNoActive : T().admNoMatch));
+      return;
+    }
+    const stages = caseStages(caseId);
+    const sorted = sortPlayers(filtered, state.liveSort, stages);
+    if (state.narrow) {
+      if (liveCards.parentNode !== liveTableEl) setChildren(liveTableEl, liveCards);
+      syncRows(
+        liveCards,
+        liveCardCache,
+        sorted.map((p) => ({ key: p.accountId, sig: liveSignature(p, stages, now), build: () => buildLiveCard(p, stages, now) })),
+      );
       return;
     }
     if (liveTable.parentNode !== liveTableEl) setChildren(liveTableEl, liveTable);
-    const stages = caseStages(caseId);
-    const now = Date.now();
     syncRows(
       liveTbody,
       liveRowCache,
-      sortPlayers(filtered, state.liveSort, stages).map((p) => ({
-        key: p.accountId,
-        sig: liveSignature(p, stages, now),
-        build: () => buildLiveRows(p, stages, now),
-      })),
+      sorted.map((p) => ({ key: p.accountId, sig: liveSignature(p, stages, now), build: () => buildLiveRows(p, stages, now) })),
     );
   }
 
@@ -2386,14 +3098,18 @@ export function renderAdmin(root: HTMLElement): void {
       setChildren(liveBodyEl, h("section", { class: "panel admin-panel admin-empty" }, h("p", { class: "admin-empty-title" }, T().admNoReleased)));
       return;
     }
-    if (liveTilesEl.parentNode !== liveBodyEl) setChildren(liveBodyEl, liveBodySkeleton());
+    if (helpEl.parentNode !== liveBodyEl) {
+      helpSig = "";
+      setChildren(liveBodyEl, liveBodySkeleton());
+    }
     resetTextEl.textContent = T().admResetCaseText(caseTitle(caseId));
     // A response for a previously selected case is ignored until the new one arrives.
     const players = state.progress?.caseId === caseId ? state.progress.players : [];
     for (const id of state.liveExpanded) if (!players.some((p) => p.accountId === id)) state.liveExpanded.delete(id);
-    renderLiveTiles(players, caseId);
+    const help = state.progress?.caseId === caseId ? helpEntries(players, Date.now()) : null;
+    renderHelp(help, caseId);
+    renderLiveTiles(players, caseId, help ?? []);
     renderFunnel(players, caseId);
-    renderHelp(players, caseId);
     renderLiveTable();
   }
 
@@ -2800,14 +3516,19 @@ export function renderAdmin(root: HTMLElement): void {
   const evClockEl = h("p", { class: "muted small adm-ev-clock" });
   const evBodyEl = h("div", { class: "admin-tabpanel adm-ev-body" });
 
-  const evName = h("input", { type: "text", id: "ev-name", class: "admin-input", maxlength: 80, placeholder: T().admEventNamePh, autocomplete: "off" });
+  const evName = h("input", { type: "text", id: "ev-name", class: "admin-input", maxlength: 80, placeholder: T().admEventNamePh, autocomplete: "off", dir: "auto" });
   const timeInput = (id: string): HTMLInputElement =>
-    h("input", { type: "datetime-local", id, class: "admin-input ev-time", step: 60, dir: "ltr", "aria-describedby": "ev-tz" });
+    h("input", { type: "datetime-local", id, class: "admin-input ev-time", step: 60, dir: "ltr", "aria-describedby": `${id}-preview ev-tz` });
+  /** The picker shows the browser's own format (often US): this line repeats the value in the app locale, with the zone. */
+  const timePreview = (id: string): HTMLParagraphElement => h("p", { class: "muted small ev-time-preview", id: `${id}-preview` });
   const evStart = timeInput("ev-start");
   const evEnd = timeInput("ev-end");
   const evFreeze = timeInput("ev-freeze");
+  const evStartPreview = timePreview("ev-start");
+  const evEndPreview = timePreview("ev-end");
+  const evFreezePreview = timePreview("ev-freeze");
   const evEnforce = h("input", { type: "checkbox", id: "ev-enforce", "aria-describedby": "ev-enforce-help" });
-  const evAnnText = h("textarea", { id: "ev-ann", class: "admin-input ev-ann", maxlength: 280, rows: 3, "aria-describedby": "ev-ann-help ev-ann-count" });
+  const evAnnText = h("textarea", { id: "ev-ann", class: "admin-input ev-ann", maxlength: 280, rows: 3, dir: "auto", "aria-describedby": "ev-ann-help ev-ann-count" });
   const evAnnCount = h("span", { class: "muted small", id: "ev-ann-count" });
   const evAnnLevel = h(
     "select",
@@ -3089,8 +3810,16 @@ export function renderAdmin(root: HTMLElement): void {
     evErrorEl.textContent = ev.error ? T().admSaveFailed(ev.error) : "";
     evErrorEl.hidden = ev.error === null;
     const errs = ev.draft ? eventFieldErrors(ev.draft) : { end: null, freeze: null, enforce: null };
-    setFieldError(evEnd, evEndErr, "ev-tz", errs.end);
-    setFieldError(evFreeze, evFreezeErr, "ev-tz", errs.freeze);
+    setFieldError(evEnd, evEndErr, "ev-end-preview ev-tz", errs.end);
+    setFieldError(evFreeze, evFreezeErr, "ev-freeze-preview ev-tz", errs.freeze);
+    if (ev.draft) {
+      const preview = (el: HTMLElement, iso: string | null): void => {
+        el.textContent = iso === null ? T().admTimeNotSet : formatDateTimeZone(iso);
+      };
+      preview(evStartPreview, ev.draft.startsAt);
+      preview(evEndPreview, ev.draft.endsAt);
+      preview(evFreezePreview, ev.draft.freezeAt);
+    }
     setFieldError(evEnforce, evEnforceErr, "ev-enforce-help", errs.enforce);
     evBar.hidden = !eventBarVisible();
     syncSaveBarClass();
@@ -3158,17 +3887,19 @@ export function renderAdmin(root: HTMLElement): void {
           "div",
           { class: "sched-form adm-ev-form" },
           field("ev-name", T().admEventName, evName),
-          field("ev-start", T().admStartsAt, h("div", { class: "ev-time-row" }, evStart, clearTimeBtn(evStart, T().admStartsAt, (d) => (d.startsAt = null)))),
+          field("ev-start", T().admStartsAt, h("div", { class: "ev-time-row" }, evStart, clearTimeBtn(evStart, T().admStartsAt, (d) => (d.startsAt = null))), evStartPreview),
           field(
             "ev-end",
             T().admEndsAt,
             h("div", { class: "ev-time-row" }, evEnd, clearTimeBtn(evEnd, T().admEndsAt, (d) => (d.endsAt = null))),
+            evEndPreview,
             evEndErr,
           ),
           field(
             "ev-freeze",
             T().admFreezeAt,
             h("div", { class: "ev-time-row" }, evFreeze, clearTimeBtn(evFreeze, T().admFreezeAt, (d) => (d.freezeAt = null))),
+            evFreezePreview,
             evFreezeErr,
             h("p", { class: "muted small" }, T().admFreezeHelp),
           ),
@@ -3263,7 +3994,7 @@ export function renderAdmin(root: HTMLElement): void {
       const name = names.get(e.target);
       out.push(
         name !== undefined
-          ? h("span", { class: "player-name" }, name)
+          ? h("span", { class: "player-name", dir: "auto" }, name)
           : h("span", { class: "muted", title: e.target }, T().admUnknownAccount),
       );
     }
@@ -3273,7 +4004,7 @@ export function renderAdmin(root: HTMLElement): void {
         detail = e.detail === "all cases" ? T().admAllCases : caseTitle(e.detail);
       }
       if (out.length > 0) out.push(" · ");
-      out.push(h("span", { class: "muted" }, detail));
+      out.push(h("span", { class: "muted", dir: "auto" }, detail));
     }
     if (out.length === 0) out.push("—");
     return out;
@@ -3327,8 +4058,9 @@ export function renderAdmin(root: HTMLElement): void {
   function buildStatsPanel(): void {
     setChildren(
       tabPanels.get("stats") ?? container,
-      h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, T().admTop10), statsBoardEl),
+      // How each case went comes first; the overall top 10 follows.
       statsCasesEl,
+      h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, T().admTop10), statsBoardEl),
     );
   }
 
@@ -3364,12 +4096,12 @@ export function renderAdmin(root: HTMLElement): void {
             h(
               "tr",
               { class: a.rank === 1 ? "is-first" : "" },
-              h("td", { class: "num" }, `#${a.rank ?? "—"}`),
-              h("td", { class: "col-name" }, h("span", { class: "player-name" }, a.username)),
-              h("td", { class: "num col-score" }, String(a.totalScore)),
-              h("td", { class: "num" }, String(a.casesCompleted)),
+              h("td", { class: "num" }, a.rank === null ? "—" : fmtInt(a.rank)),
+              h("td", { class: "col-name" }, h("span", { class: "player-name", dir: "auto" }, a.username)),
+              h("td", { class: "num col-score" }, fmtInt(a.totalScore)),
+              h("td", { class: "num" }, fmtInt(a.casesCompleted)),
               h("td", { class: "num" }, formatPct(a.accuracy)),
-              h("td", { class: "num" }, String(a.hintsUsed)),
+              h("td", { class: "num" }, fmtInt(a.hintsUsed)),
             ),
           ),
         ),
@@ -3377,107 +4109,174 @@ export function renderAdmin(root: HTMLElement): void {
     );
   }
 
+  /**
+   * One case: a headline row that answers "how did it go?" (completion, median time, hardest stage with its numbers),
+   * then per-question solved / gave up / still on it as bars, with the full numbers one disclosure away.
+   */
   function caseSummaryPanel(s: CaseSummary): HTMLElement {
     const maxScore = s.maxScore > 0 ? s.maxScore : caseMaxScore(s.caseId);
     const title = cachedCase(s.caseId)?.title ?? s.title;
-    const funnel = questionFunnel(s, state.statsProgress.get(s.caseId) ?? null);
+    const progress = state.statsProgress.get(s.caseId) ?? null;
+    const funnel = questionFunnel(s, progress);
     const hardest = hardestQuestion(funnel);
     const isToday = state.today?.caseId === s.caseId;
-    const children: Child[] = [
-      h(
-        "div",
-        { class: "stats-case-head" },
-        h("h2", { class: "admin-h2" }, title),
-        isToday ? h("span", { class: "today-tag" }, T().admTodayTag) : null,
-        h("code", { class: "muted small" }, s.caseId),
-      ),
-      h(
-        "div",
-        { class: "admin-tiles admin-tiles-sm" },
-        tile(T().admPlayers, String(s.players)),
-        tile(T().admFinished, String(s.completed), s.players ? `${Math.round((s.completed / s.players) * 100)}%` : undefined),
-        // The server averages finished players only (Live averages everyone): the label says which.
-        tile(
-          T().admAvgScoreFinishers,
-          s.avgScore === null ? "—" : String(Math.round(s.avgScore)),
-          [maxScore ? T().admPar(maxScore) : null, T().admSample(s.completed)].filter((x) => x !== null).join(" · "),
-        ),
-        tile(
-          T().admAvgTime,
-          s.avgDurationSeconds === null ? "—" : formatSeconds(Math.round(s.avgDurationSeconds)),
-          `${T().admFinishedPlayers} · ${T().admSample(s.completed)}`,
-        ),
-      ),
-    ];
+    // Median from the per-player progress when we have it; otherwise the server's mean, labelled as such.
+    const finishTimes = progress ? progress.map(finishDurationMs).filter((v): v is number => v !== null) : [];
+    const med = median(finishTimes);
+    const timeValue = med !== null ? formatFinish(med) : s.avgDurationSeconds !== null ? formatFinish(s.avgDurationSeconds * 1000) : "—";
+    const timeLabel = med !== null || s.avgDurationSeconds === null ? T().admMedianTime : T().admAvgTime;
+    const head = h(
+      "div",
+      { class: "stats-case-head" },
+      h("h2", { class: "admin-h2" }, title),
+      isToday ? h("span", { class: "today-tag" }, T().admTodayTag) : null,
+      h("code", { class: "muted small" }, s.caseId),
+    );
     if (s.players === 0) {
-      children.push(h("p", { class: "muted admin-empty-small" }, T().admNobodyPlayed));
-    } else {
-      children.push(
-        h(
-          "div",
-          { class: "admin-table-wrap" },
-          h(
-            "table",
-            { class: "admin-table stats-q-table" },
-            h(
-              "thead",
-              {},
+      return h("section", { class: "panel admin-panel stats-case" }, head, h("p", { class: "muted admin-empty-small" }, T().admNobodyPlayed));
+    }
+    const hardestLabel = hardest ? `${hardest.row.q.toUpperCase()} ${questionTitle(s.caseId, hardest.row.q)}`.trim() : null;
+    const headline = h(
+      "div",
+      { class: "stats-headline" },
+      h(
+        "div",
+        { class: "stats-kpi is-lead" },
+        h("div", { class: "admin-tile-label" }, T().admCompletion),
+        h("div", { class: "stats-kpi-value" }, formatPct(s.completed / s.players)),
+        h("div", { class: "admin-tile-sub" }, T().admCompletionSub(fmtInt(s.completed), fmtInt(s.players))),
+      ),
+      h(
+        "div",
+        { class: "stats-kpi" },
+        h("div", { class: "admin-tile-label" }, timeLabel),
+        h("div", { class: "stats-kpi-value" }, timeValue),
+        h("div", { class: "admin-tile-sub" }, `${T().admFinishedPlayers} · ${T().admSample(fmtInt(med !== null ? finishTimes.length : s.completed))}`),
+      ),
+      h(
+        "div",
+        { class: "stats-kpi is-hardest", title: T().admHardestTip },
+        h("div", { class: "admin-tile-label" }, T().admHardestStage),
+        hardest && hardestLabel
+          ? [
+              h("div", { class: "stats-kpi-value stats-kpi-text", title: hardestLabel }, hardestLabel),
               h(
-                "tr",
-                {},
-                th(T().admColQuestion),
-                th(T().admColReached, "num"),
-                th(T().admColSolved, "num"),
-                th(T().admColRevealed, "num"),
-                th(T().admColNotSolved, "num"),
-                th(T().admColAvgWrong, "num"),
-                th(T().admColAvgHints, "num"),
+                "div",
+                { class: "admin-tile-sub" },
+                T().admHardestNumbers(formatPct(hardest.rate), fmtInt(hardest.row.reached), fmtDec1(hardest.row.avgWrong)),
               ),
-            ),
+            ]
+          : h("div", { class: "admin-tile-sub" }, T().admHardestNotEnough(HARDEST_MIN_PLAYERS)),
+      ),
+    );
+    const secondary = h(
+      "p",
+      { class: "muted small stats-secondary" },
+      `${T().admAvgScoreFinishers}: ${s.avgScore === null ? "—" : fmtInt(Math.round(s.avgScore))}`,
+      maxScore ? ` (${T().admPar(fmtInt(maxScore))})` : "",
+      ` · ${T().admSample(fmtInt(s.completed))}`,
+    );
+    // Per question: a bar of everyone who reached it, split into solved / gave up / still on it (text says the same).
+    const bars = h(
+      "ol",
+      { class: "q-bars", "aria-label": T().admQBarsLabel },
+      funnel.map((row) => {
+        const stillOn = Math.max(0, row.reached - row.solved - row.revealed);
+        const pct = (n: number): string => (row.reached > 0 ? `${(n / row.reached) * 100}%` : "0%");
+        const isHardest = hardest?.row.q === row.q;
+        const qTitle = questionTitle(s.caseId, row.q);
+        return h(
+          "li",
+          { class: `q-bar-row${isHardest ? " is-hardest" : ""}` },
+          h(
+            "span",
+            { class: "q-bar-label", title: qTitle },
+            h("span", { class: "q-id" }, row.q.toUpperCase()),
+            " ",
+            qTitle,
+            isHardest ? h("span", { class: "hardest-badge" }, "⚑ ", T().admHardest) : null,
+          ),
+          h(
+            "span",
+            { class: "q-bar-track", "aria-hidden": "true" },
+            h("span", { class: "q-bar-seg is-solved", style: `width:${pct(row.solved)}` }),
+            h("span", { class: "q-bar-seg is-revealed", style: `width:${pct(row.revealed)}` }),
+            h("span", { class: "q-bar-seg is-open", style: `width:${pct(stillOn)}` }),
+          ),
+          h(
+            "span",
+            { class: "q-bar-nums" },
+            row.reached > 0
+              ? T().admQBarNums(fmtInt(row.solved), fmtInt(row.revealed), fmtInt(stillOn), fmtInt(row.reached))
+              : T().admQBarNobody,
+          ),
+        );
+      }),
+    );
+    const table = h(
+      "details",
+      { class: "stats-table-view" },
+      h("summary", { class: "link-btn" }, T().admTableView),
+      h(
+        "div",
+        { class: "admin-table-wrap" },
+        h(
+          "table",
+          { class: "admin-table stats-q-table" },
+          h(
+            "thead",
+            {},
             h(
-              "tbody",
+              "tr",
               {},
-              funnel.map((row) => {
-                const q = row.q;
-                const qs = s.questions[q];
-                const isHardest = hardest?.row.q === q;
-                const notSolved = row.reached - row.solved;
-                return h(
-                  "tr",
-                  { class: isHardest ? "is-hardest" : "" },
-                  h(
-                    "td",
-                    {},
-                    h("span", { class: "q-id" }, q.toUpperCase()),
-                    " ",
-                    questionTitle(s.caseId, q),
-                    isHardest ? h("span", { class: "hardest-badge", title: T().admHardestTip }, "⚑ ", T().admHardest) : null,
-                  ),
-                  h("td", { class: "num" }, String(row.reached)),
-                  h("td", { class: "num" }, qs ? String(qs.solved) : "—"),
-                  h("td", { class: "num" }, qs ? String(qs.revealed) : "—"),
-                  h("td", { class: "num" }, row.reached > 0 ? `${notSolved} · ${formatPct(notSolved / row.reached)}` : "—"),
-                  h("td", { class: "num" }, qs ? qs.avgWrong.toFixed(1) : "—"),
-                  h("td", { class: "num" }, qs ? qs.avgHints.toFixed(1) : "—"),
-                );
-              }),
+              th(T().admColQuestion),
+              th(T().admColReached, "num"),
+              th(T().admColSolved, "num"),
+              th(T().admColRevealed, "num"),
+              th(T().admColNotSolved, "num"),
+              th(T().admColAvgWrong, "num"),
+              th(T().admColAvgHints, "num"),
             ),
           ),
+          h(
+            "tbody",
+            {},
+            funnel.map((row) => {
+              const qs = s.questions[row.q];
+              const notSolved = row.reached - row.solved;
+              return h(
+                "tr",
+                { class: hardest?.row.q === row.q ? "is-hardest" : "" },
+                h("td", {}, h("span", { class: "q-id" }, row.q.toUpperCase()), " ", questionTitle(s.caseId, row.q)),
+                h("td", { class: "num" }, fmtInt(row.reached)),
+                h("td", { class: "num" }, qs ? fmtInt(qs.solved) : "—"),
+                h("td", { class: "num" }, qs ? fmtInt(qs.revealed) : "—"),
+                h("td", { class: "num" }, row.reached > 0 ? `${fmtInt(notSolved)} · ${formatPct(notSolved / row.reached)}` : "—"),
+                h("td", { class: "num" }, qs ? fmtDec1(qs.avgWrong) : "—"),
+                h("td", { class: "num" }, qs ? fmtDec1(qs.avgHints) : "—"),
+              );
+            }),
+          ),
         ),
-        h(
-          "p",
-          { class: "muted small stats-hardest", title: T().admHardestTip },
-          hardest
-            ? T().admHardestLine(
-                `${hardest.row.q.toUpperCase()} ${questionTitle(s.caseId, hardest.row.q)}`.trim(),
-                Math.round(hardest.rate * 100),
-                hardest.row.reached,
-              )
-            : T().admHardestNotEnough(HARDEST_MIN_PLAYERS),
-        ),
-      );
-    }
-    return h("section", { class: "panel admin-panel stats-case" }, children);
+      ),
+    );
+    return h(
+      "section",
+      { class: "panel admin-panel stats-case" },
+      head,
+      headline,
+      secondary,
+      h("h3", { class: "admin-label stats-q-title" }, T().admQBarsTitle),
+      h(
+        "p",
+        { class: "muted small funnel-key" },
+        h("span", { class: "key-done" }), `${T().admColSolved} `,
+        h("span", { class: "key-revealed" }), `${T().admColRevealed} `,
+        h("span", { class: "key-open" }), T().admStillOn,
+      ),
+      bars,
+      table,
+    );
   }
 
   function renderStats(): void {
@@ -3582,10 +4381,10 @@ export function renderAdmin(root: HTMLElement): void {
           h(
             "li",
             { class: `admin-board-row rank-${e.rank}` },
-            h("span", { class: "board-rank" }, String(e.rank)),
-            h("span", { class: "board-name" }, e.username),
+            h("span", { class: "board-rank" }, fmtInt(e.rank)),
+            h("span", { class: "board-name", dir: "auto" }, e.username),
             h("span", { class: "board-time muted" }, overall ? T().admCasesDone(e.casesCompleted) : T().admStagesSolved(e.stagesSolved)),
-            h("span", { class: "board-score" }, String(e.score)),
+            h("span", { class: "board-score" }, fmtInt(e.score)),
           ),
         ),
       );
