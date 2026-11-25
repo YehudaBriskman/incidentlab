@@ -56,6 +56,9 @@ for builder in "${CASE_BUILDERS[@]}"; do
   bash "solutions/$case_id/solve.sh"
 done
 
+banner "Test: every command runs with stock tools only (scripts/check_commands.py)"
+"$PYTHON" scripts/check_commands.py
+
 if [[ "$BUILD_SITE" -eq 1 ]]; then
   banner "Build site                   (site: npm ci && npm run build)"
   (
