@@ -2,10 +2,10 @@
 // The free part of a command is its `syntax` (a template with <placeholders>). The runnable command is paid
 // for (SCORING.COMMAND_COST on the active stage) and comes from `progress.unlocked.commands`, never from the
 // bundled content: production builds strip `command` / `powershell` from the case JSON.
-import { QUESTION_ORDER, SCORING, type ProgressView, type TodayResponse } from "../../shared/contract";
+import { QUESTION_ORDER, SCORING, type ProgressView, type StageProgress, type TodayResponse } from "../../shared/contract";
 import type { Case } from "../content/schema";
 import { getProgress, revealCommand } from "../lib/api";
-import { confirmButton, copyButton, h, html, setChildren, type Child } from "../lib/dom";
+import { announce, confirmButton, copyButton, h, html, setChildren, type Child } from "../lib/dom";
 import { playErrorText } from "../lib/errors";
 import { md } from "../lib/markdown";
 import { isAdmin, loadAccount, loadToday } from "../lib/session";
@@ -13,6 +13,7 @@ import { caseSummary } from "../content/load";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { T } from "../i18n/strings-player";
+import { TP } from "../i18n/strings-play";
 import { withApprovedAccount } from "./auth";
 
 type ToolItem = Case["toolbox"][number]["items"][number];
@@ -49,6 +50,11 @@ export function activeStageNumber(progress: ProgressView | null): number | null 
   return i === -1 ? null : i + 1;
 }
 
+/** True while a stage still qualifies for the clean bonus: no hint, command or wrong answer yet. */
+export function isCleanSoFar(s: StageProgress): boolean {
+  return s.hintsRevealed === 0 && s.commandsRevealed === 0 && s.wrongAttempts === 0;
+}
+
 /** Today's case when `c` can't be started today (lock-to-today, not today's case, never started), else null. */
 export type LockedToday = { todayCaseId: string | null };
 
@@ -59,18 +65,6 @@ export type LockedToday = { todayCaseId: string | null };
 export function lockedToday(progress: ProgressView, today: TodayResponse | null, caseId: string): LockedToday | null {
   if (progress.startedAt !== null || today === null || !today.lockToToday || today.caseId === caseId) return null;
   return { todayCaseId: today.caseId };
-}
-
-/* ---------- screen-reader announcements that survive re-renders ---------- */
-let announcer: HTMLElement | null = null;
-function announce(message: string): void {
-  if (announcer === null) {
-    announcer = h("p", { class: "visually-hidden", "aria-live": "polite", role: "status" });
-    document.body.append(announcer);
-  }
-  const el = announcer;
-  el.textContent = "";
-  window.setTimeout(() => (el.textContent = message), 50);
 }
 
 const PLACEHOLDER = /(<[\p{L}\p{N}_][\p{L}\p{N}_ .,:/|=+-]*>)/u;
@@ -147,15 +141,18 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
   /* reveal action */
   const errorEl = h("p", { class: "form-error", role: "alert" });
   let action: Child = null;
-  if (!full && toolId !== undefined && ctx.locked !== true) {
+  // Signed out / not started: the page notice says it once; cards don't repeat it.
+  if (!full && toolId !== undefined && ctx.locked !== true && progress !== null && progress.setupDoneAt !== null) {
     const stageNo = activeStageNumber(progress);
-    if (progress === null) action = h("p", { class: "muted small cmd-note" }, TG().signInToReveal);
-    else if (progress.setupDoneAt === null) action = h("p", { class: "muted small cmd-note" }, TG().startToReveal);
-    else if (stageNo !== null) {
+    const active = stageNo !== null ? progress.stages[QUESTION_ORDER[stageNo - 1] ?? "q1"] : undefined;
+    if (stageNo !== null && active !== undefined) {
       const reveal = confirmButton({
         label: TG().revealCommand(SCORING.COMMAND_COST),
-        confirmLabel: TG().revealCommandConfirm(SCORING.COMMAND_COST, stageNo),
+        prompt: TP().cmdPrompt(SCORING.COMMAND_COST, stageNo, SCORING.CLEAN_BONUS, isCleanSoFar(active)),
+        confirmLabel: TP().cmdConfirm(SCORING.COMMAND_COST),
         className: "btn btn-sm btn-reveal",
+        sizeClass: "btn-sm",
+        tone: "accent",
         onConfirm: () => {
           for (const b of reveal.querySelectorAll("button")) b.disabled = true;
           errorEl.textContent = "";
