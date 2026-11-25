@@ -78,6 +78,19 @@ export function getCase(id: string): Case | undefined {
   return localized(cases.get(id));
 }
 
+/** Catalog order: the original case first, then easiest to hardest, then by title. */
+const DIFFICULTY_ORDER: Record<Case["difficulty"], number> = { easy: 0, medium: 1, hard: 2 };
+export function allCases(): Case[] {
+  return [...cases.values()]
+    .sort(
+      (a, b) =>
+        Number(b.id === FEATURED_CASE_ID) - Number(a.id === FEATURED_CASE_ID) ||
+        DIFFICULTY_ORDER[a.difficulty] - DIFFICULTY_ORDER[b.difficulty] ||
+        a.title.localeCompare(b.title),
+    )
+    .map((c) => localized(c) ?? c);
+}
+
 export function featuredCase(): Case | undefined {
   return localized(cases.get(FEATURED_CASE_ID) ?? cases.values().next().value);
 }

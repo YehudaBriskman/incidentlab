@@ -4,6 +4,10 @@ import { T } from "./i18n/strings-player";
 import { getCase } from "./content/load";
 import { onConnectivity } from "./lib/api";
 import { h, setChildren } from "./lib/dom";
+import { cachedAccount, loadAccount, onAccountChange, signOut } from "./lib/session";
+import { TA } from "./i18n/strings-account";
+import { renderAuthForm, stopAuthTimers, withApprovedAccount } from "./views/auth";
+import { renderStats } from "./views/stats";
 import { renderCase, stopCaseTimers } from "./views/case";
 import { renderHome } from "./views/home";
 import { renderToolbox } from "./views/toolbox";
@@ -29,6 +33,32 @@ function mountLangToggle(): void {
   });
 }
 mountLangToggle();
+
+/* ---------- account menu (header, every page) ---------- */
+function mountAccountMenu(): void {
+  const bar = document.querySelector(".topbar");
+  if (!(bar instanceof HTMLElement)) return;
+  const wrap = h("nav", { class: "account-menu", "aria-label": TA().accountMenu });
+  const draw = (): void => {
+    const account = cachedAccount();
+    if (account === null) {
+      setChildren(wrap, h("a", { class: "btn btn-sm", href: "#/login" }, TA().signIn));
+      return;
+    }
+    setChildren(
+      wrap,
+      h("span", { class: "account-name", dir: "auto" }, account.username),
+      account.status === "approved" ? h("a", { class: "btn btn-sm btn-ghost", href: "#/me" }, TA().myStats) : null,
+      h("button", { type: "button", class: "btn btn-sm btn-ghost", onclick: () => void signOut().then(() => (window.location.hash = "#/")) }, TA().signOut),
+    );
+  };
+  bar.querySelector(".lang-toggle")?.before(wrap);
+  onAccountChange(draw);
+  window.addEventListener("hashchange", draw); // re-label on language change
+  draw();
+  loadAccount().catch(() => undefined);
+}
+mountAccountMenu();
 
 const root = document.getElementById("app");
 if (!(root instanceof HTMLElement)) throw new Error("#app root missing");
@@ -91,11 +121,27 @@ function route(): void {
   const hash = (window.location.hash.replace(/^#\/?/, "").split("?")[0]) ?? "";
   const parts = hash.split("/").filter((part) => part.length > 0).map(decodeURIComponent);
   stopCaseTimers();
+  stopAuthTimers();
   window.scrollTo(0, 0);
 
   try {
     if (parts.length === 0) {
       renderHome(appRoot);
+      return;
+    }
+    if (parts[0] === "login" && parts.length === 1) {
+      document.title = `${TA().signIn} · IncidentLab`;
+      withApprovedAccount(appRoot, "IncidentLab", () => void (window.location.hash = "#/"));
+      return;
+    }
+    if (parts[0] === "signup" && parts.length === 1) {
+      // After sign-up the account is pending: the gate shows the approval screen, then goes home.
+      const goHome = (): void => void (window.location.hash = "#/");
+      renderAuthForm(appRoot, { context: "IncidentLab", mode: "sign-up", onSignedIn: () => withApprovedAccount(appRoot, "IncidentLab", goHome) });
+      return;
+    }
+    if (parts[0] === "me" && parts.length === 1) {
+      renderStats(appRoot);
       return;
     }
     if (parts[0] === "admin" && parts.length === 1) {
@@ -111,7 +157,7 @@ function route(): void {
       const sub = parts[2];
       if (sub === undefined) renderCase(appRoot, c);
       else if (sub === "toolbox") renderToolbox(appRoot, c);
-      else if (sub === "explorer") lazyView(() => import("./views/explorer").then((m) => m.renderExplorer));
+      else if (sub === "explorer") lazyView(() => import("./views/explorer").then((m) => (root: HTMLElement) => m.renderExplorer(root, c)));
       else notFound(T().notOnRunbook);
       return;
     }

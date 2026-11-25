@@ -1,0 +1,758 @@
+{
+  "id": "who-deleted-prod",
+  "title": "מי מחק את prod?",
+  "subtitle": "100 מיליון רשומות לקוח יצאו מהדלת, וכל קריאת API נעשתה עם ה-role שלנו. שחזרו את התקיפה מ-CloudTrail, מלוגי ה-WAF ומ-metadata endpoint אחד פטפטן במיוחד.",
+  "difficulty": "hard",
+  "estMinutes": 70,
+  "tags": [
+    "cloud-forensics",
+    "aws",
+    "cloudtrail",
+    "ssrf",
+    "imds",
+    "iam",
+    "jq",
+    "incident-response"
+  ],
+  "inspiredBy": {
+    "title": "Capital One data breach",
+    "year": 2019,
+    "summary": "במרץ 2019 תוקפת ניצלה WAF בקונפיגורציה שגויה ב-Capital One כדי לשלוח בקשות מצד השרת אל שירות ה-metadata של EC2, והשיגה credentials זמניים של ה-IAM role של ה-WAF. בעזרתם היא מנתה והעתיקה נתוני S3 של כ-106 מיליון לקוחות ומבקשי כרטיסי אשראי בארה\"ב ובקנדה. הדליפה נחשפה ביולי 2019, הבנק נקנס מאוחר יותר ב-80 מיליון דולר, ו-AWS שחררה את IMDSv2 בנובמבר של אותה שנה."
+  },
+  "briefing": "**יום חמישי, 19 בנובמבר 2026, 14:30 UTC. Fernhill Credit, צוות האבטחה.**\n\nהבוקר פורטל הדוחות התחיל להיכשל על כל דוח שישן יותר מאתמול. רוב `fh-prod-customer-exports`, שבוע שלם של ייצואי לקוחות מלאים (כ-100 מיליון שורות), פשוט נעלם. versioning אף פעם לא הופעל.\n\nבערוץ האירוע כבר יש חשודים: מהנדס שהריץ מחיקות ב-S3 ביום שלישי בערב, מפתח של מפתחת שדלף ל-GitHub, אולי אפילו AWS עצמה. צוות האבטחה שם לב למשהו מוזר יותר: ה-role של מכונת ה-WAF שלנו קרא ל-S3 עם user agent שה-WAF אף פעם לא משתמש בו.\n\n**חבילת הראיות** מכילה את הלוג והקונפיגורציה של ה-WAF, את CloudTrail, לוגי גישה של S3, VPC flow logs, צילומי מצב של IAM ו-EC2, את GuardDuty, כרטיס שינוי וערוץ ה-Slack. **קראו קודם את `README_FIRST.txt`**, ושימו לב לשעונים: ה-WAF רושם לפי שעון ניו יורק, ו-AWS לפי UTC.\n\nשישה שלבים משחזרים את התקיפה: **הדרך פנימה**, **מתי המפתחות נגנבו**, **באילו ידיים** הם היו, **מה נלקח**, **מה מחק את prod** ו**למה זה הותר**. כל תשובה היא ערך קטן ומדויק. נתקעתם? השתמשו ב-Toolbox וברמזים.",
+  "setupChecklist": [
+    "השיגו את הראיות: הורידו ופרסו את **חבילת הראיות**, *או* פתחו את ה-**Evidence Explorer** כדי לעיין בכל הקבצים בדפדפן (בלי התקנות).",
+    "קראו את `README_FIRST.txt` מההתחלה ועד הסוף, כולל מילון המונחים.",
+    "רשמו את השעון של כל מקור: לוג ה-WAF ב-**שעון החוף המזרחי של ארה\"ב (-0500)**; CloudTrail, לוגי הגישה של S3 ו-GuardDuty ב-**UTC**; ה-flow logs וה-Slack ב-**epoch seconds**.",
+    "בחרו מסלול: **bash** עם `jq` (Linux, macOS או WSL), **Windows PowerShell** (לכל פקודה ב-Toolbox יש גרסת PowerShell), או ה-**Explorer בדפדפן**.",
+    "לא צריך חשבון AWS. כל מה שבחבילה בדוי, אז אל תנסו שום דבר ממנה על מערכות אמיתיות."
+  ],
+  "evidenceZip": "/evidence/who-deleted-prod-evidence.zip",
+  "evidence": [
+    {
+      "path": "README_FIRST.txt",
+      "format": "טקסט",
+      "description": "תדריך ממובילת האירוע, רשימת הקבצים, הערות על אזורי זמן ומילון AWS קצר. מתחילים כאן."
+    },
+    {
+      "path": "waf/access.log",
+      "format": "לוג nginx (EST, -0500)",
+      "description": "כל בקשה שעברה דרך ה-WAF / reverse proxy: כתובת הלקוח, הבקשה, status, בתים, user agent, ה-`upstream=` ש-nginx התחבר אליו והחלטת ה-WAF."
+    },
+    {
+      "path": "waf/edge-waf.conf",
+      "format": "קונפיגורציית nginx",
+      "description": "ה-`log_format` של ה-WAF, חוקי ה-ModSecurity המותאמים שלו והנתיבים שלו. קראו אותו כדי להבין כל שדה בלוג."
+    },
+    {
+      "path": "cloudtrail/111122223333_CloudTrail_us-east-1_20261117.jsonl",
+      "format": "JSON lines (UTC)",
+      "description": "CloudTrail של 17 בנובמבר, מ-22:00Z עד חצות: אירוע לכל שורה, אירועי ניהול ואירועי data של S3."
+    },
+    {
+      "path": "cloudtrail/111122223333_CloudTrail_us-east-1_20261118.jsonl",
+      "format": "JSON lines (UTC)",
+      "description": "CloudTrail של 18 בנובמבר, מחצות עד 08:00Z. רוב הלילה קורה כאן."
+    },
+    {
+      "path": "s3-access-logs/fh-prod-customer-exports/2026-11-18.log",
+      "format": "לוג גישה של S3 (UTC)",
+      "description": "לוג הגישה של שרת S3 עבור bucket ה-exports של prod, 18 בנובמבר: כתובת מרוחקת, requester, פעולה, key, status, בתים."
+    },
+    {
+      "path": "s3-access-logs/fh-prod-customer-exports/2026-11-19.log",
+      "format": "לוג גישה של S3 (UTC)",
+      "description": "אותו bucket ב-19 בנובמבר, עד 13:00Z."
+    },
+    {
+      "path": "vpc-flow-logs/eni-0c7d1e2f3a4b5c6d7.log",
+      "format": "VPC flow log v2 (epoch)",
+      "description": "flow logs של ממשק הרשת של מכונת ה-WAF, אגרגציה של 10 דקות. `start`/`end` הם epoch seconds."
+    },
+    {
+      "path": "ec2/describe-instances.json",
+      "format": "JSON",
+      "description": "`aws ec2 describe-instances` למכונות ה-WAF וה-statements-api: כתובות, instance profiles, הגדרות metadata."
+    },
+    {
+      "path": "iam/roles/fh-waf-edge-role.json",
+      "format": "JSON",
+      "description": "ה-role של מכונת ה-WAF: trust policy, instance profile, policies מצורפות ו-inline."
+    },
+    {
+      "path": "iam/roles/fh-statements-api-role.json",
+      "format": "JSON",
+      "description": "ה-role של statements-api, להשוואה."
+    },
+    {
+      "path": "iam/access-keys.csv",
+      "format": "CSV",
+      "description": "מפתחות גישה ארוכי טווח של משתמשי IAM, הסטטוס שלהם והשימוש האחרון."
+    },
+    {
+      "path": "guardduty/findings.json",
+      "format": "JSON (UTC)",
+      "description": "ייצוא ממצאי GuardDuty. ממצאים פעילים בלבד."
+    },
+    {
+      "path": "guardduty/suppression-rules.json",
+      "format": "JSON",
+      "description": "חוקי השתקה של GuardDuty (פילטרים שמעבירים ממצאים לארכיון אוטומטית)."
+    },
+    {
+      "path": "slack/inc-prod-exports.json",
+      "format": "ייצוא Slack (JSON)",
+      "description": "ערוץ האירוע ב-19 בנובמבר. `ts` הוא epoch seconds כמחרוזת. תיאוריות, לא עובדות."
+    },
+    {
+      "path": "tickets/CHG-4471.txt",
+      "format": "טקסט (EST)",
+      "description": "כרטיס השינוי של ניקוי ה-staging ביום שלישי בערב."
+    }
+  ],
+  "rules": [
+    "עובדים רק מחבילת הראיות. אל תקראו את קוד ה-generator או את קוד האתר; זה הורס את הכיף.",
+    "התשובות לא רגישות לאותיות גדולות/קטנות, ורווחים בהתחלה ובסוף מתעלמים מהם. הקפידו על הפורמט שמופיע מתחת לכל שאלה.",
+    "כל רמז עולה את הנקודות שמופיעות עליו. הרמזים נחשפים לפי הסדר, מדחיפה עדינה ועד כמעט הפקודה המלאה.",
+    "עבודה בזוגות מומלצת. דברו על ההיגיון שלכם בקול, בדיוק כמו ב-incident review אמיתי.",
+    "כל כלי מותר: grep, awk, jq, Python, גיליון אלקטרוני, העורך האהוב עליכם. בלשונית Toolbox יש פקודות שיעזרו.",
+    "תשובות שגויות לא עולות כלום, אז נחשו בחופשיות. ובכל זאת, נסו להיות מסוגלים להסביר *למה* התשובה שלכם נכונה.",
+    "אל תשתפו flags עם צוותים אחרים עד שכולם מסיימים. לשתף טכניקות זה בסדר.",
+    "כל כתובת IP, מזהה חשבון ומפתח בחבילה הם בדויים. חקרו את הלוגים; אל תכוונו שום דבר מהם למערכת אמיתית."
+  ],
+  "questions": [
+    {
+      "stage": {
+        "name": "הדרך פנימה",
+        "goal": "מצאו את כתובת הלקוח שהבקשה שלה דרך ה-WAF קיבלה תשובה מוצלחת משירות ה-metadata של המכונה.",
+        "lookFor": [
+          "ב-`waf/access.log` יש שדה `upstream=`: לאן nginx באמת התחבר",
+          "שירות ה-metadata יושב ב-169.254.169.254, אבל אפשר לכתוב כתובת ביותר מדרך אחת",
+          "בקשות שנחסמו (`waf=block`, 403) לא הגיעו אליו",
+          "רק 200 נחשב הצלחה"
+        ],
+        "tools": [
+          "grep-fixed",
+          "grep-only-match",
+          "waf-fields",
+          "waf-blocked",
+          "flow-outbound",
+          "decimal-ip"
+        ],
+        "explorerTip": "פתחו את `waf/access.log` והוסיפו פילטר **contains** `upstream=169.254.169.254`, ואחריו פילטר **regex** `\" 200 `. הריצו **Count unique** עם ה-regex `^(\\S+)` כדי לראות אילו כתובות לקוח נשארו. עכשיו השוו לפילטר **contains** פשוט `169.254.169.254`: איך הכתובת כתובה בבקשות שעברו?"
+      },
+      "id": "q1",
+      "title": "הדרך פנימה",
+      "prompt": "מישהו גרם ל-WAF שלנו לדבר עם שירות ה-metadata של EC2 (`169.254.169.254`), ה-endpoint הפנימי שמחלק את ה-credentials של ה-role של המכונה. לא מעט סורקים ניסו את זה באותו לילה.\n\n**איזו כתובת לקוח באמת קיבלה ממנו תשובה מוצלחת (HTTP 200)** דרך ה-WAF?\n\nענו עם כתובת ה-IPv4.",
+      "answerFormat": "כתובת IPv4",
+      "placeholder": "192.0.2.1",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "`grep 169.254.169.254` מוצא הרבה ניסיונות מכמה כתובות, וכולם נחסמו עם 403. ייתכן שבבקשות שהצליחו המחרוזת הזאת בכלל לא מופיעה ב-URL. פתחו את `waf/edge-waf.conf`: איזה שדה בלוג רושם לאן nginx *באמת* התחבר?"
+        },
+        {
+          "cost": 20,
+          "text": "סננו לפי השדה `upstream=` במקום לפי ה-URL, השאירו רק status `200` (שדה `$9`), ואז הציגו את כתובות הלקוח (שדה `$1`). שימו לב איך ה-URLs האלה כותבים את הכתובת: גם מספר עשרוני יחיד הוא כתובת IPv4 תקינה."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngrep -F 'upstream=169.254.169.254' waf/access.log | awk '$9 == 200 {print $1}' | sort | uniq -c\n```"
+        }
+      ],
+      "successNote": "רשימות חסימה מתאימות מחרוזות, לא יעדים. חוק `100231` חיפש את הטקסט `169.254.169.254`, והתוקף כתב את אותה כתובת כמספר עשרוני אחד ועבר ישר. הבאג האמיתי הוא `proxy_pass $arg_u`: proxy שמביא כל URL שזר נותן לו. התיקונים: allowlist של יעדים, בדיקה של **כתובת ה-IP אחרי DNS**, וחסימת טווחי link-local ברמת הרשת.\n\nשימו לב גם לחימום: קודם URLs תמימים, אחר כך בקשה לשרת של התוקף עצמו בפורט 8000. ה-flow logs מראים את ה-WAF מתחבר **החוצה** אליו, בדיקת SSRF קלאסית מסוג out-of-band."
+    },
+    {
+      "stage": {
+        "name": "מתי המפתחות נגנבו?",
+        "goal": "מצאו את זמן ה-UTC של הבקשה הראשונה שהחזירה את ה-credentials הזמניים של ה-role.",
+        "lookFor": [
+          "`.../iam/security-credentials/` לבד רק מחזיר את שם ה-role",
+          "המפתחות מגיעים מ-`.../security-credentials/<role-name>`",
+          "ה-WAF רושם בשעון החוף המזרחי של ארה\"ב (-0500)",
+          "ערב מאוחר בניו יורק הוא כבר היום הבא ב-UTC"
+        ],
+        "tools": [
+          "grep-fixed",
+          "first-last-match",
+          "waf-fields",
+          "nginx-time-to-utc",
+          "est-to-utc",
+          "utc-to-est"
+        ],
+        "explorerTip": "ב-`waf/access.log`, סננו **contains** `security-credentials/` ו-**contains** את כתובת ה-IP משלב 1. הסתכלו על גודלי התשובות, בחרו את הנתיב הנכון, השתמשו ב-**First match**, ואז המירו את הזמן מ-`-0500` ל-UTC עם **ממיר הזמן**."
+      },
+      "id": "q2",
+      "title": "מתי המפתחות נגנבו?",
+      "prompt": "שירות ה-metadata מחלק credentials בנתיב `/latest/meta-data/iam/security-credentials/<role-name>`.\n\nמתי התוקף שלף **לראשונה** בהצלחה את ה-credentials של ה-role?\n\nענו עם הזמן **ב-UTC** בפורמט `HH:MM:SS` (בלי תאריך).",
+      "answerFormat": "HH:MM:SS (UTC)",
+      "placeholder": "04:20:00",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "שני נתיבים נראים דומים. זה שמסתיים ב-`security-credentials/` מחזיר רק את שם ה-role (שימו לב לגודל התשובה הזעיר). רק זה שמוסיף את שם ה-role בסוף מחזיר מפתחות, והתוקף שלף אותו יותר מפעם אחת."
+        },
+        {
+          "cost": 20,
+          "text": "קחו את השורה **המוקדמת ביותר** מהסוג הזה עם status 200 מכתובת ה-IP משלב 1. הזמן שלה ב-EST (`-0500`): הוסיפו חמש שעות, וצפו שהתאריך יתחלף."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngrep -F 'upstream=169.254.169.254' waf/access.log \\\n  | awk '$9 == 200 && $7 ~ /security-credentials\\/[^\\/]+$/ {print $4, $5}'\ndate -u -d '17 Nov 2026 HH:MM:SS -0500' +%H:%M:%S\n```"
+        }
+      ],
+      "successNote": "IMDSv1 עונה לכל `GET` פשוט מתוך המכונה, כולל כזה שה-reverse proxy שלכם שולח בשביל זר. **IMDSv2** דורש session token שצריך לבקש קודם עם `PUT` ו-header מיוחד, ו-SSRF שרק מביא URLs, כמו כאן, לא יכול לשלוח אותם. ב-`ec2/describe-instances.json` רואים `HttpTokens: optional` על ה-WAF ו-`required` על המכונות החדשות.\n\nCloudTrail אפילו מסמן sessions כאלה: `ec2RoleDelivery: 1.0` אומר שה-credentials נמסרו דרך IMDSv1. זה שווה התראה בפני עצמו."
+    },
+    {
+      "stage": {
+        "name": "באילו ידיים?",
+        "goal": "מצאו את מזהה ה-access key הזמני שמישהו שאינו מכונת ה-WAF השתמש בו.",
+        "lookFor": [
+          "ב-role של מכונת EC2, שם ה-session ב-CloudTrail הוא ה-instance id",
+          "ה-credentials של role מתחלפים: המכונה עצמה משתמשת בכמה מפתחות במהלך הלילה",
+          "ב-`ec2/describe-instances.json` יש את הכתובות של המכונה עצמה",
+          "אותו role, אותו מפתח, `sourceIPAddress` ו-`userAgent` שונים"
+        ],
+        "tools": [
+          "ct-pretty",
+          "ct-where",
+          "ct-useragent",
+          "ct-select-role",
+          "ec2-metadata-options",
+          "access-keys-table"
+        ],
+        "explorerTip": "פתחו את קובץ ה-CloudTrail של 18 בנובמבר והוסיפו **JSON field filter** `userIdentity.sessionContext.sessionIssuer.userName = <role-name>`. הריצו **Count unique** עם ה-regex `\"sourceIPAddress\":\"([^\"]+)\"`, אחר כך הוסיפו פילטר **NOT** לכתובת הציבורית של המכונה עצמה והריצו **Count unique** עם `\"accessKeyId\":\"(\\w+)\"`."
+      },
+      "id": "q3",
+      "title": "באילו ידיים?",
+      "prompt": "כל קריאה חשודה ב-CloudTrail חתומה על ידי ה-role של מכונת ה-WAF שלנו, וגם המכונה עצמה משתמשת ב-role הזה כל הלילה.\n\n**באיזה מזהה access key זמני (`ASIA...`) השתמש מישהו שאינו המכונה?**\n\nענו עם מזהה המפתח בן 20 התווים.",
+      "answerFormat": "מזהה access key (20 תווים, מתחיל ב-ASIA)",
+      "placeholder": "ASIAEXAMPLE000000000",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "מצאו את הכתובת הציבורית והפרטית של מכונת ה-WAF ב-`ec2/describe-instances.json` (התאימו את ה-instance profile שלה ל-role שב-`iam/roles/`). כל מה שה-role עושה מכל כתובת אחרת שווה בדיקה רצינית."
+        },
+        {
+          "cost": 20,
+          "text": "קבצו את האירועים של ה-role לפי `sourceIPAddress`, `userAgent` ו-`userIdentity.accessKeyId`. תראו שלושה מפתחות, כי IMDS מחליף אותם. רק אחד מהם מופיע גם מכתובת שאינה המכונה, עם לקוח שונה לגמרי."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ncat cloudtrail/*.jsonl | jq -r 'select(.userIdentity.sessionContext.sessionIssuer.userName == \"<role-name>\")\n  | [.sourceIPAddress, .userIdentity.accessKeyId, .userAgent[0:30]] | @tsv' | sort | uniq -c\n```"
+        }
+      ],
+      "successNote": "credentials של role הם bearer tokens: מי שמחזיק בהם *הוא* ה-role, מכל מקום באינטרנט. CloudTrail לא יכול להגיד לכם *מי* עומד מאחורי session, רק **מאיפה** הגיעה כל קריאה ו**איזה לקוח** שלח אותה. כאן אותו מפתח בדיוק שימש מהכתובת של ה-WAF את ה-log shipper שכתוב ב-Go, ובאותו זמן, מכתובת לא מוכרת, את `aws-cli`. זה בדיוק הדפוס שהממצא `InstanceCredentialExfiltration.OutsideAWS` של GuardDuty מזהה. אצלנו הוא הלך ישר לארכיון: חוק השתקה מ-2024 השתיק כל ממצא על ה-role הזה.\n\nשימו לב גם שקריאות ה-API הגיעו מ**כתובת אחרת** מזו של ה-SSRF. תנאי data perimeter כמו `aws:SourceVpce` (ל-role של statements-api יש כזה) היה הופך את המפתחות הגנובים לחסרי ערך מחוץ לרשת שלנו."
+    },
+    {
+      "stage": {
+        "name": "מה נלקח?",
+        "goal": "ספרו את האובייקטים הייחודיים שה-credentials הגנובים הורידו בהצלחה.",
+        "lookFor": [
+          "רק אירועי `GetObject` בלי `errorCode`",
+          "ספרו אובייקטים (bucket + key), לא קריאות: חלק מהקבצים הורדו פעמיים",
+          "סננו לפי המקום שממנו הגיעה הקריאה, לא רק לפי המפתח: המכונה השתמשה באותו מפתח",
+          "כל bucket נחשב, לא רק prod"
+        ],
+        "tools": [
+          "ct-timeline",
+          "ct-errors",
+          "ct-not-ip",
+          "ct-unique-objects",
+          "s3-by-ip",
+          "s3-bytes"
+        ],
+        "explorerTip": "בקובץ ה-CloudTrail של 18 בנובמבר, סננו **contains** את הכתובת שממנה השתמשו במפתח הגנוב, **contains** `\"eventName\":\"GetObject\"`, והוסיפו פילטר **NOT** `errorCode`. אחר כך הריצו **Count unique** עם ה-regex `arn:aws:s3:::([^\"/]+/[^\"]+)` (ה-ARN של האובייקט הוא bucket + key): מספר הערכים הייחודיים הוא התשובה."
+      },
+      "id": "q4",
+      "title": "מה נלקח?",
+      "prompt": "כמה הם לקחו?\n\nספרו את **האובייקטים הייחודיים** (bucket + key) שה-credentials הגנובים הורידו **בהצלחה** עם `GetObject`, **בכל ה-buckets**. ניסיונות שנכשלו לא נספרים, וקובץ שהורד פעמיים נספר פעם אחת.\n\nענו במספר שלם.",
+      "answerFormat": "מספר שלם (אובייקטים ייחודיים)",
+      "placeholder": "42",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "התחילו מהאירועים שבודדתם בשלב 3: ה-role, בשימוש מבחוץ. השאירו רק `GetObject` בלי `errorCode`. `AccessDenied` ו-`NoSuchKey` הם ניסיונות, לא הורדות."
+        },
+        {
+          "cost": 20,
+          "text": "בנו `bucket/key` מתוך `requestParameters` והורידו כפילויות עם `sort -u`. אל תסננו רק לפי המפתח: המכונה קראה את קובצי הקונפיגורציה שלה עם אותו מפתח בדיוק. אפשר להצליב את החלק של prod מול `s3-access-logs/` (`REST.GET.OBJECT`, status 200, הכתובת של התוקף)."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ncat cloudtrail/*.jsonl | jq -r 'select(.sourceIPAddress == \"<api-ip>\" and .eventName == \"GetObject\" and (has(\"errorCode\") | not))\n  | \"\\(.requestParameters.bucketName)/\\(.requestParameters.key)\"' | sort -u | wc -l\n```"
+        }
+      ],
+      "successNote": "המספר הזה מניע את הודעת הדליפה: אילו לקוחות, אילו נתונים, אילו רגולטורים. ספרו **אובייקטים**, לא בקשות, ורק את אלה שהצליחו. התוקף ניסה גם את ה-vault של נתוני הכרטיסים ונעצר, כי ל-role לא היה `kms:Decrypt` על המפתח של ה-vault. שווה להגיד את זה בקול בדוח: מפתח KMS עם policy משלו הוא חומה שנייה אמיתית. SSE-S3 רגיל הוא לא, כי S3 מפענח לכל מי שמורשה ל-`GetObject`.\n\nהתוקף העתיק גם את החוקים והקונפיגורציה של ה-WAF עצמו, וזה מלמד שהוא חקר את ההגנות."
+    },
+    {
+      "stage": {
+        "name": "מי מחק את prod?",
+        "goal": "מצאו את קריאת ה-API שבאמת גרמה לאובייקטים של prod להיעלם.",
+        "lookFor": [
+          "לוג הגישה של S3 מראה *איך* האובייקטים נעלמו ומי היה ה-requester",
+          "היו ניסיונות `Delete*` על prod: האם מישהו מהם הצליח?",
+          "יש קריאות API שמשנות את מה ש-S3 יעשה אחר כך, לא עכשיו",
+          "ניקוי ה-staging קרה על buckets אחרים"
+        ],
+        "tools": [
+          "s3-ops",
+          "s3-requesters",
+          "ct-event-names",
+          "ct-errors",
+          "ct-timeline"
+        ],
+        "explorerTip": "פתחו את `s3-access-logs/fh-prod-customer-exports/2026-11-19.log` והריצו **Count unique** עם ה-regex `\\] \\S+ \\S+ \\S+ (\\S+)` כדי לראות את רשימת הפעולות. אחר כך פתחו את קובץ ה-CloudTrail של 18 בנובמבר, סננו **contains** את כתובת ה-API של התוקף, הוסיפו **contains** `\"readOnly\":false` ופילטר **NOT** `errorCode`."
+      },
+      "id": "q5",
+      "title": "מי מחק את prod?",
+      "prompt": "עד 19 בנובמבר רוב האובייקטים נעלמו, ובכל זאת אף `DeleteObject` או `DeleteBucket` על prod לא הצליח.\n\n**איזו קריאת API באמת השמידה את הנתונים של prod?**\n\nענו עם ה-`eventName` שלה, **בדיוק כפי ש-CloudTrail רושם אותו**.",
+      "answerFormat": "eventName של CloudTrail, באיות מדויק",
+      "placeholder": "DeleteObjects",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "הסתכלו על עמודת הפעולה בלוג הגישה של S3 מ-19 בנובמבר. למחיקות שם אין כתובת IP וה-requester הוא `AmazonS3`: S3 מחק את האובייקטים בעצמו, כי משהו אמר לו לעשות את זה."
+        },
+        {
+          "cost": 20,
+          "text": "קריאות ה-`DeleteObject` וה-`DeleteBucket` של התוקף נכשלו עם `AccessDenied` (deny מפורש). בדקו מה אותו מקור עשה מיד אחר כך, על אותו bucket, שהצליח ולא היה קריאה בלבד. הקריאה הדומה של יוני ביום שלישי הייתה על bucket של staging."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ncat cloudtrail/*.jsonl | jq -r 'select(.sourceIPAddress == \"<api-ip>\" and .readOnly == false)\n  | [.eventTime, .eventName, .requestParameters.bucketName, .errorCode // \"OK\"] | @tsv'\n```"
+        }
+      ],
+      "successNote": "רשימת deny טובה רק כמו ה-actions שהיא מונה. ל-role היה deny מפורש על `s3:DeleteObject` ו-`s3:DeleteBucket` עבור `fh-prod-*`, אז התוקף נתן ל-S3 למחוק בשבילו: חוק על ה-bucket שמוחק כל אובייקט אחרי יום. S3 הסיר את האובייקטים בלוח הזמנים שלו, אחרי חצות UTC. ההסרות האלה מופיעות בלוג הגישה של S3 כ-`S3.EXPIRE.OBJECT` של `AmazonS3`, ו**אף פעם** לא ב-CloudTrail כמחיקות. בגלל זה grep על `Delete` ב-CloudTrail הצביע על יוני.\n\nהגנו על buckets חשובים עם **versioning ו-Object Lock** (או MFA delete), חסמו שינויי קונפיגורציה של bucket ולא רק מחיקות, ותריעו על כל אחד מהם."
+    },
+    {
+      "stage": {
+        "name": "למה זה הותר?",
+        "goal": "מצאו את ה-statement ב-policy שאישר את הקריאה משלב 5.",
+        "lookFor": [
+          "ב-`iam/roles/fh-waf-edge-role.json` נמצאת ה-policy ה-inline של ה-role",
+          "שמות אירועים ב-CloudTrail הם לא תמיד שמות ה-actions ב-IAM",
+          "statement צריך להתאים גם ל-action וגם למשאב",
+          "deny מפורש גובר, אבל רק על ה-actions שהוא מונה"
+        ],
+        "tools": [
+          "iam-statements",
+          "iam-action-names",
+          "iam-glob-test",
+          "ec2-metadata-options"
+        ],
+        "explorerTip": "פתחו את `iam/roles/fh-waf-edge-role.json` וקראו את ה-`Sid`, ה-`Effect`, ה-`Action` וה-`Resource` של כל statement. תרגמו את האירוע משלב 5 ל-action ב-IAM (ב-Toolbox: *שמות API מול שמות actions ב-IAM*), ואז בדקו אותו מול כל תבנית `Action` וודאו שה-`Resource` מכסה את ה-ARN של ה-bucket."
+      },
+      "id": "q6",
+      "title": "למה זה הותר?",
+      "prompt": "ה-WAF היה צריך רק לקרוא את החוקים שלו ולשלוח את הלוגים שלו.\n\n**איזה statement ב-policy ה-inline של ה-role אישר את הקריאה משלב 5?**\n\nענו עם ה-`Sid` של ה-statement, בדיוק כפי שהוא כתוב.",
+      "answerFormat": "ה-Sid של ה-statement (מדויק)",
+      "placeholder": "AllowSomething",
+      "points": 150,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "CloudTrail רושם את פעולת ה-API, אבל IAM מאשר **action**, ובממשקי קונפיגורציית bucket של S3 שני השמות שונים. חפשו את האירוע משלב 5 ב-AWS Service Authorization Reference של Amazon S3."
+        },
+        {
+          "cost": 20,
+          "text": "ה-action שאתם צריכים הוא `s3:PutLifecycleConfiguration`, על המשאב `arn:aws:s3:::<bucket>`. לאיזה statement מסוג `Allow` יש תבנית `Action` שמתאימה לו *וגם* `Resource` שמכסה את ה-bucket? האם `Deny` כלשהו מזכיר אותו?"
+        },
+        {
+          "cost": 40,
+          "text": "```sh\njq -r '.RolePolicies[].PolicyDocument.Statement[] | [.Sid, .Effect, (.Action | tostring), (.Resource | tostring)] | @tsv' \\\n  iam/roles/fh-waf-edge-role.json\n[[ s3:PutLifecycleConfiguration == <pattern> ]] && echo matches   # try each Action pattern\n```"
+        }
+      ],
+      "successNote": "תווים כלליים מזדקנים רע. `s3:Put*` *זמני* על `*`, שנוסף להעברת לוגים ב-2024 ואף פעם לא הוסר, כלל בשקט את `s3:PutLifecycleConfiguration`, את `s3:PutBucketPolicy` ואת כל ה-`Put` האחרים על כל bucket בחשבון. לצד `s3:Get*` ו-`s3:List*` על `*`, ה-role של ה-WAF הפך ל-role שקורא הכול ומגדיר מחדש הכול, וה-deny שחסם רק מחיקות לא עמד בזה.\n\nהשרשרת המלאה: **SSRF** ב-proxy של התצוגה המקדימה ב-WAF, **IMDSv1** שעונה לו, **role רחב מדי**, ו**אפס זיהוי** כי הממצאים הושתקו. שברו חוליה אחת וכל הסיפור נגמר הרבה קודם. least privilege פירושו actions מפורשים על משאבים מפורשים, יחד עם תנאי data perimeter; ה-unused access findings ויצירת ה-policies של IAM Access Analyzer הופכים את זה למעשי."
+    }
+  ],
+  "toolbox": [
+    {
+      "category": "התמצאות ראשונית",
+      "items": [
+        {
+          "id": "unzip-evidence",
+          "title": "פריסת הראיות",
+          "command": "unzip who-deleted-prod-evidence.zip && cd who-deleted-prod",
+          "explain": "פורס את החבילה. הכול נמצא תחת תיקייה עליונה אחת.",
+          "powershell": "Expand-Archive .\\who-deleted-prod-evidence.zip -DestinationPath .\ncd .\\who-deleted-prod"
+        },
+        {
+          "id": "list-files",
+          "title": "מה יש לנו כאן",
+          "command": "find . -type f | sort | xargs ls -l",
+          "explain": "כל הקבצים עם הגודל שלהם. הגדולים (לוג ה-WAF, ה-flow logs, ה-CloudTrail) הם אלה שמסננים, לא קוראים.",
+          "powershell": "Get-ChildItem -Recurse -File | Select-Object FullName, Length"
+        },
+        {
+          "id": "read-readme",
+          "title": "קראו את ה-README",
+          "command": "cat README_FIRST.txt",
+          "explain": "אזורי זמן, פורמטים ומילון מונחים. קראו אותו לפני כל דבר אחר.",
+          "powershell": "Get-Content README_FIRST.txt"
+        },
+        {
+          "id": "head-lines",
+          "title": "הצצה לשורות הראשונות",
+          "command": "head -n 3 waf/access.log",
+          "explain": "הסתכלו על הפורמט **לפני** שאתם מפרסרים אותו. `tail -n 3` מציג את סוף החלון.",
+          "powershell": "Get-Content waf\\access.log -TotalCount 3"
+        },
+        {
+          "id": "line-count",
+          "title": "כמה זה גדול?",
+          "command": "wc -l waf/access.log cloudtrail/*.jsonl s3-access-logs/*/*.log",
+          "explain": "מספר השורות אומר לכם אם אפשר לעבור על הקובץ בעיניים או שצריך לסכם אותו.",
+          "powershell": "Get-ChildItem waf\\access.log, cloudtrail\\*.jsonl | ForEach-Object { '{0,8} {1}' -f (Get-Content $_.FullName | Measure-Object -Line).Lines, $_.Name }"
+        }
+      ]
+    },
+    {
+      "category": "grep וחברים",
+      "items": [
+        {
+          "id": "grep-fixed",
+          "title": "חיפוש מילולי",
+          "command": "grep -F '169.254.169.254' waf/access.log | head",
+          "explain": "`-F` מתייחס לתבנית כטקסט רגיל, כך שהנקודות בכתובת IP הן נקודות ולא \"כל תו\". הוא מוצא את הכתובת רק אם היא **כתובה בדיוק כך**.",
+          "powershell": "Select-String -Path waf\\access.log -Pattern '169.254.169.254' -SimpleMatch | Select-Object -First 10"
+        },
+        {
+          "id": "grep-count",
+          "title": "ספירת התאמות",
+          "command": "grep -c 'waf=block' waf/access.log",
+          "explain": "`-c` מדפיס כמה שורות תואמות. בדיקות שפיות מהירות.",
+          "powershell": "(Select-String -Path waf\\access.log -Pattern 'waf=block' -SimpleMatch).Count"
+        },
+        {
+          "id": "grep-exclude",
+          "title": "היפוך / החרגה",
+          "command": "grep -v -e 'waf=block' -e '/static/' waf/access.log | head",
+          "explain": "`-v` משאיר שורות ש**לא** תואמות. כל `-e` מוסיף תבנית. טוב לקילוף רעש.",
+          "powershell": "Select-String -Path waf\\access.log -Pattern 'waf=block', '/static/' -NotMatch | Select-Object -First 10"
+        },
+        {
+          "id": "grep-only-match",
+          "title": "להדפיס רק את ההתאמה",
+          "command": "grep -o 'upstream=[^ ]*' waf/access.log | sort | uniq -c | sort -rn",
+          "explain": "`-o` מוציא רק את הטקסט שהתאים. כאן: כל upstream ש-nginx התחבר אליו, עם ספירה. ערכים נדירים שווים בדיקה.",
+          "powershell": "Select-String -Path waf\\access.log -Pattern 'upstream=\\S+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "grep-all-files",
+          "title": "חיפוש בכמה קבצים יחד",
+          "command": "grep -h -F 'pattern' cloudtrail/*.jsonl | head",
+          "explain": "`-h` מוריד את קידומת שם הקובץ, כך שהפלט עדיין JSON lines תקין שאפשר להעביר ל-`jq`.",
+          "powershell": "Select-String -Path cloudtrail\\*.jsonl -Pattern 'pattern' -SimpleMatch | Select-Object -First 10 -ExpandProperty Line"
+        },
+        {
+          "id": "grep-context",
+          "title": "הקשר סביב התאמה",
+          "command": "grep -n -B2 -A4 'pattern' waf/access.log",
+          "explain": "`-B`/`-A` מציגים שורות לפני ואחרי כל התאמה: מה עוד קרה סביב הרגע הזה?",
+          "powershell": "Select-String -Path waf\\access.log -Pattern 'pattern' -Context 2,4"
+        }
+      ]
+    },
+    {
+      "category": "awk ללוגי גישה",
+      "items": [
+        {
+          "id": "waf-fields",
+          "title": "שליפת שדות משורות WAF",
+          "command": "awk '{print $1, $4, $5, $7, $9}' waf/access.log | head",
+          "explain": "פיצול לפי רווחים: `$1` כתובת הלקוח, `$4 $5` הזמן וההיסט, `$7` ה-URI, `$9` ה-status, `$10` הבתים. ב-user agent יש רווחים, אז לשדות שאחריו השתמשו ב-`grep -o 'upstream=[^ ]*'` במקום לספור.",
+          "powershell": "Get-Content waf\\access.log -TotalCount 10 | ForEach-Object { $f = $_ -split ' '; \"$($f[0]) $($f[3]) $($f[4]) $($f[6]) $($f[8])\" }"
+        },
+        {
+          "id": "status-histogram",
+          "title": "היסטוגרמה של status",
+          "command": "awk '{print $9}' waf/access.log | sort | uniq -c | sort -rn",
+          "explain": "כמה מכל status. המבט הראשון הקלאסי על כל access log.",
+          "powershell": "Select-String -Path waf\\access.log -Pattern '\" (\\d{3}) ' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "ip-histogram",
+          "title": "כתובות הלקוח המובילות",
+          "command": "awk '{print $1}' waf/access.log | sort | uniq -c | sort -rn | head -20",
+          "explain": "מי מדבר איתנו הכי הרבה? תוקפים הם לרוב *לא* בראש הרשימה: הם שולחים מעט בקשות מדויקות.",
+          "powershell": "Select-String -Path waf\\access.log -Pattern '^(\\S+)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name"
+        },
+        {
+          "id": "field-filter",
+          "title": "סינון לפי שדה ואז לפי טקסט",
+          "command": "awk '$9 == 200' waf/access.log | grep -F '/proxy/fetch' | head",
+          "explain": "awk משווה שדה במדויק (`200` לא יתאים בתוך מספר בתים), ואז grep מצמצם לפי path.",
+          "powershell": "Select-String -Path waf\\access.log -Pattern '\" 200 ' | Where-Object { $_.Line -like '*/proxy/fetch*' } | Select-Object -First 10 -ExpandProperty Line"
+        },
+        {
+          "id": "waf-blocked",
+          "title": "מה ה-WAF חסם?",
+          "command": "grep -F 'waf=block' waf/access.log | grep -o 'rule=[0-9]*' | sort | uniq -c",
+          "explain": "אילו חוקים מותאמים הופעלו וכמה פעמים. אחר כך קראו את החוקים האלה ב-`waf/edge-waf.conf`: על מה בדיוק הם מתאימים?",
+          "powershell": "Select-String -Path waf\\access.log -Pattern 'waf=block rule=(\\d+)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name"
+        },
+        {
+          "id": "first-last-match",
+          "title": "המופע הראשון והאחרון",
+          "command": "grep -F 'pattern' waf/access.log | sed -n '1p;$p'",
+          "explain": "ההתחלה והסוף של תופעה בבת אחת. הלוג מסודר לפי זמן.",
+          "powershell": "$hits = Select-String -Path waf\\access.log -Pattern 'pattern' -SimpleMatch\n$hits[0].Line\n$hits[-1].Line"
+        }
+      ]
+    },
+    {
+      "category": "jq ל-CloudTrail",
+      "items": [
+        {
+          "id": "ct-pretty",
+          "title": "הצגה יפה של אירוע אחד",
+          "command": "head -n1 cloudtrail/*20261118.jsonl | jq .",
+          "explain": "ראו כל שדה שרשומת CloudTrail מכילה: `userIdentity`, `sourceIPAddress`, `userAgent`, `eventName`, `requestParameters`, `errorCode`...",
+          "powershell": "Get-Content cloudtrail\\*20261118.jsonl -TotalCount 1 | ConvertFrom-Json | ConvertTo-Json -Depth 10"
+        },
+        {
+          "id": "ct-event-names",
+          "title": "אילו קריאות API היו?",
+          "command": "cat cloudtrail/*.jsonl | jq -r '.eventName' | sort | uniq -c | sort -rn",
+          "explain": "היסטוגרמה של `eventName`. קריאות כתיבה נדירות בולטות מיד.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Group-Object eventName | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "ct-who",
+          "title": "מי חתם על הקריאות?",
+          "command": "cat cloudtrail/*.jsonl | jq -r '.userIdentity.arn // .userIdentity.type' | sort | uniq -c | sort -rn",
+          "explain": "ה-principals לפי נפח. ב-assumed role ה-ARN מסתיים בשם ה-session; ב-role של מכונת EC2 זה ה-instance id.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | ForEach-Object { if ($_.userIdentity.arn) { $_.userIdentity.arn } else { $_.userIdentity.type } } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "ct-where",
+          "title": "מי, מאיפה, ועם איזה מפתח",
+          "command": "cat cloudtrail/*.jsonl | jq -r '[.userIdentity.arn // \"-\", .sourceIPAddress, .userIdentity.accessKeyId // \"-\"] | @tsv' | sort | uniq -c | sort -rn",
+          "explain": "מקבץ אירועים לפי principal, כתובת מקור ו-access key. principal אחד אמור בדרך כלל להגיע ממספר קטן וצפוי של מקומות.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | ForEach-Object { '{0} {1} {2}' -f $_.userIdentity.arn, $_.sourceIPAddress, $_.userIdentity.accessKeyId } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "ct-useragent",
+          "title": "איזה לקוח ביצע את הקריאה?",
+          "command": "cat cloudtrail/*.jsonl | jq -r '[.sourceIPAddress, .userAgent[0:40]] | @tsv' | sort | uniq -c | sort -rn | head -20",
+          "explain": "ה-`userAgent` מגלה את ה-SDK או הכלי. שירות שכתוב ב-Go לא מתחיל פתאום להשתמש ב-CLI של Python.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | ForEach-Object { '{0} {1}' -f $_.sourceIPAddress, $_.userAgent.Substring(0, [Math]::Min(40, $_.userAgent.Length)) } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name"
+        },
+        {
+          "id": "ct-select-role",
+          "title": "רק role אחד",
+          "command": "cat cloudtrail/*.jsonl | jq -c 'select(.userIdentity.sessionContext.sessionIssuer.userName == \"<role-name>\")' | head",
+          "explain": "`sessionIssuer.userName` הוא ה-role שמאחורי session של assumed role, לא משנה איך ה-session נקרא.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.userIdentity.sessionContext.sessionIssuer.userName -eq '<role-name>' } | Select-Object -First 10 eventTime, eventName, sourceIPAddress"
+        },
+        {
+          "id": "ct-not-ip",
+          "title": "החרגת מקורות מוכרים",
+          "command": "cat cloudtrail/*.jsonl | jq -c 'select(.sourceIPAddress != \"<ip>\" and .sourceIPAddress != \"<other-ip>\")' | head",
+          "explain": "הורידו את הכתובות שאתם יודעים להסביר, וראו מה נשאר.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.sourceIPAddress -notin @('<ip>', '<other-ip>') } | Select-Object -First 10 eventTime, eventName, sourceIPAddress"
+        },
+        {
+          "id": "ct-errors",
+          "title": "קריאות שנכשלו",
+          "command": "cat cloudtrail/*.jsonl | jq -r 'select(.errorCode) | [.eventTime, .eventName, .errorCode, .sourceIPAddress] | @tsv'",
+          "explain": "`errorCode` קיים רק כשקריאה נכשלה. כישלון הוא ניסיון ולא פעולה, אבל ניסיונות מראים כוונה.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.errorCode } | Format-Table eventTime, eventName, errorCode, sourceIPAddress"
+        },
+        {
+          "id": "ct-timeline",
+          "title": "ציר הזמן של שחקן אחד",
+          "command": "cat cloudtrail/*.jsonl | jq -r 'select(.sourceIPAddress == \"<ip>\") | [.eventTime, .eventName, .requestParameters.bucketName // \"-\", .errorCode // \"OK\", .readOnly] | @tsv'",
+          "explain": "כל מה שמקור אחד עשה, לפי הסדר, עם ה-bucket והאם זה הצליח. `readOnly` הוא false בקריאות שמשנות משהו.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.sourceIPAddress -eq '<ip>' } | Format-Table eventTime, eventName, @{n='bucket'; e={$_.requestParameters.bucketName}}, errorCode, readOnly"
+        },
+        {
+          "id": "ct-unique-objects",
+          "title": "אובייקטים ייחודיים שנקראו",
+          "command": "cat cloudtrail/*.jsonl | jq -r 'select(.eventName == \"GetObject\" and (has(\"errorCode\") | not)) | \"\\(.requestParameters.bucketName)/\\(.requestParameters.key)\"' | sort -u | wc -l",
+          "explain": "בונה `bucket/key` לכל `GetObject` מוצלח וסופר ערכים ייחודיים. הוסיפו תנאי `select()` משלכם בשביל ה*מי*.",
+          "powershell": "(Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.eventName -eq 'GetObject' -and -not $_.errorCode } | ForEach-Object { $_.requestParameters.bucketName + '/' + $_.requestParameters.key } | Sort-Object -Unique | Measure-Object).Count"
+        }
+      ]
+    },
+    {
+      "category": "לוגי גישה של S3",
+      "items": [
+        {
+          "id": "s3-fields",
+          "title": "שדות בלוג גישה של S3",
+          "command": "awk '{print $3, $5, $6, $8, $9}' s3-access-logs/*/*.log | head",
+          "explain": "`$2` bucket, `$3 $4` זמן (UTC), `$5` כתובת מרוחקת, `$6` ה-requester (ARN, או שירות), `$7` request id, `$8` הפעולה, `$9` ה-key. ה-status בא אחרי שורת הבקשה שבמירכאות.",
+          "powershell": "Get-Content s3-access-logs\\*\\*.log -TotalCount 10 | ForEach-Object { $f = $_ -split ' '; \"$($f[2]) $($f[4]) $($f[5]) $($f[7]) $($f[8])\" }"
+        },
+        {
+          "id": "s3-ops",
+          "title": "היסטוגרמת פעולות",
+          "command": "awk '{print $8}' s3-access-logs/*/*.log | sort | uniq -c | sort -rn",
+          "explain": "`REST.GET.OBJECT`, `REST.PUT.OBJECT`, ... ופעולות ש-S3 מבצע בעצמו. אילו מופיעות רק ביום אחד?",
+          "powershell": "Get-Content s3-access-logs\\*\\*.log | ForEach-Object { ($_ -split ' ')[7] } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "s3-requesters",
+          "title": "מי נגע ב-bucket, ומאיפה",
+          "command": "awk '{print $5, $6}' s3-access-logs/*/*.log | sort | uniq -c | sort -rn",
+          "explain": "כתובת מרוחקת ו-requester יחד. אותו ARN משתי רשתות שונות לגמרי הוא דגל אדום.",
+          "powershell": "Get-Content s3-access-logs\\*\\*.log | ForEach-Object { $f = $_ -split ' '; \"$($f[4]) $($f[5])\" } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "s3-by-ip",
+          "title": "הבקשות של מקור אחד",
+          "command": "awk '$5 == \"<ip>\" {print $3, $8, $9}' s3-access-logs/*/*.log | head -30",
+          "explain": "כל הבקשות מכתובת אחת: זמן, פעולה ו-key.",
+          "powershell": "Get-Content s3-access-logs\\*\\*.log | Where-Object { ($_ -split ' ')[4] -eq '<ip>' } | ForEach-Object { $f = $_ -split ' '; \"$($f[2]) $($f[7]) $($f[8])\" } | Select-Object -First 30"
+        },
+        {
+          "id": "s3-bytes",
+          "title": "בתים שנשלחו",
+          "command": "awk '$5 == \"<ip>\" && $8 == \"REST.GET.OBJECT\"' s3-access-logs/*/*.log | grep -oE 'HTTP/1.1\" 200 - [0-9]+' | awk '{s += $NF} END {print s}'",
+          "explain": "סוכם את הבתים ש-S3 שלח בקריאות אובייקטים מוצלחות. שימושי לדוח הדליפה.",
+          "powershell": "Get-Content s3-access-logs\\*\\*.log | Where-Object { ($_ -split ' ')[4] -eq '<ip>' } | Select-String 'REST.GET.OBJECT .*HTTP/1.1\" 200 - (\\d+)' | ForEach-Object { [long]$_.Matches[0].Groups[1].Value } | Measure-Object -Sum"
+        }
+      ]
+    },
+    {
+      "category": "VPC flow logs",
+      "items": [
+        {
+          "id": "flow-header",
+          "title": "מספור העמודות",
+          "command": "head -1 vpc-flow-logs/*.log | tr ' ' '\\n' | nl",
+          "explain": "Flow log v2: `$4` srcaddr, `$5` dstaddr, `$6` srcport, `$7` dstport, `$10` bytes, `$11`/`$12` התחלה/סוף (epoch), `$13` action.",
+          "powershell": "$i = 0; (Get-Content vpc-flow-logs\\*.log -TotalCount 1) -split ' ' | ForEach-Object { $i++; \"$i $_\" }"
+        },
+        {
+          "id": "flow-by-ip",
+          "title": "כל ה-flows עם host אחד",
+          "command": "awk '$4 == \"<ip>\" || $5 == \"<ip>\"' vpc-flow-logs/*.log",
+          "explain": "בשני הכיוונים. המירו את `start` עם `date -u -d @<epoch>`.",
+          "powershell": "Get-Content vpc-flow-logs\\*.log | Where-Object { $f = $_ -split ' '; $f[3] -eq '<ip>' -or $f[4] -eq '<ip>' }"
+        },
+        {
+          "id": "flow-outbound",
+          "title": "חיבורים שהמכונה פתחה",
+          "command": "awk 'NR > 1 && $4 ~ /^10\\./ && $6 != 443 {print $5 \":\" $7}' vpc-flow-logs/*.log | sort | uniq -c | sort -rn",
+          "explain": "WAF בעיקר *עונה* על 443. flows שבהם הוא המקור ופורט המקור אינו 443 הם חיבורים שהוא פתח בעצמו. לאן?",
+          "powershell": "Get-Content vpc-flow-logs\\*.log | Select-Object -Skip 1 | ForEach-Object { $f = $_ -split ' '; if ($f[3] -like '10.*' -and $f[5] -ne '443') { $f[4] + ':' + $f[6] } } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "flow-rejects",
+          "title": "ניסיונות שנחסמו",
+          "command": "awk '$13 == \"REJECT\" {print $4, $7}' vpc-flow-logs/*.log | sort | uniq -c | sort -rn | head",
+          "explain": "מה ש-security group זרק. סריקות פורטים רועשות, נפוצות, ובדרך כלל הן לא הסיפור.",
+          "powershell": "Get-Content vpc-flow-logs\\*.log | Where-Object { ($_ -split ' ')[12] -eq 'REJECT' } | ForEach-Object { $f = $_ -split ' '; \"$($f[3]) $($f[6])\" } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count, Name"
+        }
+      ]
+    },
+    {
+      "category": "אזורי זמן ו-timestamps",
+      "items": [
+        {
+          "id": "nginx-time-to-utc",
+          "title": "זמן nginx ל-UTC",
+          "command": "echo '[17/Nov/2026:21:15:00 -0500]' | sed -E 's#\\[([0-9]+)/([A-Za-z]+)/([0-9]+):([0-9:]+) ([-+][0-9]+)\\]#\\1 \\2 \\3 \\4 \\5#' | xargs -I{} date -u -d '{}' +%FT%TZ",
+          "explain": "הופך `[dd/Mon/yyyy:HH:MM:SS -0500]` לזמן UTC בפורמט ISO. שימו לב לתאריך: הוא יכול להתחלף.",
+          "powershell": "$s = '17/Nov/2026:21:15:00 -0500' -replace '(\\d\\d)(\\d\\d)$', '$1:$2'\n[DateTimeOffset]::ParseExact($s, 'dd/MMM/yyyy:HH:mm:ss zzz', [Globalization.CultureInfo]::InvariantCulture).UtcDateTime.ToString('u')"
+        },
+        {
+          "id": "est-to-utc",
+          "title": "EST ל-UTC",
+          "command": "date -u -d '17 Nov 2026 21:15:00 -0500' +%H:%M:%S",
+          "explain": "בנובמבר, ניו יורק היא UTC-05:00. מוסיפים חמש שעות.",
+          "powershell": "([DateTimeOffset]'2026-11-17T21:15:00-05:00').UtcDateTime.ToString('HH:mm:ss')"
+        },
+        {
+          "id": "utc-to-est",
+          "title": "UTC ל-EST",
+          "command": "TZ=America/New_York date -d '2026-11-18T03:00:00Z'",
+          "explain": "מה הייתה השעה במשרד בניו יורק ברגע UTC נתון.",
+          "powershell": "([DateTimeOffset]'2026-11-18T03:00:00Z').ToOffset([TimeSpan]'-05:00')"
+        },
+        {
+          "id": "epoch-to-utc",
+          "title": "Epoch ל-UTC",
+          "command": "date -u -d @1794952800",
+          "explain": "בשביל ה-flow logs וה-Slack. ב-macOS: `date -u -r 1794952800`.",
+          "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794952800).UtcDateTime.ToString('u')"
+        },
+        {
+          "id": "slack-timestamps",
+          "title": "קריאת ערוץ ה-Slack",
+          "command": "jq -r '.[] | \"\\(.ts | tonumber | floor | todate) \\(.user): \\(.text)\"' slack/inc-prod-exports.json",
+          "explain": "ה-`ts` של Slack הוא epoch כמחרוזת. `tonumber | floor | todate` נותן ISO-8601 ב-UTC.",
+          "powershell": "(Get-Content slack\\inc-prod-exports.json -Raw | ConvertFrom-Json) | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][Math]::Floor([double]$_.ts)).ToString('u'), $_.user, $_.text }"
+        }
+      ]
+    },
+    {
+      "category": "פענוח URLs וכתובות",
+      "items": [
+        {
+          "id": "decimal-ip",
+          "title": "ממספר עשרוני ל-IPv4",
+          "command": "n=3232235777; echo $((n>>24&255)).$((n>>16&255)).$((n>>8&255)).$((n&255))",
+          "explain": "כתובת IPv4 היא בסך הכול מספר של 32 ביט. `http://3232235777/` ו-`http://192.168.1.1/` מגיעים לאותו מקום, ורשימות חסימה של מחרוזות כמעט אף פעם לא יודעות את זה.",
+          "powershell": "[System.Net.IPAddress]::Parse('3232235777').ToString()"
+        },
+        {
+          "id": "url-decode",
+          "title": "פענוח URL של פרמטר",
+          "command": "python3 -c 'import sys, urllib.parse; print(urllib.parse.unquote(sys.argv[1]))' 'http%3A%2F%2Fexample.com%2Fa%20b'",
+          "explain": "`%3A` הוא `:`, `%2F` הוא `/`. פענחו לפני שאתם מחליטים מה הבקשה באמת ביקשה.",
+          "powershell": "[uri]::UnescapeDataString('http%3A%2F%2Fexample.com%2Fa%20b')"
+        }
+      ]
+    },
+    {
+      "category": "קונפיגורציית IAM ו-EC2",
+      "items": [
+        {
+          "id": "ec2-metadata-options",
+          "title": "מכונות, כתובות והגדרות IMDS",
+          "command": "jq '.Reservations[].Instances[] | {InstanceId, PrivateIpAddress, PublicIpAddress, profile: .IamInstanceProfile.Arn, MetadataOptions}' ec2/describe-instances.json",
+          "explain": "איזה instance profile כל מכונה לובשת, הכתובות שלה, והאם IMDSv2 נאכף (`HttpTokens: required`).",
+          "powershell": "(Get-Content ec2\\describe-instances.json -Raw | ConvertFrom-Json).Reservations.Instances | Select-Object InstanceId, PrivateIpAddress, PublicIpAddress, @{n='profile'; e={$_.IamInstanceProfile.Arn}}, @{n='HttpTokens'; e={$_.MetadataOptions.HttpTokens}}"
+        },
+        {
+          "id": "iam-statements",
+          "title": "ה-statements של ה-policy במבט אחד",
+          "command": "jq -r '.RolePolicies[].PolicyDocument.Statement[] | [.Sid, .Effect, (.Action | tostring), (.Resource | tostring)] | @tsv' iam/roles/<role-name>.json",
+          "explain": "שורה לכל statement: Sid, Effect, Action ו-Resource. הפתעות גרות בתווים כלליים (`*`).",
+          "powershell": "(Get-Content iam\\roles\\<role-name>.json -Raw | ConvertFrom-Json).RolePolicies.PolicyDocument.Statement | Format-Table Sid, Effect, @{n='Action'; e={$_.Action -join ','}}, @{n='Resource'; e={$_.Resource -join ','}} -Wrap"
+        },
+        {
+          "id": "iam-action-names",
+          "title": "שמות API מול שמות actions ב-IAM",
+          "command": "cat cloudtrail/*.jsonl | jq -r 'select(.eventSource == \"s3.amazonaws.com\") | .eventName' | sort -u",
+          "explain": "CloudTrail רושם את **פעולת ה-API**; IAM מאשר **action**, וב-S3 הם לא תמיד זהים. `ListObjects` (V2) דורש `s3:ListBucket`; `ListBuckets` דורש `s3:ListAllMyBuckets`; לכמה APIs של קונפיגורציית bucket יש שמות action משלהם. בדקו כל אחד ב-AWS Service Authorization Reference של Amazon S3.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.eventSource -eq 's3.amazonaws.com' } | Select-Object -ExpandProperty eventName -Unique"
+        },
+        {
+          "id": "iam-glob-test",
+          "title": "האם תו כללי מכסה action?",
+          "command": "[[ 's3:GetObject' == s3:Get* ]] && echo match || echo no-match",
+          "explain": "תבניות `Action` ו-`Resource` ב-IAM הן globs: `*` מתאים לכל רצף תווים. בדקו את ה-action ואת ה-ARN של המשאב מול כל statement, וזכרו ש-`Deny` מפורש גובר על כל `Allow`.",
+          "powershell": "'s3:GetObject' -like 's3:Get*'"
+        },
+        {
+          "id": "access-keys-table",
+          "title": "מפתחות ארוכי טווח",
+          "command": "column -s, -t < iam/access-keys.csv",
+          "explain": "מפתחות של משתמשי IAM (`AKIA...`) והסטטוס שלהם. credentials זמניים של roles (`ASIA...`) לא מופיעים כאן לעולם.",
+          "powershell": "Import-Csv iam\\access-keys.csv | Format-Table"
+        }
+      ]
+    }
+  ],
+  "debrief": "_Sealed._ סיימו את כל ששת השלבים כדי לפתוח את ה-debrief."
+}

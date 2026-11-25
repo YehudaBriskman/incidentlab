@@ -1,15 +1,26 @@
 // Typed client for the instructor/admin endpoints. Every response is parsed with the shared zod contract.
+import type { z } from "zod";
 import {
-  AdminPlayersResponseSchema,
+  AccountResponseSchema,
+  AdminAccountsResponseSchema,
+  AdminProgressResponseSchema,
   AdminResetRequestSchema,
+  AdminStatsResponseSchema,
   ErrorBodySchema,
-  type AdminPlayer,
+  ScheduleResponseSchema,
+  ScheduleSchema,
+  TodayResponseSchema,
+  type AccountView,
+  type Schedule,
+  type TodayResponse,
 } from "../../shared/contract";
 
 const ADMIN_KEY_STORAGE = "il.adminKey";
 const FETCH_TIMEOUT_MS = 8000;
 
-export type AdminPlayersResult = { generatedAt: string; players: AdminPlayer[] };
+export type AdminAccountsResult = z.infer<typeof AdminAccountsResponseSchema>;
+export type AdminProgressResult = z.infer<typeof AdminProgressResponseSchema>;
+export type AdminStatsResult = z.infer<typeof AdminStatsResponseSchema>;
 
 export class AdminApiError extends Error {
   readonly status: number;
@@ -56,9 +67,10 @@ async function readErrorMessage(res: Response): Promise<string> {
   return `Request failed (${res.status})`;
 }
 
-async function adminFetch(path: string, key: string, init: RequestInit = {}): Promise<Response> {
+/** key === null: public endpoint, no X-Admin-Key header. */
+async function apiFetch(path: string, key: string | null, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
-  headers.set("X-Admin-Key", key);
+  if (key !== null) headers.set("X-Admin-Key", key);
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   let res: Response;
@@ -76,23 +88,82 @@ async function adminFetch(path: string, key: string, init: RequestInit = {}): Pr
   return res;
 }
 
-export async function fetchAdminPlayers(key: string): Promise<AdminPlayersResult> {
-  const res = await adminFetch("/api/admin/players", key);
-  const body: unknown = await res.json();
-  const parsed = AdminPlayersResponseSchema.safeParse(body);
-  if (!parsed.success) throw new AdminApiError(res.status, "Unexpected response shape from /api/admin/players");
+async function parseJson<S extends z.ZodType>(res: Response, schema: S, path: string): Promise<z.infer<S>> {
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    throw new AdminApiError(res.status, `Invalid JSON from ${path}`);
+  }
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new AdminApiError(res.status, `Unexpected response shape from ${path}`);
   return parsed.data;
 }
 
-export async function deleteAdminPlayer(key: string, id: string): Promise<void> {
-  await adminFetch(`/api/admin/players/${encodeURIComponent(id)}`, key, { method: "DELETE" });
+function jsonInit(method: string, body: unknown): RequestInit {
+  return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
 }
 
-export async function resetAllPlayers(key: string): Promise<void> {
-  const body = AdminResetRequestSchema.parse({ confirm: "RESET" });
-  await adminFetch("/api/admin/reset", key, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+const seg = encodeURIComponent;
+
+// ---- public ------------------------------------------------------------------
+
+export async function fetchToday(): Promise<TodayResponse> {
+  const path = "/api/today";
+  return parseJson(await apiFetch(path, null), TodayResponseSchema, path);
+}
+
+// ---- accounts ----------------------------------------------------------------
+
+export async function fetchAccounts(key: string): Promise<AdminAccountsResult> {
+  const path = "/api/admin/accounts";
+  return parseJson(await apiFetch(path, key), AdminAccountsResponseSchema, path);
+}
+
+export async function setAccountStatus(key: string, id: string, action: "approve" | "reject"): Promise<AccountView> {
+  const path = `/api/admin/accounts/${seg(id)}/${action}`;
+  const body = await parseJson(await apiFetch(path, key, jsonInit("POST", {})), AccountResponseSchema, path);
+  return body.account;
+}
+
+export async function deleteAccount(key: string, id: string): Promise<void> {
+  await apiFetch(`/api/admin/accounts/${seg(id)}`, key, { method: "DELETE" });
+}
+
+// ---- live progress -----------------------------------------------------------
+
+export async function fetchProgress(key: string, caseId: string): Promise<AdminProgressResult> {
+  const path = `/api/admin/progress?caseId=${seg(caseId)}`;
+  return parseJson(await apiFetch(path, key), AdminProgressResponseSchema, "/api/admin/progress");
+}
+
+export async function restartPlayerCase(key: string, accountId: string, caseId: string): Promise<void> {
+  await apiFetch(`/api/admin/progress/${seg(accountId)}/${seg(caseId)}`, key, { method: "DELETE" });
+}
+
+/** Wipes progress for one case (or every case when caseId is omitted). Accounts stay. */
+export async function resetProgress(key: string, caseId?: string): Promise<void> {
+  const body = AdminResetRequestSchema.parse(caseId === undefined ? { confirm: "RESET" } : { confirm: "RESET", caseId });
+  await apiFetch("/api/admin/reset", key, jsonInit("POST", body));
+}
+
+// ---- schedule ----------------------------------------------------------------
+
+export async function fetchSchedule(key: string): Promise<Schedule> {
+  const path = "/api/admin/schedule";
+  return (await parseJson(await apiFetch(path, key), ScheduleResponseSchema, path)).schedule;
+}
+
+export async function saveSchedule(key: string, schedule: Schedule): Promise<Schedule> {
+  const path = "/api/admin/schedule";
+  const local = ScheduleSchema.safeParse(schedule);
+  if (!local.success) throw new AdminApiError(400, local.error.issues[0]?.message ?? "Invalid schedule");
+  return (await parseJson(await apiFetch(path, key, jsonInit("PUT", local.data)), ScheduleResponseSchema, path)).schedule;
+}
+
+// ---- stats -------------------------------------------------------------------
+
+export async function fetchCaseStats(key: string): Promise<AdminStatsResult> {
+  const path = "/api/admin/stats";
+  return parseJson(await apiFetch(path, key), AdminStatsResponseSchema, path);
 }

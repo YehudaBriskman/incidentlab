@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Full IncidentLab build: generators -> server answer key -> evidence zip + Explorer files -> solver test -> site -> server tests.
+# Full IncidentLab build: generators (3am-outage + generator/cases/*) -> server answer keys -> evidence zip + Explorer files -> solver test -> site -> server tests.
 # Usage: ./scripts/build-all.sh [--no-site]
 set -euo pipefail
 
@@ -34,7 +34,15 @@ banner "Generate nginx + app logs    (generator/gen_logs.py)"
 banner "Generate supporting evidence (generator/gen_support.py)"
 "$PYTHON" generator/gen_support.py
 
-banner "Answer key -> server secrets (scripts/make_flags.py)"
+shopt -s nullglob
+CASE_BUILDERS=(generator/cases/*/build.py)
+shopt -u nullglob
+for builder in "${CASE_BUILDERS[@]}"; do
+  banner "Generate case $(basename "$(dirname "$builder")")"
+  "$PYTHON" "$builder"
+done
+
+banner "Answer keys -> server secrets (scripts/make_flags.py)"
 "$PYTHON" scripts/make_flags.py
 
 banner "Package evidence + Explorer  (scripts/package.sh)"
@@ -42,6 +50,11 @@ banner "Package evidence + Explorer  (scripts/package.sh)"
 
 banner "Test: official solver        (solutions/solve.sh)"
 bash solutions/solve.sh
+for builder in "${CASE_BUILDERS[@]}"; do
+  case_id="$(basename "$(dirname "$builder")")"
+  banner "Test: solver $case_id"
+  bash "solutions/$case_id/solve.sh"
+done
 
 if [[ "$BUILD_SITE" -eq 1 ]]; then
   banner "Build site                   (site: npm ci && npm run build)"

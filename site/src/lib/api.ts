@@ -1,29 +1,35 @@
 // Typed client for the IncidentLab player API (see shared/contract.ts).
 // Every response is parsed with the contract's zod schemas; nothing is trusted blindly.
+// Auth is an HttpOnly session cookie set by the server: this file never sees or stores a token.
 import type { z } from "zod";
 import {
+  AccountResponseSchema,
   AnswerResponseSchema,
-  CreatePlayerResponseSchema,
   DebriefResponseSchema,
   ErrorBodySchema,
-  MeResponseSchema,
-  PlayerResponseSchema,
-  type PlayerView,
+  ProgressResponseSchema,
+  TodayResponseSchema,
+  UserStatsResponseSchema,
+  type AccountView,
+  type ProgressView,
   type QuestionId,
+  type TodayResponse,
+  type UserStats,
 } from "../../shared/contract";
 
-const TOKEN_KEY = "il.token";
 const rawBase: unknown = import.meta.env["VITE_API_BASE"];
 const API_BASE = typeof rawBase === "string" ? rawBase.replace(/\/$/, "") : "";
 
 export class ApiError extends Error {
   readonly status: number;
+  readonly code: string | null;
   readonly retryAfterSeconds: number | null;
-  constructor(status: number, message: string, retryAfterSeconds: number | null) {
+  constructor(status: number, message: string, options: { code?: string | null; retryAfterSeconds?: number | null } = {}) {
     super(message);
     this.name = "ApiError";
     this.status = status;
-    this.retryAfterSeconds = retryAfterSeconds;
+    this.code = options.code ?? null;
+    this.retryAfterSeconds = options.retryAfterSeconds ?? null;
   }
   get isUnauthorized(): boolean {
     return this.status === 401;
@@ -31,36 +37,11 @@ export class ApiError extends Error {
   get isRateLimited(): boolean {
     return this.status === 429;
   }
-}
-
-export function getToken(): string | null {
-  try {
-    return window.localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
+  /** Signed in, but the instructor hasn't approved (or has rejected) the account. */
+  get isNotApproved(): boolean {
+    return this.status === 403 && (this.code === "pending" || this.code === "rejected");
   }
 }
-
-export function setToken(token: string): void {
-  try {
-    window.localStorage.setItem(TOKEN_KEY, token);
-  } catch {
-    /* storage unavailable: token lives only for this page load */
-  }
-  memoryToken = token;
-}
-
-export function clearToken(): void {
-  memoryToken = null;
-  try {
-    window.localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
-let memoryToken: string | null = null;
-const currentToken = (): string | null => getToken() ?? memoryToken;
 
 export type Connectivity = "ok" | "retrying" | "unreachable";
 const connectivityListeners = new Set<(state: Connectivity) => void>();
@@ -83,36 +64,33 @@ async function fetchOnce(url: string, init: RequestInit): Promise<Response> {
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } catch {
-    throw new ApiError(0, "Can't reach the IncidentLab server. Check your connection and try again.", null);
+    throw new ApiError(0, "Can't reach the IncidentLab server. Check your connection and try again.");
   } finally {
     window.clearTimeout(timer);
   }
 }
 
-async function request<S extends z.ZodType>(
-  method: "GET" | "POST",
-  path: string,
-  schema: S,
-  body?: unknown,
-): Promise<z.infer<S>> {
+async function send(method: "GET" | "POST", path: string, body?: unknown): Promise<Response> {
   const headers: Record<string, string> = { Accept: "application/json" };
-  const token = currentToken();
-  if (token) headers["Authorization"] = `Bearer ${token}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  const init: RequestInit = { method, headers, body: body === undefined ? undefined : JSON.stringify(body) };
+  const init: RequestInit = {
+    method,
+    headers,
+    credentials: API_BASE ? "include" : "same-origin",
+    body: body === undefined ? undefined : JSON.stringify(body),
+  };
 
   // Retries: GET on network errors and 5xx; POST only when no response was received at all.
-  let res: Response | null = null;
   for (let attempt = 0; ; attempt++) {
     try {
-      res = await fetchOnce(`${API_BASE}${path}`, init);
+      const res = await fetchOnce(`${API_BASE}${path}`, init);
       if (method === "GET" && res.status >= 500 && attempt < MAX_RETRIES) {
         emitConnectivity("retrying");
         await sleep(600 * 2 ** attempt);
         continue;
       }
       emitConnectivity("ok");
-      break;
+      return res;
     } catch (err) {
       if (attempt >= MAX_RETRIES) {
         emitConnectivity("unreachable");
@@ -122,57 +100,104 @@ async function request<S extends z.ZodType>(
       await sleep(600 * 2 ** attempt);
     }
   }
+}
 
-  let json: unknown = null;
+async function readJson(res: Response): Promise<unknown> {
   try {
-    json = await res.json();
+    const value: unknown = await res.json();
+    return value;
   } catch {
-    json = null;
+    return null;
   }
+}
 
+async function request<S extends z.ZodType>(method: "GET" | "POST", path: string, schema: S, body?: unknown): Promise<z.infer<S>> {
+  const res = await send(method, path, body);
+  const json = await readJson(res);
   if (!res.ok) {
     const parsed = ErrorBodySchema.safeParse(json);
     const header = Number(res.headers.get("Retry-After"));
-    const retry = parsed.success && parsed.data.retryAfterSeconds !== undefined
-      ? parsed.data.retryAfterSeconds
-      : Number.isFinite(header) && header > 0 ? header : null;
-    throw new ApiError(res.status, parsed.success ? parsed.data.error : `Request failed (${res.status})`, retry);
+    const retry =
+      parsed.success && parsed.data.retryAfterSeconds !== undefined ? parsed.data.retryAfterSeconds : Number.isFinite(header) && header > 0 ? header : null;
+    throw new ApiError(res.status, parsed.success ? parsed.data.error : `Request failed (${res.status})`, {
+      code: parsed.success ? (parsed.data.code ?? null) : null,
+      retryAfterSeconds: retry,
+    });
   }
-
   const parsed = schema.safeParse(json);
   if (!parsed.success) {
     console.error(`[api] ${path} returned an unexpected shape`, parsed.error.issues);
-    throw new ApiError(res.status, "The server sent an unexpected response.", null);
+    throw new ApiError(res.status, "The server sent an unexpected response.");
   }
   return parsed.data;
 }
 
-export async function createPlayer(name: string): Promise<PlayerView> {
-  const data = await request("POST", "/api/players", CreatePlayerResponseSchema, { name, caseId: "3am-outage" });
-  setToken(data.token);
-  return data.player;
+async function requestNoContent(path: string, body: unknown): Promise<void> {
+  const res = await send("POST", path, body);
+  if (!res.ok) {
+    const parsed = ErrorBodySchema.safeParse(await readJson(res));
+    throw new ApiError(res.status, parsed.success ? parsed.data.error : `Request failed (${res.status})`);
+  }
 }
 
-export async function getMe(): Promise<PlayerView> {
-  return (await request("GET", "/api/me", MeResponseSchema)).player;
+// ---- account / session ------------------------------------------------------
+
+type Credentials = { username: string; password: string };
+
+export async function register(credentials: Credentials): Promise<AccountView> {
+  return (await request("POST", "/api/auth/register", AccountResponseSchema, credentials)).account;
 }
 
-export async function setupDone(): Promise<PlayerView> {
-  return (await request("POST", "/api/setup-done", PlayerResponseSchema, {})).player;
+export async function login(credentials: Credentials): Promise<AccountView> {
+  return (await request("POST", "/api/auth/login", AccountResponseSchema, credentials)).account;
 }
 
-export async function submitAnswer(questionId: QuestionId, answer: string): Promise<{ correct: boolean; player: PlayerView }> {
-  return request("POST", "/api/answer", AnswerResponseSchema, { questionId, answer });
+export async function logout(): Promise<void> {
+  await requestNoContent("/api/auth/logout", {});
 }
 
-export async function revealHint(questionId: QuestionId): Promise<PlayerView> {
-  return (await request("POST", "/api/hint", PlayerResponseSchema, { questionId })).player;
+/** The signed-in account, or null when signed out. */
+export async function fetchMe(): Promise<AccountView | null> {
+  try {
+    return (await request("GET", "/api/me", AccountResponseSchema)).account;
+  } catch (err) {
+    if (err instanceof ApiError && err.isUnauthorized) return null;
+    throw err;
+  }
 }
 
-export async function revealAnswer(questionId: QuestionId): Promise<PlayerView> {
-  return (await request("POST", "/api/reveal", PlayerResponseSchema, { questionId })).player;
+export async function fetchMyStats(): Promise<UserStats> {
+  return (await request("GET", "/api/me/stats", UserStatsResponseSchema)).stats;
 }
 
-export async function getDebrief(): Promise<string> {
-  return (await request("GET", "/api/debrief", DebriefResponseSchema)).markdown;
+export async function fetchToday(): Promise<TodayResponse> {
+  return request("GET", "/api/today", TodayResponseSchema);
+}
+
+// ---- gameplay (per case) ----------------------------------------------------
+
+const casePath = (caseId: string, action: string): string => `/api/cases/${encodeURIComponent(caseId)}/${action}`;
+
+export async function getProgress(caseId: string): Promise<ProgressView> {
+  return (await request("GET", casePath(caseId, "progress"), ProgressResponseSchema)).progress;
+}
+
+export async function setupDone(caseId: string): Promise<ProgressView> {
+  return (await request("POST", casePath(caseId, "setup-done"), ProgressResponseSchema, {})).progress;
+}
+
+export async function submitAnswer(caseId: string, questionId: QuestionId, answer: string): Promise<{ correct: boolean; progress: ProgressView }> {
+  return request("POST", casePath(caseId, "answer"), AnswerResponseSchema, { questionId, answer });
+}
+
+export async function revealHint(caseId: string, questionId: QuestionId): Promise<ProgressView> {
+  return (await request("POST", casePath(caseId, "hint"), ProgressResponseSchema, { questionId })).progress;
+}
+
+export async function revealAnswer(caseId: string, questionId: QuestionId): Promise<ProgressView> {
+  return (await request("POST", casePath(caseId, "reveal"), ProgressResponseSchema, { questionId })).progress;
+}
+
+export async function getDebrief(caseId: string, lang: "en" | "he"): Promise<string> {
+  return (await request("GET", `${casePath(caseId, "debrief")}?lang=${lang}`, DebriefResponseSchema)).markdown;
 }

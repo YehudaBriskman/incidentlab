@@ -1,61 +1,59 @@
 #!/usr/bin/env bash
-# Zip the generated evidence pack into the site's public folder.
-# Result: site/public/evidence/3am-outage-evidence.zip with a top-level `3am-outage/` folder,
-# plus every evidence file (except the git bundle) under site/public/evidence/files/ for the
-# in-browser Evidence Explorer. Before zipping, the repo history is exported to repo/git-log.txt
-# so players without git can still read it.
+# Package every case's evidence for the site.
+# For each case <id> with build/evidence/<id>/:
+#   site/public/evidence/<id>-evidence.zip    the download (one top-level folder `<id>/`)
+#   site/public/evidence/<id>/files/...       loose text files for the in-browser Evidence Explorer
+#                                             (binary twins: *.bundle *.pcap *.tar.gz *.bin are skipped)
+# Case 3am-outage also gets repo/git-log.txt exported from its generated git repo first.
+# Usage: scripts/package.sh [case-id ...]   (default: every case under build/evidence/)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CASE_ID="3am-outage"
 SRC_PARENT="$ROOT/build/evidence"
 OUT_DIR="$ROOT/site/public/evidence"
-OUT="$OUT_DIR/${CASE_ID}-evidence.zip"
 
-if [[ ! -d "$SRC_PARENT/$CASE_ID" ]]; then
-  echo "[package] ERROR: $SRC_PARENT/$CASE_ID not found. Run the generators first." >&2
-  exit 1
-fi
 if ! command -v zip >/dev/null 2>&1; then
   echo "[package] ERROR: 'zip' is not installed." >&2
   exit 1
 fi
 
-REPO_DIR="$ROOT/build/repo/shipfast-checkout"
-EV_DIR="$SRC_PARENT/$CASE_ID"
-FILES_DIR="$OUT_DIR/files"
-
-# Plain-text git history (no git needed on the player's machine).
-if [[ ! -d "$REPO_DIR/.git" ]]; then
-  echo "[package] ERROR: $REPO_DIR is not a git repo. Run generator/build_repo.py first." >&2
-  exit 1
+if [[ $# -gt 0 ]]; then
+  CASES=("$@")
+else
+  mapfile -t CASES < <(find "$SRC_PARENT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort)
 fi
-mkdir -p "$EV_DIR/repo"
-git -C "$REPO_DIR" log -p --decorate --all --date=iso >"$EV_DIR/repo/git-log.txt"
-echo "[package] wrote ${EV_DIR#"$ROOT"/}/repo/git-log.txt ($(wc -l <"$EV_DIR/repo/git-log.txt" | tr -d ' ') lines)"
+[[ ${#CASES[@]} -gt 0 ]] || { echo "[package] ERROR: no cases under $SRC_PARENT. Run the generators first." >&2; exit 1; }
 
 mkdir -p "$OUT_DIR"
-rm -f "$OUT"
+rm -rf "$OUT_DIR/files" # pre-multi-case layout
 
-# Loose copies for the browser Explorer (same relative paths; the .bundle is binary, skip it).
-rm -rf "$FILES_DIR"
-(
-  cd "$EV_DIR"
-  find . -type f ! -name '*.bundle' -print | LC_ALL=C sort | while IFS= read -r f; do
-    mkdir -p "$FILES_DIR/$(dirname "$f")"
-    cp "$f" "$FILES_DIR/$f"
-  done
-)
-echo "[package] copied $(find "$FILES_DIR" -type f | wc -l | tr -d ' ') files to ${FILES_DIR#"$ROOT"/}/"
+for CASE_ID in "${CASES[@]}"; do
+  EV_DIR="$SRC_PARENT/$CASE_ID"
+  [[ -d "$EV_DIR" ]] || { echo "[package] ERROR: $EV_DIR not found." >&2; exit 1; }
+  [[ -f "$EV_DIR/README_FIRST.txt" ]] || { echo "[package] ERROR: $CASE_ID has no README_FIRST.txt" >&2; exit 1; }
 
-# Deterministic-ish: sorted file list, no extra attributes (-X), fixed mtimes.
-(
-  cd "$SRC_PARENT"
-  find "$CASE_ID" -exec touch -h -d '2026-11-13 08:00:00 UTC' {} + 2>/dev/null || true
-  find "$CASE_ID" -type f -print | LC_ALL=C sort | zip -q -X -9 "$OUT" -@
-)
+  if [[ "$CASE_ID" == "3am-outage" ]]; then
+    REPO_DIR="$ROOT/build/repo/shipfast-checkout"
+    [[ -d "$REPO_DIR/.git" ]] || { echo "[package] ERROR: $REPO_DIR is not a git repo. Run generator/build_repo.py first." >&2; exit 1; }
+    mkdir -p "$EV_DIR/repo"
+    git -C "$REPO_DIR" log -p --decorate --all --date=iso >"$EV_DIR/repo/git-log.txt"
+  fi
 
-SIZE_BYTES=$(wc -c <"$OUT" | tr -d ' ')
-SIZE_HUMAN=$(du -h "$OUT" | cut -f1)
-FILES=$(unzip -Z1 "$OUT" 2>/dev/null | wc -l | tr -d ' ' || echo "?")
-echo "[package] wrote ${OUT#"$ROOT"/} (${SIZE_HUMAN}, ${SIZE_BYTES} bytes, ${FILES} files)"
+  FILES_DIR="$OUT_DIR/$CASE_ID/files"
+  OUT="$OUT_DIR/${CASE_ID}-evidence.zip"
+  rm -rf "$FILES_DIR" "$OUT"
+  (
+    cd "$EV_DIR"
+    find . -type f ! -name '*.bundle' ! -name '*.pcap' ! -name '*.tar.gz' ! -name '*.bin' -print | LC_ALL=C sort | while IFS= read -r f; do
+      mkdir -p "$FILES_DIR/$(dirname "$f")"
+      cp "$f" "$FILES_DIR/$f"
+    done
+  )
+  # Deterministic-ish: sorted file list, no extra attributes (-X), fixed mtimes.
+  (
+    cd "$SRC_PARENT"
+    find "$CASE_ID" -exec touch -h -d '2026-11-13 08:00:00 UTC' {} + 2>/dev/null || true
+    find "$CASE_ID" -type f -print | LC_ALL=C sort | zip -q -X -9 "$OUT" -@
+  )
+  echo "[package] $CASE_ID: $(du -h "$OUT" | cut -f1) zip, $(find "$FILES_DIR" -type f | wc -l | tr -d ' ') Explorer files"
+done

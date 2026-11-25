@@ -1,0 +1,717 @@
+{
+  "setupChecklist": [
+    "השיגו את הראיות: הורידו ופרסו את **חבילת הראיות**, *או* פתחו את ה-**Evidence Explorer** כדי לעיין בכל קבצי הטקסט בדפדפן (בלי התקנות). קבצי ה-`.pcap` נמצאים רק ב-zip.",
+    "קראו את `README_FIRST.txt` מההתחלה ועד הסוף.",
+    "רשמו את השעון של כל מקור: לוג הלקוח ב-**שעון מקומי (+02:00)**; ה-captures, ה-firewall, ה-ingress, השינויים, ה-audit של ה-zone וה-dig ב-**UTC**; הצ'אט ב-**epoch seconds**. ללוג ה-firewall **אין שנה**.",
+    "בחרו מסלול: **bash** (Linux, macOS או WSL), **Windows PowerShell** (לכל פקודה ב-Toolbox יש גרסת PowerShell), או ה-**Explorer בדפדפן**.",
+    "Wireshark הוא אופציונלי: לכל capture יש תאום טקסט של `tcpdump -v`."
+  ],
+  "id": "ghost-in-the-network",
+  "title": "Ghost in the Network",
+  "subtitle": "בקשות קטנות עובדות. גדולות נתקעות לנצח. חצי מהצי מקבל מה-DNS כתובת IP שלא קיימת מאז יום שלישי. שום דבר לא למטה, ובכל זאת שום דבר לא ממש עובד.",
+  "difficulty": "hard",
+  "estMinutes": 60,
+  "tags": [
+    "tcpdump",
+    "wireshark",
+    "mtu",
+    "pmtud",
+    "icmp",
+    "iptables",
+    "dns",
+    "dig",
+    "unbound",
+    "ttl",
+    "incident-response"
+  ],
+  "inspiredBy": {
+    "title": "תקלת ה-DNSSEC של Slack, ועוד ה-black hole הקלאסי של PMTUD",
+    "year": 2021,
+    "summary": "ב-30 בספטמבר 2021 Slack הפעילו DNSSEC על slack.com, נתקלו בבעיה באופן שבו נענו רשומות wildcard, וגלגלו את השינוי אחורה. רשומת ה-DS כבר נשמרה ב-cache של resolvers מאמתים עם TTL של 24 שעות, כך שאצל חלק מהמשתמשים slack.com המשיך לא להיפתר עד שה-caches האלה פגו או נוקו. רוח הרפאים השנייה ותיקה יותר: black holes של Path MTU Discovery, שבהם הודעות ICMP ‏\"fragmentation needed\" מסוננות ו-segments גדולים של TCP נעלמים בשקט, מתועדים מאז RFC 2923 ‏(2000)."
+  },
+  "briefing": "**יום חמישי, 09:05. Kestrel Freight, חדר ה-ops של dc1.**\n\nאתמול היה יום מוזר. ה-API של ה-**ledger** בדיוק עבר מ-VM ב-dc1 לענן, מאחורי tunnel חדש לגמרי. ואז שמונת ה-workers של `manifest-sync` התחילו להתנהג מוזר: **בקשות קטנות עבדו, העלאות גדולות נתקעו עד שהלקוח ויתר**, וחלק מה-hosts לא הצליחו להגיע ל-ledger בכלל. ping עבד. ה-ledger היה בריא. שום דבר לא היה למטה.\n\nעד תחילת אחר הצהריים שני שינויי חירום גרמו לכל זה להיעלם. אף אחד לא בטוח איזה שינוי תיקן מה, או אם זו הייתה בעיה אחת או שתיים.\n\n**חבילת הראיות** כוללת לוגים של הלקוח ושל ה-ingress, packet captures (כטקסט וכ-`.pcap` אמיתי), לוגים וחוקים של ה-firewall של ה-hosts, dumps של interfaces, פלטים של `dig`, קונפיגורציות של ה-resolver, ה-audit של ה-zone ב-DNS, לוח השינויים וערוץ התקלה. **קראו קודם את `README_FIRST.txt`**: המקורות משתמשים בשעונים שונים.\n\nשישה שלבים, שתי רוחות רפאים: **מתי** ההעלאות התחילו להיתקע, **מה השתנה**, **כמה גדול** packet יכול להיות, ואז ה**כתובת** שלא מוכנה למות, **כמה** hosts היא רדפה, ו**למה** ה-cache שרד את המיגרציה. כל תשובה היא ערך קטן ומדויק.",
+  "evidenceZip": "/evidence/ghost-in-the-network-evidence.zip",
+  "evidence": [
+    {
+      "path": "README_FIRST.txt",
+      "format": "טקסט",
+      "description": "ההערות של ה-on-call: מה קרה מנקודת המבט שלהם, רשימת הקבצים ואזור הזמן של כל מקור. מתחילים כאן."
+    },
+    {
+      "path": "app/manifest-sync.log",
+      "format": "JSON lines (מקומי +02:00)",
+      "description": "לוג הלקוח מכל שמונת ה-app hosts: שורה אחת לכל בקשה ל-ledger כשהיא מסתיימת, ועוד שורות resolver תקופתיות. שעון מקומי."
+    },
+    {
+      "path": "ledger/ingress-access.log",
+      "format": "לוג nginx (UTC)",
+      "description": "ה-ingress של ה-ledger בענן. רק בקשות שבאמת הגיעו. `rid` תואם ל-`req_id` בלוג הלקוח."
+    },
+    {
+      "path": "pcap/app-03_small-request.txt",
+      "format": "טקסט tcpdump -v (UTC)",
+      "description": "בקשה קטנה אחת מ-app-03 ל-ledger, נלכדה על eth0 של app-03."
+    },
+    {
+      "path": "pcap/app-03_large-request.txt",
+      "format": "טקסט tcpdump -v (UTC)",
+      "description": "העלאת manifest אחת מ-app-03, נלכדה על eth0 של app-03. התאום של ה-`.pcap` שב-zip."
+    },
+    {
+      "path": "pcap/app-05_ledger-connect.txt",
+      "format": "טקסט tcpdump -v (UTC)",
+      "description": "ניסיון בקשה אחד מ-app-05, נלכד על eth0 של app-05."
+    },
+    {
+      "path": "pcap/tunnel-validation_app-03.txt",
+      "format": "טקסט tcpdump -v (UTC)",
+      "description": "ה-capture שצורף לשינוי ה-tunnel בליל שלישי: העלאה מ-app-03 מיד אחרי ה-cutover."
+    },
+    {
+      "path": "firewall/kern-app-hosts.log",
+      "format": "syslog (UTC, בלי שנה)",
+      "description": "שורות לוג של ה-kernel שנכתבו על ידי חוקי ה-LOG של ה-firewall בכל שמונת ה-app hosts."
+    },
+    {
+      "path": "firewall/app-03_iptables-save_before.txt",
+      "format": "iptables-save",
+      "description": "ה-firewall של app-03 מגיבוי הקונפיגורציה הלילי (06:00 UTC)."
+    },
+    {
+      "path": "firewall/app-03_iptables-save_after.txt",
+      "format": "iptables-save",
+      "description": "ה-firewall של app-03 כפי שנאסף במהלך התקלה."
+    },
+    {
+      "path": "network/inventory.csv",
+      "format": "CSV",
+      "description": "Hosts, כתובות IP, racks, ה-role של ה-DNS resolver וזמן ה-boot האחרון."
+    },
+    {
+      "path": "network/ip-link.txt",
+      "format": "פלט shell",
+      "description": "`ip link` ו-`ip route get` מ-app-03, מ-app-05, מה-gateway של dc1 ומה-load balancer בענן."
+    },
+    {
+      "path": "changes/change-log.csv",
+      "format": "CSV (UTC)",
+      "description": "לוח השינויים משני עד חמישי. חלק מהתקצירים מעורפלים יותר מהשינויים עצמם."
+    },
+    {
+      "path": "dns/zone-audit.log",
+      "format": "key=value (UTC)",
+      "description": "ה-audit trail של ה-zone הפנימי ב-ns1: הוספות, מחיקות ושינויי TTL."
+    },
+    {
+      "path": "dns/dig/app-02.txt",
+      "format": "פלט dig (UTC)",
+      "description": "dig ו-getent מ-app-02."
+    },
+    {
+      "path": "dns/dig/app-05.txt",
+      "format": "פלט dig (UTC)",
+      "description": "dig מ-app-05, מול ה-resolver המקומי ומול ns1, ועוד getent."
+    },
+    {
+      "path": "dns/dig/app-07.txt",
+      "format": "פלט dig (UTC)",
+      "description": "dig מ-app-07, מול ה-resolver המקומי ומול ns1, ועוד getent."
+    },
+    {
+      "path": "dns/dig/app-08.txt",
+      "format": "פלט dig (UTC)",
+      "description": "dig ו-getent מ-app-08."
+    },
+    {
+      "path": "dns/unbound/node-dns-v1.conf",
+      "format": "unbound.conf",
+      "description": "קונפיגורציית ה-resolver המקומי שנפרסת על ידי ה-role של ansible ‏node-dns v1."
+    },
+    {
+      "path": "dns/unbound/node-dns-v2.conf",
+      "format": "unbound.conf",
+      "description": "קונפיגורציית ה-resolver המקומי שנפרסת על ידי ה-role של ansible ‏node-dns v2."
+    },
+    {
+      "path": "chat/inc-3107.json",
+      "format": "ייצוא Slack (JSON, epoch)",
+      "description": "ערוץ התקלה. `ts` הוא שניות epoch כמחרוזת. דעות הן השערות, לא עובדות."
+    }
+  ],
+  "rules": [
+    "עובדים רק מחבילת הראיות. אל תקראו את קוד ה-generator או את קוד האתר; זה הורס את הכיף.",
+    "התשובות לא רגישות לאותיות גדולות/קטנות, ורווחים בהתחלה ובסוף מתעלמים מהם. הקפידו על הפורמט שמופיע מתחת לכל שאלה.",
+    "כל רמז עולה את הנקודות שמופיעות עליו. הרמזים נחשפים לפי הסדר, מדחיפה עדינה ועד כמעט הפקודה המלאה.",
+    "עבודה בזוגות מומלצת. דברו על ההיגיון שלכם בקול, בדיוק כמו ב-incident review אמיתי.",
+    "כל כלי מותר: grep, awk, jq, Python, Wireshark, גיליון אלקטרוני, העורך האהוב עליכם. בלשונית Toolbox יש פקודות שיעזרו.",
+    "תשובות שגויות לא עולות כלום, אז נחשו בחופשיות. ובכל זאת, נסו להיות מסוגלים להסביר *למה* התשובה שלכם נכונה.",
+    "אל תשתפו flags עם צוותים אחרים עד שכולם מסיימים. לשתף טכניקות זה בסדר.",
+    "בחבילה הזאת יש שתי בעיות. לפני שאתם מאשימים אחת מהן, ודאו שהראיה שאתם משתמשים בה באמת שייכת לה."
+  ],
+  "questions": [
+    {
+      "stage": {
+        "name": "מתי זה התחיל?",
+        "goal": "מצאו מתי בקשה שהגיעה ל-ledger נתקעה לראשונה עד שהלקוח ויתר.",
+        "lookFor": [
+          "`app/manifest-sync.log` כתוב בשעון **מקומי** (+02:00)",
+          "לכשלונות יש `phase`: לא כולם נכשלו באותה דרך",
+          "שורה נכתבת כשהבקשה **מסתיימת**",
+          "יש hosts שנכשלים כל היום מסיבה אחרת: אל תתנו להם להסיח את דעתכם"
+        ],
+        "tools": [
+          "json-pretty",
+          "json-unique-field",
+          "json-first-by-time",
+          "json-size-split",
+          "local-to-utc"
+        ],
+        "explorerTip": "פתחו את `app/manifest-sync.log` והוסיפו פילטר **contains** ‏`\"phase\":\"response\"`. השתמשו ב-**First match** כדי לקפוץ להופעה המוקדמת ביותר, ואז המירו את ה-`ts` שלה עם **ממיר הזמנים** (הוא ב-+02:00). **היסטוגרמה** לפי ה-regex ‏`\"phase\":\"(\\w+)\"` מראה את שני סוגי הכשלונות זה לצד זה."
+      },
+      "id": "q1",
+      "title": "מתי העלאות גדולות התחילו להיתקע?",
+      "prompt": "ביום רביעי בבוקר העלאות manifest התחילו להיתקע. חלק מהבקשות נכשלו **אחרי** שהתחברו ל-ledger: החיבור היה תקין, ואז שום דבר לא חזר עד שללקוח נגמר ה-timeout.\n\nמצאו את הכשלון **הראשון** מהסוג הזה ב-`app/manifest-sync.log` וענו עם הזמן **שבו השורה נרשמה**, מומר ל-**UTC**, בפורמט `HH:MM:SS` (בלי תאריך, בלי מילישניות).",
+      "answerFormat": "HH:MM:SS (UTC)",
+      "placeholder": "08:30:00",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "לכל שורת כשלון יש שדה `phase`. בקשות שלא הגיעו ל-ledger נכשלות ב-phase אחד; בקשות שהגיעו ואז חיכו לנצח נכשלות ב-phase אחר. אתם מחפשים את המוקדמת ביותר מהסוג השני."
+        },
+        {
+          "cost": 20,
+          "text": "סננו לפי `\"phase\":\"response\"`. הקובץ ממוין לפי זמן, אז ההתאמה הראשונה היא המוקדמת ביותר. ה-`ts` שלה מסתיים ב-`+02:00`: הורידו שעתיים. ענו עם זמן הרישום, לא עם הזמן שבו הבקשה התחילה."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\njq -r 'select(.phase == \"response\") | .ts' app/manifest-sync.log | sort | head -1\ndate -u -d '<paste that ts>' +%H:%M:%S\n```"
+        }
+      ],
+      "successNote": "שני פרטים מסתתרים בשורה האחת הזאת. ראשית, היא נרשמה 30 שניות **אחרי** שהבקשה התחילה (`duration_ms`), כך שה-packet שנעלם יצא מ-app-03 חצי דקה קודם: את ה-drop התואם ב-firewall תמצאו בזמן ההתחלה. שנית, זו לא הייתה הדקה הראשונה אחרי שינוי כלשהו. Linux שומר path MTU שנלמד לכל יעד במשך **10 דקות** (`net.ipv4.route.mtu_expires`), כך שכל host המשיך לעבוד על הידע הישן שלו עד שהרשומה ב-cache פגה, אחד אחרי השני. black hole שמופיע כמה דקות אחרי שינוי עדיין נגרם על ידי השינוי הזה."
+    },
+    {
+      "stage": {
+        "name": "מה השתנה?",
+        "goal": "זהו את השינוי שהפך Path MTU Discovery שעבד ל-black hole.",
+        "lookFor": [
+          "packets קטנים עוברים, גדולים נעלמים: מי אמור להגיד \"גדול מדי\"?",
+          "`firewall/kern-app-hosts.log` ושני קבצי ה-`iptables-save`",
+          "comment של חוק הוא tag שאפשר לחפש",
+          "השינוי האחרון לפני הסימפטום הוא חשוד, לא פסק דין"
+        ],
+        "tools": [
+          "fw-prefixes",
+          "fw-first-drop",
+          "iptables-diff",
+          "changes-window",
+          "changes-grep",
+          "tcpdump-icmp"
+        ],
+        "explorerTip": "פתחו את `firewall/kern-app-hosts.log`, סננו **contains** ‏`TYPE=3 CODE=4` והשתמשו ב-**First match** כדי למצוא את ה-drop הראשון. פתחו את שני קבצי `firewall/app-03_iptables-save_*.txt` והשוו את חוקי ה-ICMP ואת ה-`--comment` שלהם. אחר כך פתחו את `changes/change-log.csv` (טבלת CSV) וסננו **contains** לפי ה-tag הזה."
+      },
+      "id": "q2",
+      "title": "מה השתנה?",
+      "prompt": "בין ליל שלישי לבוקר רביעי כמה שינויים נגעו בנתיב הרשת בין ה-app hosts ל-ledger. ה-tunnel עבד כל הלילה, וה-capture של הבדיקה מוכיח ש-PMTUD עבד דרכו.\n\nאיזה שינוי גרם ל-packets גדולים להיעלם **בשקט**? ענו עם מזהה השינוי, למשל `CHG-1234`.",
+      "answerFormat": "מזהה שינוי (CHG-NNNN)",
+      "placeholder": "CHG-1234",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "כש-router לא יכול להעביר packet עם DF, הוא שולח בחזרה ICMP ‏\"fragmentation needed\" והשולח מקטין את ה-segments. ב-`pcap/app-03_large-request.txt` ההודעה הזאת כן מגיעה, וה-host מתעלם ממנה בכל זאת. מה יושב בין החוט ל-TCP stack?"
+        },
+        {
+          "cost": 20,
+          "text": "מצאו את שורת ה-`TYPE=3 CODE=4` הראשונה ב-`firewall/kern-app-hosts.log`: מתי, ובאיזה prefix של חוק היא נרשמה? עשו diff בין ה-`iptables-save` של לפני ושל אחרי: איזה חוק חדש זורק אותה, ואיזה tag יש ב-comment שלו? חפשו את ה-tag הזה ב-`changes/change-log.csv`."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngrep -m1 'TYPE=3 CODE=4' firewall/kern-app-hosts.log\ndiff firewall/app-03_iptables-save_before.txt firewall/app-03_iptables-save_after.txt\ngrep -i '<tag from the rule comment>' changes/change-log.csv\n```"
+        }
+      ],
+      "successNote": "שלושה לקחים. **tcpdump רואה packets לפני netfilter**: ה-capture מראה את ה-ICMP מגיע, אז \"אני רואה אותו, הוא לא חסום\" היה שגוי. **סדר החוקים חשוב**: החוקים החדשים הוכנסו *מעל* ה-accept של `RELATED,ESTABLISHED`, שהוא בדיוק החוק שבדרך כלל מעביר שגיאות ICMP של החיבורים שלכם. ו-**\"ping עובד\" לא מוכיח כלום על PMTUD**: echo הותר, destination-unreachable לא. ה-MTU הקטן של ה-tunnel היה התנאי המקדים; שינוי ה-firewall היה הטריגר. baseline של hardening צריך תמיד לאפשר ICMP type 3 (ו-ICMPv6 type 2, \"packet too big\", ראו RFC 4890)."
+    },
+    {
+      "stage": {
+        "name": "למדוד את הצינור",
+        "goal": "חשבו את ה-TCP MSS שיגרום ל-segments בגודל מלא לעבור דרך ה-tunnel.",
+        "lookFor": [
+          "ה-router שדוחה packet אומר כמה גדול הוא מותר להיות",
+          "`network/ip-link.txt`: איזה interface הוא הצר?",
+          "השוו את ה-segments הגדולים ביותר שכל צד של החיבור שולח",
+          "ה-jumbo frames של eth1 וה-9001 של ה-LB בענן לא נמצאים בנתיב הזה"
+        ],
+        "tools": [
+          "tcpdump-flow",
+          "tcpdump-lengths",
+          "tcpdump-mss",
+          "tcpdump-icmp",
+          "fw-field-values",
+          "wireshark-filters"
+        ],
+        "explorerTip": "פתחו את `pcap/app-03_large-request.txt` וסננו **contains** ‏`need to frag`. או פתחו את `firewall/kern-app-hosts.log` והריצו **Count unique** עם ה-regex ‏`MTU=(\\d+)`. הצליבו מול שורת ה-`wg0` ב-`network/ip-link.txt`, ואז עשו את החיסור."
+      },
+      "id": "q3",
+      "title": "כמה גדול זה גדול מדי?",
+      "prompt": "כדי להפסיק לגמרי לתלות את הנתיב הזה ב-ICMP, צוות הרשת יעשה **clamp ל-TCP MSS** על ה-tunnel, כך שאף host לא ישלח segment שלא נכנס.\n\nאיזה MSS נכנס? MSS = ה-packet הגדול ביותר של IPv4 שהנתיב יכול להעביר, פחות **20** בתים של כותרת IPv4, פחות **20** בתים של כותרת TCP. ענו עם **מספר שלם** (בתים).",
+      "answerFormat": "מספר שלם (בתים)",
+      "placeholder": "1400",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "packets בגודל המלא של ה-app host לא נכנסים, קטנים יותר כן. ה-gateway אומר מה הגבול בתוך שגיאת ה-ICMP שהוא שולח, ורשימת ה-interfaces שלו מסכימה."
+        },
+        {
+          "cost": 20,
+          "text": "חפשו `need to frag (mtu N)` ב-capture של הבקשה הגדולה, או `MTU=` בסוף שורות ה-drop של ה-firewall, או את שורת ה-`wg0` ב-`network/ip-link.txt`. ה-N הזה הוא ה-packet הכי גדול של IP. עכשיו הורידו את שתי הכותרות של 20 בתים."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngrep -o 'MTU=[0-9]*' firewall/kern-app-hosts.log | sort | uniq -c\ngrep -A1 'wg0' network/ip-link.txt\n```\nואז MSS = MTU − 40."
+        }
+      ],
+      "successNote": "המספר מגיע מ-overhead מצטבר: מעגל האינטרנט של dc1 הוא PPPoE ‏(1492 בתים), ו-WireGuard מוסיף 80 בתים משלו, אז `wg-quick` קבע ל-tunnel ‏1412. שימו לב לאסימטריה ב-capture: ה-**ledger** שולח segments של 1360 בתים (ה-PMTUD שלו עובד, שום דבר לא מסנן ICMP בצד של הענן), בזמן ש-app-03 ממשיך לשלוח 1448. בגלל זה הורדות עבדו והעלאות נתקעו. התיקון העמיד הוא clamp על ה-gateway, למשל `iptables -t mangle -A FORWARD -o wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu`, ולהפעיל `net.ipv4.tcp_mtu_probing=1` ‏(RFC 4821) ב-hosts כגיבוי."
+    },
+    {
+      "stage": {
+        "name": "רוח הרפאים השנייה",
+        "goal": "מצאו את הכתובת שחלק מה-hosts המשיכו לנסות להגיע אליה למרות ששום דבר כבר לא גר שם.",
+        "lookFor": [
+          "ה-`phase` ה**אחר** של כשלונות",
+          "איזה `peer` מופיע בכשלונות האלה?",
+          "`dns/zone-audit.log`: מה היה פעם בכתובת הזאת?",
+          "`pcap/app-05_ledger-connect.txt`: מישהו עונה?"
+        ],
+        "tools": [
+          "json-two-fields",
+          "json-filter-field",
+          "zone-audit-record",
+          "dig-answers",
+          "tcpdump-flow"
+        ],
+        "explorerTip": "פתחו את `app/manifest-sync.log`, סננו **contains** ‏`\"phase\":\"connect\"`, ואז **Count unique** עם ה-regex ‏`\"peer\":\"([^\"]+)\"`. אמתו מול `dns/zone-audit.log` עם סינון **contains** ‏`name=ledger `."
+      },
+      "id": "q4",
+      "title": "הכתובת של רוח הרפאים",
+      "prompt": "לא כל כשלון היה העלאה שנתקעה. חלק מה-hosts לא הצליחו אפילו **להתחבר** ל-ledger, בשום בקשה, קטנה או גדולה.\n\nלאיזו כתובת IPv4 ניסיונות החיבור האלה הלכו? ענו בפורמט dotted quad, למשל `192.0.2.10`.",
+      "answerFormat": "כתובת IPv4",
+      "placeholder": "192.0.2.10",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "עד עכשיו התעלמתם מסוג אחד של כשלונות. הסתכלו עליו עכשיו, ועל השדה `peer` בשורות האלה."
+        },
+        {
+          "cost": 20,
+          "text": "ספרו ערכי `peer` ייחודיים בשורות עם `phase` = `connect`. אחר כך חפשו את הכתובת ב-`dns/zone-audit.log`: מה היה שם, ומתי זה נמחק?"
+        },
+        {
+          "cost": 40,
+          "text": "```sh\njq -r 'select(.phase == \"connect\") | .peer' app/manifest-sync.log | sort | uniq -c\ngrep 'name=ledger' dns/zone-audit.log\n```"
+        }
+      ],
+      "successNote": "שתי רוחות הרפאים שזורות זו בזו. לפני 09:12 ה-hosts האלה נכשלו מהר עם `EHOSTUNREACH`: ה-gateway ענה בשם ה-VM שנעלם עם ICMP ‏\"host unreachable\". אחרי ה-baseline של ה-firewall גם ה-ICMP הזה נזרק, כך שאותה בעיית DNS הפכה ל-**connect timeouts** איטיים של 5 שניות. שינוי אחד שינה את הסימפטום של באג שלא קשור אליו. תמיד פצלו כשלונות לפי *phase* ולפי *יעד* לפני שאתם בונים תאוריות: \"timeouts\" הסתיר שתי בעיות שונות."
+    },
+    {
+      "stage": {
+        "name": "כמה hosts?",
+        "goal": "ספרו את ה-app hosts שעדיין שלחו תעבורת ledger לכתובת של רוח הרפאים.",
+        "lookFor": [
+          "בערוץ אומרים \"rack B, חצי מהצי\": תבדקו",
+          "כל שורה בלוג הלקוח אומרת מה ה-`host` שלה",
+          "`network/inventory.csv` מראה roles **וגם** זמני boot אחרונים",
+          "אותה קונפיגורציה לא אומרת אותו מצב"
+        ],
+        "tools": [
+          "json-two-fields",
+          "json-unique-field",
+          "csv-table",
+          "changes-grep",
+          "dig-answers"
+        ],
+        "explorerTip": "פתחו את `app/manifest-sync.log`, סננו **contains** לפי הכתובת משלב 4, ואז **Count unique** עם ה-regex ‏`\"host\":\"([^\"]+)\"`. פתחו את `network/inventory.csv` כ-**טבלת CSV** כדי להסביר host שציפיתם למצוא ולא מצאתם."
+      },
+      "id": "q5",
+      "title": "Blast radius",
+      "prompt": "כמה **app hosts** שלחו בקשות לכתובת של רוח הרפאים בנקודה כלשהי ב-`app/manifest-sync.log`?\n\nענו עם **מספר שלם**.",
+      "answerFormat": "מספר שלם (hosts)",
+      "placeholder": "5",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "אל תספרו מהערוץ או מעמודת ה-role במלאי. ספרו מהנתונים: כל שורה בלוג הלקוח אומרת איזה host שלח אותה ולאן היא הלכה."
+        },
+        {
+          "cost": 20,
+          "text": "השאירו שורות שה-`peer` שלהן הוא הכתובת משלב 4 וספרו ערכי `host` שונים. אם host שציפיתם לו חסר, בדקו את ה-`last_boot_utc` שלו ב-`network/inventory.csv` ואת לוג השינויים."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\njq -r --arg ip '<address from stage 4>' 'select(.peer == $ip) | .host' app/manifest-sync.log | sort | uniq -c\n```"
+        }
+      ],
+      "successNote": "ארבעה hosts קיבלו את ה-role החדש של ה-resolver, אבל רק חלק מהם נתקעו. אחד עבר reboot מוקדם ביום רביעי בשביל עדכון kernel, מה שרוקן את ה-cache שלו, אז הוא שאל מחדש וקיבל את הכתובת החדשה. **אותה קונפיגורציה, מצב שונה.** באג של cache נושך רק hosts שבמקרה מילאו את ה-cache ברגע הלא נכון. ה-blast radius צריך לבוא מהנתונים, לא מהמלאי, ו\"תיקון\" ב-reboot יכול להסתיר באג ב-host אחד בזמן שהוא ממשיך לפגוע באחרים."
+    },
+    {
+      "stage": {
+        "name": "Root cause",
+        "goal": "תנו שם לאופציית ה-resolver שגרמה ל-hosts התקועים להתעלם מה-TTL של הרשומה.",
+        "lookFor": [
+          "השוו את ה-TTL מה-cache המקומי ל-TTL מ-ns1 ‏(`dns/dig/`)",
+          "`dns/zone-audit.log`: איזה TTL היה לרשומה לפני ה-cutover?",
+          "עשו diff בין שני ה-roles של `unbound.conf`",
+          "תקרה, כפתור של negative cache ורצפה הם שלושה דברים שונים"
+        ],
+        "tools": [
+          "dig-answers",
+          "dig-server-flags",
+          "unbound-diff",
+          "zone-audit-record",
+          "ttl-math"
+        ],
+        "explorerTip": "פתחו את `dns/dig/app-05.txt`: השוו את ה-TTL בתשובה הראשונה (cache מקומי, בלי `aa`) לתשובה השנייה (ns1, עם `aa`). פתחו את שני קבצי `dns/unbound/node-dns-v*.conf` זה לצד זה וסננו **regex** ‏`ttl` כדי לראות כל אופציה שקשורה ל-TTL."
+      },
+      "id": "q6",
+      "title": "למה ה-cache שרד את המיגרציה?",
+      "prompt": "ביום שני ה-TTL של רשומת ה-ledger הורד ל-**60 שניות**, בדיוק כמו שה-runbook של המיגרציה אומר. ובכל זאת, ה-hosts התקועים המשיכו להחזיר את התשובה הישנה שעות רבות אחרי ה-cutover של יום שלישי.\n\nאיזו **אופציה של unbound** גרמה להם להתעלם מה-TTL של הרשומה? ענו עם שם האופציה בדיוק כפי שהוא כתוב ב-`unbound.conf`, **בלי** הנקודתיים.",
+      "answerFormat": "שם אופציה ב-unbound.conf (בלי נקודתיים)",
+      "placeholder": "msg-cache-size",
+      "points": 150,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "cache שמכבד TTL של 60 שניות לא יכול לחלק תשובה שנשארו לה עוד שעות לחיות. השוו את ה-TTL שה-resolver המקומי של host תקוע מחזיר ל-TTL ש-ns1 מחזיר לאותו שם."
+        },
+        {
+          "cost": 20,
+          "text": "עשו diff בין `node-dns-v1.conf` ל-`node-dns-v2.conf`. כמה שורות השתנו, ויותר מאחת מזכירה TTL. אופציה אחת היא **תקרה** ל-TTL (היא יכולה רק לקצר, והיא זהה בשני ה-roles), אחת משפיעה רק על תשובות **שליליות** (NXDOMAIN), ואחת מעלה כל TTL ל-**לפחות** הערך שלה."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ndiff dns/unbound/node-dns-v1.conf dns/unbound/node-dns-v2.conf | grep -i ttl\ngrep -h -A1 'ANSWER SECTION' dns/dig/*.txt\n```\nלאיזו אופציה שהשתנתה יש ערך גדול מכל TTL ישן שאתם רואים?"
+        }
+      ],
+      "successNote": "צוות ה-DNS עשה הכול נכון: הם הורידו את ה-TTL יום מראש כדי שה-caches יעקבו אחרי ה-cutover תוך דקה. **רצפת TTL** ב-resolver המקומי, שנוספה באותו שבוע כדי להוריד עומס שאילתות, העלתה בשקט את ה-60 שניות ליממה שלמה. כל host עם v2 שמילא את ה-cache לפני ה-cutover החזיק את הכתובת המתה 24 שעות. ה-manual של unbound מזהיר שערכים מעל שעה בערך \"can lead to trouble\". תיקונים: להשאיר רצפות TTL ברמת שניות או להסיר אותן, לעשות flush ל-caches כשלב מפורש במיגרציה, להשאיר את הכתובת הישנה עונה (או מפנה) יותר זמן מה-cache הארוך ביותר, ולהתריע כשהתשובה של resolver מקומי שונה מהתשובה ה-authoritative."
+    }
+  ],
+  "toolbox": [
+    {
+      "category": "התמצאות",
+      "items": [
+        {
+          "id": "unzip-evidence",
+          "title": "פריסת הראיות",
+          "command": "unzip ghost-in-the-network-evidence.zip && cd ghost-in-the-network",
+          "explain": "פורס את החבילה. הכול נמצא תחת תיקייה עליונה אחת. קבצי ה-`.pcap` נמצאים רק ב-zip, לא ב-Explorer.",
+          "powershell": "Expand-Archive .\\ghost-in-the-network-evidence.zip -DestinationPath .\ncd .\\ghost-in-the-network"
+        },
+        {
+          "id": "list-files",
+          "title": "מה יש לנו",
+          "command": "find . -type f | sort | xargs ls -la",
+          "explain": "כל הקבצים עם הגודל שלהם. שני לוגים גדולים; את כל השאר אפשר לקרוא מההתחלה עד הסוף.",
+          "powershell": "Get-ChildItem -Recurse -File | Select-Object FullName, Length"
+        },
+        {
+          "id": "read-readme",
+          "title": "קריאת ה-README",
+          "command": "less README_FIRST.txt",
+          "explain": "ההערות של ה-on-call: רשימת הקבצים, ובעיקר אזור הזמן של כל מקור.",
+          "powershell": "Get-Content README_FIRST.txt | Out-Host -Paging"
+        },
+        {
+          "id": "head-lines",
+          "title": "הצצה לשורות הראשונות",
+          "command": "head -n 3 app/manifest-sync.log",
+          "explain": "הסתכלו על הפורמט **לפני** שאתם מפרסרים. `tail -n 3` מראה את סוף החלון.",
+          "powershell": "Get-Content app\\manifest-sync.log -TotalCount 3"
+        }
+      ]
+    },
+    {
+      "category": "grep וחברים",
+      "items": [
+        {
+          "id": "grep-count",
+          "title": "ספירת התאמות",
+          "command": "grep -c '\"level\":\"error\"' app/manifest-sync.log",
+          "explain": "`-c` מדפיס כמה שורות תואמות במקום את השורות עצמן. בדיקות שפיות מהירות.",
+          "powershell": "(Select-String -Path app\\manifest-sync.log -Pattern '\"level\":\"error\"' -SimpleMatch).Count"
+        },
+        {
+          "id": "grep-first-match",
+          "title": "עצירה בהתאמה הראשונה",
+          "command": "grep -m1 'pattern' firewall/kern-app-hosts.log",
+          "explain": "`-m1` יוצא אחרי ההתאמה הראשונה. בקובץ שממוין לפי זמן, זו ההופעה ה**מוקדמת ביותר**.",
+          "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'pattern' | Select-Object -First 1"
+        },
+        {
+          "id": "grep-exclude",
+          "title": "היפוך / החרגה",
+          "command": "grep -v -e 'IN-DROP: ' firewall/kern-app-hosts.log | head",
+          "explain": "`-v` משאיר שורות ש**לא** תואמות. טוב להסרת רעש של סורקים.",
+          "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'IN-DROP: ' -SimpleMatch -NotMatch | Select-Object -First 10"
+        },
+        {
+          "id": "grep-only-match",
+          "title": "הדפסת ההתאמה בלבד",
+          "command": "grep -o 'TYPE=[0-9]* CODE=[0-9]*' firewall/kern-app-hosts.log | sort | uniq -c",
+          "explain": "`-o` מדפיס רק את הטקסט שהותאם. העבירו ל-`sort | uniq -c` כדי לקבל היסטוגרמה של ערכים.",
+          "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'TYPE=\\d+ CODE=\\d+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name"
+        },
+        {
+          "id": "grep-context",
+          "title": "הקשר סביב התאמה",
+          "command": "grep -n -B2 -A6 'need to frag' pcap/app-03_large-request.txt | head -40",
+          "explain": "`-B`/`-A` מציגים שורות לפני ואחרי כל התאמה, כדי לראות מה הוביל אליה ומה בא אחריה.",
+          "powershell": "Select-String -Path pcap\\app-03_large-request.txt -Pattern 'need to frag' -Context 2,6 | Select-Object -First 5"
+        }
+      ]
+    },
+    {
+      "category": "jq ללוגים של JSON",
+      "items": [
+        {
+          "id": "json-pretty",
+          "title": "הדפסה יפה של שורה",
+          "command": "head -n1 app/manifest-sync.log | jq .",
+          "explain": "ראו את כל השדות של שורה לפני שאתם כותבים פילטרים. בכשלונות יש `phase` ו-`error` במקום `status`.",
+          "powershell": "Get-Content app\\manifest-sync.log -TotalCount 1 | ConvertFrom-Json | Format-List"
+        },
+        {
+          "id": "json-unique-field",
+          "title": "ערכים של שדה אחד",
+          "command": "jq -r '.msg' app/manifest-sync.log | sort | uniq -c",
+          "explain": "מציג כל ערך שונה של שדה עם ספירה. החליפו את `.msg` ב-`.phase`, `.host` או `.peer`.",
+          "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { ($_ | ConvertFrom-Json).msg } | Group-Object | Select-Object Count, Name"
+        },
+        {
+          "id": "json-filter-field",
+          "title": "סינון לפי שדה",
+          "command": "jq -c 'select(.phase == \"connect\")' app/manifest-sync.log | head",
+          "explain": "`select()` משאיר את האובייקטים שתואמים. `-c` שומר אחד לשורה כדי שאפשר יהיה להמשיך ל-`head` ו-`wc`.",
+          "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object phase -eq 'connect' | Select-Object -First 10"
+        },
+        {
+          "id": "json-first-by-time",
+          "title": "השורה המוקדמת ביותר",
+          "command": "jq -r 'select(.phase == \"response\") | .ts' app/manifest-sync.log | sort | head -1",
+          "explain": "שולפים את ה-timestamp של השורות התואמות וממיינים. לכל `ts` כאן אותו offset, אז מיון מחרוזות הוא גם מיון לפי זמן.",
+          "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object phase -eq 'response' | Sort-Object ts | Select-Object -First 1"
+        },
+        {
+          "id": "json-two-fields",
+          "title": "קיבוץ לפי כמה שדות",
+          "command": "jq -r 'select(.level == \"error\") | \"\\(.host) \\(.phase) \\(.peer)\"' app/manifest-sync.log | sort | uniq -c",
+          "explain": "סופר כל צירוף. טבלה אחת שמפצלת את הכשלונות לפי host, לפי phase ולפי יעד.",
+          "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object level -eq 'error' | Group-Object host, phase, peer | Select-Object Count, Name"
+        },
+        {
+          "id": "json-size-split",
+          "title": "תוצאה לפי גודל בקשה",
+          "command": "jq -r 'select(.method == \"POST\") | \"\\(.path) \\(if .req_bytes > 1300 then \"big\" else \"small\" end) \\(.phase // .status)\"' app/manifest-sync.log | sort | uniq -c",
+          "explain": "מחלק בקשות לקטנות וגדולות ומראה איך כל אחת הסתיימה. שנו את סף הגודל וראו איפה הגבול.",
+          "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object method -eq 'POST' | Group-Object path, { if ($_.req_bytes -gt 1300) { 'big' } else { 'small' } }, { if ($_.phase) { $_.phase } else { $_.status } } | Select-Object Count, Name"
+        }
+      ]
+    },
+    {
+      "category": "אזורי זמן",
+      "items": [
+        {
+          "id": "local-to-utc",
+          "title": "מקומי ל-UTC",
+          "command": "date -u -d '2026-11-18T11:00:00.000+02:00' +%H:%M:%S",
+          "explain": "ממיר timestamp עם offset (כמו בלוג האפליקציה) ל-UTC. בנובמבר ישראל היא **UTC+02:00**.",
+          "powershell": "([DateTimeOffset]'2026-11-18T11:00:00.000+02:00').UtcDateTime.ToString('HH:mm:ss')"
+        },
+        {
+          "id": "epoch-to-utc",
+          "title": "Epoch ל-UTC",
+          "command": "date -u -d @1795424400",
+          "explain": "ממיר שניות epoch לזמן UTC קריא. ב-macOS: `date -u -r 1795424400`.",
+          "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1795424400).UtcDateTime.ToString('u')"
+        },
+        {
+          "id": "slack-timestamps",
+          "title": "קריאת הצ'אט ב-UTC",
+          "command": "jq -r '.[] | \"\\(.ts | tonumber | todate) \\(.user): \\(.text)\"' chat/inc-3107.json",
+          "explain": "הופך את ה-`ts` של כל הודעה ל-UTC כדי שאפשר יהיה ליישר אותו מול שאר המקורות.",
+          "powershell": "Get-Content chat\\inc-3107.json -Raw | ConvertFrom-Json | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([int][double]$_.ts).UtcDateTime.ToString('HH:mm:ss'), $_.user, $_.text }"
+        },
+        {
+          "id": "syslog-no-year",
+          "title": "ל-syslog אין שנה",
+          "command": "date -u -d 'Nov 18 09:30:00 2026 UTC' +%s",
+          "explain": "חותמות syslog כמו `Nov 18 09:30:00` לא כוללות שנה ולא אזור זמן. הוסיפו את שניהם בעצמכם לפני ההמרה.",
+          "powershell": "([DateTimeOffset]::ParseExact('Nov 18 09:30:00 2026', 'MMM dd HH:mm:ss yyyy', [Globalization.CultureInfo]::InvariantCulture, 'AssumeUniversal')).ToUnixTimeSeconds()"
+        }
+      ]
+    },
+    {
+      "category": "tcpdump ו-Wireshark",
+      "items": [
+        {
+          "id": "tcpdump-read",
+          "title": "קריאת pcap אמיתי",
+          "command": "tcpdump -nn -tttt -v -r pcap/app-03_large-request.pcap",
+          "explain": "קבצי ה-`.txt` הם הפלט של הפקודה הזאת, כך שלא צריך tcpdump. אם אתם מעדיפים Wireshark, השתמשו בקבצי ה-`.pcap` התאומים.",
+          "powershell": "& 'C:\\Program Files\\Wireshark\\tshark.exe' -n -t ad -V -r pcap\\app-03_large-request.pcap | Out-Host -Paging"
+        },
+        {
+          "id": "tcpdump-flow",
+          "title": "שורה אחת לכל packet",
+          "command": "grep -E '^ {4}[0-9.]+ > ' pcap/app-03_small-request.txt | cut -c1-150",
+          "explain": "עם `-v`, tcpdump מדפיס שתי שורות לכל packet (כותרת IP ואז TCP). השאירו רק את השנייה כדי לקרוא את השיחה כרצף: מי שלח מה ועם אילו flags.",
+          "powershell": "Select-String -Path pcap\\app-03_small-request.txt -Pattern '^ {4}[0-9.]+ > ' | ForEach-Object { $_.Line.Substring(0, [Math]::Min(150, $_.Line.Length)) }"
+        },
+        {
+          "id": "tcpdump-lengths",
+          "title": "גודלי packets",
+          "command": "grep -oE 'proto [A-Z]+ \\([0-9]+\\), length [0-9]+' pcap/app-03_large-request.txt | sort | uniq -c",
+          "explain": "ה-`length` בשורת ה-IP הוא גודל כל ה-packet. השוו את ה-packets הגדולים ביותר שכל צד שולח.",
+          "powershell": "Select-String -Path pcap\\app-03_large-request.txt -Pattern 'proto [A-Z]+ \\(\\d+\\), length \\d+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name"
+        },
+        {
+          "id": "tcpdump-mss",
+          "title": "MSS ב-handshake",
+          "command": "grep -o 'mss [0-9]*' pcap/*.txt",
+          "explain": "כל צד מכריז על ה-MSS שלו ב-SYN. השולח משתמש בקטן מבין השניים, ואף אחד מהם לא יודע על link צר יותר באמצע.",
+          "powershell": "Select-String -Path pcap\\*.txt -Pattern 'mss \\d+' | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Matches[0].Value }"
+        },
+        {
+          "id": "tcpdump-icmp",
+          "title": "שגיאות ICMP ומה הן מצטטות",
+          "command": "grep -n -A3 'ICMP' pcap/app-03_large-request.txt | head -20",
+          "explain": "שגיאת ICMP מצטטת את הכותרת של ה-packet שגרם לה, כך שרואים בדיוק איזה packet נדחה על ידי router, ולמה.",
+          "powershell": "Select-String -Path pcap\\app-03_large-request.txt -Pattern 'ICMP' -Context 0,3 | Select-Object -First 5"
+        },
+        {
+          "id": "tcpdump-retrans",
+          "title": "זיהוי retransmissions",
+          "command": "grep -oE 'seq [0-9]+:[0-9]+' pcap/app-03_large-request.txt | sort | uniq -c | sort -rn | head",
+          "explain": "אותו טווח בתים שנשלח יותר מפעם אחת הוא retransmission. בדקו את המרווחים ביניהם: exponential backoff.",
+          "powershell": "Select-String -Path pcap\\app-03_large-request.txt -Pattern 'seq \\d+:\\d+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count, Name"
+        },
+        {
+          "id": "wireshark-filters",
+          "title": "פילטרי תצוגה ב-Wireshark",
+          "command": "tshark -r pcap/app-03_large-request.pcap -Y 'icmp.type == 3 || tcp.analysis.retransmission'",
+          "explain": "אותו פילטר עובד בשורת הפילטר של Wireshark. נסו גם `tcp.len > 1300` ו-`icmp.code == 4`.",
+          "powershell": "& 'C:\\Program Files\\Wireshark\\tshark.exe' -r pcap\\app-03_large-request.pcap -Y 'icmp.type == 3 || tcp.analysis.retransmission'"
+        }
+      ]
+    },
+    {
+      "category": "Firewall של ה-host",
+      "items": [
+        {
+          "id": "fw-prefixes",
+          "title": "איזה חוק רשם את זה?",
+          "command": "grep -oE 'IN-DROP[A-Z-]*:' firewall/kern-app-hosts.log | sort | uniq -c",
+          "explain": "ה-`--log-prefix` של חוק ה-iptables פותח כל הודעה. כל prefix שייך לחוק אחד ב-`iptables-save`.",
+          "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'IN-DROP[A-Z-]*:' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name"
+        },
+        {
+          "id": "fw-first-drop",
+          "title": "ה-drop הראשון מסוג מסוים",
+          "command": "grep 'TYPE=3 CODE=4' firewall/kern-app-hosts.log | head -3",
+          "explain": "ICMP type 3 זה destination-unreachable; code 4 זה fragmentation needed, ו-code 1 זה host unreachable. Type 11 זה time exceeded (traceroute).",
+          "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'TYPE=3 CODE=4' -SimpleMatch | Select-Object -First 3"
+        },
+        {
+          "id": "fw-field-values",
+          "title": "ערכים בתוך שורות netfilter",
+          "command": "grep -oE '(MTU|SRC)=[0-9.]+' firewall/kern-app-hosts.log | sort | uniq -c | sort -rn | head",
+          "explain": "Netfilter רושם זוגות `KEY=value`. החלק שבתוך `[...]` הוא ה-packet שמצוטט בתוך שגיאת ה-ICMP.",
+          "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern '(MTU|SRC)=[\\d.]+' -AllMatches | ForEach-Object { $_.Matches.Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count, Name"
+        },
+        {
+          "id": "fw-per-host-minute",
+          "title": "לפי host, לפי דקה",
+          "command": "grep 'TYPE=3 CODE=4' firewall/kern-app-hosts.log | awk '{print $4, substr($3,1,5)}' | uniq -c | head -20",
+          "explain": "מראה מתי כל host התחיל לרשום drop מסוים. שדה 4 הוא ה-host ושדה 3 הוא הזמן.",
+          "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'TYPE=3 CODE=4' -SimpleMatch | ForEach-Object { $f = $_.Line -split '\\s+'; '{0} {1}' -f $f[3], $f[2].Substring(0,5) } | Group-Object | Select-Object -First 20 Count, Name"
+        },
+        {
+          "id": "iptables-diff",
+          "title": "מה השתנה בחוקים?",
+          "command": "diff firewall/app-03_iptables-save_before.txt firewall/app-03_iptables-save_after.txt",
+          "explain": "iptables עובר על INPUT **מלמעלה למטה** ועוצר בחוק הראשון שתואם. הסדר חשוב בדיוק כמו התוכן.",
+          "powershell": "Compare-Object (Get-Content firewall\\app-03_iptables-save_before.txt) (Get-Content firewall\\app-03_iptables-save_after.txt)"
+        }
+      ]
+    },
+    {
+      "category": "DNS",
+      "items": [
+        {
+          "id": "dig-answers",
+          "title": "כל התשובות במבט אחד",
+          "command": "grep -H -A1 'ANSWER SECTION' dns/dig/*.txt",
+          "explain": "שורת תשובה אחת לכל שאילתה: שם, **TTL שנותר**, class, type, כתובת. בדקו גם איזה שרת ענה (`;; SERVER:`).",
+          "powershell": "Select-String -Path dns\\dig\\*.txt -Pattern 'ANSWER SECTION' -Context 0,1 | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Context.PostContext[0] }"
+        },
+        {
+          "id": "dig-server-flags",
+          "title": "מי ענה, והאם בסמכות?",
+          "command": "grep -H -E '^;; (flags|SERVER|WHEN)' dns/dig/*.txt",
+          "explain": "`aa` אומר תשובה authoritative ישירות מה-zone. בלי `aa` ומ-`127.0.0.1` אומר שענה cache מקומי.",
+          "powershell": "Select-String -Path dns\\dig\\*.txt -Pattern '^;; (flags|SERVER|WHEN)' | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Line }"
+        },
+        {
+          "id": "zone-audit-record",
+          "title": "ההיסטוריה של רשומה אחת",
+          "command": "grep 'name=ledger ' dns/zone-audit.log",
+          "explain": "כל שינוי בשם DNS, ב-UTC: שינויי TTL, מחיקות, הוספות, וכרטיס השינוי שמאחורי כל אחד.",
+          "powershell": "Select-String -Path dns\\zone-audit.log -Pattern 'name=ledger ' -SimpleMatch"
+        },
+        {
+          "id": "unbound-diff",
+          "title": "השוואת ה-roles של ה-resolver",
+          "command": "diff dns/unbound/node-dns-v1.conf dns/unbound/node-dns-v2.conf",
+          "explain": "שורות שמתחילות ב-`<` קיימות רק ב-v1, ו-`>` רק ב-v2. קראו כל אופציה שהשתנתה ב-man page של unbound.conf לפני שאתם מאשימים אותה.",
+          "powershell": "Compare-Object (Get-Content dns\\unbound\\node-dns-v1.conf) (Get-Content dns\\unbound\\node-dns-v2.conf)"
+        },
+        {
+          "id": "ttl-math",
+          "title": "מתי תשובה ב-cache תפוג?",
+          "command": "echo $(( $(date -u -d 'Wed Nov 18 11:31:07 UTC 2026' +%s) + 10000 )) | xargs -I{} date -u -d @{}",
+          "explain": "זמן השאילתה ועוד ה-TTL שנותר הוא הרגע שבו ה-cache יזרוק את התשובה. חישוב לאחור אומר מתי היא נשמרה ולכמה זמן.",
+          "powershell": "([DateTimeOffset]'2026-11-18T11:31:07Z').AddSeconds(10000).ToString('u')"
+        }
+      ]
+    },
+    {
+      "category": "שינויים ומלאי (CSV)",
+      "items": [
+        {
+          "id": "csv-table",
+          "title": "טבלה מסודרת",
+          "command": "column -s, -t < network/inventory.csv",
+          "explain": "מיישר עמודות CSV. עובד על `network/inventory.csv`. שדות במירכאות עם פסיקים מבלבלים את `column`, אז לשינויים השתמשו בכלי הבא.",
+          "powershell": "Import-Csv network\\inventory.csv | Format-Table"
+        },
+        {
+          "id": "changes-window",
+          "title": "שינויים בחלון זמן",
+          "command": "awk -F, '$2 >= \"2026-11-18T08:00\" && $2 < \"2026-11-18T10:00\" {print $1, $2, $5}' changes/change-log.csv",
+          "explain": "מחרוזות ISO-8601 ב-UTC ממוינות כמו זמנים, אז השוואת מחרוזות בוחרת חלון. הרחיבו אותו: יש סיבות שהן ישנות יותר ממה שנראה.",
+          "powershell": "Import-Csv changes\\change-log.csv | Where-Object { $_.start_utc -ge '2026-11-18T08:00' -and $_.start_utc -lt '2026-11-18T10:00' } | Format-Table change_id, start_utc, team, summary -Wrap"
+        },
+        {
+          "id": "changes-grep",
+          "title": "חיפוש שינוי לפי מילה",
+          "command": "grep -i 'tunnel' changes/change-log.csv",
+          "explain": "חפשו בתקצירים מילה או tag שראיתם במקום אחר, כמו comment של חוק או שם של role.",
+          "powershell": "Import-Csv changes\\change-log.csv | Where-Object summary -match 'tunnel' | Format-List"
+        }
+      ]
+    }
+  ],
+  "debrief": "_חתום._ סיימו את כל ששת השלבים כדי לפתוח את ה-debrief."
+}
