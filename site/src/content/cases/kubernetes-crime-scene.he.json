@@ -547,8 +547,8 @@
           "command": "awk '{k = $1; gsub(/[\":]/, \"\", k); v = $0; sub(/^[^:]*: /, \"\", v); sub(/,$/, \"\", v); gsub(/^\"|\"$/, \"\", v)} k == \"firstTimestamp\" {t = v} k == \"count\" {c = v} k == \"name\" && o == \"\" {o = v} k == \"reason\" {r = v} k == \"message\" {m = v} k == \"type\" {print t, c, o, r, m; o = \"\"}' kubectl/get-events-A.json | sort | head -40",
           "syntax": "awk '{k = $1; gsub(/[\":]/, \"\", k); v = $0; sub(/^[^:]*: /, \"\", v); sub(/,$/, \"\", v); gsub(/^\"|\"$/, \"\", v)} k == \"<time-key>\" {t = v} k == \"<key>\" {c = v} k == \"<key>\" && o == \"\" {o = v} k == \"<key>\" {r = v} k == \"<key>\" {m = v} k == \"<last-key>\" {print t, c, o, r, m; o = \"\"}' <events-json> | sort | head -<n>",
           "explain": "`kubectl get events` **לא** ממוין לפי זמן כברירת מחדל. ב-JSON יש timestamps מוחלטים ב-UTC, אז מיינו בעצמכם. הוא מודפס יפה, `\"key\": value` אחד בכל שורה והמפתחות ממוינים, אז awk יכול לשטח אותו: הבלוק הראשון מפרק כל שורה למפתח `k` ולערך `v`, הבלוקים הבאים זוכרים את השדות שאתם רוצים, ו-`type` (המפתח האחרון בכל event) מדפיס את השורה. ה-`name` הראשון בכל event הוא `involvedObject.name`. הורידו את `| head -40` כדי לראות את כולם, או קראו את התאום הטקסטואלי `kubectl/get-events-A-wide.txt`.",
-          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Sort-Object firstTimestamp | Format-Table firstTimestamp, count, @{n='object'; e={$_.involvedObject.name}}, reason, message | Out-Host -Paging",
-          "syntaxPowershell": "(Get-Content <events-json> -Raw | ConvertFrom-Json).items | Sort-Object <time-field> | Format-Table <columns> | Out-Host -Paging"
+          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Sort-Object firstTimestamp | Select-Object -First 40 | Format-Table firstTimestamp, count, @{n='object'; e={$_.involvedObject.name}}, reason, message",
+          "syntaxPowershell": "(Get-Content <events-json> -Raw | ConvertFrom-Json).items | Sort-Object <time-field> | Select-Object -First <n> | Format-Table <columns>"
         },
         {
           "id": "events-reasons",
@@ -765,8 +765,8 @@
           "command": "awk -F, '{for (i = 1; i <= NF; i++) printf \"%-20s\", $i; print \"\"}' metrics/hpa-pricing-api.csv | head -40",
           "syntax": "awk -F, '{for (i = 1; i <= NF; i++) printf \"%-<width>s\", $i; print \"\"}' <metrics-csv> | head -<n>",
           "explain": "מיישר את עמודות ה-CSV כדי שאפשר יהיה לקרוא אותן: כל שדה מרופד ל-20 תווים. הורידו את `| head -40` בשביל הקובץ כולו.",
-          "powershell": "Import-Csv metrics\\hpa-pricing-api.csv | Format-Table | Out-Host -Paging",
-          "syntaxPowershell": "Import-Csv <metrics-csv> | Format-Table | Out-Host -Paging"
+          "powershell": "Import-Csv metrics\\hpa-pricing-api.csv | Select-Object -First 40 | Format-Table",
+          "syntaxPowershell": "Import-Csv <metrics-csv> | Select-Object -First <n> | Format-Table"
         },
         {
           "id": "csv-changes",

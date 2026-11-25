@@ -61,6 +61,7 @@ PS_LINT = [
     (re.compile(r"-AsHashtable\b"), "ConvertFrom-Json -AsHashtable (PowerShell 6+)"),
     (re.compile(r"Select-String[^|]*-Raw\b"), "Select-String -Raw (PowerShell 7 only)"),
     (re.compile(r"-NoEmphasis\b"), "-NoEmphasis (PowerShell 7 only)"),
+    (re.compile(r"Out-Host\s+-Paging|\|\s*more\b"), "interactive paging (fails in ISE and redirected output; use Select-Object -First)"),
     (re.compile(r"Join-String\b|Get-Error\b|ConvertFrom-Markdown\b|Test-Json\b"), "PowerShell 6+/7 cmdlet"),
     # Only in command position (start, or after | ; & ( { ), so file names like git-log.txt don't count.
     (re.compile(r"(?:^|[|;&({]\s*)&?\s*(jq|git|python3?|node|tcpdump|tshark|dig|kubectl|aws|curl)(?:\.exe)?(?=\s|$)", re.M), "needs an installed tool"),
