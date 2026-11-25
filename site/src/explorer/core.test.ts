@@ -62,6 +62,7 @@ test("deep link state round-trips", () => {
     steps: [{ kind: "regex" as const, text: '" 5\\d\\d &x=?', ci: false }, { kind: "not" as const, text: "healthz", ci: true }],
     json: { field: "msg", value: "a=b" },
     cols: ["ts", "msg"],
+    line: null,
   };
   assert.deepEqual(core.decodeState(core.encodeState(state)), state);
   assert.deepEqual(core.parseCsvLine('a,"b,c",d'), ["a", "b,c", "d"]);
@@ -97,4 +98,83 @@ test("real checkout-service.log is detected as JSON lines", () => {
   const t = Date.now();
   core.applyFilters(lines, [], { field: "level", value: "*" });
   assert.ok(Date.now() - t < 1000);
+});
+
+test("filter can hide a CSV header line", () => {
+  const lines = ["a,b", "1,x", "2,y"];
+  assert.deepEqual([...core.applyFilters(lines, [], null, Number.POSITIVE_INFINITY, true)], [1, 2]);
+  assert.deepEqual([...core.applyFilters(lines, [{ kind: "contains", text: "a", ci: false }], null, Number.POSITIVE_INFINITY, true)], []);
+});
+
+test("regex errors are short", () => {
+  assert.equal(core.regexError("(a"), "Unterminated group");
+  assert.equal(core.regexError("a+"), null);
+});
+
+test("histogram buckets times per minute on a real axis, empty minutes included", () => {
+  const lines = [
+    "[13/Nov/2026:00:00:05 +0000] a",
+    "[13/Nov/2026:00:00:59 +0000] b",
+    "[13/Nov/2026:00:03:01 +0000] c",
+  ];
+  const r = core.histogram(lines, null, "\\[(\\d+/\\w+/\\d+:\\d\\d:\\d\\d)");
+  assert.deepEqual(r.buckets, []);
+  const t0 = Date.UTC(2026, 10, 13, 0, 0);
+  assert.deepEqual(r.minutes, [[t0, 2], [t0 + 180_000, 1]]);
+  const s = core.timeSeries(r.minutes);
+  assert.ok(s);
+  assert.equal(s?.step, 1);
+  assert.deepEqual(s?.counts, [2, 0, 0, 1]);
+  assert.deepEqual(s?.gap, { from: t0 + 60_000, to: t0 + 180_000, buckets: 2 });
+  assert.deepEqual(s?.peak, { at: t0, count: 2 });
+});
+
+test("histogram reads syslog (with an assumed year), epoch and dpkg keys", () => {
+  const sys = core.histogram(["Nov 18 07:00:07 h kernel: x", "Nov 18 07:00:59 h kernel: y"], null, "^(\\w{3} +\\d+ \\d\\d:\\d\\d)", Number.POSITIVE_INFINITY, 2026);
+  assert.deepEqual(sys.minutes, [[Date.UTC(2026, 10, 18, 7, 0), 2]]);
+  const epoch = core.histogram(["1794528000,1", "1794528030,2", "1794528090,3"], null, "^(\\d{10})");
+  assert.deepEqual(epoch.minutes.map(([, n]) => n), [2, 1]);
+  const dpkg = core.histogram(["web-05 2026-11-01 06:34:19 status x"], null, "(\\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d)");
+  assert.deepEqual(dpkg.minutes, [[Date.UTC(2026, 10, 1, 6, 34), 1]]);
+});
+
+test("long spans get coarser buckets", () => {
+  const t0 = Date.UTC(2026, 10, 17, 0, 0);
+  const s = core.timeSeries([[t0, 1], [t0 + 2 * 24 * 3600_000, 1]]);
+  assert.ok(s !== null && s.counts.length <= 240 && s.step === 15);
+});
+
+test("year-less syslog never becomes 2001", () => {
+  assert.equal(core.parseTimeInput("Nov 18 07:00:07"), null);
+  assert.equal(core.parseTimeInput("Nov 18 07:00:07", 2026), Date.UTC(2026, 10, 18, 7, 0, 7));
+  assert.ok(core.isYearless("Nov 18 07:00:07"));
+  assert.ok(!core.isYearless("2026-11-18T07:00:07Z"));
+  assert.ok(core.isZoneless("2026-11-01 06:01:06"));
+  assert.ok(!core.isZoneless("2026-11-01T06:01:06Z"));
+  assert.ok(!core.isZoneless("1794528000"));
+});
+
+test("zones: EST/EDT, CET and a fixed +02:00", () => {
+  const ms = Date.UTC(2026, 10, 18, 7, 0, 0);
+  assert.equal(core.formatInZone(ms, "UTC"), "2026-11-18 07:00:00 UTC");
+  assert.equal(core.formatInZone(ms, "America/New_York"), "2026-11-18 02:00:00 -05:00");
+  assert.equal(core.formatInZone(ms, "Europe/Paris"), "2026-11-18 08:00:00 +01:00");
+  assert.equal(core.formatInZone(ms, "+02:00"), "2026-11-18 09:00:00 +02:00");
+  // a zone-less dpkg stamp read as CET, and as a fixed +02:00
+  const wall = core.parseTimeInput("2026-11-01 06:01:06");
+  assert.equal(wall === null ? null : core.wallClockToUtc(wall, "Europe/Paris"), Date.UTC(2026, 10, 1, 5, 1, 6));
+  assert.equal(wall === null ? null : core.wallClockToUtc(wall, "+02:00"), Date.UTC(2026, 10, 1, 4, 1, 6));
+});
+
+test("year hint and line deep link", () => {
+  assert.equal(core.yearHint(["x 2026-11-18T00:00:00Z", "[13/Nov/2026:00:00:00 +0000]", "2025-01-01"]), 2026);
+  assert.equal(core.yearHint(["no dates"]), null);
+  const st = core.decodeState(core.encodeState({ file: "a.log", steps: [], json: null, cols: [], line: 42 }));
+  assert.equal(st.line, 42);
+});
+
+test("plural categories", () => {
+  assert.equal(core.pluralCategory(1, "en"), "one");
+  assert.equal(core.pluralCategory(2, "he"), "two");
+  assert.equal(core.pluralCategory(5, "he"), "other");
 });
