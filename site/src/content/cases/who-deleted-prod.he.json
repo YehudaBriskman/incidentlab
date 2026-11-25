@@ -11,7 +11,7 @@
     "ssrf",
     "imds",
     "iam",
-    "jq",
+    "awk",
     "incident-response"
   ],
   "inspiredBy": {
@@ -24,7 +24,7 @@
     "השיגו את הראיות: הורידו ופרסו את **חבילת הראיות**, *או* פתחו את ה-**Evidence Explorer** כדי לעיין בכל הקבצים בדפדפן (בלי התקנות).",
     "קראו את `README_FIRST.txt` מההתחלה ועד הסוף, כולל מילון המונחים.",
     "רשמו את השעון של כל מקור: לוג ה-WAF ב-**שעון החוף המזרחי של ארה\"ב (-0500)**; CloudTrail, לוגי הגישה של S3 ו-GuardDuty ב-**UTC**; ה-flow logs וה-Slack ב-**epoch seconds**.",
-    "בחרו מסלול: **bash** עם `jq` (Linux, macOS או WSL), **Windows PowerShell** (לכל פקודה ב-Toolbox יש גרסת PowerShell), או ה-**Explorer בדפדפן**.",
+    "בחרו מסלול: **bash** (Linux, macOS, WSL או Git Bash), **Windows PowerShell** (לכל פקודה ב-Toolbox יש גרסת PowerShell), או ה-**Explorer בדפדפן**. אין מה להתקין: כל פקודה משתמשת רק בכלים שכבר מגיעים עם המערכת (grep, sed, awk, sort, date...).",
     "לא צריך חשבון AWS. כל מה שבחבילה בדוי, אז אל תנסו שום דבר ממנה על מערכות אמיתיות."
   ],
   "evidenceZip": "/evidence/who-deleted-prod-evidence.zip",
@@ -115,7 +115,7 @@
     "התשובות לא רגישות לאותיות גדולות/קטנות, ורווחים בהתחלה ובסוף מתעלמים מהם. הקפידו על הפורמט שמופיע מתחת לכל שאלה.",
     "כל רמז עולה את הנקודות שמופיעות עליו. הרמזים נחשפים לפי הסדר, מדחיפה עדינה ועד כמעט הפקודה המלאה. בלשונית Toolbox התחביר של כל פקודה חינמי; הצגת הפקודה המלאה והמוכנה להרצה עולה 5 נקודות. אחרי שמסיימים את התיק, כל הפקודות חינמיות.",
     "עבודה בזוגות מומלצת. דברו על ההיגיון שלכם בקול, בדיוק כמו ב-incident review אמיתי.",
-    "כל כלי מותר: grep, awk, jq, Python, גיליון אלקטרוני, העורך האהוב עליכם. בלשונית Toolbox יש פקודות שיעזרו.",
+    "כל כלי מותר: grep, awk, גיליון אלקטרוני, העורך האהוב עליכם, jq או Python אם כבר יש לכם. אף פעם לא צריך להתקין שום דבר: כל פקודה ב-Toolbox רצה עם מה שמגיע עם Linux, macOS, Git Bash או Windows PowerShell.",
     "כל תשובה שגויה עולה 2 נקודות (עד 20 לכל שלב), אז בדקו את ההיגיון לפני שאתם שולחים. נסו להיות מסוגלים להסביר *למה* התשובה שלכם נכונה.",
     "מהירות ודיוק משתלמים: פתרון מהיר מזכה בבונוס זמן (עד +30 לכל שלב, שהולך ופוחת אחרי זמן היעד של השלב), פתרון נקי בלי רמזים, פקודות או תשובות שגויות מזכה ב-+10, מי שפותר שלב ראשון מקבל +15 first blood, וסיום כל ששת השלבים בלי לחשוף תשובה מזכה ב-+50.",
     "אל תשתפו flags עם צוותים אחרים עד שכולם מסיימים. לשתף טכניקות זה בסדר.",
@@ -203,7 +203,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\ngrep -F 'upstream=169.254.169.254' waf/access.log \\\n  | awk '$9 == 200 && $7 ~ /security-credentials\\/[^\\/]+$/ {print $4, $5}'\ndate -u -d '17 Nov 2026 HH:MM:SS -0500' +%H:%M:%S\n```"
+          "text": "```sh\ngrep -F 'upstream=169.254.169.254' waf/access.log \\\n  | awk '$9 == 200 && $7 ~ /security-credentials\\/[^\\/]+$/ {print $4, $5}' | head -n 1 \\\n  | awk -F: '{printf \"%s  ->  %02d:%s:%s UTC\\n\", $0, ($2 + 5) % 24, $3, substr($4, 1, 2)}'\n```"
         }
       ],
       "successNote": "IMDSv1 עונה לכל `GET` פשוט מתוך המכונה, כולל כזה שה-reverse proxy שלכם שולח בשביל זר. **IMDSv2** דורש session token שצריך לבקש קודם עם `PUT` ו-header מיוחד, ו-SSRF שרק מביא URLs, כמו כאן, לא יכול לשלוח אותם. ב-`ec2/describe-instances.json` רואים `HttpTokens: optional` על ה-WAF ו-`required` על המכונות החדשות.\n\nCloudTrail אפילו מסמן sessions כאלה: `ec2RoleDelivery: 1.0` אומר שה-credentials נמסרו דרך IMDSv1. זה שווה התראה בפני עצמו."
@@ -246,7 +246,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\ncat cloudtrail/*.jsonl | jq -r 'select(.userIdentity.sessionContext.sessionIssuer.userName == \"<role-name>\")\n  | [.sourceIPAddress, .userIdentity.accessKeyId, .userAgent[0:30]] | @tsv' | sort | uniq -c\n```"
+          "text": "```sh\ngrep -h -F '\"userName\":\"fh-waf-edge-role\"' cloudtrail/*.jsonl \\\n  | awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"sourceIPAddress\"], f[\"accessKeyId\"], substr(f[\"userAgent\"], 1, 30); split(\"\", f)}' \\\n  | sort | uniq -c\n```"
         }
       ],
       "successNote": "credentials של role הם bearer tokens: מי שמחזיק בהם *הוא* ה-role, מכל מקום באינטרנט. CloudTrail לא יכול להגיד לכם *מי* עומד מאחורי session, רק **מאיפה** הגיעה כל קריאה ו**איזה לקוח** שלח אותה. כאן אותו מפתח בדיוק שימש מהכתובת של ה-WAF את ה-log shipper שכתוב ב-Go, ובאותו זמן, מכתובת לא מוכרת, את `aws-cli`. זה בדיוק הדפוס שהממצא `InstanceCredentialExfiltration.OutsideAWS` של GuardDuty מזהה. אצלנו הוא הלך ישר לארכיון: חוק השתקה מ-2024 השתיק כל ממצא על ה-role הזה.\n\nשימו לב גם שקריאות ה-API הגיעו מ**כתובת אחרת** מזו של ה-SSRF. תנאי data perimeter כמו `aws:SourceVpce` (ל-role של statements-api יש כזה) היה הופך את המפתחות הגנובים לחסרי ערך מחוץ לרשת שלנו."
@@ -289,7 +289,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\ncat cloudtrail/*.jsonl | jq -r 'select(.sourceIPAddress == \"<api-ip>\" and .eventName == \"GetObject\" and (has(\"errorCode\") | not))\n  | \"\\(.requestParameters.bucketName)/\\(.requestParameters.key)\"' | sort -u | wc -l\n```"
+          "text": "```sh\ngrep -h -F '\"userName\":\"fh-waf-edge-role\"' cloudtrail/*.jsonl \\\n  | grep -v -e '\"sourceIPAddress\":\"10.20.1.15\"' -e '\"sourceIPAddress\":\"198.51.100.20\"' \\\n  | grep -F '\"eventName\":\"GetObject\"' | grep -v '\"errorCode\"' \\\n  | awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"bucketName\"] \"/\" f[\"key\"]; split(\"\", f)}' \\\n  | sort -u | wc -l\n```"
         }
       ],
       "successNote": "המספר הזה מניע את הודעת הדליפה: אילו לקוחות, אילו נתונים, אילו רגולטורים. ספרו **אובייקטים**, לא בקשות, ורק את אלה שהצליחו. התוקף ניסה גם את ה-vault של נתוני הכרטיסים ונעצר, כי ל-role לא היה `kms:Decrypt` על המפתח של ה-vault. שווה להגיד את זה בקול בדוח: מפתח KMS עם policy משלו הוא חומה שנייה אמיתית. SSE-S3 רגיל הוא לא, כי S3 מפענח לכל מי שמורשה ל-`GetObject`.\n\nהתוקף העתיק גם את החוקים והקונפיגורציה של ה-WAF עצמו, וזה מלמד שהוא חקר את ההגנות."
@@ -331,7 +331,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\ncat cloudtrail/*.jsonl | jq -r 'select(.sourceIPAddress == \"<api-ip>\" and .readOnly == false)\n  | [.eventTime, .eventName, .requestParameters.bucketName, .errorCode // \"OK\"] | @tsv'\n```"
+          "text": "```sh\ngrep -h -F '\"userName\":\"fh-waf-edge-role\"' cloudtrail/*.jsonl \\\n  | grep -v -e '\"sourceIPAddress\":\"10.20.1.15\"' -e '\"sourceIPAddress\":\"198.51.100.20\"' \\\n  | grep -F '\"readOnly\":false' \\\n  | awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"eventTime\"], f[\"eventName\"], f[\"bucketName\"], (f[\"errorCode\"] == \"\" ? \"OK\" : f[\"errorCode\"]); split(\"\", f)}'\n```"
         }
       ],
       "successNote": "רשימת deny טובה רק כמו ה-actions שהיא מונה. ל-role היה deny מפורש על `s3:DeleteObject` ו-`s3:DeleteBucket` עבור `fh-prod-*`, אז התוקף נתן ל-S3 למחוק בשבילו: חוק על ה-bucket שמוחק כל אובייקט אחרי יום. S3 הסיר את האובייקטים בלוח הזמנים שלו, אחרי חצות UTC. ההסרות האלה מופיעות בלוג הגישה של S3 כ-`S3.EXPIRE.OBJECT` של `AmazonS3`, ו**אף פעם** לא ב-CloudTrail כמחיקות. בגלל זה grep על `Delete` ב-CloudTrail הצביע על יוני.\n\nהגנו על buckets חשובים עם **versioning ו-Object Lock** (או MFA delete), חסמו שינויי קונפיגורציה של bucket ולא רק מחיקות, ותריעו על כל אחד מהם."
@@ -372,7 +372,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\njq -r '.RolePolicies[].PolicyDocument.Statement[] | [.Sid, .Effect, (.Action | tostring), (.Resource | tostring)] | @tsv' \\\n  iam/roles/fh-waf-edge-role.json\n[[ s3:PutLifecycleConfiguration == <pattern> ]] && echo matches   # try each Action pattern\n```"
+          "text": "```sh\nawk -F'\"' '/\"Sid\"/ {sid = $4} /\"Effect\"/ {eff = $4} /\"(Action|Resource)\"/ {k = $2} sid != \"\" {for (i = 2; i < NF; i += 2) if ($i ~ /^(s3:|arn:aws:s3:|\\*$)/) print sid, eff, k, $i}' \\\n  iam/roles/fh-waf-edge-role.json\nfor p in 's3:GetObject' 's3:ListBucket' 's3:PutObject' 's3:Get*' 's3:List*' 's3:Put*'; do [[ s3:PutLifecycleConfiguration == $p ]] && echo \"$p matches\"; done\n```"
         }
       ],
       "successNote": "תווים כלליים מזדקנים רע. `s3:Put*` *זמני* על `*`, שנוסף להעברת לוגים ב-2024 ואף פעם לא הוסר, כלל בשקט את `s3:PutLifecycleConfiguration`, את `s3:PutBucketPolicy` ואת כל ה-`Put` האחרים על כל bucket בחשבון. לצד `s3:Get*` ו-`s3:List*` על `*`, ה-role של ה-WAF הפך ל-role שקורא הכול ומגדיר מחדש הכול, וה-deny שחסם רק מחיקות לא עמד בזה.\n\nהשרשרת המלאה: **SSRF** ב-proxy של התצוגה המקדימה ב-WAF, **IMDSv1** שעונה לו, **role רחב מדי**, ו**אפס זיהוי** כי הממצאים הושתקו. שברו חוליה אחת וכל הסיפור נגמר הרבה קודם. least privilege פירושו actions מפורשים על משאבים מפורשים, יחד עם תנאי data perimeter; ה-unused access findings ויצירת ה-policies של IAM Access Analyzer הופכים את זה למעשי."
@@ -473,18 +473,18 @@
           "title": "חיפוש בכמה קבצים יחד",
           "syntax": "grep -h -F '<literal-text>' <dir>/<glob> | head",
           "syntaxPowershell": "Select-String -Path <dir>\\<glob> -Pattern '<literal-text>' -SimpleMatch | Select-Object -First <count> -ExpandProperty Line",
-          "command": "grep -h -F 'pattern' cloudtrail/*.jsonl | head",
-          "explain": "`-h` מוריד את קידומת שם הקובץ, כך שהפלט עדיין JSON lines תקין שאפשר להעביר ל-`jq`.",
-          "powershell": "Select-String -Path cloudtrail\\*.jsonl -Pattern 'pattern' -SimpleMatch | Select-Object -First 10 -ExpandProperty Line"
+          "command": "grep -h -F '\"errorCode\":\"AccessDenied\"' cloudtrail/*.jsonl | head -n 3",
+          "explain": "`-h` מוריד את קידומת שם הקובץ, כך שכל שורת פלט היא עדיין רשומת CloudTrail שלמה שאפשר להעביר ל-`grep` או ל-`awk` הבא.",
+          "powershell": "Select-String -Path cloudtrail\\*.jsonl -Pattern '\"errorCode\":\"AccessDenied\"' -SimpleMatch | Select-Object -First 3 -ExpandProperty Line"
         },
         {
           "id": "grep-context",
           "title": "הקשר סביב התאמה",
-          "syntax": "grep -n -B<before> -A<after> '<pattern>' <log-file>",
-          "syntaxPowershell": "Select-String -Path <log-file> -Pattern '<pattern>' -Context <before>,<after>",
-          "command": "grep -n -B2 -A4 'pattern' waf/access.log",
-          "explain": "`-B`/`-A` מציגים שורות לפני ואחרי כל התאמה: מה עוד קרה סביב הרגע הזה?",
-          "powershell": "Select-String -Path waf\\access.log -Pattern 'pattern' -Context 2,4"
+          "syntax": "grep -n -B<before> -A<after> '<pattern>' <log-file> | head -n <count>",
+          "syntaxPowershell": "Select-String -Path <log-file> -Pattern '<pattern>' -Context <before>,<after> | Select-Object -First <count>",
+          "command": "grep -n -B2 -A2 'waf=block' waf/access.log | head -n 20",
+          "explain": "`-B`/`-A` מציגים שורות לפני ואחרי כל התאמה: מה עוד קרה סביב הרגע הזה? `-n` מוסיף מספרי שורות כדי שתוכלו למצוא את המקום שוב.",
+          "powershell": "Select-String -Path waf\\access.log -Pattern 'waf=block' -Context 2,2 | Select-Object -First 4"
         }
       ]
     },
@@ -541,103 +541,103 @@
           "title": "המופע הראשון והאחרון",
           "syntax": "grep -F '<literal-text>' <log-file> | sed -n '<first>p;<last>p'",
           "syntaxPowershell": "$hits = Select-String -Path <log-file> -Pattern '<literal-text>' -SimpleMatch\n$hits[<first>].Line\n$hits[<last>].Line",
-          "command": "grep -F 'pattern' waf/access.log | sed -n '1p;$p'",
-          "explain": "ההתחלה והסוף של תופעה בבת אחת. הלוג מסודר לפי זמן.",
-          "powershell": "$hits = Select-String -Path waf\\access.log -Pattern 'pattern' -SimpleMatch\n$hits[0].Line\n$hits[-1].Line"
+          "command": "grep -F 'waf=block' waf/access.log | sed -n '1p;$p'",
+          "explain": "תחילתה וסופה של תופעה במכה אחת: `sed -n '1p;$p'` מדפיס רק את השורה הראשונה והאחרונה. הלוג מסודר לפי זמן.",
+          "powershell": "$hits = Select-String -Path waf\\access.log -Pattern 'waf=block' -SimpleMatch\n$hits[0].Line\n$hits[-1].Line"
         }
       ]
     },
     {
-      "category": "jq ל-CloudTrail",
+      "category": "grep ו-awk ל-CloudTrail",
       "items": [
         {
           "id": "ct-pretty",
           "title": "הצגה יפה של אירוע אחד",
-          "syntax": "head -n1 <cloudtrail-file> | jq .",
+          "syntax": "head -n 1 <cloudtrail-file> | tr '<separator>' '\\n'",
           "syntaxPowershell": "Get-Content <cloudtrail-file> -TotalCount 1 | ConvertFrom-Json | ConvertTo-Json -Depth <depth>",
-          "command": "head -n1 cloudtrail/*20261118.jsonl | jq .",
-          "explain": "ראו כל שדה שרשומת CloudTrail מכילה: `userIdentity`, `sourceIPAddress`, `userAgent`, `eventName`, `requestParameters`, `errorCode`...",
+          "command": "head -n 1 cloudtrail/*20261118.jsonl | tr ',' '\\n'",
+          "explain": "רשומת CloudTrail אחת, כל `\"key\":\"value\"` בשורה משלו (אובייקטים מקוננים שומרים על הסוגריים שלהם). רואים כל שדה שרשומה נושאת: `userIdentity`, `sourceIPAddress`, `userAgent`, `eventName`, `requestParameters`, `errorCode`...",
           "powershell": "Get-Content cloudtrail\\*20261118.jsonl -TotalCount 1 | ConvertFrom-Json | ConvertTo-Json -Depth 10"
         },
         {
           "id": "ct-event-names",
           "title": "אילו קריאות API היו?",
-          "syntax": "cat <cloudtrail-files> | jq -r '.<field>' | sort | uniq -c | sort -rn",
+          "syntax": "grep -h -o '\"<field>\":\"[^\"]*\"' <cloudtrail-files> | sort | uniq -c | sort -rn",
           "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Group-Object <field> | Sort-Object Count -Descending | Select-Object Count, Name",
-          "command": "cat cloudtrail/*.jsonl | jq -r '.eventName' | sort | uniq -c | sort -rn",
-          "explain": "היסטוגרמה של `eventName`. קריאות כתיבה נדירות בולטות מיד.",
+          "command": "grep -h -o '\"eventName\":\"[^\"]*\"' cloudtrail/*.jsonl | sort | uniq -c | sort -rn",
+          "explain": "היסטוגרמה של `eventName`. `[^\"]*` נעצר במירכאה הסוגרת, כך ש-`-o` מדפיס בדיוק זוג key-value אחד לכל אירוע. קריאות כתיבה נדירות בולטות.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Group-Object eventName | Sort-Object Count -Descending | Select-Object Count, Name"
         },
         {
           "id": "ct-who",
           "title": "מי חתם על הקריאות?",
-          "syntax": "cat <cloudtrail-files> | jq -r '.<path> // .<fallback-path>' | sort | uniq -c | sort -rn",
+          "syntax": "awk -F'\"<field>\":\"' '{split($2, v, \"\\\"\"); print v[1]}' <cloudtrail-files> | sort | uniq -c | sort -rn",
           "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | ForEach-Object { if ($_.<path>) { $_.<path> } else { $_.<fallback-path> } } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
-          "command": "cat cloudtrail/*.jsonl | jq -r '.userIdentity.arn // .userIdentity.type' | sort | uniq -c | sort -rn",
-          "explain": "ה-principals לפי נפח. ב-assumed role ה-ARN מסתיים בשם ה-session; ב-role של מכונת EC2 זה ה-instance id.",
+          "command": "awk -F'\"arn\":\"' '{split($2, v, \"\\\"\"); print v[1]}' cloudtrail/*.jsonl | sort | uniq -c | sort -rn",
+          "explain": "principals לפי נפח. פיצול כל שורה לפי `\"arn\":\"` גורם ל-`$2` להתחיל מיד אחרי ה-`arn` **הראשון**, שהוא `userIdentity.arn`, ו-`split` לפי `\"` חותך אותו במירכאה הסוגרת. ב-assumed role ה-ARN נגמר בשם ה-session; ב-role של מכונת EC2 זה ה-instance id.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | ForEach-Object { if ($_.userIdentity.arn) { $_.userIdentity.arn } else { $_.userIdentity.type } } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
         },
         {
           "id": "ct-where",
           "title": "מי, מאיפה, ועם איזה מפתח",
-          "syntax": "cat <cloudtrail-files> | jq -r '[.<path> // \"-\", .<path>, .<path> // \"-\"] | @tsv' | sort | uniq -c | sort -rn",
+          "syntax": "awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"<field>\"], f[\"<field>\"], f[\"<field>\"]; split(\"\", f)}' <cloudtrail-files> | sort | uniq -c | sort -rn",
           "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | ForEach-Object { '{0} {1} {2}' -f $_.<path>, $_.<path>, $_.<path> } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
-          "command": "cat cloudtrail/*.jsonl | jq -r '[.userIdentity.arn // \"-\", .sourceIPAddress, .userIdentity.accessKeyId // \"-\"] | @tsv' | sort | uniq -c | sort -rn",
-          "explain": "מקבץ אירועים לפי principal, כתובת מקור ו-access key. principal אחד אמור בדרך כלל להגיע ממספר קטן וצפוי של מקומות.",
+          "command": "awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"arn\"], f[\"sourceIPAddress\"], f[\"accessKeyId\"]; split(\"\", f)}' cloudtrail/*.jsonl | sort | uniq -c | sort -rn",
+          "explain": "סוס העבודה של CloudTrail, בלי `jq`. עם `-F'\"'` כל key וכל ערך מחרוזת הופכים לשדה נפרד, והערך יושב שני שדות אחרי ה-key שלו, אז הלולאה בונה טבלת חיפוש `f[key] = value` (המופע הראשון קובע, כך ש-`arn` הוא של הקורא ולא של ה-role). הדפיסו אילו keys שתרצו, כולל מקוננים כמו `bucketName`. כאן: אירועים לפי principal, כתובת מקור ו-access key. principal אחד אמור בדרך כלל להגיע ממספר קטן וצפוי של מקומות.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | ForEach-Object { '{0} {1} {2}' -f $_.userIdentity.arn, $_.sourceIPAddress, $_.userIdentity.accessKeyId } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
         },
         {
           "id": "ct-useragent",
           "title": "איזה לקוח ביצע את הקריאה?",
-          "syntax": "cat <cloudtrail-files> | jq -r '[.<field>, .<field>[0:<length>]] | @tsv' | sort | uniq -c | sort -rn | head -<count>",
+          "syntax": "awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"<field>\"], substr(f[\"<field>\"], 1, <length>); split(\"\", f)}' <cloudtrail-files> | sort | uniq -c | sort -rn | head -<count>",
           "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | ForEach-Object { '{0} {1}' -f $_.<field>, $_.<field>.Substring(0, [Math]::Min(<length>, $_.<field>.Length)) } | Group-Object | Sort-Object Count -Descending | Select-Object -First <count> Count, Name",
-          "command": "cat cloudtrail/*.jsonl | jq -r '[.sourceIPAddress, .userAgent[0:40]] | @tsv' | sort | uniq -c | sort -rn | head -20",
-          "explain": "ה-`userAgent` מגלה את ה-SDK או הכלי. שירות שכתוב ב-Go לא מתחיל פתאום להשתמש ב-CLI של Python.",
+          "command": "awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"sourceIPAddress\"], substr(f[\"userAgent\"], 1, 40); split(\"\", f)}' cloudtrail/*.jsonl | sort | uniq -c | sort -rn | head -20",
+          "explain": "ה-`userAgent` מגלה את ה-SDK או הכלי (`substr` משאיר את 40 התווים הראשונים). שירות שכתוב ב-Go לא מתחיל פתאום להשתמש ב-CLI של Python.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | ForEach-Object { '{0} {1}' -f $_.sourceIPAddress, $_.userAgent.Substring(0, [Math]::Min(40, $_.userAgent.Length)) } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name"
         },
         {
           "id": "ct-select-role",
           "title": "רק role אחד",
-          "syntax": "cat <cloudtrail-files> | jq -c 'select(.<path> == \"<value>\")' | head",
+          "syntax": "grep -h -F '\"<field>\":\"<value>\"' <cloudtrail-files> | awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"<field>\"], f[\"<field>\"], f[\"<field>\"]; split(\"\", f)}' | head",
           "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<path> -eq '<value>' } | Select-Object -First <count> <field>, <field>, <field>",
-          "command": "cat cloudtrail/*.jsonl | jq -c 'select(.userIdentity.sessionContext.sessionIssuer.userName == \"<role-name>\")' | head",
-          "explain": "`sessionIssuer.userName` הוא ה-role שמאחורי session של assumed role, לא משנה איך ה-session נקרא.",
-          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.userIdentity.sessionContext.sessionIssuer.userName -eq '<role-name>' } | Select-Object -First 10 eventTime, eventName, sourceIPAddress"
+          "command": "grep -h -F '\"userName\":\"fh-waf-edge-role\"' cloudtrail/*.jsonl | awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"eventTime\"], f[\"eventName\"], f[\"sourceIPAddress\"]; split(\"\", f)}' | head",
+          "explain": "`sessionIssuer.userName` הוא ה-role שמאחורי session של assumed role, לא משנה איך ה-session נקרא. ב-JSON של שורה אחת, התאמה לטקסט המדויק `\"key\":\"value\"` עם `grep -F` היא סינון מהיר ומדויק; טבלת החיפוש של awk מדפיסה אחר כך את השדות שאתם רוצים.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.userIdentity.sessionContext.sessionIssuer.userName -eq 'fh-waf-edge-role' } | Select-Object -First 10 eventTime, eventName, sourceIPAddress"
         },
         {
           "id": "ct-not-ip",
           "title": "החרגת מקורות מוכרים",
-          "syntax": "cat <cloudtrail-files> | jq -c 'select(.<field> != \"<value>\" and .<field> != \"<other-value>\")' | head",
+          "syntax": "grep -h -v -e '\"<field>\":\"<value>\"' -e '\"<field>\":\"<other-value>\"' <cloudtrail-files> | awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"<field>\"], f[\"<field>\"], f[\"<field>\"]; split(\"\", f)}' | head",
           "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<field> -notin @('<value>', '<other-value>') } | Select-Object -First <count> <field>, <field>, <field>",
-          "command": "cat cloudtrail/*.jsonl | jq -c 'select(.sourceIPAddress != \"<ip>\" and .sourceIPAddress != \"<other-ip>\")' | head",
-          "explain": "הורידו את הכתובות שאתם יודעים להסביר, וראו מה נשאר.",
-          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.sourceIPAddress -notin @('<ip>', '<other-ip>') } | Select-Object -First 10 eventTime, eventName, sourceIPAddress"
+          "command": "grep -h -v -e '\"sourceIPAddress\":\"10.20.1.15\"' -e '\"sourceIPAddress\":\"198.51.100.20\"' cloudtrail/*.jsonl | awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"eventTime\"], f[\"eventName\"], f[\"sourceIPAddress\"]; split(\"\", f)}' | head",
+          "explain": "הורידו את הכתובות שאתם יודעים להסביר (כאן: הכתובת הפרטית והציבורית של מכונת ה-WAF עצמה) ותראו מה נשאר. המירכאות הופכות כל תבנית למדויקת: `10.20.1.15` לא יוריד גם את `10.20.1.150`.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.sourceIPAddress -notin @('10.20.1.15', '198.51.100.20') } | Select-Object -First 10 eventTime, eventName, sourceIPAddress"
         },
         {
           "id": "ct-errors",
           "title": "קריאות שנכשלו",
-          "syntax": "cat <cloudtrail-files> | jq -r 'select(.<field>) | [.<field>, .<field>, ...] | @tsv'",
+          "syntax": "grep -h -F '\"<field>\"' <cloudtrail-files> | awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"<field>\"], f[\"<field>\"], f[\"<field>\"], f[\"<field>\"]; split(\"\", f)}'",
           "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<field> } | Format-Table <field>, <field>, ...",
-          "command": "cat cloudtrail/*.jsonl | jq -r 'select(.errorCode) | [.eventTime, .eventName, .errorCode, .sourceIPAddress] | @tsv'",
-          "explain": "`errorCode` קיים רק כשקריאה נכשלה. כישלון הוא ניסיון ולא פעולה, אבל ניסיונות מראים כוונה.",
+          "command": "grep -h -F '\"errorCode\"' cloudtrail/*.jsonl | awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"eventTime\"], f[\"eventName\"], f[\"errorCode\"], f[\"sourceIPAddress\"]; split(\"\", f)}'",
+          "explain": "`errorCode` קיים רק כשקריאה נכשלה. כישלון הוא ניסיון, לא פעולה, אבל ניסיונות מראים כוונה.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.errorCode } | Format-Table eventTime, eventName, errorCode, sourceIPAddress"
         },
         {
           "id": "ct-timeline",
           "title": "ציר הזמן של שחקן אחד",
-          "syntax": "cat <cloudtrail-files> | jq -r 'select(.<field> == \"<value>\") | [.<field>, .<field>, .<path> // \"-\", ...] | @tsv'",
+          "syntax": "grep -h -F '\"<field>\":\"<value>\"' <cloudtrail-files> | awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"<field>\"], f[\"<field>\"], (f[\"<field>\"] == \"\" ? \"-\" : f[\"<field>\"]), (f[\"<field>\"] == \"\" ? \"OK\" : f[\"<field>\"]), (index($0, \"\\\"<flag>\\\":false\") ? \"write\" : \"read\"); split(\"\", f)}'",
           "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<field> -eq '<value>' } | Format-Table <field>, <field>, @{n='<label>'; e={$_.<path>}}, ...",
-          "command": "cat cloudtrail/*.jsonl | jq -r 'select(.sourceIPAddress == \"<ip>\") | [.eventTime, .eventName, .requestParameters.bucketName // \"-\", .errorCode // \"OK\", .readOnly] | @tsv'",
-          "explain": "כל מה שמקור אחד עשה, לפי הסדר, עם ה-bucket והאם זה הצליח. `readOnly` הוא false בקריאות שמשנות משהו.",
-          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.sourceIPAddress -eq '<ip>' } | Format-Table eventTime, eventName, @{n='bucket'; e={$_.requestParameters.bucketName}}, errorCode, readOnly"
+          "command": "grep -h -F '\"sourceIPAddress\":\"192.0.2.150\"' cloudtrail/*.jsonl | awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"eventTime\"], f[\"eventName\"], (f[\"bucketName\"] == \"\" ? \"-\" : f[\"bucketName\"]), (f[\"errorCode\"] == \"\" ? \"OK\" : f[\"errorCode\"]), (index($0, \"\\\"readOnly\\\":false\") ? \"write\" : \"read\"); split(\"\", f)}'",
+          "explain": "כל מה שמקור אחד עשה, לפי הסדר, עם ה-bucket שהיה היעד והאם זה הצליח. `readOnly` הוא boolean של JSON ולא מחרוזת, אז בודקים בשורה הגולמית אם יש `\"readOnly\":false` (קריאה שמשנה משהו). הדוגמה עוקבת אחרי ה-session של יוני בקונסול מכרטיס השינוי; הכניסו כל כתובת שתרצו לעקוב אחריה.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.sourceIPAddress -eq '192.0.2.150' } | Format-Table eventTime, eventName, @{n='bucket'; e={$_.requestParameters.bucketName}}, errorCode, readOnly"
         },
         {
           "id": "ct-unique-objects",
           "title": "אובייקטים ייחודיים שנקראו",
-          "syntax": "cat <cloudtrail-files> | jq -r 'select(.<field> == \"<value>\" and (has(\"<field>\") | not)) | \"\\(.<path>)/\\(.<path>)\"' | sort -u | wc -l",
+          "syntax": "grep -h -F '\"<field>\":\"<value>\"' <cloudtrail-files> | grep -v '\"<field>\"' | awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"<field>\"] \"/\" f[\"<field>\"]; split(\"\", f)}' | sort -u | wc -l",
           "syntaxPowershell": "(Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<field> -eq '<value>' -and -not $_.<field> } | ForEach-Object { $_.<path> + '/' + $_.<path> } | Sort-Object -Unique | Measure-Object).Count",
-          "command": "cat cloudtrail/*.jsonl | jq -r 'select(.eventName == \"GetObject\" and (has(\"errorCode\") | not)) | \"\\(.requestParameters.bucketName)/\\(.requestParameters.key)\"' | sort -u | wc -l",
-          "explain": "בונה `bucket/key` לכל `GetObject` מוצלח וסופר ערכים ייחודיים. הוסיפו תנאי `select()` משלכם בשביל ה*מי*.",
+          "command": "grep -h -F '\"eventName\":\"GetObject\"' cloudtrail/*.jsonl | grep -v '\"errorCode\"' | awk -F'\"' '{for (i = 1; i < NF; i++) if (!($i in f)) f[$i] = $(i+2); print f[\"bucketName\"] \"/\" f[\"key\"]; split(\"\", f)}' | sort -u | wc -l",
+          "explain": "בונה `bucket/key` לכל `GetObject` שהצליח (אין `errorCode` בשורה) וסופר ערכים ייחודיים. הוסיפו מקדימה סינוני `grep -F` / `grep -v` משלכם בשביל ה*מי*.",
           "powershell": "(Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.eventName -eq 'GetObject' -and -not $_.errorCode } | ForEach-Object { $_.requestParameters.bucketName + '/' + $_.requestParameters.key } | Sort-Object -Unique | Measure-Object).Count"
         }
       ]
@@ -742,7 +742,7 @@
           "syntax": "echo '<nginx-timestamp>' | sed -E 's#<timestamp-regex>#<reordered-groups>#' | xargs -I{} date -u -d '{}' +%FT%TZ",
           "syntaxPowershell": "$s = '<nginx-timestamp>' -replace '<offset-regex>', '<offset-with-colon>'\n[DateTimeOffset]::ParseExact($s, '<format>', [Globalization.CultureInfo]::InvariantCulture).UtcDateTime.ToString('u')",
           "command": "echo '[17/Nov/2026:21:15:00 -0500]' | sed -E 's#\\[([0-9]+)/([A-Za-z]+)/([0-9]+):([0-9:]+) ([-+][0-9]+)\\]#\\1 \\2 \\3 \\4 \\5#' | xargs -I{} date -u -d '{}' +%FT%TZ",
-          "explain": "הופך `[dd/Mon/yyyy:HH:MM:SS -0500]` לזמן UTC בפורמט ISO. שימו לב לתאריך: הוא יכול להתחלף.",
+          "explain": "הופך `[dd/Mon/yyyy:HH:MM:SS -0500]` לזמן UTC בפורמט ISO. שימו לב לתאריך: הוא עלול להתחלף. `date -d` הוא של GNU (Linux, WSL, Git Bash); ב-macOS השתמשו ב-`date -j -u -f '%d %b %Y %T %z' '17 Nov 2026 21:15:00 -0500' +%FT%TZ`, או פשוט הוסיפו חמש שעות.",
           "powershell": "$s = '17/Nov/2026:21:15:00 -0500' -replace '(\\d\\d)(\\d\\d)$', '$1:$2'\n[DateTimeOffset]::ParseExact($s, 'dd/MMM/yyyy:HH:mm:ss zzz', [Globalization.CultureInfo]::InvariantCulture).UtcDateTime.ToString('u')"
         },
         {
@@ -751,7 +751,7 @@
           "syntax": "date -u -d '<local-time> <offset>' +%H:%M:%S",
           "syntaxPowershell": "([DateTimeOffset]'<local-time-with-offset>').UtcDateTime.ToString('HH:mm:ss')",
           "command": "date -u -d '17 Nov 2026 21:15:00 -0500' +%H:%M:%S",
-          "explain": "בנובמבר, ניו יורק היא UTC-05:00. מוסיפים חמש שעות.",
+          "explain": "בנובמבר ניו יורק נמצאת ב-UTC-05:00. הוסיפו חמש שעות. `date -d` הוא של GNU (Linux, WSL, Git Bash); ב-macOS השתמשו ב-`date -j -u -f '%d %b %Y %T %z' '17 Nov 2026 21:15:00 -0500' +%H:%M:%S`.",
           "powershell": "([DateTimeOffset]'2026-11-17T21:15:00-05:00').UtcDateTime.ToString('HH:mm:ss')"
         },
         {
@@ -760,7 +760,7 @@
           "syntax": "TZ=<time-zone> date -d '<utc-timestamp>'",
           "syntaxPowershell": "([DateTimeOffset]'<utc-timestamp>').ToOffset([TimeSpan]'<offset>')",
           "command": "TZ=America/New_York date -d '2026-11-18T03:00:00Z'",
-          "explain": "מה הייתה השעה במשרד בניו יורק ברגע UTC נתון.",
+          "explain": "מה הראה השעון במשרד בניו יורק ברגע UTC מסוים. `date -d` הוא של GNU (Linux, WSL, Git Bash); ב-macOS פשוט הפחיתו חמש שעות.",
           "powershell": "([DateTimeOffset]'2026-11-18T03:00:00Z').ToOffset([TimeSpan]'-05:00')"
         },
         {
@@ -775,10 +775,10 @@
         {
           "id": "slack-timestamps",
           "title": "קריאת ערוץ ה-Slack",
-          "syntax": "jq -r '.[] | \"\\(.<ts-field> | tonumber | floor | todate) \\(.<field>): \\(.<field>)\"' <slack-export>",
+          "syntax": "sed -n -E 's/^ *\"(<key>|<key>|<key>)\": \"(.*)\",?$/\\2/p' <slack-export> | paste -d ' ' - - - | while read -r ts user text; do printf '%s %s: %s\\n' \"$(date -u -d \"@${ts%.*}\" +%FT%TZ)\" \"$user\" \"$text\"; done",
           "syntaxPowershell": "(Get-Content <slack-export> -Raw | ConvertFrom-Json) | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][Math]::Floor([double]$_.<ts-field>)).ToString('u'), $_.<field>, $_.<field> }",
-          "command": "jq -r '.[] | \"\\(.ts | tonumber | floor | todate) \\(.user): \\(.text)\"' slack/inc-prod-exports.json",
-          "explain": "ה-`ts` של Slack הוא epoch כמחרוזת. `tonumber | floor | todate` נותן ISO-8601 ב-UTC.",
+          "command": "sed -n -E 's/^ *\"(ts|user|text)\": \"(.*)\",?$/\\2/p' slack/inc-prod-exports.json | paste -d ' ' - - - | while read -r ts user text; do printf '%s %s: %s\\n' \"$(date -u -d \"@${ts%.*}\" +%FT%TZ)\" \"$user\" \"$text\"; done",
+          "explain": "הייצוא מעוצב עם key אחד בכל שורה: `sed` משאיר את הערכים של `ts`, `user` ו-`text`, `paste - - -` מחבר כל שלוש שורות להודעה אחת, ו-`${ts%.*}` מוריד את המיקרו-שניות לפני ש-`date` הופך את ה-epoch ל-UTC. `date -d` הוא של GNU (Linux, WSL, Git Bash); ב-macOS השתמשו ב-`date -u -r \"${ts%.*}\" +%FT%TZ`.",
           "powershell": "(Get-Content slack\\inc-prod-exports.json -Raw | ConvertFrom-Json) | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][Math]::Floor([double]$_.ts)).ToString('u'), $_.user, $_.text }"
         }
       ]
@@ -798,10 +798,10 @@
         {
           "id": "url-decode",
           "title": "פענוח URL של פרמטר",
-          "syntax": "python3 -c 'import sys, urllib.parse; print(urllib.parse.<decode-function>(sys.argv[1]))' '<encoded-value>'",
+          "syntax": "printf '%b\\n' \"$(echo '<encoded-value>' | sed 's/%/\\\\x/g')\"",
           "syntaxPowershell": "[uri]::UnescapeDataString('<encoded-value>')",
-          "command": "python3 -c 'import sys, urllib.parse; print(urllib.parse.unquote(sys.argv[1]))' 'http%3A%2F%2Fexample.com%2Fa%20b'",
-          "explain": "`%3A` הוא `:`, `%2F` הוא `/`. פענחו לפני שאתם מחליטים מה הבקשה באמת ביקשה.",
+          "command": "printf '%b\\n' \"$(echo 'http%3A%2F%2Fexample.com%2Fa%20b' | sed 's/%/\\\\x/g')\"",
+          "explain": "`%3A` הוא `:`, `%2F` הוא `/`. `sed` הופך כל `%` ל-`\\x`, ו-`printf '%b'` קורא את `\\x3A` כתו שקוד ה-hex שלו 3A. פענחו לפני שאתם מחליטים מה הבקשה באמת ביקשה.",
           "powershell": "[uri]::UnescapeDataString('http%3A%2F%2Fexample.com%2Fa%20b')"
         }
       ]
@@ -812,27 +812,27 @@
         {
           "id": "ec2-metadata-options",
           "title": "מכונות, כתובות והגדרות IMDS",
-          "syntax": "jq '.<path>[].<path>[] | {<field>, <field>, <label>: .<path>, <field>}' <describe-instances-file>",
+          "syntax": "grep -E '\"(<key>|<key>|<key>|...)\"' <describe-instances-file> | tr -d '<chars-to-drop>'",
           "syntaxPowershell": "(Get-Content <describe-instances-file> -Raw | ConvertFrom-Json).<path>.<path> | Select-Object <field>, <field>, @{n='<label>'; e={$_.<path>}}, ...",
-          "command": "jq '.Reservations[].Instances[] | {InstanceId, PrivateIpAddress, PublicIpAddress, profile: .IamInstanceProfile.Arn, MetadataOptions}' ec2/describe-instances.json",
-          "explain": "איזה instance profile כל מכונה לובשת, הכתובות שלה, והאם IMDSv2 נאכף (`HttpTokens: required`).",
+          "command": "grep -E '\"(InstanceId|PrivateIpAddress|PublicIpAddress|Arn|HttpTokens)\"' ec2/describe-instances.json | tr -d ' ,'",
+          "explain": "ב-JSON מעוצב יש key אחד בכל שורה, אז `grep -E` עם חלופות שולף את השדות שמעניינים אתכם לפי סדר המסמך: אחרי כל `InstanceId` באים כתובות ה-IP של המכונה, ה-instance profile שלה והגדרת ה-IMDS (`HttpTokens: required` אומר ש-IMDSv2 נאכף). `PrivateIpAddress` מופיע פעמיים: פעם למכונה ופעם לממשק הרשת שלה.",
           "powershell": "(Get-Content ec2\\describe-instances.json -Raw | ConvertFrom-Json).Reservations.Instances | Select-Object InstanceId, PrivateIpAddress, PublicIpAddress, @{n='profile'; e={$_.IamInstanceProfile.Arn}}, @{n='HttpTokens'; e={$_.MetadataOptions.HttpTokens}}"
         },
         {
           "id": "iam-statements",
           "title": "ה-statements של ה-policy במבט אחד",
-          "syntax": "jq -r '.<path>[].<path>.<path>[] | [.<field>, .<field>, (.<field> | tostring), (.<field> | tostring)] | @tsv' <role-policy-file>",
+          "syntax": "awk -F'\"' '/\"<key>\"/ {sid = $4} /\"<key>\"/ {eff = $4} /\"(<key>|<key>)\"/ {k = $2} sid != \"\" {for (i = 2; i < NF; i += 2) if ($i ~ /<value-regex>/) print sid, eff, k, $i}' <role-policy-file>",
           "syntaxPowershell": "(Get-Content <role-policy-file> -Raw | ConvertFrom-Json).<path>.<path>.<path> | Format-Table <field>, <field>, @{n='<label>'; e={$_.<field> -join ','}}, ... -Wrap",
-          "command": "jq -r '.RolePolicies[].PolicyDocument.Statement[] | [.Sid, .Effect, (.Action | tostring), (.Resource | tostring)] | @tsv' iam/roles/<role-name>.json",
-          "explain": "שורה לכל statement: Sid, Effect, Action ו-Resource. הפתעות גרות בתווים כלליים (`*`).",
-          "powershell": "(Get-Content iam\\roles\\<role-name>.json -Raw | ConvertFrom-Json).RolePolicies.PolicyDocument.Statement | Format-Table Sid, Effect, @{n='Action'; e={$_.Action -join ','}}, @{n='Resource'; e={$_.Resource -join ','}} -Wrap"
+          "command": "awk -F'\"' '/\"Sid\"/ {sid = $4} /\"Effect\"/ {eff = $4} /\"(Action|Resource)\"/ {k = $2} sid != \"\" {for (i = 2; i < NF; i += 2) if ($i ~ /^(s3:|arn:aws:s3:|\\*$)/) print sid, eff, k, $i}' iam/roles/fh-waf-edge-role.json",
+          "explain": "שורה לכל ערך של `Action` או `Resource`, מתויגת ב-`Sid` וב-`Effect` של ה-statement שלה: awk זוכר את ה-`Sid`, ה-`Effect` וה-key האחרונים שראה בזמן שהוא עובר על המדיניות המעוצבת מלמעלה למטה. התווים הכלליים (`*`) הם המקום שבו מסתתרות ההפתעות.",
+          "powershell": "(Get-Content iam\\roles\\fh-waf-edge-role.json -Raw | ConvertFrom-Json).RolePolicies.PolicyDocument.Statement | Format-Table Sid, Effect, @{n='Action'; e={$_.Action -join ','}}, @{n='Resource'; e={$_.Resource -join ','}} -Wrap"
         },
         {
           "id": "iam-action-names",
           "title": "שמות API מול שמות actions ב-IAM",
-          "syntax": "cat <cloudtrail-files> | jq -r 'select(.<field> == \"<value>\") | .<field>' | sort -u",
+          "syntax": "grep -h -F '\"<field>\":\"<value>\"' <cloudtrail-files> | grep -o '\"<field>\":\"[^\"]*\"' | sort -u",
           "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<field> -eq '<value>' } | Select-Object -ExpandProperty <field> -Unique",
-          "command": "cat cloudtrail/*.jsonl | jq -r 'select(.eventSource == \"s3.amazonaws.com\") | .eventName' | sort -u",
+          "command": "grep -h -F '\"eventSource\":\"s3.amazonaws.com\"' cloudtrail/*.jsonl | grep -o '\"eventName\":\"[^\"]*\"' | sort -u",
           "explain": "CloudTrail רושם את **פעולת ה-API**; IAM מאשר **action**, וב-S3 הם לא תמיד זהים. `ListObjects` (V2) דורש `s3:ListBucket`; `ListBuckets` דורש `s3:ListAllMyBuckets`; לכמה APIs של קונפיגורציית bucket יש שמות action משלהם. בדקו כל אחד ב-AWS Service Authorization Reference של Amazon S3.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.eventSource -eq 's3.amazonaws.com' } | Select-Object -ExpandProperty eventName -Unique"
         },
@@ -848,10 +848,10 @@
         {
           "id": "access-keys-table",
           "title": "מפתחות ארוכי טווח",
-          "syntax": "column -s<separator> -t < <csv-file>",
+          "syntax": "awk -F'<separator>' '/^#/ {print; next} {printf \"<format>\\n\", $<field>, $<field>, ...}' <csv-file>",
           "syntaxPowershell": "Import-Csv <csv-file> | Format-Table",
-          "command": "column -s, -t < iam/access-keys.csv",
-          "explain": "מפתחות של משתמשי IAM (`AKIA...`) והסטטוס שלהם. credentials זמניים של roles (`ASIA...`) לא מופיעים כאן לעולם.",
+          "command": "awk -F, '/^#/ {print; next} {printf \"%-17s %-21s %-9s %-21s %s\\n\", $1, $2, $3, $6, $8}' iam/access-keys.csv",
+          "explain": "מפתחות של משתמשי IAM (`AKIA...`) והסטטוס שלהם, בעמודות מיושרות (`%-17s` מרפד ערך ל-17 תווים; שורות ההערה עם `#` עוברות כמו שהן). credentials זמניים של roles (`ASIA...`) לא מופיעים כאן לעולם.",
           "powershell": "Import-Csv iam\\access-keys.csv | Format-Table"
         }
       ]
