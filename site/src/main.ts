@@ -1,9 +1,9 @@
 import "./styles.css";
-import { applyLang, getLang, setLang } from "./i18n/i18n";
+import { applyLang, getLang, isRelabel, noteRoute, setLang } from "./i18n/i18n";
 import { T } from "./i18n/strings-player";
 import { getCase } from "./content/load";
 import { onConnectivity } from "./lib/api";
-import { h, setChildren } from "./lib/dom";
+import { h, restoreFields, setChildren, snapshotFields, type FieldSnapshot } from "./lib/dom";
 import { cachedAccount, isAdmin, loadAccount, onAccountChange, signOut } from "./lib/session";
 import { onEventChange, startEventPolling } from "./lib/event";
 import { TA } from "./i18n/strings-account";
@@ -18,11 +18,54 @@ import { eventLine, renderLeaderboard, stopLeaderboard } from "./views/leaderboa
 applyLang();
 
 /* ---------- language toggle (header, every page) ---------- */
+
+/**
+ * A language switch re-renders the current route. What the user typed must survive it: snapshot the text
+ * fields (in memory only), then refill the re-rendered fields as they appear (views may render async, e.g.
+ * after the account loads). Focus stays on the toggle and the scroll position is kept.
+ */
+type PendingRestore = { hash: string; fields: FieldSnapshot; scrollY: number; focus: HTMLElement | null; until: number };
+let pendingRestore: PendingRestore | null = null;
+const RESTORE_WINDOW_MS = 5_000;
+
+function applyPendingRestore(): void {
+  const pending = pendingRestore;
+  const app = document.getElementById("app");
+  if (pending === null || app === null) return;
+  if (pending.hash !== window.location.hash || Date.now() > pending.until) {
+    pendingRestore = null;
+    return;
+  }
+  restoreFields(app, pending.fields);
+  if (pending.focus !== null && document.activeElement !== pending.focus && app.contains(document.activeElement)) {
+    pending.focus.focus({ preventScroll: true }); // a view auto-focused its first field: give focus back
+  }
+  if (pending.scrollY > 0 && document.documentElement.scrollHeight >= pending.scrollY + window.innerHeight) {
+    window.scrollTo(0, pending.scrollY);
+    pending.scrollY = 0;
+  }
+  if (pending.fields.size === 0 && pending.scrollY === 0 && pending.focus === null) pendingRestore = null;
+}
+
+function switchLang(lang: "en" | "he", button: HTMLElement): void {
+  if (lang === getLang()) return;
+  const app = document.getElementById("app");
+  pendingRestore = {
+    hash: window.location.hash,
+    fields: app === null ? new Map() : snapshotFields(app),
+    scrollY: window.scrollY,
+    focus: document.activeElement === button ? button : null,
+    until: Date.now() + RESTORE_WINDOW_MS,
+  };
+  setLang(lang);
+  applyPendingRestore();
+}
+
 function mountLangToggle(): void {
   const bar = document.querySelector(".topbar");
   if (!(bar instanceof HTMLElement)) return;
   const mk = (lang: "en" | "he", label: string): HTMLButtonElement => {
-    const btn = h("button", { type: "button", class: "lang-btn", lang, "aria-pressed": String(getLang() === lang), onclick: () => setLang(lang) }, label);
+    const btn: HTMLButtonElement = h("button", { type: "button", class: "lang-btn", lang, "aria-pressed": String(getLang() === lang), onclick: () => switchLang(lang, btn) }, label);
     return btn;
   };
   const en = mk("en", "EN");
@@ -142,6 +185,7 @@ mountEvent();
 const root = document.getElementById("app");
 if (!(root instanceof HTMLElement)) throw new Error("#app root missing");
 const appRoot: HTMLElement = root;
+new MutationObserver(() => applyPendingRestore()).observe(appRoot, { childList: true, subtree: true });
 
 /* ---------- global safety net: never white-screen ---------- */
 const toastHost = h("div", { class: "toast-host", "aria-live": "polite" });
@@ -201,10 +245,11 @@ function route(): void {
   const hash = path ?? "";
   const query = new URLSearchParams(queryString ?? "");
   const parts = hash.split("/").filter((part) => part.length > 0).map(decodeURIComponent);
+  noteRoute();
   stopCaseTimers();
   stopAuthTimers();
   stopLeaderboard();
-  window.scrollTo(0, 0);
+  if (!isRelabel()) window.scrollTo(0, 0);
 
   try {
     if (parts.length === 0) {

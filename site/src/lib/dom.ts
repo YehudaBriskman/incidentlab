@@ -120,3 +120,41 @@ export function setChildren(parent: Element, ...children: Child[]): void {
   parent.replaceChildren();
   appendChildren(parent, children);
 }
+
+/* ---------- form drafts that survive a re-render (language switch) ---------- */
+
+/** Typed values by element id. Lives only in memory: password values are never written to storage. */
+export type FieldSnapshot = Map<string, string>;
+
+const TEXT_TYPES = new Set(["text", "password", "email", "search", "tel", "url", "number", ""]);
+
+function draftFields(root: ParentNode): Array<HTMLInputElement | HTMLTextAreaElement> {
+  const out: Array<HTMLInputElement | HTMLTextAreaElement> = [];
+  for (const el of root.querySelectorAll("input[id], textarea[id]")) {
+    if (el instanceof HTMLTextAreaElement) out.push(el);
+    else if (el instanceof HTMLInputElement && TEXT_TYPES.has(el.getAttribute("type") ?? "")) out.push(el);
+  }
+  return out;
+}
+
+/** Snapshot every non-empty text field under `root`, keyed by id. */
+export function snapshotFields(root: ParentNode): FieldSnapshot {
+  const snap: FieldSnapshot = new Map();
+  for (const el of draftFields(root)) if (el.value.length > 0) snap.set(el.id, el.value);
+  return snap;
+}
+
+/**
+ * Put snapshotted values back into freshly rendered, still-empty fields with the same id. Restored ids are
+ * removed from `snap` (each value is restored once). Fires "input" so views that track drafts stay in sync.
+ */
+export function restoreFields(root: ParentNode, snap: FieldSnapshot): void {
+  for (const el of draftFields(root)) {
+    const value = snap.get(el.id);
+    if (value === undefined) continue;
+    snap.delete(el.id);
+    if (el.value.length > 0) continue;
+    el.value = value;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+}

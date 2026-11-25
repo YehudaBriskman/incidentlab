@@ -8,7 +8,7 @@ import { withApprovedAccount } from "./auth";
 import { confirmButton, copyButton, h, html, setChildren, type Child } from "../lib/dom";
 import { md, mdInline } from "../lib/markdown";
 import { formatElapsed } from "../lib/time";
-import { formatNumber } from "../i18n/i18n";
+import { formatNumber, isRelabel } from "../i18n/i18n";
 import { commandCard, type CommandContext } from "./toolbox";
 import { T } from "../i18n/strings-player";
 
@@ -17,6 +17,8 @@ type StepState = "locked" | "active" | "solved" | "revealed";
 
 const timers = new Set<number>();
 const drafts = new Map<QuestionId, string>();
+/** The stage last shown, so a language switch (which re-renders the route) keeps the player where they were. */
+let lastView: { caseId: string; stage: StageKey } | null = null;
 
 export function stopCaseTimers(): void {
   for (const t of timers) window.clearInterval(t);
@@ -140,7 +142,8 @@ const STAGE_KEYS: readonly StageKey[] = ["setup", ...QUESTION_ORDER, "debrief"];
 function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): void {
   stopCaseTimers();
   let player = initialPlayer;
-  let viewing: StageKey = currentStage(player);
+  const kept = isRelabel() && lastView !== null && lastView.caseId === c.id ? lastView.stage : null;
+  let viewing: StageKey = kept !== null && stepState(player, kept) !== "locked" ? kept : currentStage(player);
   let justSolved: QuestionId | null = null;
 
   const update = (next: ProgressView, view?: StageKey): void => {
@@ -199,6 +202,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
 
   const draw = (): void => {
     stopCaseTimers();
+    lastView = { caseId: c.id, stage: viewing };
     const header = h(
       "header",
       { class: "case-head" },
@@ -239,7 +243,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
   };
 
   draw();
-  window.scrollTo(0, 0);
+  if (!isRelabel()) window.scrollTo(0, 0);
 }
 
 /* ================= Stage 0: setup ================= */
