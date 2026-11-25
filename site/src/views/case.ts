@@ -7,15 +7,23 @@ import { caseSummary } from "../content/load";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { withApprovedAccount } from "./auth";
-import { confirmButton, copyButton, h, html, setChildren, type Child } from "../lib/dom";
+import { announce, confirmButton, copyButton, ensureAnnouncer, h, html, setChildren } from "../lib/dom";
 import { md, mdInline } from "../lib/markdown";
 import { formatElapsed } from "../lib/time";
 import { formatNumber, isRelabel, locale } from "../i18n/i18n";
-import { commandCard, lockedToday, type CommandContext, type LockedToday } from "./toolbox";
+import { commandCard, isCleanSoFar, lockedToday, type CommandContext, type LockedToday } from "./toolbox";
 import { T } from "../i18n/strings-player";
+import { TP } from "../i18n/strings-play";
+import { getLang } from "../i18n/i18n";
 
 type StageKey = "setup" | QuestionId | "debrief";
 type StepState = "locked" | "active" | "solved" | "revealed";
+/**
+ * Where focus goes after the next redraw. Every action that redraws the stage names one, so focus never
+ * falls back to <body>: the stage heading (stepper, Continue, I'm ready), the result title (solve, reveal)
+ * or the hint that was just bought.
+ */
+type FocusTarget = { kind: "heading" } | { kind: "result" } | { kind: "hint"; index: number };
 
 const timers = new Set<number>();
 const drafts = new Map<QuestionId, string>();
@@ -79,6 +87,7 @@ function wrongPenalty(wrong: number): number {
 export function renderCase(root: HTMLElement, c: Case): void {
   stopCaseTimers();
   document.title = `${c.title} · IncidentLab`;
+  ensureAnnouncer();
   withApprovedAccount(root, c.title, () => loadProgress(root, c));
 }
 
@@ -150,11 +159,30 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, l
   const kept = isRelabel() && lastView !== null && lastView.caseId === c.id ? lastView.stage : null;
   let viewing: StageKey = kept !== null && stepState(player, kept) !== "locked" ? kept : currentStage(player);
   let justSolved: QuestionId | null = null;
+  let focusNext: FocusTarget | null = null;
 
-  const update = (next: ProgressView, view?: StageKey): void => {
+  const update = (next: ProgressView, view?: StageKey, focus: FocusTarget = { kind: "heading" }): void => {
     player = next;
     viewing = view ?? currentStage(player);
+    focusNext = focus;
     draw();
+  };
+
+  const applyFocus = (): void => {
+    const target = focusNext;
+    focusNext = null;
+    if (target === null) return;
+    const stage = document.getElementById("stage");
+    if (stage === null) return;
+    const el =
+      target.kind === "result"
+        ? stage.querySelector<HTMLElement>(".result-title")
+        : target.kind === "hint"
+          ? stage.querySelector<HTMLElement>(`[data-hint="${target.index}"]`)
+          : null;
+    const heading = el ?? stage.querySelector<HTMLElement>(".stage-goal") ?? stage;
+    heading.focus({ preventScroll: true });
+    heading.scrollIntoView({ block: "nearest", behavior: "auto" });
   };
 
   const switchPlayer = (): void => {
@@ -166,36 +194,51 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, l
   const elFill = h("span", { class: "progress-fill" });
   const tick = (): void => {
     const solved = QUESTION_ORDER.filter((id) => isDone(stageProgress(player, id))).length;
-    const start = Date.parse(player.setupDoneAt ?? player.startedAt ?? new Date().toISOString());
-    const end = player.completedAt !== null ? Date.parse(player.completedAt) : Date.now();
-    elStats.textContent = T().progressStats(solved, QUESTION_ORDER.length, TG().scorePar(player.score, player.maxScore), formatElapsed(end - start));
+    const score = formatNumber(player.score);
+    const par = formatNumber(player.maxScore);
+    // The clock starts at "I'm ready" (setupDoneAt), not while the player reads the briefing.
+    if (player.setupDoneAt === null) {
+      elStats.textContent = TP().progressLineSetup(QUESTION_ORDER.length, score, par);
+    } else {
+      const start = Date.parse(player.setupDoneAt);
+      const end = player.completedAt !== null ? Date.parse(player.completedAt) : Date.now();
+      elStats.textContent = TP().progressLine(solved, QUESTION_ORDER.length, score, par, formatElapsed(end - start));
+    }
     elFill.style.width = `${(solved / QUESTION_ORDER.length) * 100}%`;
   };
 
-  const stepper = (): HTMLElement =>
-    h(
+  const stepName = (key: StageKey): string => (key === "setup" ? T().setup : key === "debrief" ? T().debrief : stageLabel(c, key));
+
+  const stepper = (): HTMLElement => {
+    const current = currentStage(player);
+    return h(
       "ol",
       { class: "stepper", "aria-label": T().stagesLabel },
       STAGE_KEYS.map((key, i) => {
         const state = stepState(player, key);
-        const label = key === "setup" ? T().setup : key === "debrief" ? T().debrief : stageLabel(c, key);
+        const label = stepName(key);
         const num = key === "setup" ? "0" : key === "debrief" ? "★" : String(i);
         const icon = state === "solved" ? "✓" : state === "revealed" ? "👁" : num;
         const stateText = { locked: T().stLocked, active: T().stCurrent, solved: T().stSolved, revealed: T().stRevealed }[state];
+        const isViewing = key === viewing;
+        const locked = state === "locked";
+        // aria-current marks the stage the player is on; the one on screen is named "viewing" and underlined.
+        // Locked steps stay focusable (aria-disabled), so their names can be read ahead.
         const btn = h(
           "button",
           {
             type: "button",
-            class: `step step-${state}${key === viewing ? " is-viewing" : ""}`,
-            disabled: state === "locked",
-            "aria-current": key === viewing ? "step" : null,
-            "aria-label": `${key === "setup" || key === "debrief" ? "" : T().stageN(i)}${label} (${stateText})`,
+            class: `step step-${state}${isViewing ? " is-viewing" : ""}${key === current ? " is-current" : ""}`,
+            "aria-disabled": locked ? "true" : null,
+            "aria-current": key === current ? "step" : null,
+            "aria-label": `${key === "setup" || key === "debrief" ? "" : T().stageN(i)}${label} (${stateText})${isViewing ? `, ${TP().viewing}` : ""}`,
             title: label,
             onclick: () => {
+              if (locked) return;
               viewing = key;
               justSolved = null;
+              focusNext = { kind: "heading" };
               draw();
-              document.getElementById("stage")?.focus({ preventScroll: true });
             },
           },
           h("span", { class: "step-icon", "aria-hidden": "true" }, icon),
@@ -204,6 +247,13 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, l
         return h("li", {}, btn);
       }),
     );
+  };
+
+  /** Phones hide the step labels: this line keeps the viewed stage's name next to the dots. */
+  const stepNow = (): HTMLElement | null => {
+    if (viewing === "setup" || viewing === "debrief") return h("p", { class: "step-now", "aria-hidden": "true" }, stepName(viewing));
+    return h("p", { class: "step-now", "aria-hidden": "true" }, TP().stepNow(QUESTION_ORDER.indexOf(viewing) + 1, QUESTION_ORDER.length, stepName(viewing)));
+  };
 
   const draw = (): void => {
     stopCaseTimers();
@@ -231,6 +281,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, l
         h("a", { class: "btn btn-ghost btn-sm", href: `#/case/${c.id}/toolbox` }, T().allCommands),
       ),
       stepper(),
+      stepNow(),
       h("div", { class: "progress" }, h("div", { class: "progress-track", "aria-hidden": "true" }, elFill), elStats),
     );
 
@@ -239,10 +290,11 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, l
     else if (viewing === "debrief") main.append(renderDebrief(c, player));
     else main.append(renderQuestionStage(c, player, viewing, justSolved === viewing, (next, correct) => {
       if (correct) justSolved = viewing === "setup" || viewing === "debrief" ? null : viewing;
-      update(next, viewing);
+      update(next, viewing, { kind: "result" });
     }, update));
 
     setChildren(root, header, main);
+    applyFocus();
     tick();
     if (player.completedAt === null) every(1000, tick);
   };
@@ -282,7 +334,7 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
     "details",
     { class: "briefing", open: readPref("briefingRead") === null },
     h("summary", {}, T().briefing),
-    html("div", { class: "prose" }, md(c.briefing)),
+    prose("prose", c.briefing),
   );
   briefing.addEventListener("toggle", () => {
     if (!briefing.open) writePref("briefingRead", "1");
@@ -293,7 +345,7 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
     const key = `check.${c.id}.${i}`;
     const box = h("input", { type: "checkbox", id: `chk-${i}`, checked: readPref(key) === "1" });
     box.addEventListener("change", () => writePref(key, box.checked ? "1" : "0"));
-    return h("li", {}, h("label", { class: "check", for: `chk-${i}` }, box, html("span", {}, mdInline(item))));
+    return h("li", {}, h("label", { class: "check", for: `chk-${i}` }, box, inlineMd("span", item)));
   });
 
   const errorEl = h("p", { class: "form-error", role: "alert" });
@@ -321,7 +373,7 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
     "div",
     { class: "stage" },
     h("p", { class: "stage-kicker mono" }, T().setupKicker),
-    locked ? lockedCard(c, locked) : h("h2", { class: "stage-goal" }, T().setupGoal),
+    locked ? lockedCard(c, locked) : h("h2", { class: "stage-goal", tabindex: "-1" }, T().setupGoal),
     briefing,
     h(
       "div",
@@ -335,7 +387,7 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
         h(
           "ul",
           { class: "file-list" },
-          c.evidence.map((f) => h("li", {}, h("code", {}, f.path), " ", h("span", { class: "muted" }, `· ${f.format}`), html("div", { class: "muted small" }, mdInline(f.description)))),
+          c.evidence.map((f) => h("li", {}, h("code", {}, f.path), " ", h("span", { class: "muted" }, `· ${f.format}`), bidiProse(html("div", { class: "muted small" }, mdInline(f.description))))),
         ),
       ),
     ),
@@ -369,6 +421,96 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
   );
 }
 
+/* ---------- answer formats: client-side format check (free) before a guess that costs points ---------- */
+
+type FormatKind = "time" | "integer" | "ipv4" | "sha" | "version" | "change" | "order" | "accessKey" | "other";
+
+/** Recognise the common `answerFormat` texts (EN and HE). Anything unrecognised is "other": never blocked. */
+function formatKind(format: string): FormatKind {
+  const t = format.toLowerCase();
+  if (t.includes("hh:mm:ss")) return "time";
+  if (/^(integer|מספר שלם)/.test(t)) return "integer";
+  if (t.includes("ipv4")) return "ipv4";
+  if (t.includes("sha") && t.includes("7")) return "sha";
+  if (t.includes("x.y.z")) return "version";
+  if (t.includes("chg-n")) return "change";
+  if (t.includes("ord-x")) return "order";
+  if (t.includes("asia")) return "accessKey";
+  return "other";
+}
+
+const FORMAT_PATTERN: Record<Exclude<FormatKind, "other">, RegExp> = {
+  time: /^\d{1,2}:\d{2}:\d{2}$/,
+  integer: /^\d+$/,
+  ipv4: /^\d{1,3}(\.\d{1,3}){3}$/,
+  sha: /^[0-9a-f]{7,40}$/i,
+  version: /^\d+\.\d+\.\d+$/,
+  change: /^chg-\d+$/i,
+  order: /^ord-[a-z0-9]+$/i,
+  accessKey: /^asia[a-z0-9]{16}$/i,
+};
+
+/** True when `answer` fits the stage's format (or the format can't be checked). */
+export function matchesFormat(format: string, answer: string): boolean {
+  const kind = formatKind(format);
+  return kind === "other" ? true : FORMAT_PATTERN[kind].test(answer.trim());
+}
+
+/** The placeholder shows the format's shape, never a realistic value that reads as a prefilled answer. */
+function formatPlaceholder(kind: FormatKind): string | null {
+  const t = TP();
+  const map: Record<FormatKind, string | null> = {
+    time: t.phTime,
+    integer: t.phInteger,
+    ipv4: t.phIpv4,
+    sha: t.phSha,
+    version: t.phVersion,
+    change: t.phChange,
+    order: t.phOrder,
+    accessKey: t.phAccessKey,
+    other: null,
+  };
+  return map[kind];
+}
+
+function formatInputMode(kind: FormatKind): string {
+  if (kind === "integer") return "numeric";
+  if (kind === "ipv4" || kind === "version") return "decimal";
+  return "text";
+}
+
+/* ---------- Hebrew UI: English-only content keeps its own direction ---------- */
+
+const HEBREW = /[֐-׿]/;
+
+/**
+ * Case content is partly translated. In the Hebrew UI every prose block gets dir="auto" (its first strong
+ * character decides), and blocks with no Hebrew at all get lang="en", so English punctuation stays at the
+ * end of the line and screen readers switch voice.
+ */
+function bidiProse<E extends HTMLElement>(el: E): E {
+  if (getLang() !== "he") return el;
+  const blocks: HTMLElement[] = el.matches("p, li, h1, h2, h3, h4, td, th, blockquote, dd, dt") ? [el] : [];
+  blocks.push(...el.querySelectorAll<HTMLElement>("p, li, h1, h2, h3, h4, td, th, blockquote, dd, dt"));
+  for (const block of blocks) {
+    block.setAttribute("dir", "auto");
+    if (!HEBREW.test(block.textContent ?? "")) block.setAttribute("lang", "en");
+  }
+  if (!HEBREW.test(el.textContent ?? "")) {
+    el.setAttribute("lang", "en");
+    el.setAttribute("dir", "auto");
+  }
+  return el;
+}
+
+/** Trusted build-time markdown, with the Hebrew-UI direction fix applied. */
+const prose = (cls: string, markdown: string): HTMLElement => bidiProse(html("div", { class: cls }, md(markdown)));
+const inlineMd = <K extends keyof HTMLElementTagNameMap>(tag: K, markdown: string): HTMLElementTagNameMap[K] =>
+  bidiProse(html(tag, {}, mdInline(markdown)));
+/** Plain content text (stage names, goals) that may be English inside the Hebrew UI. */
+const contentText = <K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string>, text: string): HTMLElementTagNameMap[K] =>
+  h(tag, { ...attrs, dir: getLang() === "he" ? "auto" : null, lang: getLang() === "he" && !HEBREW.test(text) ? "en" : null }, text);
+
 /* ================= Question stages ================= */
 
 function renderQuestionStage(
@@ -377,31 +519,35 @@ function renderQuestionStage(
   id: QuestionId,
   justSolved: boolean,
   onAnswer: (p: ProgressView, correct: boolean) => void,
-  update: (p: ProgressView, view?: StageKey) => void,
+  update: (p: ProgressView, view?: StageKey, focus?: FocusTarget) => void,
 ): HTMLElement {
   const q = questionFor(c, id);
   const s = stageProgress(player, id);
   const index = QUESTION_ORDER.indexOf(id) + 1;
   const kicker = h("p", { class: "stage-kicker mono" }, T().stageOf(index, QUESTION_ORDER.length));
   if (q === undefined || s === undefined) {
-    return h("div", { class: "stage" }, kicker, h("p", { class: "muted" }, T().stageUnavailable));
+    return h("div", { class: "stage" }, kicker, h("h2", { class: "stage-goal", tabindex: "-1" }, T().stageUnavailable));
   }
   const stage = q.stage;
   const nextKey: StageKey = QUESTION_ORDER[index] ?? "debrief";
   const continueBtn = (): HTMLElement =>
     h(
       "button",
-      { type: "button", class: "btn btn-primary btn-lg", onclick: () => update(player, currentStage(player)) },
+      { type: "button", class: "btn btn-primary btn-lg", onclick: () => update(player, currentStage(player), { kind: "heading" }) },
       nextKey === "debrief" ? T().continueDebrief : T().continueStage(index + 1),
     );
 
-  const head: Child[] = [
-    kicker,
-    h("h2", { class: "stage-goal" }, stage?.goal ?? q.title),
+  const goal = contentText("h2", { class: "stage-goal", tabindex: "-1" }, stage?.goal ?? q.title);
+  const lookFor =
     stage && stage.lookFor.length > 0
-      ? h("div", { class: "look-for" }, h("h3", {}, T().lookFor), h("ul", {}, stage.lookFor.map((l) => html("li", {}, mdInline(l)))))
-      : null,
-  ];
+      ? h(
+          "details",
+          // Open on wide screens; a one-line summary on phones, so the answer field is closer to the top.
+          { class: "look-for", open: window.matchMedia("(min-width: 641px)").matches },
+          h("summary", {}, T().lookFor),
+          h("ul", {}, stage.lookFor.map((l) => inlineMd("li", l))),
+        )
+      : null;
 
   /* finished stage: read-only */
   if (s.status === "solved" || s.status === "revealed") {
@@ -409,46 +555,67 @@ function renderQuestionStage(
     return h(
       "div",
       { class: "stage" },
-      head,
-      html("div", { class: "prose prompt" }, md(q.prompt)),
+      kicker,
+      goal,
+      lookFor,
+      prose("prose prompt", q.prompt),
       h(
         "div",
-        { class: `result-panel ${solved ? "is-solved" : "is-revealed"}${justSolved ? " pop" : ""}`, role: justSolved ? "status" : null },
-        h("p", { class: "result-title" }, solved ? T().solvedPts(s.points) : T().revealedPts),
+        { class: `result-panel ${solved ? "is-solved" : "is-revealed"}${justSolved ? " pop" : ""}` },
+        // Focus target after a solve or a reveal; the result itself is announced through the shared region.
+        h("p", { class: "result-title", tabindex: "-1" }, solved ? T().solvedPts(s.points) : T().revealedPts),
         solved && s.breakdown !== null ? breakdownTable(s.breakdown) : null,
         !solved && s.revealedAnswer !== null ? h("p", {}, T().answerLabel, h("code", { class: "answer-code" }, s.revealedAnswer)) : null,
-        html("div", { class: "prose" }, md(q.successNote)),
+        prose("prose", q.successNote),
         currentStage(player) !== id ? continueBtn() : null,
       ),
     );
   }
 
   if (s.status === "locked") {
-    return h("div", { class: "stage" }, kicker, h("p", { class: "muted" }, T().finishPrevious));
+    return h("div", { class: "stage" }, kicker, h("h2", { class: "stage-goal", tabindex: "-1" }, T().finishPrevious));
   }
 
   /* active stage */
+  const cleanOpen = isCleanSoFar(s);
+  const completionOpen = QUESTION_ORDER.every((qid) => player.stages[qid]?.status !== "revealed");
+  const kind = formatKind(q.answerFormat);
+  const inputId = `answer-${id}`;
   const input = h("input", {
-    id: `answer-${id}`,
+    id: inputId,
     class: "input input-lg mono",
     type: "text",
+    dir: "ltr",
     autocomplete: "off",
+    autocapitalize: "off",
+    autocorrect: "off",
     spellcheck: "false",
+    enterkeyhint: "go",
+    inputmode: formatInputMode(kind),
     maxlength: "200",
-    placeholder: q.placeholder,
+    placeholder: formatPlaceholder(kind),
     "aria-describedby": `fmt-${id} feedback-${id}`,
   });
   input.value = drafts.get(id) ?? "";
-  input.addEventListener("input", () => drafts.set(id, input.value));
-  const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg" }, T().submit);
+  const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg answer-submit" }, TP().checkAnswer);
   const feedback = h("p", { id: `feedback-${id}`, class: "feedback", role: "status" });
   if (s.wrongAttempts > 0) feedback.textContent = TG().wrongSoFarCost(s.wrongAttempts, wrongPenalty(s.wrongAttempts));
+  const setInvalid = (message: string): void => {
+    input.setAttribute("aria-invalid", "true");
+    feedback.className = "feedback is-wrong";
+    feedback.textContent = message;
+  };
+  input.addEventListener("input", () => {
+    drafts.set(id, input.value);
+    if (input.getAttribute("aria-invalid") === "true") input.removeAttribute("aria-invalid");
+  });
 
   // Rate-limit cooldown. The end time lives in `cooldowns`, so a redraw (hint, reveal, language) keeps
   // Submit disabled. The live region gets one message with an absolute time; the ticking countdown is on
   // the (non-live) button only, so screen readers aren't told the time every second.
   const cooldownKey = `${c.id}:${id}`;
   let cooldown: number | null = null;
+  let busy = false;
   const startCooldown = (until: number): void => {
     cooldowns.set(cooldownKey, until);
     submit.disabled = true;
@@ -464,7 +631,7 @@ function renderQuestionStage(
       if (cooldown !== null) window.clearInterval(cooldown);
       cooldowns.delete(cooldownKey);
       submit.disabled = false;
-      submit.textContent = T().submit;
+      submit.textContent = TP().checkAnswer;
       feedback.className = "feedback";
       feedback.textContent = T().canTryAgain;
       return false;
@@ -480,36 +647,50 @@ function renderQuestionStage(
 
   const form = h(
     "form",
-    { class: "answer-form", novalidate: true },
-    h("label", { class: "answer-label", for: `answer-${id}` }, T().yourAnswer),
-    h("p", { id: `fmt-${id}`, class: "muted small" }, T().format, h("code", {}, q.answerFormat)),
+    { class: "answer-form", id: `form-${id}`, novalidate: true },
+    h("label", { class: "answer-label", for: inputId }, T().yourAnswer),
+    h("p", { id: `fmt-${id}`, class: "muted small" }, T().format, contentText("bdi", { class: "answer-format" }, q.answerFormat)),
     h("div", { class: "answer-row" }, input, submit),
     feedback,
+    h("p", { class: "muted small cost-note" }, TP().costNote(SCORING.WRONG_COST, SCORING.WRONG_CAP, SCORING.CLEAN_BONUS, cleanOpen)),
   );
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
+    if (busy || submit.disabled) return;
     const answer = input.value.trim();
     if (answer.length === 0) {
-      feedback.className = "feedback is-wrong";
-      feedback.textContent = T().typeFirst;
+      setInvalid(T().typeFirst);
       input.focus();
       return;
     }
-    submit.disabled = true;
+    if (!matchesFormat(q.answerFormat, answer)) {
+      setInvalid(TP().formatMismatch(q.answerFormat));
+      input.focus();
+      return;
+    }
+    busy = true;
+    submit.setAttribute("aria-disabled", "true");
+    submit.textContent = TP().checking;
+    const done = (): void => {
+      busy = false;
+      submit.removeAttribute("aria-disabled");
+      if (!cooldowns.has(cooldownKey)) submit.textContent = TP().checkAnswer;
+    };
     submitAnswer(c.id, id, answer)
       .then(({ correct, progress: next }) => {
         if (correct) {
           drafts.delete(id);
+          announce(TP().solvedAnnounce(next.stages[id]?.points ?? 0));
           onAnswer(next, true);
           return;
         }
-        submit.disabled = false;
+        done();
         const attempts = next.stages[id]?.wrongAttempts ?? 0;
-        feedback.className = "feedback is-wrong";
-        feedback.textContent =
+        setInvalid(
           SCORING.WRONG_COST * attempts <= SCORING.WRONG_CAP
-            ? TG().notQuiteCost(attempts, SCORING.WRONG_COST)
-            : TG().notQuiteCapped(attempts, SCORING.WRONG_CAP);
+            ? TP().wrongValue(attempts, SCORING.WRONG_COST)
+            : TP().wrongValueCapped(attempts, SCORING.WRONG_CAP),
+        );
         meter.refresh(next.stages[id] ?? s);
         form.classList.remove("shake");
         void form.offsetWidth;
@@ -517,11 +698,11 @@ function renderQuestionStage(
         input.select();
       })
       .catch((err: unknown) => {
+        done();
         if (err instanceof ApiError && err.isRateLimited) {
           startCooldown(Date.now() + (err.retryAfterSeconds ?? 60) * 1000);
           return;
         }
-        submit.disabled = false;
         feedback.className = "feedback is-wrong";
         feedback.textContent = errorMessage(err);
       });
@@ -538,35 +719,50 @@ function renderQuestionStage(
   const hintList = q.hints.slice(0, s.hintsRevealed).map((hint, i) =>
     h(
       "li",
-      { class: "hint" },
-      h("span", { class: "hint-label mono" }, T().hintLabel(i + 1, hint.cost)),
-      html("div", { class: "prose" }, md(hintTexts[i] ?? "")),
+      { class: "hint", tabindex: "-1", "data-hint": String(i) },
+      h("span", { class: "hint-label mono" }, TP().hintLabel(i + 1, hint.cost)),
+      prose("prose", hintTexts[i] ?? ""),
     ),
   );
   const nextHint = q.hints[s.hintsRevealed];
   const hintError = h("p", { class: "form-error", role: "alert" });
   const hintBtn = nextHint
-    ? h("button", { type: "button", class: "btn btn-ghost" }, T().revealHint(s.hintsRevealed + 1, q.hints.length, nextHint.cost))
+    ? h(
+        "button",
+        { type: "button", class: "btn btn-ghost" },
+        TP().revealHint(s.hintsRevealed + 1, q.hints.length, nextHint.cost, SCORING.CLEAN_BONUS, cleanOpen),
+      )
     : null;
   hintBtn?.addEventListener("click", () => {
-    hintBtn.disabled = true;
+    if (hintBtn.getAttribute("aria-disabled") === "true") return;
+    hintBtn.setAttribute("aria-disabled", "true");
     revealHint(c.id, id)
-      .then((p) => update(p, id))
+      .then((p) => {
+        announce(TP().hintAnnounce(s.hintsRevealed + 1, nextHint?.cost ?? 0));
+        update(p, id, { kind: "hint", index: s.hintsRevealed });
+      })
       .catch((err: unknown) => {
         hintError.textContent = errorMessage(err);
-        hintBtn.disabled = false;
+        hintBtn.removeAttribute("aria-disabled");
       });
   });
 
   const revealError = h("p", { class: "form-error", role: "alert" });
   const reveal = confirmButton({
-    label: T().revealAnswer,
-    confirmLabel: T().revealConfirm,
-    className: "link-btn muted",
+    label: TP().revealAnswer(SCORING.COMPLETION_BONUS, completionOpen),
+    prompt: TP().revealPrompt(index, SCORING.COMPLETION_BONUS, completionOpen),
+    confirmLabel: TP().revealConfirm,
+    cancelLabel: TP().keepTrying,
+    className: "btn btn-ghost btn-sm reveal-trigger",
+    sizeClass: "btn-sm",
+    tone: "neutral",
     onConfirm: () => {
       for (const b of reveal.querySelectorAll("button")) b.disabled = true;
       revealAnswer(c.id, id)
-        .then((p) => update(p, id))
+        .then((p) => {
+          announce(TP().revealedAnnounce(p.stages[id]?.revealedAnswer ?? ""));
+          update(p, id, { kind: "result" });
+        })
         .catch((err: unknown) => {
           for (const b of reveal.querySelectorAll("button")) b.disabled = false;
           revealError.textContent = errorMessage(err);
@@ -577,12 +773,29 @@ function renderQuestionStage(
   const meter = stageMeter(c, q, s);
   every(1000, () => meter.tick());
 
+  // Phones: one tap from the top of the stage to the answer field.
+  const jump = h(
+    "button",
+    {
+      type: "button",
+      class: "btn btn-ghost btn-sm answer-jump",
+      onclick: () => {
+        form.scrollIntoView({ block: "center", behavior: "auto" });
+        input.focus({ preventScroll: true });
+      },
+    },
+    TP().jumpToAnswer,
+  );
+
   return h(
     "div",
     { class: "stage" },
-    head,
+    kicker,
+    goal,
+    jump,
+    lookFor,
     meter.el,
-    h("div", { class: "question-box" }, html("div", { class: "prose prompt" }, md(q.prompt)), form),
+    h("div", { class: "question-box" }, prose("prose prompt", q.prompt), form),
     tools.length > 0
       ? h(
           "div",
@@ -591,14 +804,14 @@ function renderQuestionStage(
           h("p", { class: "muted small" }, TG().toolboxCostNote(SCORING.COMMAND_COST, index)),
           h("div", { class: "tool-list" }, tools.map((tool) => commandCard(tool, commandCtx))),
         )
-      : h("p", { class: "muted small" }, T().needCommands, h("a", { href: `#/case/${c.id}/toolbox` }, T().browseCommands), "."),
+      : h("p", { class: "muted small" }, T().needCommands, h("a", { class: "stage-link", href: `#/case/${c.id}/toolbox` }, T().browseCommands), "."),
     stage?.explorerTip
       ? h(
           "div",
           { class: "tip" },
           h("h3", {}, T().inExplorer),
-          html("div", { class: "prose" }, md(stage.explorerTip)),
-          h("a", { href: `#/case/${c.id}/explorer` }, T().openExplorer),
+          prose("prose", stage.explorerTip),
+          h("a", { class: "stage-link", href: `#/case/${c.id}/explorer` }, T().openExplorer),
         )
       : null,
     h(
@@ -615,17 +828,49 @@ function renderQuestionStage(
 
 /* ================= Debrief ================= */
 
-function shareText(c: Case, player: ProgressView): string {
-  const hints = QUESTION_ORDER.reduce((n, id) => n + (player.stages[id]?.hintsRevealed ?? 0), 0);
+function caseElapsed(player: ProgressView): string {
+  if (player.setupDoneAt === null) return formatElapsed(0);
   const end = player.completedAt !== null ? Date.parse(player.completedAt) : Date.now();
-  return T().shareText(c.title, TG().scorePar(player.score, player.maxScore), hints, formatElapsed(end - Date.parse(player.setupDoneAt ?? player.startedAt ?? new Date().toISOString())));
+  return formatElapsed(end - Date.parse(player.setupDoneAt));
+}
+
+function totalHints(player: ProgressView): number {
+  return QUESTION_ORDER.reduce((n, id) => n + (player.stages[id]?.hintsRevealed ?? 0), 0);
+}
+
+/** The copied share text (plain; the clipboard can't carry isolation). */
+function shareText(c: Case, player: ProgressView): string {
+  return ["IncidentLab", c.title, TP().sharePts(player.score), TP().sharePar(player.maxScore), TP().shareHints(totalHints(player)), caseElapsed(player)].join(" · ");
+}
+
+/**
+ * The visible share line: a sentence in the UI's direction, with only the LTR parts (brand, an English
+ * title, numbers, the clock) isolated in <bdi>, so Hebrew keeps its logical order.
+ */
+function shareLine(c: Case, player: ProgressView): HTMLElement {
+  const sep = " · ";
+  return h(
+    "p",
+    { class: "share-line" },
+    h("bdi", { dir: "ltr" }, "IncidentLab"),
+    sep,
+    h("bdi", { lang: HEBREW.test(c.title) ? null : "en" }, c.title),
+    sep,
+    h("bdi", {}, TP().sharePts(player.score)),
+    sep,
+    h("bdi", {}, TP().sharePar(player.maxScore)),
+    sep,
+    TP().shareHints(totalHints(player)),
+    sep,
+    h("bdi", { dir: "ltr", class: "mono" }, caseElapsed(player)),
+  );
 }
 
 function renderDebrief(c: Case, player: ProgressView): HTMLElement {
   const body = h("div", { class: "prose" }, h("p", { class: "muted" }, T().loadingDebrief));
   getDebrief(c.id)
     .then((markdown) => {
-      body.replaceChildren(html("div", {}, md(markdown)));
+      body.replaceChildren(bidiProse(html("div", {}, md(markdown))));
     })
     .catch((err: unknown) => {
       body.replaceChildren(
@@ -636,7 +881,7 @@ function renderDebrief(c: Case, player: ProgressView): HTMLElement {
     "div",
     { class: "stage" },
     h("p", { class: "stage-kicker mono" }, T().debrief),
-    h("h2", { class: "stage-goal" }, T().caseClosed),
+    h("h2", { class: "stage-goal", tabindex: "-1" }, T().caseClosed),
     h(
       "div",
       { class: "score-card" },
@@ -648,7 +893,7 @@ function renderDebrief(c: Case, player: ProgressView): HTMLElement {
         player.score > player.maxScore ? h("span", { class: "chip chip-completed above-par" }, `▲ ${TG().abovePar}`) : null,
       ),
       stageTotals(c, player),
-      h("code", { class: "share-text" }, shareText(c, player)),
+      shareLine(c, player),
       copyButton(() => shareText(c, player), T().copyResult),
     ),
     body,
@@ -686,41 +931,61 @@ function breakdownTable(b: ScoreBreakdown): HTMLElement {
   );
 }
 
-/** Live "this stage so far": base, the time bonus counting down, and the running penalties. */
+/**
+ * Live "this stage so far": what the stage can still be worth, base, the time bonus counting down, the
+ * clean and first-solver bonuses still on the table (or lost), and the running penalties.
+ */
 function stageMeter(c: Case, q: Question, initial: StageProgress): { el: HTMLElement; tick: () => void; refresh: (s: StageProgress) => void } {
   let stage = initial;
   const target = targetSeconds(c, q);
+  const upTo = h("span", { class: "meter-item meter-upto" });
   const timeText = h("span", { class: "meter-value" });
   const timeSub = h("span", { class: "meter-sub muted" });
   const timeFill = h("span", { class: "meter-fill" });
+  const clean = h("span", { class: "meter-item meter-bonus" });
+  const first = h(
+    "span",
+    { class: "meter-item meter-bonus" },
+    TP().meterFirst(SCORING.FIRST_BLOOD_BONUS),
+    " ",
+    h("span", { class: "meter-sub muted" }, TP().meterFirstSub),
+  );
   const hints = h("span", { class: "meter-item" });
   const commands = h("span", { class: "meter-item" });
   const wrong = h("span", { class: "meter-item" });
+  let penalties = 0;
   const tick = (): void => {
     const started = stage.startedAt === null ? Date.now() : Date.parse(stage.startedAt);
     const elapsed = Math.max(0, (Date.now() - started) / 1000);
     const bonus = timeBonus(elapsed, target);
-    timeText.textContent = TG().meterTime(bonus);
+    timeText.textContent = TP().meterTime(bonus);
     timeSub.textContent = elapsed < target ? TG().meterTimeFull(mmss(Math.ceil(target - elapsed))) : bonus > 0 ? TG().meterTimeFading : TG().meterTimeGone;
     timeFill.style.width = `${(bonus / SCORING.TIME_BONUS_MAX) * 100}%`;
+    const possible = Math.max(0, q.points - penalties) + bonus + (isCleanSoFar(stage) ? SCORING.CLEAN_BONUS : 0) + SCORING.FIRST_BLOOD_BONUS;
+    upTo.textContent = TP().meterUpTo(possible);
   };
   const refresh = (next: StageProgress): void => {
     stage = next;
     const hp = hintPenalty(q, stage.hintsRevealed);
     const cp = SCORING.COMMAND_COST * stage.commandsRevealed;
     const wp = wrongPenalty(stage.wrongAttempts);
-    hints.textContent = TG().meterHints(hp);
-    commands.textContent = TG().meterCommands(cp);
-    wrong.textContent = TG().meterWrong(wp, wp >= SCORING.WRONG_CAP);
+    penalties = hp + cp + wp;
+    hints.textContent = TP().meterHints(hp);
+    commands.textContent = TP().meterCommands(cp);
+    wrong.textContent = TP().meterWrong(wp, wp >= SCORING.WRONG_CAP);
     hints.classList.toggle("is-minus", hp > 0);
     commands.classList.toggle("is-minus", cp > 0);
     wrong.classList.toggle("is-minus", wp > 0);
+    const cleanOpen = isCleanSoFar(stage);
+    clean.textContent = cleanOpen ? TP().meterClean(SCORING.CLEAN_BONUS) : TP().meterCleanLost(SCORING.CLEAN_BONUS);
+    clean.classList.toggle("is-lost", !cleanOpen);
     tick();
   };
   const el = h(
     "div",
     { class: "stage-meter", role: "group", "aria-label": TG().meterLabel },
-    h("span", { class: "meter-item meter-base mono" }, `${TG().bdBase} ${q.points}`),
+    upTo,
+    h("span", { class: "meter-item meter-base" }, `${TG().bdBase} ${q.points}`),
     h(
       "span",
       { class: "meter-item meter-time" },
@@ -730,6 +995,8 @@ function stageMeter(c: Case, q: Question, initial: StageProgress): { el: HTMLEle
       timeSub,
       h("span", { class: "meter-track", "aria-hidden": "true" }, timeFill),
     ),
+    clean,
+    first,
     hints,
     commands,
     wrong,
@@ -753,7 +1020,7 @@ function stageTotals(c: Case, player: ProgressView): HTMLElement {
         return h(
           "tr",
           { class: revealed || (s?.points ?? 0) === 0 ? "is-zero" : "is-plus" },
-          h("th", { scope: "row" }, `${i + 1}. ${stageLabel(c, id)}`, revealed ? h("span", { class: "bd-detail muted" }, TG().revealedShort) : null),
+          h("th", { scope: "row" }, h("bdi", {}, `${i + 1}.`), " ", contentText("bdi", {}, stageLabel(c, id)), revealed ? h("span", { class: "bd-detail muted" }, TG().revealedShort) : null),
           h("td", { class: "num mono" }, String(s?.points ?? 0)),
         );
       }),
