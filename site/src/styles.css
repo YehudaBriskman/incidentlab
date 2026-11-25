@@ -63,6 +63,10 @@ a { color: var(--accent); text-underline-offset: 3px; }
 h1, h2, h3, h4 { line-height: 1.25; letter-spacing: -0.01em; margin: 0 0 0.5em; }
 h1 { font-size: clamp(1.7rem, 4.5vw, 2.4rem); }
 code, pre, .mono { font-family: var(--mono); }
+/* Ligatures would turn != into ≠ and -> into an arrow: players copy and retype these, so show every char. */
+code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-code, .input.mono {
+  font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0;
+}
 .muted { color: var(--muted); }
 .accent { color: var(--accent); }
 .small { font-size: 0.9rem; }
@@ -218,9 +222,11 @@ code, pre, .mono { font-family: var(--mono); }
 .shell-tabs { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .shell-tab { background: none; border: 0; padding: 4px 12px; font: inherit; font-size: 0.8rem; color: var(--muted); cursor: pointer; }
 .shell-tab[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.code-wrap { position: relative; margin: 8px 0; }
-.code-block { margin: 0; background: var(--code-bg); color: var(--code-text); border-radius: 10px; padding: 14px 80px 14px 16px; overflow-x: auto; font-size: 0.86rem; line-height: 1.55; }
-.code-wrap .btn-copy { position: absolute; top: 8px; right: 8px; }
+/* Copy sits beside the code, never on top of it: long revealed commands scroll under nothing. */
+.code-wrap { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; margin: 8px 0; }
+.code-wrap > :only-child { grid-column: 1 / -1; }
+.code-block { margin: 0; background: var(--code-bg); color: var(--code-text); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: 0.86rem; line-height: 1.55; }
+.code-wrap .btn-copy { margin-top: 6px; }
 
 .tip { border-left: 3px solid var(--accent); padding: 4px 0 4px 18px; }
 .tip .prose { margin-bottom: 8px; }
@@ -307,7 +313,7 @@ code, pre, .mono { font-family: var(--mono); }
 [dir=rtl] .look-for ul, [dir=rtl] .prose ul, [dir=rtl] .prose ol { padding-left: 0; padding-inline-start: 1.2em; }
 [dir=rtl] .tip { border-left: 0; border-inline-start: 3px solid var(--accent); padding: 4px 18px 4px 0; }
 [dir=rtl] .prose blockquote { border-left: 0; padding-left: 0; border-inline-start: 3px solid var(--border); padding-inline-start: 16px; }
-[dir=rtl] .code-wrap .btn-copy { right: 8px; left: auto; } /* code block itself is LTR, so the button stays on its right */
+[dir=rtl] .code-wrap { direction: ltr; } /* code block itself is LTR, so Copy stays on its right */
 
 /* Code, commands, answers and logs stay LTR in every language. */
 [dir=rtl] pre, [dir=rtl] code, [dir=rtl] .mono, [dir=rtl] .code-block,
