@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""Build the server-side answer key for the IncidentLab site.
+"""Build the server-side answer key for the IncidentLab site (every released case).
 
-Reads the generator truth files (build/truth/repo.json, build/truth/logs.json) plus the
-canonical constants in generator/timeline.py, cross-checks them, and writes:
+Case `3am-outage` (legacy pipeline): reads build/truth/repo.json + build/truth/logs.json plus the
+canonical constants in generator/timeline.py and cross-checks them.
+Every other case (docs/CASE_CONTRACT.md): reads build/truth/<id>.answers.json, written by
+generator/cases/<id>/build.py.
 
-  site/server/generated/secrets.json  normalized answers + sealed debrief for the Netlify Function
+Points and hint costs come from site/src/content/cases/<id>.json; debriefs from
+content-sealed/<id>.debrief.md (+ optional <id>.debrief.he.md). Writes:
+
+  site/server/generated/secrets.json  {cases: {<id>: {title, answers (normalized), debrief, debriefHe, questions}}}
                                       (bundled server-side only; gitignored; NEVER served to browsers)
-  build/truth/answers.json            plaintext answers (instructor only; NEVER deployed)
+  build/truth/answers.json            3am-outage plaintext answers (read by solutions/solve.sh)
+  build/truth/all-answers.json        every case's plaintext answers (instructor only; NEVER deployed)
 
 Normalization must match normalizeAnswer() in site/src/content/schema.ts:
   trim -> lowercase -> collapse runs of whitespace to a single space.
@@ -27,8 +33,12 @@ import timeline  # noqa: E402
 
 TRUTH_DIR = ROOT / "build" / "truth"
 SECRETS_OUT = ROOT / "site" / "server" / "generated" / "secrets.json"
-DEBRIEF_SRC = ROOT / "content-sealed" / f"{timeline.CASE_ID}.debrief.md"
+SEALED_DIR = ROOT / "content-sealed"
+CASES_JSON_DIR = ROOT / "site" / "src" / "content" / "cases"
+CASE_GENERATORS = ROOT / "generator" / "cases"
 ANSWERS_OUT = TRUTH_DIR / "answers.json"
+ALL_ANSWERS_OUT = TRUTH_DIR / "all-answers.json"
+QUESTION_IDS = ["q1", "q2", "q3", "q4", "q5", "q6"]
 
 _HMS_RE = re.compile(r"(\d{2}:\d{2}:\d{2})")
 
@@ -101,44 +111,100 @@ def build_answers(repo: dict, logs: dict) -> dict[str, str]:
     return {"q1": q1, "q2": q2, "q3": q3, "q4": q4, "q5": q5, "q6": q6}
 
 
+def case_config(case_id: str) -> tuple[str, dict[str, dict]]:
+    """Title + {qid: {points, hintCosts}} from the player-facing case JSON."""
+    data = load_json(CASES_JSON_DIR / f"{case_id}.json")
+    questions = {q.get("id"): q for q in data.get("questions", []) if isinstance(q, dict)}
+    config: dict[str, dict] = {}
+    for qid in QUESTION_IDS:
+        q = questions.get(qid)
+        if q is None:
+            fail(f"{case_id}.json has no question {qid}")
+        config[qid] = {"points": int(q["points"]), "hintCosts": [int(h["cost"]) for h in q["hints"]]}
+    return str(data.get("title", case_id)), config
+
+
+def debriefs(case_id: str) -> tuple[str, str | None]:
+    en = SEALED_DIR / f"{case_id}.debrief.md"
+    if not en.is_file():
+        fail(f"missing {en.relative_to(ROOT)}")
+    he = SEALED_DIR / f"{case_id}.debrief.he.md"
+    return en.read_text(encoding="utf-8"), (he.read_text(encoding="utf-8") if he.is_file() else None)
+
+
+def contract_case_answers(case_id: str) -> dict[str, str]:
+    data = load_json(TRUTH_DIR / f"{case_id}.answers.json")
+    if data.get("caseId") != case_id:
+        fail(f"{case_id}.answers.json has caseId={data.get('caseId')!r}")
+    answers = data.get("answers")
+    if not isinstance(answers, dict):
+        fail(f"{case_id}.answers.json has no answers object")
+    out: dict[str, str] = {}
+    for qid in QUESTION_IDS:
+        value = str(answers.get(qid, "")).strip()
+        if not value:
+            fail(f"{case_id}: empty answer for {qid}")
+        out[qid] = value
+    return out
+
+
+def discover_contract_cases() -> list[str]:
+    if not CASE_GENERATORS.is_dir():
+        return []
+    return sorted(p.parent.name for p in CASE_GENERATORS.glob("*/build.py"))
+
+
 def main() -> int:
+    all_answers: dict[str, dict[str, str]] = {}
+
     repo = load_json(TRUTH_DIR / "repo.json")
     logs = load_json(TRUTH_DIR / "logs.json")
-    answers = build_answers(repo, logs)
-    normalized = {qid: normalize_answer(a) for qid, a in answers.items()}
+    all_answers[timeline.CASE_ID] = build_answers(repo, logs)
+    for case_id in discover_contract_cases():
+        all_answers[case_id] = contract_case_answers(case_id)
 
-    if not DEBRIEF_SRC.is_file():
-        fail(f"missing {DEBRIEF_SRC.relative_to(ROOT)}")
-    debrief = DEBRIEF_SRC.read_text(encoding="utf-8")
+    cases: dict[str, dict] = {}
+    for case_id, answers in all_answers.items():
+        title, questions = case_config(case_id)
+        debrief_en, debrief_he = debriefs(case_id)
+        cases[case_id] = {
+            "title": title,
+            "answers": {qid: normalize_answer(a) for qid, a in answers.items()},
+            "debrief": debrief_en,
+            "debriefHe": debrief_he,
+            "questions": questions,
+        }
 
     SECRETS_OUT.parent.mkdir(parents=True, exist_ok=True)
-    SECRETS_OUT.write_text(
-        json.dumps({"caseId": timeline.CASE_ID, "answers": normalized, "debrief": debrief}, indent=2, ensure_ascii=False)
-        + "\n",
-        encoding="utf-8",
-    )
+    SECRETS_OUT.write_text(json.dumps({"cases": cases}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    legacy = all_answers[timeline.CASE_ID]
     ANSWERS_OUT.parent.mkdir(parents=True, exist_ok=True)
     ANSWERS_OUT.write_text(
         json.dumps(
             {
                 "caseId": timeline.CASE_ID,
                 "_warning": "PLAINTEXT ANSWERS. Instructor only. Never deploy or share with players.",
-                "answers": answers,
-                "normalized": normalized,
+                "answers": legacy,
+                "normalized": {qid: normalize_answer(a) for qid, a in legacy.items()},
             },
             indent=2,
         )
         + "\n",
         encoding="utf-8",
     )
+    ALL_ANSWERS_OUT.write_text(
+        json.dumps({"_warning": "PLAINTEXT ANSWERS. Instructor only. Never deploy or share with players.", "cases": all_answers}, indent=2, ensure_ascii=False)
+        + "\n",
+        encoding="utf-8",
+    )
 
-    print(f"[make_flags] case: {timeline.CASE_ID}")
-    print(f"  {'id':<4} {'answer':<20} normalized")
-    print(f"  {'-' * 4} {'-' * 20} {'-' * 20}")
-    for qid, ans in answers.items():
-        print(f"  {qid:<4} {ans:<20} {normalized[qid]}")
+    for case_id, answers in all_answers.items():
+        print(f"[make_flags] case: {case_id}")
+        for qid, ans in answers.items():
+            print(f"  {qid:<4} {ans}")
     print(f"[make_flags] wrote {SECRETS_OUT.relative_to(ROOT)} (server-only; gitignored)")
-    print(f"[make_flags] wrote {ANSWERS_OUT.relative_to(ROOT)} (plaintext; do not deploy)")
+    print(f"[make_flags] wrote {ALL_ANSWERS_OUT.relative_to(ROOT)} (plaintext; do not deploy)")
     return 0
 
 
