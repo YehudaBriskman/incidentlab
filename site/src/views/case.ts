@@ -10,7 +10,7 @@ import { withApprovedAccount } from "./auth";
 import { confirmButton, copyButton, h, html, setChildren, type Child } from "../lib/dom";
 import { md, mdInline } from "../lib/markdown";
 import { formatElapsed } from "../lib/time";
-import { formatNumber, isRelabel } from "../i18n/i18n";
+import { formatNumber, isRelabel, locale } from "../i18n/i18n";
 import { commandCard, lockedToday, type CommandContext, type LockedToday } from "./toolbox";
 import { T } from "../i18n/strings-player";
 
@@ -19,6 +19,8 @@ type StepState = "locked" | "active" | "solved" | "revealed";
 
 const timers = new Set<number>();
 const drafts = new Map<QuestionId, string>();
+/** Answer cooldown end (epoch ms) per "caseId:questionId": survives redraws (hint, reveal, language). */
+const cooldowns = new Map<string, number>();
 /** The stage last shown, so a language switch (which re-renders the route) keeps the player where they were. */
 let lastView: { caseId: string; stage: StageKey } | null = null;
 
@@ -442,28 +444,39 @@ function renderQuestionStage(
   const feedback = h("p", { id: `feedback-${id}`, class: "feedback", role: "status" });
   if (s.wrongAttempts > 0) feedback.textContent = TG().wrongSoFarCost(s.wrongAttempts, wrongPenalty(s.wrongAttempts));
 
+  // Rate-limit cooldown. The end time lives in `cooldowns`, so a redraw (hint, reveal, language) keeps
+  // Submit disabled. The live region gets one message with an absolute time; the ticking countdown is on
+  // the (non-live) button only, so screen readers aren't told the time every second.
+  const cooldownKey = `${c.id}:${id}`;
   let cooldown: number | null = null;
-  const startCooldown = (seconds: number): void => {
-    let left = Math.ceil(seconds);
+  const startCooldown = (until: number): void => {
+    cooldowns.set(cooldownKey, until);
     submit.disabled = true;
-    const show = (): void => {
-      feedback.className = "feedback is-wrong";
-      feedback.textContent = T().tooMany(left);
-    };
-    show();
-    if (cooldown !== null) window.clearInterval(cooldown);
-    cooldown = every(1000, () => {
-      left -= 1;
-      if (left <= 0) {
-        if (cooldown !== null) window.clearInterval(cooldown);
-        submit.disabled = false;
-        feedback.className = "feedback";
-        feedback.textContent = T().canTryAgain;
-        return;
+    const at = new Intl.DateTimeFormat(locale(), { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(until));
+    feedback.className = "feedback is-wrong";
+    if (feedback.textContent !== T().tooManyUntil(at)) feedback.textContent = T().tooManyUntil(at);
+    const show = (): boolean => {
+      const left = Math.ceil((until - Date.now()) / 1000);
+      if (left > 0) {
+        submit.textContent = T().waitBtn(formatElapsed(left * 1000));
+        return true;
       }
-      show();
-    });
+      if (cooldown !== null) window.clearInterval(cooldown);
+      cooldowns.delete(cooldownKey);
+      submit.disabled = false;
+      submit.textContent = T().submit;
+      feedback.className = "feedback";
+      feedback.textContent = T().canTryAgain;
+      return false;
+    };
+    if (cooldown !== null) window.clearInterval(cooldown);
+    if (show()) cooldown = every(1000, show);
   };
+  const pendingCooldown = cooldowns.get(cooldownKey);
+  if (pendingCooldown !== undefined) {
+    if (pendingCooldown > Date.now()) startCooldown(pendingCooldown);
+    else cooldowns.delete(cooldownKey);
+  }
 
   const form = h(
     "form",
@@ -505,7 +518,7 @@ function renderQuestionStage(
       })
       .catch((err: unknown) => {
         if (err instanceof ApiError && err.isRateLimited) {
-          startCooldown(err.retryAfterSeconds ?? 60);
+          startCooldown(Date.now() + (err.retryAfterSeconds ?? 60) * 1000);
           return;
         }
         submit.disabled = false;
