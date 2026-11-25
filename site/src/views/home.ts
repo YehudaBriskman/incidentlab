@@ -5,7 +5,10 @@ import { fetchMyStats } from "../lib/api";
 import { h, setChildren } from "../lib/dom";
 import { cachedAccount, loadAccount, loadToday } from "../lib/session";
 import { getLang } from "../i18n/i18n";
+import { cachedEvent, isEventActive, onEventChange } from "../lib/event";
 import { TA } from "../i18n/strings-account";
+import { TG } from "../i18n/strings-game";
+import { eventWhen } from "./leaderboard";
 import { T } from "../i18n/strings-player";
 
 const steps = (): ReadonlyArray<{ title: string; body: string }> => [
@@ -82,6 +85,43 @@ function caseCard(c: Case, state: HomeState): HTMLElement {
   );
 }
 
+/** "Live event" strip: name + countdown, ticking every second; it removes its own timers once detached. */
+function eventStrip(): HTMLElement {
+  const name = h("p", { class: "event-strip-name" });
+  const when = h("p", { class: "event-strip-when mono" });
+  const strip = h(
+    "section",
+    { class: "event-strip", "aria-label": TG().eventKicker, hidden: true },
+    h("p", { class: "today-kicker mono" }, h("span", { class: "dot", "aria-hidden": "true" }), TG().eventKicker),
+    name,
+    when,
+    h("a", { class: "btn btn-sm", href: "#/leaderboard" }, TG().homeLeaderboard),
+  );
+  const draw = (): void => {
+    const event = cachedEvent();
+    if (!isEventActive(event)) {
+      strip.hidden = true;
+      return;
+    }
+    strip.hidden = false;
+    name.textContent = event.name;
+    name.hidden = event.name.length === 0;
+    when.textContent = eventWhen();
+    when.hidden = when.textContent.length === 0;
+  };
+  const unsubscribe = onEventChange(draw);
+  const timer = window.setInterval(() => {
+    if (!strip.isConnected) {
+      window.clearInterval(timer);
+      unsubscribe();
+      return;
+    }
+    draw();
+  }, 1000);
+  draw();
+  return strip;
+}
+
 function teaserCard(t: Teaser): HTMLElement {
   return h("article", { class: "teaser-card" }, h("h3", { class: "teaser-title" }, t.title), h("p", { class: "muted" }, t.tagline));
 }
@@ -99,7 +139,9 @@ function draw(root: HTMLElement, state: HomeState): void {
       { class: "hero" },
       h("h1", { class: "hero-title" }, T().heroA, h("span", { class: "accent" }, T().heroB)),
       h("p", { class: "hero-sub" }, account && account.status === "approved" ? TA().welcomeBack(account.username) : T().heroSub),
+      h("p", { class: "hero-links" }, h("a", { href: "#/leaderboard" }, TG().homeLeaderboard)),
     ),
+    eventStrip(),
     h(
       "section",
       { class: "section", "aria-label": T().featuredCase },

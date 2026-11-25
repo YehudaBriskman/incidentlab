@@ -1,14 +1,14 @@
-import { QUESTION_ORDER, type ProgressView, type QuestionId, type StageProgress } from "../../shared/contract";
+import { QUESTION_ORDER, SCORING, type ProgressView, type QuestionId, type ScoreBreakdown, type StageProgress } from "../../shared/contract";
 import type { Case, Question } from "../content/schema";
 import { ApiError, getDebrief, getProgress, revealAnswer, revealHint, setupDone, submitAnswer } from "../lib/api";
+import { playErrorText } from "../lib/errors";
 import { loadAccount, setAccount, signOut } from "../lib/session";
-import { getLang } from "../i18n/i18n";
-import { TA } from "../i18n/strings-account";
+import { TG } from "../i18n/strings-game";
 import { withApprovedAccount } from "./auth";
 import { confirmButton, copyButton, h, html, setChildren, type Child } from "../lib/dom";
 import { md, mdInline } from "../lib/markdown";
 import { formatElapsed } from "../lib/time";
-import { commandCard } from "./toolbox";
+import { commandCard, type CommandContext } from "./toolbox";
 import { T } from "../i18n/strings-player";
 
 type StageKey = "setup" | QuestionId | "debrief";
@@ -44,10 +44,27 @@ function writePref(key: string, value: string): void {
   }
 }
 
-function errorMessage(err: unknown): string {
-  if (err instanceof ApiError && err.code === "not-today") return TA().notToday;
-  if (err instanceof ApiError) return err.message;
-  return T().genericError;
+const errorMessage = playErrorText;
+
+/* ---------- scoring v2 helpers (mirror server/services/scoring.ts; display only) ---------- */
+
+/** Time-bonus target for a stage: `targetMinutes`, else the case estimate split over six stages. */
+function targetSeconds(c: Case, q: Question): number {
+  return Math.max(1, Math.round((q.targetMinutes ?? c.estMinutes / QUESTION_ORDER.length) * 60));
+}
+
+/** Full bonus within the target, fading linearly to 0 at 3x the target. */
+function timeBonus(solveSeconds: number, target: number): number {
+  const ratio = Math.min(1, Math.max(0, (3 * target - solveSeconds) / (2 * target)));
+  return Math.round(SCORING.TIME_BONUS_MAX * ratio);
+}
+
+function hintPenalty(q: Question, revealed: number): number {
+  return q.hints.slice(0, revealed).reduce((sum, hint) => sum + hint.cost, 0);
+}
+
+function wrongPenalty(wrong: number): number {
+  return Math.min(SCORING.WRONG_CAP, SCORING.WRONG_COST * wrong);
 }
 
 /* ================= entry ================= */
@@ -64,7 +81,7 @@ function loadProgress(root: HTMLElement, c: Case): void {
     .then((progress) => renderStaged(root, c, progress))
     .catch((err: unknown) => {
       // Session expired or approval revoked since the page loaded: re-run the gate with fresh state.
-      if (err instanceof ApiError && (err.isUnauthorized || err.isNotApproved)) {
+      if (err instanceof ApiError && (err.isUnauthorized || err.isNotApproved || err.needsGate)) {
         if (err.isUnauthorized) setAccount(null);
         void loadAccount(true).finally(() => renderCase(root, c));
         return;
@@ -142,7 +159,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
     const solved = QUESTION_ORDER.filter((id) => isDone(stageProgress(player, id))).length;
     const start = Date.parse(player.setupDoneAt ?? player.startedAt ?? new Date().toISOString());
     const end = player.completedAt !== null ? Date.parse(player.completedAt) : Date.now();
-    elStats.textContent = T().progressStats(solved, QUESTION_ORDER.length, player.score, formatElapsed(end - start));
+    elStats.textContent = T().progressStats(solved, QUESTION_ORDER.length, player.score, player.maxScore, formatElapsed(end - start));
     elFill.style.width = `${(solved / QUESTION_ORDER.length) * 100}%`;
   };
 
@@ -358,6 +375,7 @@ function renderQuestionStage(
         "div",
         { class: `result-panel ${solved ? "is-solved" : "is-revealed"}${justSolved ? " pop" : ""}`, role: justSolved ? "status" : null },
         h("p", { class: "result-title" }, solved ? T().solvedPts(s.points) : T().revealedPts),
+        solved && s.breakdown !== null ? breakdownTable(s.breakdown) : null,
         !solved && s.revealedAnswer !== null ? h("p", {}, T().answerLabel, h("code", { class: "answer-code" }, s.revealedAnswer)) : null,
         html("div", { class: "prose" }, md(q.successNote)),
         currentStage(player) !== id ? continueBtn() : null,
@@ -384,7 +402,7 @@ function renderQuestionStage(
   input.addEventListener("input", () => drafts.set(id, input.value));
   const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg" }, T().submit);
   const feedback = h("p", { id: `feedback-${id}`, class: "feedback", role: "status" });
-  if (s.wrongAttempts > 0) feedback.textContent = T().wrongSoFar(s.wrongAttempts);
+  if (s.wrongAttempts > 0) feedback.textContent = TG().wrongSoFarCost(s.wrongAttempts, wrongPenalty(s.wrongAttempts));
 
   let cooldown: number | null = null;
   const startCooldown = (seconds: number): void => {
@@ -437,7 +455,11 @@ function renderQuestionStage(
         submit.disabled = false;
         const attempts = next.stages[id]?.wrongAttempts ?? 0;
         feedback.className = "feedback is-wrong";
-        feedback.textContent = T().notQuite(attempts);
+        feedback.textContent =
+          SCORING.WRONG_COST * attempts <= SCORING.WRONG_CAP
+            ? TG().notQuiteCost(attempts, SCORING.WRONG_COST)
+            : TG().notQuiteCapped(attempts, SCORING.WRONG_CAP);
+        meter.refresh(next.stages[id] ?? s);
         form.classList.remove("shake");
         void form.offsetWidth;
         form.classList.add("shake");
@@ -458,9 +480,17 @@ function renderQuestionStage(
   const toolIds = stage?.tools ?? [];
   const tools = c.toolbox.flatMap((sec) => sec.items).filter((it) => it.id !== undefined && toolIds.includes(it.id));
 
-  /* hints */
+  const commandCtx: CommandContext = { caseId: c.id, progress: player, onProgress: (next) => update(next, id) };
+
+  /* hints: the texts come from the server (paid-for content), never from the bundle */
+  const hintTexts = player.unlocked.hints[id] ?? [];
   const hintList = q.hints.slice(0, s.hintsRevealed).map((hint, i) =>
-    h("li", { class: "hint" }, h("span", { class: "hint-label mono" }, T().hintLabel(i + 1, hint.cost)), html("div", { class: "prose" }, md(hint.text))),
+    h(
+      "li",
+      { class: "hint" },
+      h("span", { class: "hint-label mono" }, T().hintLabel(i + 1, hint.cost)),
+      html("div", { class: "prose" }, md(hintTexts[i] ?? "")),
+    ),
   );
   const nextHint = q.hints[s.hintsRevealed];
   const hintError = h("p", { class: "form-error", role: "alert" });
@@ -493,13 +523,23 @@ function renderQuestionStage(
     },
   });
 
+  const meter = stageMeter(c, q, s);
+  every(1000, () => meter.tick());
+
   return h(
     "div",
     { class: "stage" },
     head,
+    meter.el,
     h("div", { class: "question-box" }, html("div", { class: "prose prompt" }, md(q.prompt)), form),
     tools.length > 0
-      ? h("div", { class: "block" }, h("h3", {}, T().usefulCommands), h("div", { class: "tool-list" }, tools.map(commandCard)))
+      ? h(
+          "div",
+          { class: "block" },
+          h("h3", {}, T().usefulCommands),
+          h("p", { class: "muted small" }, TG().toolboxCostNote(SCORING.COMMAND_COST, index)),
+          h("div", { class: "tool-list" }, tools.map((tool) => commandCard(tool, commandCtx))),
+        )
       : h("p", { class: "muted small" }, T().needCommands, h("a", { href: `#/case/${c.id}/toolbox` }, T().browseCommands), "."),
     stage?.explorerTip
       ? h(
@@ -532,7 +572,7 @@ function shareText(c: Case, player: ProgressView): string {
 
 function renderDebrief(c: Case, player: ProgressView): HTMLElement {
   const body = h("div", { class: "prose" }, h("p", { class: "muted" }, T().loadingDebrief));
-  getDebrief(c.id, getLang())
+  getDebrief(c.id)
     .then((markdown) => {
       body.replaceChildren(html("div", {}, md(markdown)));
     })
@@ -550,9 +590,123 @@ function renderDebrief(c: Case, player: ProgressView): HTMLElement {
       "div",
       { class: "score-card" },
       h("p", { class: "score-big mono" }, `${player.score}`, h("span", { class: "muted" }, T().ptsOf(player.maxScore))),
+      stageTotals(c, player),
       h("code", { class: "share-text" }, shareText(c, player)),
       copyButton(() => shareText(c, player), T().copyResult),
     ),
     body,
+  );
+}
+
+/* ================= scoring widgets ================= */
+
+const mmss = (seconds: number): string => formatElapsed(seconds * 1000);
+
+function breakdownTable(b: ScoreBreakdown): HTMLElement {
+  const row = (label: string, value: number, detail?: string, extra = ""): HTMLElement =>
+    h(
+      "tr",
+      { class: `${value === 0 ? "is-zero" : value < 0 ? "is-minus" : "is-plus"}${extra}` },
+      h("th", { scope: "row" }, label, detail ? h("span", { class: "bd-detail muted" }, detail) : null),
+      h("td", { class: "num mono" }, TG().pts(value)),
+    );
+  return h(
+    "table",
+    { class: "breakdown" },
+    h("caption", {}, TG().breakdownCaption),
+    h(
+      "tbody",
+      {},
+      row(TG().bdBase, b.base),
+      row(TG().bdHints, b.hints),
+      row(TG().bdCommands, b.commands),
+      row(TG().bdWrong, b.wrong),
+      row(TG().bdTime, b.time, TG().bdTimeDetail(mmss(b.solveSeconds), mmss(b.targetSeconds))),
+      row(TG().bdClean, b.clean),
+      row(TG().bdFirstBlood, b.firstBlood),
+    ),
+    h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().bdTotal), h("td", { class: "num mono" }, String(b.total)))),
+  );
+}
+
+/** Live "this stage so far": base, the time bonus counting down, and the running penalties. */
+function stageMeter(c: Case, q: Question, initial: StageProgress): { el: HTMLElement; tick: () => void; refresh: (s: StageProgress) => void } {
+  let stage = initial;
+  const target = targetSeconds(c, q);
+  const timeText = h("span", { class: "meter-value" });
+  const timeSub = h("span", { class: "meter-sub muted" });
+  const timeFill = h("span", { class: "meter-fill" });
+  const hints = h("span", { class: "meter-item" });
+  const commands = h("span", { class: "meter-item" });
+  const wrong = h("span", { class: "meter-item" });
+  const tick = (): void => {
+    const started = stage.startedAt === null ? Date.now() : Date.parse(stage.startedAt);
+    const elapsed = Math.max(0, (Date.now() - started) / 1000);
+    const bonus = timeBonus(elapsed, target);
+    timeText.textContent = TG().meterTime(bonus);
+    timeSub.textContent = elapsed < target ? TG().meterTimeFull(mmss(Math.ceil(target - elapsed))) : bonus > 0 ? TG().meterTimeFading : TG().meterTimeGone;
+    timeFill.style.width = `${(bonus / SCORING.TIME_BONUS_MAX) * 100}%`;
+  };
+  const refresh = (next: StageProgress): void => {
+    stage = next;
+    const hp = hintPenalty(q, stage.hintsRevealed);
+    const cp = SCORING.COMMAND_COST * stage.commandsRevealed;
+    const wp = wrongPenalty(stage.wrongAttempts);
+    hints.textContent = TG().meterHints(hp);
+    commands.textContent = TG().meterCommands(cp);
+    wrong.textContent = TG().meterWrong(wp, wp >= SCORING.WRONG_CAP);
+    hints.classList.toggle("is-minus", hp > 0);
+    commands.classList.toggle("is-minus", cp > 0);
+    wrong.classList.toggle("is-minus", wp > 0);
+    tick();
+  };
+  const el = h(
+    "div",
+    { class: "stage-meter", role: "group", "aria-label": TG().meterLabel },
+    h("span", { class: "meter-item meter-base mono" }, `${TG().bdBase} ${q.points}`),
+    h(
+      "span",
+      { class: "meter-item meter-time" },
+      h("span", { "aria-hidden": "true" }, "⏱ "),
+      timeText,
+      " ",
+      timeSub,
+      h("span", { class: "meter-track", "aria-hidden": "true" }, timeFill),
+    ),
+    hints,
+    commands,
+    wrong,
+  );
+  refresh(stage);
+  return { el, tick, refresh };
+}
+
+/** Debrief: points per stage, the completion bonus and the total. */
+function stageTotals(c: Case, player: ProgressView): HTMLElement {
+  return h(
+    "table",
+    { class: "breakdown stage-totals" },
+    h("caption", {}, TG().perStage),
+    h(
+      "tbody",
+      {},
+      QUESTION_ORDER.map((id, i) => {
+        const s = player.stages[id];
+        const revealed = s?.status === "revealed";
+        return h(
+          "tr",
+          { class: revealed || (s?.points ?? 0) === 0 ? "is-zero" : "is-plus" },
+          h("th", { scope: "row" }, `${i + 1}. ${stageLabel(c, id)}`, revealed ? h("span", { class: "bd-detail muted" }, TG().revealedShort) : null),
+          h("td", { class: "num mono" }, String(s?.points ?? 0)),
+        );
+      }),
+      h(
+        "tr",
+        { class: player.completionBonus > 0 ? "is-plus" : "is-zero" },
+        h("th", { scope: "row" }, player.completionBonus > 0 ? TG().completionBonus : TG().completionNone),
+        h("td", { class: "num mono" }, TG().pts(player.completionBonus)),
+      ),
+    ),
+    h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().totalLabel), h("td", { class: "num mono" }, String(player.score)))),
   );
 }
