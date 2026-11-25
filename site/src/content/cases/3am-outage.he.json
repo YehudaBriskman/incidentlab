@@ -7,9 +7,9 @@
   "tags": [
     "log-forensics",
     "nginx",
-    "jq",
+    "grep",
     "time-zones",
-    "git",
+    "git-log",
     "nodejs",
     "incident-response"
   ],
@@ -23,8 +23,8 @@
     "השיגו את הראיות: הורידו ופרסו את **חבילת הראיות**, *או* פתחו את ה-**Evidence Explorer** כדי לעיין בכל הקבצים בדפדפן (בלי התקנות).",
     "קראו את `README_FIRST.txt` מההתחלה ועד הסוף.",
     "רשמו את אזור הזמן של כל מקור: nginx, Postgres והדיפלויים ב-**UTC**, לוג האפליקציה ב-**שעון מקומי (+02:00)**, המטריקות ו-Slack ב-**epoch seconds**.",
-    "בחרו מסלול: **bash** (Linux, macOS או WSL), **Windows PowerShell** (לכל פקודה ב-Toolbox יש גרסת PowerShell), או ה-**Explorer בדפדפן**.",
-    "git הוא אופציונלי: `repo/git-log.txt` מכיל את ההיסטוריה המלאה (כולל diffs) כטקסט רגיל."
+    "בחרו מסלול: **bash** (Linux, macOS, WSL או Git Bash), **Windows PowerShell** (לכל פקודה ב-Toolbox יש גרסת PowerShell), או ה-**Explorer בדפדפן**.",
+    "אין מה להתקין: כל שאלה פתירה עם מה שכבר יש במחשב שלכם (grep, awk, sed, sort ב-bash; cmdlets מובנים ב-Windows PowerShell). היסטוריית הקוד היא טקסט רגיל ב-`repo/git-log.txt`, כך שלא צריך git."
   ],
   "evidenceZip": "/evidence/3am-outage-evidence.zip",
   "evidence": [
@@ -84,7 +84,7 @@
     "התשובות לא רגישות לאותיות גדולות/קטנות, ורווחים בהתחלה ובסוף מתעלמים מהם. הקפידו על הפורמט שמופיע מתחת לכל שאלה.",
     "כל רמז עולה את הנקודות שמופיעות עליו, והרמזים נחשפים לפי הסדר, מדחיפה עדינה ועד כמעט הפקודה המלאה. לכל פקודה ב-Toolbox רואים את התחביר בחינם; חשיפת הפקודה המלאה והמוכנה להרצה עולה 5 נקודות. אחרי שמסיימים את התיק, כל הפקודות בחינם.",
     "עבודה בזוגות מומלצת. דברו על ההיגיון שלכם בקול, בדיוק כמו ב-incident review אמיתי.",
-    "כל כלי מותר: grep, awk, jq, Python, גיליון אלקטרוני, העורך האהוב עליכם. בלשונית Toolbox יש פקודות שיעזרו.",
+    "כל כלי מותר, ואין צורך להתקין כלום: הפקודות ב-Toolbox משתמשות רק במה שמגיע עם Linux, macOS, Git Bash ו-Windows PowerShell. גם גיליון אלקטרוני או העורך האהוב עליכם זה בסדר.",
     "תשובות שגויות כבר לא בחינם: כל אחת עולה 2 נקודות, עד 20 לכל שלב. לפני שאתם שולחים, ודאו שאתם יכולים להסביר *למה* התשובה שלכם נכונה.",
     "מהירות וזהירות משתלמות. פתרון מהיר מזכה בבונוס זמן של עד 30 נקודות לכל שלב, שהולך ופוחת אחרי זמן היעד של השלב. פתרון נקי (בלי רמזים, בלי פקודות ובלי תשובות שגויות) מזכה ב-10 נקודות נוספות. השחקן הראשון שפותר שלב מקבל 15 נקודות first blood. מי שמסיים את כל ששת השלבים בלי לחשוף אף תשובה מקבל בונוס של 50 נקודות.",
     "אל תשתפו flags עם צוותים אחרים עד שכולם מסיימים. לשתף טכניקות זה בסדר.",
@@ -166,11 +166,11 @@
         },
         {
           "cost": 20,
-          "text": "שכפלו את ה-bundle והתאימו את ה-**version** שנפרס ל-**git tag**. `git show <tag>` אומר לכם לאיזה commit ה-tag מצביע. השדה `commit=` בלוג הדיפלויים אמור להסכים איתו. אם נשארו שני מועמדים, קראו את שני ה-diffs ושאלו איזה מהם יכול באופן סביר להקפיא pod."
+          "text": "התאימו את ה-**version** שנפרס ל-**tag** בקובץ `repo/git-log.txt`: כל שורת `commit <sha> (tag: ...)` מראה לאיזה commit ה-tag מצביע, ו-7 התווים הראשונים שלה הם ה-short SHA. השדה `commit=` בלוג הדיפלויים אמור להסכים איתו. אם נשארו שני מועמדים, קראו את שני ה-diffs ושאלו איזה מהם יכול באופן סביר להקפיא pod."
         },
         {
           "cost": 40,
-          "text": "```sh\ngit clone repo/shipfast-checkout.bundle && cd shipfast-checkout\ngit tag --sort=creatordate | tail -5\ngit log --oneline -1 <tag>      # short SHA of the tagged commit\ngit show <tag> --stat           # what did that release touch?\n```\n\nהצלבה: `grep checkout deploys/deploys.log` והשדה `version` בלוג האפליקציה ממש לפני השגיאה הראשונה."
+          "text": "```sh\ngrep 'service=checkout' deploys/deploys.log\ngrep -E '^commit .*tag: ' repo/git-log.txt   # which commit each tag points to\nfor TAG in v2.14.0 v2.14.1; do               # what did each candidate release touch?\n  awk -v t=\"tag: $TAG\" '/^commit / {p = index($0, t); d = 0} /^diff --git/ {d = 1} p && (!d || /^diff --git/)' repo/git-log.txt\ndone\n```\n\nה-short SHA הוא 7 התווים הראשונים אחרי `commit`. הצליבו עם השדה `version` בלוג האפליקציה ממש לפני השגיאה הראשונה."
         }
       ],
       "successNote": "הדיפלוי האחרון הוא החשוד הראשון, לא אוטומטית האשם. release אחד עלה יותר מחצי שעה לפני שמשהו נשבר, אז להסתמך רק על \"הכי עדכני\" היה שולח אתכם לכיוון הלא נכון. הצליבו *מתי כל שינוי עלה לאוויר* עם *מתי הסימפטומים התחילו*, ואז אמתו בקריאת ה-diff."
@@ -212,7 +212,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\n# starts vs dones per order, then diff them\njq -r 'select(.msg==\"checkout.start\") | .order' app/checkout-service.log | sort -u > started\njq -r 'select(.msg==\"checkout.done\")  | .order' app/checkout-service.log | sort -u > done\ncomm -23 started done\n# or: grep '<rid-from-nginx>' app/checkout-service.log\n```"
+          "text": "```sh\n# starts vs dones per order, then diff them\ncomm -23 \\\n  <(grep '\"msg\":\"checkout.start\"' app/checkout-service.log | grep -o '\"order\":\"[^\"]*\"' | sort -u) \\\n  <(grep '\"msg\":\"checkout.done\"'  app/checkout-service.log | grep -o '\"order\":\"[^\"]*\"' | sort -u)\n# or: follow the rid of the first 5xx from nginx into the app log\ngrep \"$(grep -m1 -E '\" 5[0-9][0-9] ' nginx/access.log | grep -o 'rid=[0-9a-f]*' | cut -d= -f2)\" app/checkout-service.log\n```"
         }
       ],
       "successNote": "חלק מהבאגים קופצים רק על input ספציפי. דיפלוי יכול להיראות בריא 15 דקות עד שמגיע ה-payload היחיד שמפעיל אותו. בקשה ש**מתחילה ולא נגמרת אף פעם** (בלי לוג סיום, בלי שגיאה) היא סימן קלאסי ל-thread או event loop שנתקע, ולא לקריסה."
@@ -254,7 +254,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\ngit show <bad-sha> --stat\ngit show <bad-sha> -- src/\ngit grep -n -E 'RegExp|/\\^.*\\)\\*' <bad-sha>\n```\n\nהתשובה היא הפונקציה המיוצאת ש*משתמשת* ב-regex החשוד, לא השם של הקבוע."
+          "text": "```sh\nTAG=v2.14.1   # the release you found in stage 2\n# files it touched, plus every added line that builds a regex\nawk -v t=\"tag: $TAG\" '/^commit / {p = index($0, t)} p && /^(diff --git|\\+.*(RegExp|= \\/\\^))/' repo/git-log.txt\n# nested quantifiers on added lines, with line numbers to read around\ngrep -n -E '^\\+.*\\([^()]*[+*][^()]*\\)[*+]' repo/git-log.txt\n```\n\nקראו את הקובץ שנוסף סביב השורה הזו (`sed -n '<from>,<to>p' repo/git-log.txt`). התשובה היא הפונקציה המיוצאת ש*משתמשת* ב-regex החשוד, לא השם של הקבוע."
         }
       ],
       "successNote": "**Catastrophic backtracking:** עם quantifiers מקוננים כמו `(\\w+\\s?)*`, מנוע regex מבוסס backtracking יכול לפצל מחרוזת של מילים במספר אקספוננציאלי של דרכים. כשהתו האחרון גורם להתאמה להיכשל, הוא מנסה את **כולן**. 99 תווים מספיקים כדי להעסיק CPU הרבה יותר זמן ממה שמישהו יחכה, וב-Node.js שהוא single-threaded זה חוסם הכול."
@@ -295,7 +295,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\njq -c 'select(.msg==\"checkout.start\" and .order==\"ORD-XXXXXX\") | {ts, pod, rid}' \\\n  app/checkout-service.log | wc -l\n```"
+          "text": "```sh\nORDER=ORD-XXXXXX   # your answer from stage 3\ngrep '\"msg\":\"checkout.start\"' app/checkout-service.log | grep \"\\\"order\\\":\\\"$ORDER\\\"\" | wc -l\n```"
         }
       ],
       "successNote": "**Retries** של הלקוח (אוטומטיים, ועוד משתמשים חסרי סבלנות שלחצו שוב) המשיכו לשלוח את אותו payload מורעל. Round-robin load balancing פיזר אותו על כל ה-pods, ו-**liveness probes** עשו restart ל-pods קפואים ישר בחזרה לקו האש. Retries צריכים backoff ותקרה, והמערכת צריכה דרך לדחות inputs שכבר הפילו אותה. אחרת self-healing פשוט הופך ל-self-reinfecting."
@@ -386,11 +386,11 @@
         {
           "id": "browse-file",
           "title": "עיון בלי גלישת שורות",
-          "syntax": "less -S <file>",
-          "command": "less -S nginx/access.log",
-          "explain": "`-S` חותך שורות ארוכות במקום לגלוש אותן. השתמשו ב-`/pattern` לחיפוש, `n` להתאמה הבאה, `G` לסוף הקובץ.",
-          "syntaxPowershell": "Get-Content <file> | Out-Host -Paging",
-          "powershell": "Get-Content nginx\\access.log | Out-Host -Paging"
+          "syntax": "cut -c1-<width> <file> | head -n <count>",
+          "command": "cut -c1-150 nginx/access.log | head -n 40",
+          "explain": "`cut -c1-150` חותך כל שורה ב-150 תווים במקום לגלוש אותה, ו-`head` משאיר את זה במסך אחד. כדי לקרוא קטע בהמשך הקובץ, הדפיסו טווח שורות: `sed -n '200,240p' nginx/access.log`.",
+          "syntaxPowershell": "Get-Content <file> -TotalCount <count> | ForEach-Object { $_.Substring(0, [Math]::Min(<width>, $_.Length)) }",
+          "powershell": "Get-Content nginx\\access.log -TotalCount 40 | ForEach-Object { $_.Substring(0, [Math]::Min(150, $_.Length)) }"
         },
         {
           "id": "file-type",
@@ -437,19 +437,19 @@
           "id": "grep-line-numbers",
           "title": "מספרי שורות",
           "syntax": "grep -n '<pattern>' <file> | head",
-          "command": "grep -n 'pattern' app/checkout-service.log | head",
-          "explain": "`-n` מוסיף לכל התאמה את מספר השורה שלה, מה שעוזר לקפוץ אליה ב-`less` (`<num>G`).",
+          "command": "grep -n '\"msg\":\"server.shutdown\"' app/checkout-service.log | head",
+          "explain": "`-n` מוסיף לכל התאמה את מספר השורה שלה. אחר כך הדפיסו את השורות סביבה עם `sed -n '<from>,<to>p' <file>`, למשל `sed -n '120,140p'`.",
           "syntaxPowershell": "Select-String -Path <file> -Pattern '<pattern>' | Select-Object -First <count> LineNumber, Line",
-          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'pattern' | Select-Object -First 10 LineNumber, Line"
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"msg\":\"server.shutdown\"' | Select-Object -First 10 LineNumber, Line"
         },
         {
           "id": "grep-first-match",
           "title": "עצירה בהתאמה הראשונה",
           "syntax": "grep -m1 -E '<regex>' <file>",
-          "command": "grep -m1 -E 'pattern' nginx/access.log",
+          "command": "grep -m1 -E '\"msg\":\"eventloop\\.lag\"' app/checkout-service.log",
           "explain": "`-m1` יוצא אחרי ההתאמה הראשונה. בלוג ממוין כרונולוגית, זה נותן לכם את ההופעה ה*מוקדמת ביותר*.",
           "syntaxPowershell": "Select-String -Path <file> -Pattern '<regex>' | Select-Object -First 1",
-          "powershell": "Select-String -Path nginx\\access.log -Pattern 'pattern' | Select-Object -First 1"
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"msg\":\"eventloop\\.lag\"' | Select-Object -First 1"
         },
         {
           "id": "grep-exclude",
@@ -473,19 +473,19 @@
           "id": "grep-context",
           "title": "הקשר סביב התאמה",
           "syntax": "grep -n -B<before> -A<after> '<id>' <file>",
-          "command": "grep -n -B3 -A10 'ORD-XXXXXX' app/checkout-service.log",
-          "explain": "`-B`/`-A` מציגים שורות לפני ואחרי כל התאמה, כדי שתראו מה קרה סביב אירוע.",
+          "command": "grep -n -B3 -A3 'ORD-MV26QB' app/checkout-service.log",
+          "explain": "`-B`/`-A` מציגים שורות לפני ואחרי כל התאמה, כך שרואים מה קרה סביב אירוע. `ORD-MV26QB` היא סתם הזמנה רגילה מהשנייה הראשונה של הלוג; החליפו בכל מזהה שמעניין אתכם.",
           "syntaxPowershell": "Select-String -Path <file> -Pattern '<id>' -Context <before>,<after>",
-          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'ORD-XXXXXX' -Context 3,10"
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'ORD-MV26QB' -Context 3,3"
         },
         {
           "id": "grep-gzip",
-          "title": "חיפוש בלוגים דחוסים",
-          "syntax": "zgrep -c '<pattern>' <file.gz>",
-          "command": "zgrep -c 'pattern' rotated.log.gz",
-          "explain": "בעולם האמיתי לוגים ישנים דחוסים ב-gzip. `zgrep`/`zcat` קוראים אותם בלי לפרוס.",
-          "syntaxPowershell": "$gz = New-Object IO.Compression.GZipStream([IO.File]::OpenRead(\"$PWD\\<file.gz>\"), [IO.Compression.CompressionMode]::Decompress)\n((New-Object IO.StreamReader($gz)).ReadToEnd() -split \"`n\" | Select-String '<pattern>').Count",
-          "powershell": "$gz = New-Object IO.Compression.GZipStream([IO.File]::OpenRead(\"$PWD\\rotated.log.gz\"), [IO.Compression.CompressionMode]::Decompress)\n((New-Object IO.StreamReader($gz)).ReadToEnd() -split \"`n\" | Select-String 'pattern').Count"
+          "title": "חיפוש בכל הקבצים בבת אחת",
+          "syntax": "grep -r -l '<pattern>' <dir>",
+          "command": "grep -r -l 'INC-2291' .",
+          "explain": "`-r` עובר על כל התיקייה ו-`-l` מדפיס רק את שמות הקבצים שיש בהם התאמה. שימושי לשאלה \"איפה עוד המזהה הזה מופיע?\". בעולם האמיתי לוגים ישנים דחוסים לרוב ב-gzip: `gzip -dc old.log.gz | grep ...` קורא אותם בלי לפרוס.",
+          "syntaxPowershell": "Get-ChildItem <dir> -Recurse -File | Select-String -Pattern '<pattern>' -List | Select-Object Path",
+          "powershell": "Get-ChildItem -Recurse -File | Select-String -Pattern 'INC-2291' -List | Select-Object Path"
         }
       ]
     },
@@ -567,79 +567,79 @@
       ]
     },
     {
-      "category": "jq ללוגי JSON",
+      "category": "לוגי JSON עם grep, sed ו-awk",
       "items": [
         {
           "id": "json-pretty",
-          "title": "הדפסה יפה של שורה אחת",
-          "syntax": "head -n<count> <json-lines-file> | jq .",
-          "command": "head -n1 app/checkout-service.log | jq .",
-          "explain": "ראו כל שדה ששורת לוג נושאת לפני שאתם כותבים פילטרים.",
+          "title": "שדה אחד בכל שורה",
+          "syntax": "head -n <count> <json-lines-file> | tr '<separator>' '<newline>'",
+          "command": "head -n 1 app/checkout-service.log | tr ',' '\\n'",
+          "explain": "ראו כל שדה ששורת לוג נושאת לפני שאתם כותבים פילטרים. כל שורה היא אובייקט JSON שטוח אחד, אז פיצול לפי פסיקים שם זוג `\"key\":value` אחד בכל שורה. (ערך שיש בו פסיק בעצמו יתפצל גם הוא; מספיק טוב למבט ראשון.)",
           "syntaxPowershell": "Get-Content <json-lines-file> -TotalCount <count> | ConvertFrom-Json | Format-List",
           "powershell": "Get-Content app\\checkout-service.log -TotalCount 1 | ConvertFrom-Json | Format-List"
         },
         {
           "id": "json-filter-msg",
           "title": "סינון לפי message",
-          "syntax": "jq -c 'select(.<field> == \"<value>\")' <json-lines-file> | head",
-          "command": "jq -c 'select(.msg==\"checkout.start\")' app/checkout-service.log | head",
-          "explain": "`select()` משאיר אובייקטים תואמים, ו-`-c` שומר אותם אחד בשורה כדי שעדיין תוכלו להשתמש ב-grep, head ו-wc.",
+          "syntax": "grep '\"<field>\":\"<value>\"' <json-lines-file> | head",
+          "command": "grep '\"msg\":\"checkout.start\"' app/checkout-service.log | head",
+          "explain": "לא צריך כלי JSON: כל שורה היא טקסט שטוח, אז `\"msg\":\"checkout.start\"` (כולל המירכאות והנקודתיים) מתאים רק לשדה הזה עם הערך המדויק הזה, אף פעם לא לאותה מילה בתוך שדה אחר.",
           "syntaxPowershell": "Select-String -Path <json-lines-file> -Pattern '<raw-json-snippet>' | ForEach-Object { $_.Line | ConvertFrom-Json } | Select-Object -First <count> <keys>",
           "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"msg\":\"checkout.start\"' | ForEach-Object { $_.Line | ConvertFrom-Json } | Select-Object -First 10 ts, pod, order, customer"
         },
         {
           "id": "json-follow-order",
           "title": "מעקב אחרי הזמנה אחת",
-          "syntax": "jq -c 'select(.<field> == \"<id>\")' <json-lines-file>",
-          "command": "jq -c 'select(.order==\"ORD-XXXXXX\")' app/checkout-service.log",
-          "explain": "כל האירועים של הזמנה אחת. יש start *וגם* done?",
+          "syntax": "grep '\"<field>\":\"<id>\"' <json-lines-file>",
+          "command": "grep '\"order\":\"ORD-MV26QB\"' app/checkout-service.log",
+          "explain": "כל האירועים של הזמנה אחת (זו הזמנה רגילה; החליפו בשלכם). יש start *וגם* done?",
           "syntaxPowershell": "Select-String -Path <json-lines-file> -Pattern '<id>' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json } | Format-Table <keys>",
-          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'ORD-XXXXXX' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json } | Format-Table ts, pod, msg, order, rid"
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'ORD-MV26QB' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json } | Format-Table ts, pod, msg, order, rid"
         },
         {
           "id": "json-custom-output",
-          "title": "פלט מותאם עם -r",
-          "syntax": "jq -r '\"\\(.<key>) \\(.<key>) \\(.<key> // \"\")\"' <json-lines-file> | less -S",
-          "command": "jq -r '\"\\(.ts) \\(.pod) \\(.msg) \\(.order // \"\")\"' app/checkout-service.log | less -S",
-          "explain": "`-r` מדפיס מחרוזות גולמיות, ו-`\\(...)` משלב שדות. `//` נותן ערך ברירת מחדל כששדה חסר.",
-          "syntaxPowershell": "Get-Content <json-lines-file> | ForEach-Object { $j = $_ | ConvertFrom-Json; \"$($j.<key>) $($j.<key>) ...\" } | Out-Host -Paging",
-          "powershell": "Get-Content app\\checkout-service.log | ForEach-Object { $j = $_ | ConvertFrom-Json; \"$($j.ts) $($j.pod) $($j.msg) $($j.order)\" } | Out-Host -Paging"
+          "title": "שליפת שדות לפי שם עם awk",
+          "syntax": "awk -F'\"' '{split(\"\", v); for (i = 2; i < NF; i++) if ($(i+1) == \":\") v[$i] = $(i+2); print v[\"<key>\"], v[\"<key>\"], ...}' <json-lines-file> | head -n <count>",
+          "command": "awk -F'\"' '{split(\"\", v); for (i = 2; i < NF; i++) if ($(i+1) == \":\") v[$i] = $(i+2); print v[\"ts\"], v[\"pod\"], v[\"msg\"], v[\"order\"]}' app/checkout-service.log | head -n 20",
+          "explain": "פיצול לפי `\"` שם כל key בשדה משלו, אחריו שדה שהוא בדיוק `:` ואז הערך. הלולאה הופכת את זה לטבלה קטנה `v[key] = value` לכל שורה, כך שאפשר להדפיס כל שדה מחרוזת לפי השם שלו. key שחסר (כמו `order` בשורות cart) מודפס ריק.",
+          "syntaxPowershell": "Get-Content <json-lines-file> -TotalCount <count> | ForEach-Object { $j = $_ | ConvertFrom-Json; \"$($j.<key>) $($j.<key>) ...\" }",
+          "powershell": "Get-Content app\\checkout-service.log -TotalCount 20 | ForEach-Object { $j = $_ | ConvertFrom-Json; \"$($j.ts) $($j.pod) $($j.msg) $($j.order)\" }"
         },
         {
           "id": "json-msg-types",
           "title": "אילו סוגי messages קיימים?",
-          "syntax": "jq -r '.<field>' <json-lines-file> | sort | uniq -c | sort -rn",
-          "command": "jq -r '.msg' app/checkout-service.log | sort | uniq -c | sort -rn",
-          "explain": "היסטוגרמה של סוגי אירועים. אזהרות נדירות בולטות מיד.",
+          "syntax": "grep -o '\"<field>\":\"[^\"]*\"' <json-lines-file> | sort | uniq -c | sort -rn",
+          "command": "grep -o '\"msg\":\"[^\"]*\"' app/checkout-service.log | sort | uniq -c | sort -rn",
+          "explain": "`-o` שולף רק את הזוג `\"msg\":\"...\"` מכל שורה; `sort | uniq -c | sort -rn` הופך את זה להיסטוגרמה של סוגי אירועים. אזהרות נדירות קופצות מיד.",
           "syntaxPowershell": "Select-String -Path <json-lines-file> -Pattern '<regex-with-capture-group>' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
           "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"msg\":\"([^\"]+)\"' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
         },
         {
           "id": "json-group-count",
-          "title": "קיבוץ וספירה (slurp)",
-          "syntax": "jq -s 'map(select(.<field> == \"<value>\")) | group_by(.<field>) | map({<key>: .[0].<field>, n: length})' <json-lines-file>",
-          "command": "jq -s 'map(select(.level==\"warn\")) | group_by(.msg) | map({msg: .[0].msg, n: length})' app/checkout-service.log",
-          "explain": "`-s` טוען את כל השורות למערך אחד, כך שאפשר להשתמש ב-`group_by`, `sort_by` ו-`length` על כל הקובץ.",
+          "title": "סינון, ואז קיבוץ וספירה",
+          "syntax": "grep '\"<field>\":\"<value>\"' <json-lines-file> | grep -o '\"<group-field>\":\"[^\"]*\"' | sort | uniq -c | sort -rn",
+          "command": "grep '\"level\":\"warn\"' app/checkout-service.log | grep -o '\"msg\":\"[^\"]*\"' | sort | uniq -c | sort -rn",
+          "explain": "ה-`grep` הראשון משאיר את השורות שמעניינות אתכם (אזהרות), השני שולף את השדה לקיבוץ, ו-`uniq -c` סופר כל קבוצה. group-by בצינור אחד.",
           "syntaxPowershell": "Select-String -Path <json-lines-file> -Pattern '<raw-json-snippet>' | ForEach-Object { $_.Line | ConvertFrom-Json } | Group-Object <field> | Select-Object Count, Name",
           "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"level\":\"warn\"' | ForEach-Object { $_.Line | ConvertFrom-Json } | Group-Object msg | Select-Object Count, Name"
         },
         {
           "id": "json-numeric-filter",
           "title": "סינון לפי מספרים",
-          "syntax": "jq -c 'select(.<field> == \"<value>\" and .<number-field> > <threshold>) | {<keys>}' <json-lines-file>",
-          "command": "jq -c 'select(.msg==\"eventloop.lag\" and .lag_ms > 1000) | {ts, pod, lag_ms}' app/checkout-service.log",
-          "explain": "השוואות מספריות ובניית אובייקט `{a, b}` משאירות רק את השדות שמעניינים אתכם.",
+          "syntax": "sed -n -E 's/.*\"<key>\":\"([^\"]*)\".*\"<key>\":\"([^\"]*)\".*\"<number-key>\":([0-9]+).*/\\1 \\2 \\3/p' <json-lines-file> | awk '$<column> > <threshold>'",
+          "command": "sed -n -E 's/.*\"ts\":\"([^\"]*)\".*\"pod\":\"([^\"]*)\".*\"lag_ms\":([0-9]+).*/\\1 \\2 \\3/p' app/checkout-service.log | awk '$3 > 1000'",
+          "explain": "`sed -n -E 's/.../\\1 \\2 \\3/p'` לוכד את השדות שאתם רוצים ומדפיס רק שורות שבהן כולם נמצאו. מספרים ב-JSON הם בלי מירכאות, ומכאן `([0-9]+)`. אחר כך awk משווה את העמודה השלישית כמספר.",
           "syntaxPowershell": "Select-String -Path <json-lines-file> -Pattern '<value>' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json } | Where-Object { $_.<number-field> -gt <threshold> } | Format-Table <keys>",
           "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'eventloop.lag' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json } | Where-Object { $_.lag_ms -gt 1000 } | Format-Table ts, pod, lag_ms"
         },
         {
           "id": "versions-over-time",
           "title": "גרסאות לאורך זמן",
-          "syntax": "jq -r '[.<key>, .<key>, .<key>] | @tsv' <json-lines-file> | uniq -f<skip-fields> | less",
-          "command": "jq -r '[.ts, .pod, .version] | @tsv' app/checkout-service.log | uniq -f2 | less",
-          "explain": "`@tsv` הופך מערכים לשורות מופרדות בטאבים. בשילוב עם `uniq` רואים מתי כל pod החליף גרסה.",
-          "syntaxPowershell": "Get-Content <json-lines-file> | ForEach-Object { $j = $_ | ConvertFrom-Json; \"$($j.<key>)`t$($j.<key>)`t$($j.<key>)\" } | Out-Host -Paging",
-          "powershell": "Get-Content app\\checkout-service.log | ForEach-Object { $j = $_ | ConvertFrom-Json; \"$($j.ts)`t$($j.pod)`t$($j.version)\" } | Out-Host -Paging"
+          "syntax": "sed -E 's/.*\"<key>\":\"([^\"]*)\".*\"<key>\":\"([^\"]*)\".*\"<key>\":\"([^\"]*)\".*/\\1 \\2 \\3/' <json-lines-file> | awk '$<column> != seen[$<column>] {print; seen[$<column>] = $<column>}'",
+          "command": "sed -E 's/.*\"ts\":\"([^\"]*)\".*\"pod\":\"([^\"]*)\".*\"version\":\"([^\"]*)\".*/\\1 \\2 \\3/' app/checkout-service.log | awk '$3 != seen[$2] {print; seen[$2] = $3}'",
+          "explain": "sed הופך כל שורה ל-`ts pod version`; awk זוכר את הגרסה האחרונה שראה לכל pod ומדפיס רק את השורה הראשונה של כל pod וכל החלפה. רואים בדיוק מתי כל pod עלה, ועל איזה release.",
+          "syntaxPowershell": "$seen = @{}\nGet-Content <json-lines-file> | ForEach-Object { $j = $_ | ConvertFrom-Json; if ($seen[$j.<key>] -ne $j.<key>) { $seen[$j.<key>] = $j.<key>; \"$($j.<key>)`t$($j.<key>)`t$($j.<key>)\" } }",
+          "powershell": "$seen = @{}\nGet-Content app\\checkout-service.log | ForEach-Object { $j = $_ | ConvertFrom-Json; if ($seen[$j.pod] -ne $j.version) { $seen[$j.pod] = $j.version; \"$($j.ts)`t$($j.pod)`t$($j.version)\" } }"
         }
       ]
     },
@@ -658,9 +658,9 @@
         {
           "id": "rid-in-app-log",
           "title": "מציאת הבקשה בלוג האפליקציה",
-          "syntax": "grep '<request-id>' <json-lines-file> | jq .",
-          "command": "grep '<rid>' app/checkout-service.log | jq .",
-          "explain": "אותה בקשה מנקודת המבט של השירות: איזה pod, איזו הזמנה, איזו גרסה, והאם היא הסתיימה?",
+          "syntax": "grep '<request-id>' <json-lines-file> | tr '<separator>' '<newline>'",
+          "command": "grep '<rid>' app/checkout-service.log | tr ',' '\\n'",
+          "explain": "הדביקו את ה-rid מהפקודה הקודמת. רואים את אותה בקשה מנקודת המבט של השירות, שדה בכל שורה: איזה pod, איזו הזמנה, איזו גרסה, והאם היא הסתיימה?",
           "syntaxPowershell": "Select-String -Path <json-lines-file> -Pattern '<request-id>' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json }",
           "powershell": "Select-String -Path app\\checkout-service.log -Pattern '<rid>' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json }"
         },
@@ -668,10 +668,10 @@
           "id": "customer-requests",
           "title": "כל הבקשות של לקוח אחד",
           "syntax": "grep '<customer-pattern>' <log-file> | awk '{print $<field>, $<field>, ...}'",
-          "command": "grep 'cid=cus_XXXX' nginx/access.log | awk '{print $4, $6, $7, $9, $(NF-2)}'",
-          "explain": "retries של אותו אדם מסתדרים כאן בשורה. שימו לב לתזמון בין הניסיונות.",
+          "command": "grep 'cid=cus_4734$' nginx/access.log | awk '{print $4, $6, $7, $9, $(NF-2)}'",
+          "explain": "ניסיונות חוזרים של אותו אדם מסתדרים כאן בשורה (`cus_4734` הוא אחד הלקוחות שקיבלו שגיאות). `$(NF-2)` הוא `urt=`, כמה זמן לקח ל-upstream. שימו לב לזמנים בין הניסיונות.",
           "syntaxPowershell": "Select-String -Path <log-file> -Pattern '<customer-regex>' | ForEach-Object Line",
-          "powershell": "Select-String -Path nginx\\access.log -Pattern 'cid=cus_XXXX\\b' | ForEach-Object Line"
+          "powershell": "Select-String -Path nginx\\access.log -Pattern 'cid=cus_4734$' | ForEach-Object Line"
         },
         {
           "id": "line-up-sources",
@@ -684,21 +684,21 @@
         },
         {
           "id": "never-finished",
-          "title": "בקשות שלא הסתיימו",
-          "syntax": "comm -23 <(jq -r 'select(.<field> == \"<start-value>\") | .<key>' <json-lines-file> | sort -u) <(jq -r 'select(.<field> == \"<end-value>\") | .<key>' <json-lines-file> | sort -u)",
-          "command": "comm -23 <(jq -r 'select(.msg==\"x.start\")|.rid' app.log | sort -u) <(jq -r 'select(.msg==\"x.done\")|.rid' app.log | sort -u)",
-          "explain": "`comm -23` מדפיס שורות שנמצאות רק ברשימה הממוינת הראשונה: דברים שהתחילו ואין להם סיום תואם.",
+          "title": "התחילו ולא הסתיימו",
+          "syntax": "comm -23 <(grep '\"<field>\":\"<start-value>\"' <json-lines-file> | grep -o '\"<key>\":\"[^\"]*\"' | sort -u) <(grep '\"<field>\":\"<end-value>\"' <json-lines-file> | grep -o '\"<key>\":\"[^\"]*\"' | sort -u)",
+          "command": "comm -23 <(grep '\"msg\":\"server.start\"' app/checkout-service.log | grep -o '\"pod\":\"[^\"]*\"' | sort -u) <(grep '\"msg\":\"server.shutdown\"' app/checkout-service.log | grep -o '\"pod\":\"[^\"]*\"' | sort -u)",
+          "explain": "`comm -23` מדפיס שורות שנמצאות רק ברשימה הממוינת הראשונה: דברים שהתחילו ואין להם סיום תואם. הדוגמה הזו מצמידה `server.start` ל-`server.shutdown` לכל pod (ה-pods שעדיין רצים כשהלוג נגמר). החליפו בהודעות ה-start וה-done של בקשה וב-key שמחבר ביניהן.",
           "syntaxPowershell": "$done = @{}\nSelect-String -Path <json-lines-file> -Pattern '<end-snippet>' | ForEach-Object { $done[($_.Line | ConvertFrom-Json).<key>] = 1 }\nSelect-String -Path <json-lines-file> -Pattern '<start-snippet>' | ForEach-Object { $_.Line | ConvertFrom-Json } | Where-Object { -not $done.ContainsKey($_.<key>) }",
-          "powershell": "$done = @{}\nSelect-String -Path app.log -Pattern '\"msg\":\"x.done\"' | ForEach-Object { $done[($_.Line | ConvertFrom-Json).rid] = 1 }\nSelect-String -Path app.log -Pattern '\"msg\":\"x.start\"' | ForEach-Object { $_.Line | ConvertFrom-Json } | Where-Object { -not $done.ContainsKey($_.rid) }"
+          "powershell": "$done = @{}\nSelect-String -Path app\\checkout-service.log -Pattern '\"msg\":\"server.shutdown\"' | ForEach-Object { $done[($_.Line | ConvertFrom-Json).pod] = 1 }\nSelect-String -Path app\\checkout-service.log -Pattern '\"msg\":\"server.start\"' | ForEach-Object { $_.Line | ConvertFrom-Json } | Where-Object { -not $done.ContainsKey($_.pod) } | Select-Object ts, pod"
         },
         {
           "id": "pod-timeline",
           "title": "ציר זמן של pod",
-          "syntax": "jq -r 'select(.<field> == \"<value>\") | \"\\(.<key>) \\(.<key>) \\(.<key>)\"' <json-lines-file> | less",
-          "command": "jq -r 'select(.pod==\"<pod>\") | \"\\(.ts) \\(.level) \\(.msg)\"' app/checkout-service.log | less",
-          "explain": "סיפור החיים של pod אחד. פערים (שקט) יכולים להיות מעידים בדיוק כמו שגיאות.",
-          "syntaxPowershell": "Select-String -Path <json-lines-file> -Pattern '<value>' -SimpleMatch | ForEach-Object { $j = $_.Line | ConvertFrom-Json; \"$($j.<key>) $($j.<key>) $($j.<key>)\" } | Out-Host -Paging",
-          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '<pod>' -SimpleMatch | ForEach-Object { $j = $_.Line | ConvertFrom-Json; \"$($j.ts) $($j.level) $($j.msg)\" } | Out-Host -Paging"
+          "syntax": "grep '\"<field>\":\"<pod>\"' <json-lines-file> | grep -v '<noise-pattern>' | sed -E 's/.*\"<key>\":\"([^\"]*)\",\"<key>\":\"([^\"]*)\".*\"<key>\":\"([^\"]*)\".*/\\1 \\2 \\3/'",
+          "command": "grep '\"pod\":\"checkout-6b7f9c-a1b2c\"' app/checkout-service.log | grep -v '\"msg\":\"cart\\.' | sed -E 's/.*\"ts\":\"([^\"]*)\",\"level\":\"([^\"]*)\".*\"msg\":\"([^\"]*)\".*/\\1 \\2 \\3/'",
+          "explain": "סיפור החיים של pod אחד, בלי רעש ה-cart (ה-pod הזה הריץ את release v2.14.0; החליפו בכל pod מהפקודות למעלה). פערים (שקט) יכולים לספר בדיוק כמו שגיאות. הוסיפו `| head -n 50` או `| tail -n 50` כדי לדפדף.",
+          "syntaxPowershell": "Select-String -Path <json-lines-file> -Pattern '<pod-snippet>' | Where-Object { $_.Line -notmatch '<noise-regex>' } | ForEach-Object { $j = $_.Line | ConvertFrom-Json; \"$($j.<key>) $($j.<key>) $($j.<key>)\" }",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"pod\":\"checkout-6b7f9c-a1b2c\"' | Where-Object { $_.Line -notmatch '\"msg\":\"cart\\.' } | ForEach-Object { $j = $_.Line | ConvertFrom-Json; \"$($j.ts) $($j.level) $($j.msg)\" }"
         }
       ]
     },
@@ -710,7 +710,7 @@
           "title": "Epoch ל-UTC",
           "syntax": "date -u -d @<epoch-seconds>",
           "command": "date -u -d @1794531600",
-          "explain": "ממיר unix epoch seconds לזמן UTC קריא (GNU date). ב-macOS: `date -u -r 1794531600`.",
+          "explain": "ממיר unix epoch seconds לזמן UTC קריא. `date -d` הוא GNU (Linux, WSL, Git Bash); ב-macOS השתמשו ב-`date -u -r 1794531600`. אין `date` שמתאים? גרסת ה-awk בהמשך עובדת בכל מקום.",
           "syntaxPowershell": "[DateTimeOffset]::FromUnixTimeSeconds(<epoch-seconds>).UtcDateTime.ToString('<format>')",
           "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794531600).UtcDateTime.ToString('u')"
         },
@@ -719,7 +719,7 @@
           "title": "UTC לשעון מקומי (ישראל)",
           "syntax": "TZ=<zone> date -d '<utc-timestamp>'",
           "command": "TZ=Asia/Jerusalem date -d '2026-11-13T00:30:00Z'",
-          "explain": "מראה מה היה רגע UTC בשעון של המשרד. בנובמבר ישראל ב-**UTC+02:00**.",
+          "explain": "מראה מה השעה הייתה בשעון המשרד ברגע UTC מסוים. בנובמבר ישראל ב-**UTC+02:00**. `date -d` הוא GNU (Linux, WSL, Git Bash); ב-macOS השתמשו בצורת ה-epoch: `TZ=Asia/Jerusalem date -r 1794529800`. או פשוט הוסיפו שעתיים.",
           "syntaxPowershell": "([DateTimeOffset]'<utc-timestamp>').ToOffset([TimeSpan]'<offset>')",
           "powershell": "([DateTimeOffset]'2026-11-13T00:30:00Z').ToOffset([TimeSpan]'02:00')"
         },
@@ -728,43 +728,43 @@
           "title": "שעון מקומי ל-UTC",
           "syntax": "date -u -d '<local-timestamp-with-offset>' +<format>",
           "command": "date -u -d '2026-11-13T02:30:00+02:00' +%H:%M:%S",
-          "explain": "מנרמל timestamp עם offset (כמו של לוג האפליקציה) ל-UTC. `+%H:%M:%S` קובע את פורמט הפלט.",
+          "explain": "מנרמל timestamp עם offset (כמו בלוג האפליקציה) ל-UTC. `+%H:%M:%S` קובע את פורמט הפלט. `date -d` הוא GNU (Linux, WSL, Git Bash); ב-macOS פרסו עם `date -j -f`, או פשוט החסירו את ה-`+02:00` שכתוב ממש שם ב-timestamp.",
           "syntaxPowershell": "([DateTimeOffset]'<local-timestamp-with-offset>').UtcDateTime.ToString('<format>')",
           "powershell": "([DateTimeOffset]'2026-11-13T02:30:00+02:00').UtcDateTime.ToString('HH:mm:ss')"
         },
         {
           "id": "epoch-python",
-          "title": "Python one-liner",
-          "syntax": "python3 -c 'from datetime import datetime, timezone; print(datetime.fromtimestamp(<epoch-seconds>, timezone.utc))'",
-          "command": "python3 -c 'from datetime import datetime, timezone; print(datetime.fromtimestamp(1794531600, timezone.utc))'",
-          "explain": "אותה המרה, אבל portable. החליפו ל-`timezone(timedelta(hours=2))` כדי לקבל שעון מקומי.",
-          "syntaxPowershell": "[DateTimeOffset]::FromUnixTimeSeconds(<epoch-seconds>).ToString('<format>')",
-          "powershell": "# no Python needed on Windows:\n[DateTimeOffset]::FromUnixTimeSeconds(1794531600).ToString('yyyy-MM-dd HH:mm:ss zzz')"
+          "title": "Epoch לשעה ב-awk נקי",
+          "syntax": "awk 'BEGIN {e = <epoch-seconds>; s = e % 86400; printf \"<format>\", int(s / 3600), int(s % 3600 / 60), s % 60; s = (e + <offset-seconds>) % 86400; printf \"<format>\", int(s / 3600), int(s % 3600 / 60), s % 60}'",
+          "command": "awk 'BEGIN {e = 1794531600; s = e % 86400; printf \"%02d:%02d:%02d UTC\\n\", int(s / 3600), int(s % 3600 / 60), s % 60; s = (e + 7200) % 86400; printf \"%02d:%02d:%02d +02:00\\n\", int(s / 3600), int(s % 3600 / 60), s % 60}'",
+          "explain": "עובד בכל מערכת הפעלה, בלי דגלים של `date` לזכור: `epoch % 86400` הוא מספר השניות מאז חצות UTC, ו-awk מפרק אותו לשעות, דקות ושניות. הוסיפו `7200` (שעתיים) בשביל +02:00. התאריך הולך לאיבוד, אבל כל המקורות בחבילה מכסים את אותו לילה.",
+          "syntaxPowershell": "[DateTimeOffset]::FromUnixTimeSeconds(<epoch-seconds>).ToOffset([TimeSpan]'<offset>').ToString('<format>')",
+          "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794531600).ToOffset([TimeSpan]'02:00').ToString('yyyy-MM-dd HH:mm:ss zzz')"
         },
         {
           "id": "time-to-epoch",
           "title": "זמן קריא ל-epoch",
           "syntax": "date -u -d '<utc-timestamp>' +%s",
           "command": "date -u -d '2026-11-13 01:00:00' +%s",
-          "explain": "שימושי למציאת השורה המתאימה בקובץ שמאונדקס לפי epoch, כמו ה-CSV של המטריקות.",
+          "explain": "שימושי כדי למצוא את השורה המתאימה בקובץ שמאונדקס לפי epoch, כמו ה-CSV של המטריקות. `date -d` הוא GNU (Linux, WSL, Git Bash); ב-macOS: `date -j -u -f '%Y-%m-%d %H:%M:%S' '2026-11-13 01:00:00' +%s`.",
           "syntaxPowershell": "([DateTimeOffset]'<utc-timestamp>').ToUnixTimeSeconds()",
           "powershell": "([DateTimeOffset]'2026-11-13T01:00:00Z').ToUnixTimeSeconds()"
         },
         {
           "id": "csv-epoch-column",
           "title": "המרת עמודה שלמה ב-CSV",
-          "syntax": "awk -F, 'NR>1 {cmd=\"date -u -d @\"$<epoch-column>\" +<format>\"; cmd | getline t; close(cmd); print t, $0}' <csv-file> | head",
-          "command": "awk -F, 'NR>1 {cmd=\"date -u -d @\"$1\" +%H:%M:%S\"; cmd | getline t; close(cmd); print t, $0}' metrics/checkout_metrics.csv | head",
-          "explain": "מוסיף לכל שורת מטריקות זמן UTC קריא. קצת איטי (מריץ fork של `date` לכל שורה), אבל בסדר לכמה מאות שורות.",
+          "syntax": "awk -F, 'NR>1 {s = $<epoch-column> % 86400; printf \"<format>\", int(s / 3600), int(s % 3600 / 60), s % 60, $0}' <csv-file> | head",
+          "command": "awk -F, 'NR>1 {s = $1 % 86400; printf \"%02d:%02d:%02d %s\\n\", int(s / 3600), int(s % 3600 / 60), s % 60, $0}' metrics/checkout_metrics.csv | head",
+          "explain": "מוסיף לכל שורת מטריקות שעה קריאה ב-UTC, עם אותו חשבון `epoch % 86400`: מיידי, וזהה ב-Linux, macOS ו-Git Bash. כל השורות מאותו לילה, אז השעה מספיקה.",
           "syntaxPowershell": "Import-Csv <csv-file> | Select-Object -First <count> @{n='utc'; e={ [DateTimeOffset]::FromUnixTimeSeconds([long]$_.<epoch-column>).ToString('<format>') }}, *",
           "powershell": "Import-Csv metrics\\checkout_metrics.csv | Select-Object -First 10 @{n='utc'; e={ [DateTimeOffset]::FromUnixTimeSeconds([long]$_.ts_epoch).ToString('HH:mm:ss') }}, *"
         },
         {
           "id": "slack-timestamps",
           "title": "timestamps של Slack",
-          "syntax": "jq -r '.[] | \"\\(.<ts-key> | tonumber | floor | todate) \\(.<key>): \\(.<key>)\"' <json-array-file>",
-          "command": "jq -r '.[] | \"\\(.ts | tonumber | floor | todate) \\(.user): \\(.text)\"' slack/inc-checkout.json",
-          "explain": "ה-`ts` של Slack הוא *מחרוזת* epoch עם חלק עשרוני. `tonumber | floor | todate` נותן ISO-8601 UTC.",
+          "syntax": "awk -F'\"' '$2 == \"<ts-key>\" {s = int($4) % 86400} $2 == \"<key>\" {u = $4} $2 == \"<key>\" {t = $0; sub(/<prefix-regex>/, \"\", t); sub(/<suffix-regex>/, \"\", t); printf \"<format>\", int(s / 3600), int(s % 3600 / 60), s % 60, u, t}' <json-array-file>",
+          "command": "awk -F'\"' '$2 == \"ts\" {s = int($4) % 86400} $2 == \"user\" {u = $4} $2 == \"text\" {t = $0; sub(/^ *\"text\": \"/, \"\", t); sub(/\"$/, \"\", t); printf \"%02d:%02d:%02d UTC %s: %s\\n\", int(s / 3600), int(s % 3600 / 60), s % 60, u, t}' slack/inc-checkout.json",
+          "explain": "ייצוא ה-Slack הוא `\"key\": \"value\"` אחד בכל שורה, אז awk יכול לזכור את `ts` ואת `user` ולהדפיס שורה כשהוא מגיע ל-`text`. ה-`ts` של Slack הוא *מחרוזת* epoch עם חלק עשרוני: `int()` מוריד את השבר, ו-`% 86400` נותן שניות מאז חצות UTC.",
           "syntaxPowershell": "(Get-Content <json-array-file> -Raw | ConvertFrom-Json) | ForEach-Object { '<format>' -f [DateTimeOffset]::FromUnixTimeSeconds([long][Math]::Floor([double]$_.<ts-key>)).ToString('u'), $_.<key>, $_.<key> }",
           "powershell": "(Get-Content slack\\inc-checkout.json -Raw | ConvertFrom-Json) | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][Math]::Floor([double]$_.ts)).ToString('u'), $_.user, $_.text }"
         }
@@ -776,11 +776,11 @@
         {
           "id": "csv-table",
           "title": "טבלה מסודרת",
-          "syntax": "column -s, -t < <csv-file> | less -S",
-          "command": "column -s, -t < metrics/checkout_metrics.csv | less -S",
-          "explain": "מיישר עמודות CSV כדי שבאמת תוכלו לקרוא אותן. `-s,` קובע את המפריד ו-`-t` בונה טבלה.",
-          "syntaxPowershell": "Import-Csv <csv-file> | Format-Table | Out-Host -Paging",
-          "powershell": "Import-Csv metrics\\checkout_metrics.csv | Format-Table | Out-Host -Paging"
+          "syntax": "head -n <count> <csv-file> | awk -F, '{for (i = 1; i <= NF; i++) printf \"%-<width>s\", $i; print \"\"}'",
+          "command": "head -n 20 metrics/checkout_metrics.csv | awk -F, '{for (i = 1; i <= NF; i++) printf \"%-21s\", $i; print \"\"}'",
+          "explain": "`printf \"%-21s\"` של awk מרפד כל עמודה לאותו רוחב, כך שה-CSV נקרא כמו טבלה. הורידו את `head` כדי לראות את כל השורות, או העבירו ל-`sed -n '100,140p'` בשביל חלון.",
+          "syntaxPowershell": "Import-Csv <csv-file> | Select-Object -First <count> | Format-Table",
+          "powershell": "Import-Csv metrics\\checkout_metrics.csv | Select-Object -First 20 | Format-Table"
         },
         {
           "id": "csv-header",
@@ -830,79 +830,79 @@
       ]
     },
     {
-      "category": "git forensics",
+      "category": "Code history forensics (git-log.txt)",
       "items": [
         {
           "id": "git-clone",
-          "title": "שכפול bundle",
-          "syntax": "git clone <bundle-file> && cd <repo-dir>",
-          "command": "git clone repo/shipfast-checkout.bundle && cd shipfast-checkout",
-          "explain": "bundle הוא repo שלם בקובץ אחד. שכפול שלו נותן working copy רגיל עם היסטוריה ו-tags מלאים. אין git? הקובץ `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט רגיל (`git log -p --decorate --all`).",
-          "syntaxPowershell": "# git is optional: read <git-log-file> instead\nGet-Content <git-log-file> | Out-Host -Paging",
-          "powershell": "# git is optional: read repo\\git-log.txt instead\nGet-Content repo\\git-log.txt | Out-Host -Paging"
+          "title": "פתיחת היסטוריית הקוד",
+          "syntax": "head -n <count> <history-file>",
+          "command": "head -n 40 repo/git-log.txt",
+          "explain": "`repo/git-log.txt` הוא כל ההיסטוריה של ה-repo (`git log -p --decorate --all`) כטקסט רגיל, ה-commit החדש ביותר ראשון: שורת `commit <sha> (tag: ...)`, המחבר, התאריך, ההודעה, ואז ה-diff. כל הפקודות בחלק הזה קוראות אותו עם grep ו-awk; לא צריך git. ה-`.bundle` שלידו הוא אותה היסטוריה בשביל מי שכבר עובד עם git.",
+          "syntaxPowershell": "Get-Content <history-file> -TotalCount <count>",
+          "powershell": "Get-Content repo\\git-log.txt -TotalCount 40"
         },
         {
           "id": "git-log-oneline",
           "title": "ההיסטוריה במבט אחד",
-          "syntax": "git log --oneline --decorate --graph | head -<count>",
-          "command": "git log --oneline --decorate --graph | head -30",
-          "explain": "`--decorate` מציג tags ו-branches ליד ה-commits, כדי שתראו איפה כל release יושב. אין git? הקובץ `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט רגיל (`git log -p --decorate --all`).",
-          "syntaxPowershell": "# git is optional: read <git-log-file> instead\nSelect-String -Path <git-log-file> -Pattern '<commit-line-regex>' -Context 0,<after> | Select-Object -First <count>",
-          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern '^commit ' -Context 0,5 | Select-Object -First 30"
+          "syntax": "awk '/^<commit-line-regex>/ {sha = substr($2, 1, <sha-length>); ref = $0; sub(/<commit-prefix-regex>/, \"\", ref); want = 1; next} want && /<message-line-regex>/ {sub(/^ +/, \"\"); print sha, $0, ref; want = 0}' <history-file> | head -n <count>",
+          "command": "awk '/^commit / {sha = substr($2, 1, 7); ref = $0; sub(/^commit [0-9a-f]+ */, \"\", ref); want = 1; next} want && /^    / {sub(/^ +/, \"\"); print sha, $0, ref; want = 0}' repo/git-log.txt | head -n 30",
+          "explain": "בונה מחדש את `git log --oneline --decorate` מתוך הייצוא הטקסטואלי: לכל שורת `commit` שומרים את ה-short SHA (7 התווים הראשונים) ואת ה-tags בסוגריים, ומדפיסים אותם ליד השורה הראשונה של הודעת ה-commit.",
+          "syntaxPowershell": "Select-String -Path <history-file> -Pattern '<commit-line-regex-with-two-groups>' -Context 0,<after> | ForEach-Object { '<format>' -f $_.Matches[0].Groups[1].Value, $_.Context.PostContext[<index>].Trim(), $_.Matches[0].Groups[2].Value } | Select-Object -First <count>",
+          "powershell": "Select-String -Path repo\\git-log.txt -Pattern '^commit (\\w{7})\\w* ?(.*)' -Context 0,4 | ForEach-Object { '{0} {1} {2}' -f $_.Matches[0].Groups[1].Value, $_.Context.PostContext[3].Trim(), $_.Matches[0].Groups[2].Value } | Select-Object -First 30"
         },
         {
           "id": "git-tags",
           "title": "רשימת tags",
-          "syntax": "git tag --sort=<sort-key>",
-          "command": "git tag --sort=creatordate",
-          "explain": "ה-releases לפי הסדר. התאימו אותם לגרסאות בלוגי הדיפלוי. אין git? הקובץ `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט רגיל (`git log -p --decorate --all`).",
-          "syntaxPowershell": "# git is optional: read <git-log-file> instead\nSelect-String -Path <git-log-file> -Pattern '<tag-regex>' -AllMatches | ForEach-Object { $_.Matches.Value }",
-          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern 'tag: [^,)]+' -AllMatches | ForEach-Object { $_.Matches.Value }"
+          "syntax": "grep -E '^<commit-line-regex>.*<tag-marker>' <history-file>",
+          "command": "grep -E '^commit .*tag: ' repo/git-log.txt",
+          "explain": "כל commit שיש לו tag, מהחדש לישן: ה-SHA המלא (7 התווים הראשונים שלו הם ה-short SHA) וה-tags שלו. התאימו אותם לגרסאות ולערכי `commit=` בלוג הדיפלויים.",
+          "syntaxPowershell": "Select-String -Path <history-file> -Pattern '<tag-line-regex>' | ForEach-Object Line",
+          "powershell": "Select-String -Path repo\\git-log.txt -Pattern '^commit .*tag: ' | ForEach-Object Line"
         },
         {
           "id": "git-show-release",
           "title": "מה יש ב-release?",
-          "syntax": "git show <release-tag> --stat",
-          "command": "git show <tag> --stat",
-          "explain": "הודעת ה-commit, המחבר, התאריך והקבצים שנגעו בהם ב-commit שה-tag מצביע עליו. אין git? הקובץ `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט רגיל (`git log -p --decorate --all`).",
+          "syntax": "awk '/^commit / {p = /tag: <release-tag>[,)]/; d = 0} /^diff --git/ {d = 1} p && (!d || /^diff --git/)' <history-file>",
+          "command": "awk '/^commit / {p = /tag: v2\\.14\\.0[,)]/; d = 0} /^diff --git/ {d = 1} p && (!d || /^diff --git/)' repo/git-log.txt",
+          "explain": "כמו `git show <tag> --stat`: `p` נדלק ב-commit שיש לו את ה-tag ונכבה בשורת ה-`commit` הבאה, ו-`d` מסמן איפה ה-diff מתחיל. מקבלים את המחבר, התאריך וההודעה, ואז שורת `diff --git` אחת לכל קובץ שה-release נגע בו. הורידו את `(!d || /^diff --git/)` (השאירו רק `p`) בשביל ה-patch המלא.",
           "syntaxPowershell": "# git is optional: read <git-log-file> instead\nSelect-String -Path <git-log-file> -Pattern '<tag-regex>' -Context 0,<after>",
-          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern 'tag: v2.14.1\\b' -Context 0,60"
+          "powershell": "Select-String -Path repo\\git-log.txt -Pattern 'tag: v2\\.14\\.0\\b' -Context 0,60"
         },
         {
           "id": "git-diff-releases",
           "title": "Diff בין שני releases",
-          "syntax": "git diff <old-tag>..<new-tag> --stat",
-          "command": "git diff v2.13.4..v2.14.0 --stat",
-          "explain": "כל מה שהשתנה בין שתי גרסאות. הורידו את `--stat` כדי לקבל את ה-patch המלא. אין git? הקובץ `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט רגיל (`git log -p --decorate --all`).",
-          "syntaxPowershell": "# git is optional: read <git-log-file> instead\nSelect-String -Path <git-log-file> -Pattern '<commit-or-file-header-regex>' | Select-Object -First <count> Line",
-          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern '^commit |^\\+\\+\\+ b/' | Select-Object -First 40 Line"
+          "syntax": "awk '/^commit / {if (/tag: <new-tag>[,)]/) p = 1; if (/tag: <old-tag>[,)]/) p = 0} p && /^(commit|diff --git)/' <history-file>",
+          "command": "awk '/^commit / {if (/tag: v2\\.14\\.0[,)]/) p = 1; if (/tag: v2\\.13\\.4[,)]/) p = 0} p && /^(commit|diff --git)/' repo/git-log.txt",
+          "explain": "כמו `git diff v2.13.4..v2.14.0 --stat`: הקובץ מסודר מהחדש לישן, אז מתחילים להדפיס ב-tag החדש ועוצרים בישן. מקבלים כל commit שביניהם ואת הקבצים שכל אחד נגע בהם. הורידו את `&& /^(commit|diff --git)/` בשביל ה-patches המלאים.",
+          "syntaxPowershell": "$on = $false\nGet-Content <history-file> | ForEach-Object { if ($_ -match '<new-tag-regex>') { $on = $true }; if ($_ -match '<old-tag-regex>') { $on = $false }; if ($on -and $_ -match '<header-regex>') { $_ } }",
+          "powershell": "$on = $false\nGet-Content repo\\git-log.txt | ForEach-Object { if ($_ -match '^commit .*tag: v2\\.14\\.0[,)]') { $on = $true }; if ($_ -match '^commit .*tag: v2\\.13\\.4[,)]') { $on = $false }; if ($on -and $_ -match '^(commit|diff --git)') { $_ } }"
         },
         {
           "id": "git-pickaxe",
           "title": "מי הוסיף מחרוזת",
-          "syntax": "git log -p -S'<string>' --oneline",
-          "command": "git log -p -S'pattern' --oneline",
-          "explain": "ה-\"pickaxe\": commits שהוסיפו או הסירו מופעים של `pattern`, עם ה-patches שלהם. אין git? הקובץ `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט רגיל (`git log -p --decorate --all`).",
-          "syntaxPowershell": "# git is optional: read <git-log-file> instead\nSelect-String -Path <git-log-file> -Pattern '<commit-line-regex>|<changed-line-regex>' | ForEach-Object Line",
-          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern '^commit |^[+-].*pattern' | ForEach-Object Line"
+          "syntax": "awk '/^commit / {c = substr($2, 1, 7)} /^diff --git/ {f = substr($4, 3)} /^[+-].*<string>/ && !/^(\\+\\+\\+|---) / {print c, f, $0}' <history-file>",
+          "command": "awk '/^commit / {c = substr($2, 1, 7)} /^diff --git/ {f = substr($4, 3)} /^[+-].*duration_ms/ && !/^(\\+\\+\\+|---) / {print c, f, $0}' repo/git-log.txt",
+          "explain": "ה-\"pickaxe\" (`git log -S`): כל שורה שנוספה (`+`) או נמחקה (`-`) ומכילה את המחרוזת, עם ה-short SHA והקובץ שהיא שייכת אליהם. ה-commit שהוסיף אותה לראשונה הוא הנמוך ביותר בפלט.",
+          "syntaxPowershell": "Select-String -Path <history-file> -Pattern '<commit-line-regex>|<changed-line-regex>' | ForEach-Object Line",
+          "powershell": "Select-String -Path repo\\git-log.txt -Pattern '^commit |^[+-].*duration_ms' | ForEach-Object Line"
         },
         {
           "id": "git-grep",
-          "title": "חיפוש בקוד ב-revision מסוים",
-          "syntax": "git grep -n '<pattern>' <tag>",
-          "command": "git grep -n 'pattern' <tag>",
-          "explain": "מריץ grep על העץ כפי שהיה ב-tag הזה, בלי לעשות לו checkout. אין git? הקובץ `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט רגיל (`git log -p --decorate --all`).",
-          "syntaxPowershell": "# git is optional: read <git-log-file> instead\nSelect-String -Path <git-log-file> -Pattern '<pattern>' -Context <before>,<after>",
-          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern 'pattern' -Context 2,2"
+          "title": "חיפוש בקוד שנוסף",
+          "syntax": "grep -n -E '^\\+.*<pattern>' <history-file>",
+          "command": "grep -n -E '^\\+.*export (async )?function' repo/git-log.txt",
+          "explain": "במקום לחפש בעץ של tag, מחפשים ב-diffs: `^\\+` משאיר רק שורות שנוספו. `-n` נותן את מספר השורה ב-`git-log.txt`, כך שאפשר לקרוא סביב התאמה עם `sed -n '40,90p' repo/git-log.txt`; שורת ה-`commit` הקרובה מעליה אומרת איזה release הוסיף אותה.",
+          "syntaxPowershell": "Select-String -Path <history-file> -Pattern '<added-line-regex>' | Select-Object LineNumber, Line",
+          "powershell": "Select-String -Path repo\\git-log.txt -Pattern '^\\+.*export (async )?function' | Select-Object LineNumber, Line"
         },
         {
           "id": "git-blame",
-          "title": "Blame לטווח שורות",
-          "syntax": "git blame -L <start>,<end> <path>",
-          "command": "git blame -L 1,30 src/path/to/file.ts",
-          "explain": "מי נגע אחרון בכל שורה, ובאיזה commit. הוסיפו `-w` כדי להתעלם משינויי whitespace. אין git? הקובץ `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט רגיל (`git log -p --decorate --all`).",
+          "title": "מי נגע בקובץ?",
+          "syntax": "awk '/^commit / {c = substr($2, 1, 7)} /^Author:/ {a = $2 \" \" $3} /^Date:/ {d = $2} /^diff --git a\\/<escaped-path> / {print c, d, a}' <history-file>",
+          "command": "awk '/^commit / {c = substr($2, 1, 7)} /^Author:/ {a = $2 \" \" $3} /^Date:/ {d = $2} /^diff --git a\\/src\\/routes\\/checkout\\.ts / {print c, d, a}' repo/git-log.txt",
+          "explain": "blame ברמת הקובץ: כל commit ששינה את `src/routes/checkout.ts`, עם התאריך והמחבר, מהחדש לישן. אחר כך קראו את ה-hunks של ה-commit הזה בקובץ כדי לראות בדיוק אילו שורות הוא שינה.",
           "syntaxPowershell": "# git is optional: read <git-log-file> instead\nSelect-String -Path <git-log-file> -Pattern '<commit-line-regex>|<author-line-regex>|<file-header-regex>' | ForEach-Object Line",
-          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern '^commit |^Author:|^\\+\\+\\+ b/src/path/to/file.ts' | ForEach-Object Line"
+          "powershell": "Select-String -Path repo\\git-log.txt -Pattern '^commit |^Author:|^diff --git a/src/routes/checkout\\.ts ' | ForEach-Object Line"
         }
       ]
     },
@@ -911,37 +911,37 @@
       "items": [
         {
           "id": "regex-timing",
-          "title": "תזמון regex ב-Node (רק בגדלים בטוחים)",
-          "syntax": "node -e 'const re=/<regex>/; for (let n=<from>;n<=<to>;n++){const s=\"<char>\".repeat(n)+\"<tail>\"; const t=Date.now(); re.test(s); console.log(n, Date.now()-t, \"ms\")}'",
-          "command": "node -e 'const re=/^(a+)+$/; for (let n=18;n<=26;n++){const s=\"a\".repeat(n)+\"!\"; const t=Date.now(); re.test(s); console.log(n, Date.now()-t, \"ms\")}'",
-          "explain": "מודד כמה זמן לוקח ל-regex **להיכשל** על inputs באורך הולך וגדל שמסתיימים בתו שהוא לא יכול להתאים. `(a+)+` הוא ה-pattern הרשע הקלאסי; החליפו בכל regex שאתם חושדים בו (ובצורת input שמתאימה לו). אם הזמן בערך **מוכפל בכל תו נוסף**, זה אקספוננציאלי.\n\n**אזהרה: אף פעם אל תעברו ~28 תווים.** כל תו נוסף מכפיל את זמן הריצה, אז עוד כמה והטרמינל שלכם קפוא לדקות, או לשנים. אם זה קורה, `Ctrl+C`, או `pkill node` מטרמינל אחר.",
-          "syntaxPowershell": "$re = [regex]'<regex>'\nforeach ($n in <from>..<to>) { $s = ('<char>' * $n) + '<tail>'; $t = [Diagnostics.Stopwatch]::StartNew(); [void]$re.IsMatch($s); \"$n $($t.ElapsedMilliseconds) ms\" }",
-          "powershell": "$re = [regex]'^(a+)+$'\nforeach ($n in 18..24) { $s = ('a' * $n) + '!'; $t = [Diagnostics.Stopwatch]::StartNew(); [void]$re.IsMatch($s); \"$n $($t.ElapsedMilliseconds) ms\" }"
+          "title": "ציד quantifiers מקוננים ב-diffs",
+          "syntax": "grep -n -E '^\\+.*<nested-quantifier-regex>' <history-file>",
+          "command": "grep -n -E '^\\+.*\\([^()]*[+*][^()]*\\)[*+]' repo/git-log.txt",
+          "explain": "*quantifier מקונן* הוא קבוצה שמכילה `+` או `*` ובעצמה חוזרת, כמו `(a+)+` או `(x*y)*`. ה-regex-של-regexes הזה מוצא אותם בשורות שנוספו. זו היוריסטיקה, אז קראו כל התאמה.\n\nלמה לא פשוט למדוד זמן? grep, sed ו-awk משתמשים במנועים בלי backtracking: הם אף פעם לא מתפוצצים, ולכן לא יכולים לשחזר את הבעיה. JavaScript, Python, Java ו-.NET (PowerShell) *כן* עושים backtracking. אם אתם מודדים שם, השאירו inputs מתחת ל-~25 תווים: כל תו נוסף יכול להכפיל את זמן הריצה.",
+          "syntaxPowershell": "Select-String -Path <history-file> -Pattern '<added-line-regex>' | Select-Object LineNumber, Line",
+          "powershell": "Select-String -Path repo\\git-log.txt -Pattern '^\\+.*\\([^()]*[+*][^()]*\\)[*+]' | Select-Object LineNumber, Line"
         },
         {
           "id": "regex-timing-python",
-          "title": "אותה בדיקה ב-Python",
-          "syntax": "python3 -c '\nimport re, time\nfor n in range(<from>, <to>):\n    s = \"<char>\" * n + \"<tail>\"\n    t = time.time()\n    re.match(r\"<regex>\", s)\n    print(n, round((time.time() - t) * <scale>), \"ms\")\n'",
-          "command": "python3 -c '\nimport re, time\nfor n in range(18, 25):\n    s = \"a\" * n + \"!\"\n    t = time.time()\n    re.match(r\"^(a+)+$\", s)\n    print(n, round((time.time() - t) * 1000), \"ms\")\n'",
-          "explain": "גם `re` של Python הוא מנוע backtracking ומתפוצץ באותה צורה. הדביקו כמו שזה: המחרוזת הרב-שורתית בתוך מירכאות בודדות עובדת ב-bash וב-zsh. **אותה אזהרה: שמרו על n קטן.**",
+          "title": "לזהות את הצורה הרעה",
+          "syntax": "printf '%s\\n' '<regex>' '<regex>' | grep -E '<nested-quantifier-regex>'",
+          "command": "printf '%s\\n' '/^(a+)+$/' '/^([a-z]+ ?)*$/' '/^[a-z ]*$/' '/^(ab|cd)*$/' | grep -E '\\([^()]*[+*][^()]*\\)[*+]'",
+          "explain": "תרגלו על regexes מוכרים. שני הראשונים הם quantifiers מקוננים: מחרוזת של אותיות אפשר לחלק בין החזרה הפנימית לחיצונית במספר אקספוננציאלי של דרכים, ומנוע backtracking מנסה את כולן לפני שהוא מוותר. שני האחרונים בטוחים: quantifier אחד על character class, או חלופות שלא יכולות לחפוף.\n\nב-Windows, PowerShell משתמש במנוע ה-backtracking של .NET, אז הגרסה שלו מודדת את `(a+)+` הקלאסי באמת: כל תו נוסף בערך מכפיל את הזמן. **השאירו n על 24 או פחות.**",
           "syntaxPowershell": "# PowerShell uses .NET regex, which backtracks too:\n$re = [regex]'<regex>'\n<from>..<to> | ForEach-Object { $s = ('<char>' * $_) + '<tail>'; '<format>' -f $_, (Measure-Command { $re.IsMatch($s) }).TotalMilliseconds }",
           "powershell": "# PowerShell uses .NET regex, which backtracks too:\n$re = [regex]'^(a+)+$'\n18..24 | ForEach-Object { $s = ('a' * $_) + '!'; '{0} {1:N0} ms' -f $_, (Measure-Command { $re.IsMatch($s) }).TotalMilliseconds }"
         },
         {
           "id": "regex-timeout",
           "title": "הרצה עם timeout קשיח",
-          "syntax": "timeout <duration> node -e '<your test>'",
-          "command": "timeout 10s node -e '...your test...'",
-          "explain": "רשת ביטחון: הורג את התהליך אחרי 10 שניות, לא משנה מה.",
+          "syntax": "<your-experiment> & pid=$!; (sleep <seconds>; kill $pid 2>/dev/null && echo \"killed after <seconds>s\") & wait $pid; echo \"exit status $?\"",
+          "command": "sleep 30 & pid=$!; (sleep 2; kill $pid 2>/dev/null && echo \"killed after 2s\") & wait $pid; echo \"exit status $?\"",
+          "explain": "רשת ביטחון שעובדת בכל bash (`timeout` לא קיים ב-macOS): מריצים את הניסוי ברקע, מפעילים שומר שהורג אותו אחרי N שניות, ומחכים. exit status 143 אומר שהוא נהרג. החליפו את `sleep 30` בניסוי שלכם.",
           "syntaxPowershell": "$re = New-Object Text.RegularExpressions.Regex('<regex>', 'None', [TimeSpan]::FromSeconds(<seconds>))\ntry { $re.IsMatch(('<char>' * <n>) + '<tail>') } catch { 'timed out after <seconds>s' }",
           "powershell": "$re = New-Object Text.RegularExpressions.Regex('^(a+)+$', 'None', [TimeSpan]::FromSeconds(5))\ntry { $re.IsMatch(('a' * 40) + '!') } catch { 'timed out after 5s' }"
         },
         {
           "id": "regex-linear",
-          "title": "השוואה לגרסה לינארית",
-          "syntax": "node -e 'const re=/<regex>/; const s=\"<chunk>\".repeat(<n>)+\"<tail>\"; console.time(\"t\"); re.test(s); console.timeEnd(\"t\")'",
-          "command": "node -e 'const re=/^[\\w\\s]*$/; const s=\"a \".repeat(5000)+\"!\"; console.time(\"t\"); re.test(s); console.timeEnd(\"t\")'",
-          "explain": "character class עם quantifier יחיד לא יכול לעשות backtracking אקספוננציאלי. אפילו על 10,000 תווים הוא מסיים בהרבה פחות ממילישנייה.",
+          "title": "בדיקת השכתוב הלינארי",
+          "syntax": "printf '%s\\n' '<regex>' '<regex>' | grep -v -E '<nested-quantifier-regex>'",
+          "command": "printf '%s\\n' '/^([a-z]+ ?)*$/' '/^[a-z ]*$/' | grep -v -E '\\([^()]*[+*][^()]*\\)[*+]'",
+          "explain": "quantifier יחיד על character class (`[a-z ]*`, `[\\w\\s]*`) יכול לצרוך כל תו רק בדרך אחת, אז הוא רץ בזמן לינארי אפילו על 10,000 תווים. `grep -v` משאיר את השכתובים המועמדים שכבר אין בהם quantifier מקונן. ב-Windows, גרסת ה-PowerShell מודדת את השכתוב על 10,000 תווים: הרבה פחות ממילישנייה.",
           "syntaxPowershell": "$re = [regex]'<regex>'; $s = ('<chunk>' * <n>) + '<tail>'\n(Measure-Command { $re.IsMatch($s) }).TotalMilliseconds",
           "powershell": "$re = [regex]'^[\\w\\s]*$'; $s = ('a ' * 5000) + '!'\n(Measure-Command { $re.IsMatch($s) }).TotalMilliseconds"
         }

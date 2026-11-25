@@ -7,9 +7,9 @@
   "tags": [
     "log-forensics",
     "nginx",
-    "jq",
+    "grep",
     "time-zones",
-    "git",
+    "git-log",
     "nodejs",
     "incident-response"
   ],
@@ -23,8 +23,8 @@
     "Get the evidence: download and unzip the **evidence pack**, *or* open the **Evidence Explorer** to browse every file in your browser (no installs).",
     "Read `README_FIRST.txt` end to end.",
     "Note each source's time zone: nginx, Postgres and deploys are **UTC**, the app log is **local time (+02:00)**, metrics and Slack use **epoch seconds**.",
-    "Pick your path: **bash** (Linux, macOS or WSL), **Windows PowerShell** (every Toolbox command has a PowerShell version), or the **browser Explorer**.",
-    "Git is optional: `repo/git-log.txt` holds the full history (with diffs) as plain text."
+    "Pick your path: **bash** (Linux, macOS, WSL or Git Bash), **Windows PowerShell** (every Toolbox command has a PowerShell version), or the **browser Explorer**.",
+    "Nothing to install: every question is solvable with what your machine already has (grep, awk, sed, sort in bash; built-in cmdlets in Windows PowerShell). The code history is plain text in `repo/git-log.txt`, so you don't need git."
   ],
   "evidenceZip": "/evidence/3am-outage-evidence.zip",
   "evidence": [
@@ -84,7 +84,7 @@
     "Answers are case-insensitive, and leading and trailing whitespace is ignored. Stick to the format shown under each question.",
     "Hints cost the points shown on them and are revealed in order, from a gentle nudge to almost the full command. Every Toolbox command shows its syntax for free; revealing the full runnable command costs 5 points. Once you finish the case, every command is free.",
     "Working in pairs is encouraged. Talk through your reasoning out loud, just like a real incident review.",
-    "Any tool is allowed: grep, awk, jq, Python, a spreadsheet, your favourite editor. The Toolbox tab lists commands that help.",
+    "Any tool is allowed, and nothing needs installing: the Toolbox commands use only what ships with Linux, macOS, Git Bash and Windows PowerShell. A spreadsheet or your favourite editor is fine too.",
     "Wrong answers are not free: each one costs 2 points, up to 20 per stage. Be able to explain *why* your answer is right before you submit it.",
     "Speed and care pay off. A fast solve earns a time bonus of up to +30 per stage, fading once you pass the stage's target time. A clean solve (no hints, no commands, no wrong answers) earns +10. The first player to solve a stage gets +15 first blood. Finish all six stages without revealing an answer and you earn +50.",
     "Don't share flags with other teams until everyone is done. Sharing techniques is fine.",
@@ -166,11 +166,11 @@
         },
         {
           "cost": 20,
-          "text": "Clone the bundle and match the deployed **version** to a **git tag**. `git show <tag>` tells you which commit a tag points to. The deploy log's `commit=` field should agree with it. If two candidates remain, read both diffs and ask which one could plausibly freeze a pod."
+          "text": "Match the deployed **version** to a **tag** in `repo/git-log.txt`: each `commit <sha> (tag: ...)` line shows which commit a tag points to, and its first 7 characters are the short SHA. The deploy log's `commit=` field should agree with it. If two candidates remain, read both diffs and ask which one could plausibly freeze a pod."
         },
         {
           "cost": 40,
-          "text": "```sh\ngit clone repo/shipfast-checkout.bundle && cd shipfast-checkout\ngit tag --sort=creatordate | tail -5\ngit log --oneline -1 <tag>      # short SHA of the tagged commit\ngit show <tag> --stat           # what did that release touch?\n```\n\nCross-check: `grep checkout deploys/deploys.log` and the `version` field in the app log right before the first error."
+          "text": "```sh\ngrep 'service=checkout' deploys/deploys.log\ngrep -E '^commit .*tag: ' repo/git-log.txt   # which commit each tag points to\nfor TAG in v2.14.0 v2.14.1; do               # what did each candidate release touch?\n  awk -v t=\"tag: $TAG\" '/^commit / {p = index($0, t); d = 0} /^diff --git/ {d = 1} p && (!d || /^diff --git/)' repo/git-log.txt\ndone\n```\n\nThe short SHA is the first 7 characters after `commit`. Cross-check with the `version` field in the app log right before the first error."
         }
       ],
       "successNote": "The most recent deploy is the first suspect, not automatically the culprit. One release went out over half an hour before anything broke, so recency alone would have sent you the wrong way. Correlate *when each change went live* with *when symptoms began*, and then confirm it by reading the diff."
@@ -212,7 +212,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\n# starts vs dones per order, then diff them\njq -r 'select(.msg==\"checkout.start\") | .order' app/checkout-service.log | sort -u > started\njq -r 'select(.msg==\"checkout.done\")  | .order' app/checkout-service.log | sort -u > done\ncomm -23 started done\n# or: grep '<rid-from-nginx>' app/checkout-service.log\n```"
+          "text": "```sh\n# starts vs dones per order, then diff them\ncomm -23 \\\n  <(grep '\"msg\":\"checkout.start\"' app/checkout-service.log | grep -o '\"order\":\"[^\"]*\"' | sort -u) \\\n  <(grep '\"msg\":\"checkout.done\"'  app/checkout-service.log | grep -o '\"order\":\"[^\"]*\"' | sort -u)\n# or: follow the rid of the first 5xx from nginx into the app log\ngrep \"$(grep -m1 -E '\" 5[0-9][0-9] ' nginx/access.log | grep -o 'rid=[0-9a-f]*' | cut -d= -f2)\" app/checkout-service.log\n```"
         }
       ],
       "successNote": "Some bugs only fire on specific input. A deploy can look healthy for 15 minutes until the one payload that triggers it arrives. A request that **starts and never ends** (no completion log, no error) is a classic sign that a thread or event loop is stuck rather than crashing."
@@ -254,7 +254,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\ngit show <bad-sha> --stat\ngit show <bad-sha> -- src/\ngit grep -n -E 'RegExp|/\\^.*\\)\\*' <bad-sha>\n```\n\nThe answer is the exported function that *uses* the suspicious regex, not the constant's name."
+          "text": "```sh\nTAG=v2.14.1   # the release you found in stage 2\n# files it touched, plus every added line that builds a regex\nawk -v t=\"tag: $TAG\" '/^commit / {p = index($0, t)} p && /^(diff --git|\\+.*(RegExp|= \\/\\^))/' repo/git-log.txt\n# nested quantifiers on added lines, with line numbers to read around\ngrep -n -E '^\\+.*\\([^()]*[+*][^()]*\\)[*+]' repo/git-log.txt\n```\n\nRead the added file around that line (`sed -n '<from>,<to>p' repo/git-log.txt`). The answer is the exported function that *uses* the suspicious regex, not the constant's name."
         }
       ],
       "successNote": "**Catastrophic backtracking:** with nested quantifiers like `(\\w+\\s?)*`, a backtracking regex engine can split a string of words in exponentially many ways. When the final character makes the match fail, it tries **all** of them. 99 characters is enough to keep a CPU busy for far longer than anyone will wait, and in single-threaded Node.js that blocks everything."
@@ -295,7 +295,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\njq -c 'select(.msg==\"checkout.start\" and .order==\"ORD-XXXXXX\") | {ts, pod, rid}' \\\n  app/checkout-service.log | wc -l\n```"
+          "text": "```sh\nORDER=ORD-XXXXXX   # your answer from stage 3\ngrep '\"msg\":\"checkout.start\"' app/checkout-service.log | grep \"\\\"order\\\":\\\"$ORDER\\\"\" | wc -l\n```"
         }
       ],
       "successNote": "Client **retries** (automatic, plus impatient users clicking again) kept sending the same poison payload. Round-robin load balancing spread it across every pod, and **liveness probes** restarted frozen pods straight back into the line of fire. Retries need backoff and caps, and the system needs a way to reject inputs that killed it before. Otherwise self-healing just becomes self-reinfecting."
@@ -386,11 +386,11 @@
         {
           "id": "browse-file",
           "title": "Browse without wrapping",
-          "syntax": "less -S <file>",
-          "command": "less -S nginx/access.log",
-          "explain": "`-S` chops long lines instead of wrapping them. Use `/pattern` to search, `n` for the next hit, `G` for the end of the file.",
-          "syntaxPowershell": "Get-Content <file> | Out-Host -Paging",
-          "powershell": "Get-Content nginx\\access.log | Out-Host -Paging"
+          "syntax": "cut -c1-<width> <file> | head -n <count>",
+          "command": "cut -c1-150 nginx/access.log | head -n 40",
+          "explain": "`cut -c1-150` chops every line at 150 characters instead of wrapping it, and `head` keeps it to one screen. To read a stretch further down, print a range of lines: `sed -n '200,240p' nginx/access.log`.",
+          "syntaxPowershell": "Get-Content <file> -TotalCount <count> | ForEach-Object { $_.Substring(0, [Math]::Min(<width>, $_.Length)) }",
+          "powershell": "Get-Content nginx\\access.log -TotalCount 40 | ForEach-Object { $_.Substring(0, [Math]::Min(150, $_.Length)) }"
         },
         {
           "id": "file-type",
@@ -437,19 +437,19 @@
           "id": "grep-line-numbers",
           "title": "Line numbers",
           "syntax": "grep -n '<pattern>' <file> | head",
-          "command": "grep -n 'pattern' app/checkout-service.log | head",
-          "explain": "`-n` prefixes each hit with its line number, which helps you jump there in `less` (`<num>G`).",
+          "command": "grep -n '\"msg\":\"server.shutdown\"' app/checkout-service.log | head",
+          "explain": "`-n` prefixes each hit with its line number. Then print the lines around it with `sed -n '<from>,<to>p' <file>`, for example `sed -n '120,140p'`.",
           "syntaxPowershell": "Select-String -Path <file> -Pattern '<pattern>' | Select-Object -First <count> LineNumber, Line",
-          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'pattern' | Select-Object -First 10 LineNumber, Line"
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"msg\":\"server.shutdown\"' | Select-Object -First 10 LineNumber, Line"
         },
         {
           "id": "grep-first-match",
           "title": "Stop at the first match",
           "syntax": "grep -m1 -E '<regex>' <file>",
-          "command": "grep -m1 -E 'pattern' nginx/access.log",
+          "command": "grep -m1 -E '\"msg\":\"eventloop\\.lag\"' app/checkout-service.log",
           "explain": "`-m1` exits after the first hit. On a chronologically sorted log, that gives you the *earliest* occurrence.",
           "syntaxPowershell": "Select-String -Path <file> -Pattern '<regex>' | Select-Object -First 1",
-          "powershell": "Select-String -Path nginx\\access.log -Pattern 'pattern' | Select-Object -First 1"
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"msg\":\"eventloop\\.lag\"' | Select-Object -First 1"
         },
         {
           "id": "grep-exclude",
@@ -473,19 +473,19 @@
           "id": "grep-context",
           "title": "Context around a hit",
           "syntax": "grep -n -B<before> -A<after> '<id>' <file>",
-          "command": "grep -n -B3 -A10 'ORD-XXXXXX' app/checkout-service.log",
-          "explain": "`-B`/`-A` show lines before and after each match, so you see what happened around an event.",
+          "command": "grep -n -B3 -A3 'ORD-MV26QB' app/checkout-service.log",
+          "explain": "`-B`/`-A` show lines before and after each match, so you see what happened around an event. `ORD-MV26QB` is just an ordinary order from the first second of the log; swap in any ID you care about.",
           "syntaxPowershell": "Select-String -Path <file> -Pattern '<id>' -Context <before>,<after>",
-          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'ORD-XXXXXX' -Context 3,10"
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'ORD-MV26QB' -Context 3,3"
         },
         {
           "id": "grep-gzip",
-          "title": "Search compressed logs",
-          "syntax": "zgrep -c '<pattern>' <file.gz>",
-          "command": "zgrep -c 'pattern' rotated.log.gz",
-          "explain": "In real life old logs are gzipped. `zgrep`/`zcat` read them without unpacking.",
-          "syntaxPowershell": "$gz = New-Object IO.Compression.GZipStream([IO.File]::OpenRead(\"$PWD\\<file.gz>\"), [IO.Compression.CompressionMode]::Decompress)\n((New-Object IO.StreamReader($gz)).ReadToEnd() -split \"`n\" | Select-String '<pattern>').Count",
-          "powershell": "$gz = New-Object IO.Compression.GZipStream([IO.File]::OpenRead(\"$PWD\\rotated.log.gz\"), [IO.Compression.CompressionMode]::Decompress)\n((New-Object IO.StreamReader($gz)).ReadToEnd() -split \"`n\" | Select-String 'pattern').Count"
+          "title": "Search every file at once",
+          "syntax": "grep -r -l '<pattern>' <dir>",
+          "command": "grep -r -l 'INC-2291' .",
+          "explain": "`-r` walks the whole folder and `-l` prints only the names of the files that match. Handy for \"where else does this ID show up?\". In real life old logs are often gzipped: `gzip -dc old.log.gz | grep ...` reads them without unpacking.",
+          "syntaxPowershell": "Get-ChildItem <dir> -Recurse -File | Select-String -Pattern '<pattern>' -List | Select-Object Path",
+          "powershell": "Get-ChildItem -Recurse -File | Select-String -Pattern 'INC-2291' -List | Select-Object Path"
         }
       ]
     },
@@ -567,79 +567,79 @@
       ]
     },
     {
-      "category": "jq for JSON logs",
+      "category": "JSON lines with grep, sed & awk",
       "items": [
         {
           "id": "json-pretty",
-          "title": "Pretty-print one line",
-          "syntax": "head -n<count> <json-lines-file> | jq .",
-          "command": "head -n1 app/checkout-service.log | jq .",
-          "explain": "See every field a log line carries before you write filters.",
+          "title": "One field per line",
+          "syntax": "head -n <count> <json-lines-file> | tr '<separator>' '<newline>'",
+          "command": "head -n 1 app/checkout-service.log | tr ',' '\\n'",
+          "explain": "See every field a log line carries before you write filters. Each line is one flat JSON object, so splitting on commas puts one `\"key\":value` pair per line. (A value that itself contains a comma would split too; fine for a first look.)",
           "syntaxPowershell": "Get-Content <json-lines-file> -TotalCount <count> | ConvertFrom-Json | Format-List",
           "powershell": "Get-Content app\\checkout-service.log -TotalCount 1 | ConvertFrom-Json | Format-List"
         },
         {
           "id": "json-filter-msg",
           "title": "Filter by message",
-          "syntax": "jq -c 'select(.<field> == \"<value>\")' <json-lines-file> | head",
-          "command": "jq -c 'select(.msg==\"checkout.start\")' app/checkout-service.log | head",
-          "explain": "`select()` keeps matching objects, and `-c` keeps them one per line so you can still grep, head and wc.",
+          "syntax": "grep '\"<field>\":\"<value>\"' <json-lines-file> | head",
+          "command": "grep '\"msg\":\"checkout.start\"' app/checkout-service.log | head",
+          "explain": "No JSON tool needed: every line is flat text, so `\"msg\":\"checkout.start\"` (quotes and colon included) matches only that field with that exact value, never the same word inside another field.",
           "syntaxPowershell": "Select-String -Path <json-lines-file> -Pattern '<raw-json-snippet>' | ForEach-Object { $_.Line | ConvertFrom-Json } | Select-Object -First <count> <keys>",
           "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"msg\":\"checkout.start\"' | ForEach-Object { $_.Line | ConvertFrom-Json } | Select-Object -First 10 ts, pod, order, customer"
         },
         {
           "id": "json-follow-order",
           "title": "Follow one order",
-          "syntax": "jq -c 'select(.<field> == \"<id>\")' <json-lines-file>",
-          "command": "jq -c 'select(.order==\"ORD-XXXXXX\")' app/checkout-service.log",
-          "explain": "Every event for a single order. Is there a start *and* a done?",
+          "syntax": "grep '\"<field>\":\"<id>\"' <json-lines-file>",
+          "command": "grep '\"order\":\"ORD-MV26QB\"' app/checkout-service.log",
+          "explain": "Every event for a single order (this one is an ordinary order; swap in yours). Is there a start *and* a done?",
           "syntaxPowershell": "Select-String -Path <json-lines-file> -Pattern '<id>' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json } | Format-Table <keys>",
-          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'ORD-XXXXXX' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json } | Format-Table ts, pod, msg, order, rid"
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'ORD-MV26QB' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json } | Format-Table ts, pod, msg, order, rid"
         },
         {
           "id": "json-custom-output",
-          "title": "Custom output with -r",
-          "syntax": "jq -r '\"\\(.<key>) \\(.<key>) \\(.<key> // \"\")\"' <json-lines-file> | less -S",
-          "command": "jq -r '\"\\(.ts) \\(.pod) \\(.msg) \\(.order // \"\")\"' app/checkout-service.log | less -S",
-          "explain": "`-r` prints raw strings, and `\\(...)` interpolates fields. `//` gives a default when a field is missing.",
-          "syntaxPowershell": "Get-Content <json-lines-file> | ForEach-Object { $j = $_ | ConvertFrom-Json; \"$($j.<key>) $($j.<key>) ...\" } | Out-Host -Paging",
-          "powershell": "Get-Content app\\checkout-service.log | ForEach-Object { $j = $_ | ConvertFrom-Json; \"$($j.ts) $($j.pod) $($j.msg) $($j.order)\" } | Out-Host -Paging"
+          "title": "Pick fields by name with awk",
+          "syntax": "awk -F'\"' '{split(\"\", v); for (i = 2; i < NF; i++) if ($(i+1) == \":\") v[$i] = $(i+2); print v[\"<key>\"], v[\"<key>\"], ...}' <json-lines-file> | head -n <count>",
+          "command": "awk -F'\"' '{split(\"\", v); for (i = 2; i < NF; i++) if ($(i+1) == \":\") v[$i] = $(i+2); print v[\"ts\"], v[\"pod\"], v[\"msg\"], v[\"order\"]}' app/checkout-service.log | head -n 20",
+          "explain": "Splitting on `\"` puts each key in a field of its own, followed by a field that is exactly `:` and then the value. The loop turns that into a small `v[key] = value` table per line, so you can print any string fields by name. A missing key (like `order` on cart lines) prints as empty.",
+          "syntaxPowershell": "Get-Content <json-lines-file> -TotalCount <count> | ForEach-Object { $j = $_ | ConvertFrom-Json; \"$($j.<key>) $($j.<key>) ...\" }",
+          "powershell": "Get-Content app\\checkout-service.log -TotalCount 20 | ForEach-Object { $j = $_ | ConvertFrom-Json; \"$($j.ts) $($j.pod) $($j.msg) $($j.order)\" }"
         },
         {
           "id": "json-msg-types",
           "title": "What message types exist?",
-          "syntax": "jq -r '.<field>' <json-lines-file> | sort | uniq -c | sort -rn",
-          "command": "jq -r '.msg' app/checkout-service.log | sort | uniq -c | sort -rn",
-          "explain": "A histogram of event types. Rare warnings stand out immediately.",
+          "syntax": "grep -o '\"<field>\":\"[^\"]*\"' <json-lines-file> | sort | uniq -c | sort -rn",
+          "command": "grep -o '\"msg\":\"[^\"]*\"' app/checkout-service.log | sort | uniq -c | sort -rn",
+          "explain": "`-o` pulls just the `\"msg\":\"...\"` pair out of every line; `sort | uniq -c | sort -rn` turns that into a histogram of event types. Rare warnings stand out immediately.",
           "syntaxPowershell": "Select-String -Path <json-lines-file> -Pattern '<regex-with-capture-group>' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
           "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"msg\":\"([^\"]+)\"' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
         },
         {
           "id": "json-group-count",
-          "title": "Group and count (slurp)",
-          "syntax": "jq -s 'map(select(.<field> == \"<value>\")) | group_by(.<field>) | map({<key>: .[0].<field>, n: length})' <json-lines-file>",
-          "command": "jq -s 'map(select(.level==\"warn\")) | group_by(.msg) | map({msg: .[0].msg, n: length})' app/checkout-service.log",
-          "explain": "`-s` slurps all lines into one array, so you can `group_by`, `sort_by` and `length` across the whole file.",
+          "title": "Filter, then group and count",
+          "syntax": "grep '\"<field>\":\"<value>\"' <json-lines-file> | grep -o '\"<group-field>\":\"[^\"]*\"' | sort | uniq -c | sort -rn",
+          "command": "grep '\"level\":\"warn\"' app/checkout-service.log | grep -o '\"msg\":\"[^\"]*\"' | sort | uniq -c | sort -rn",
+          "explain": "The first `grep` keeps the lines you care about (warnings), the second pulls out the field to group by, and `uniq -c` counts each group. A group-by in one pipeline.",
           "syntaxPowershell": "Select-String -Path <json-lines-file> -Pattern '<raw-json-snippet>' | ForEach-Object { $_.Line | ConvertFrom-Json } | Group-Object <field> | Select-Object Count, Name",
           "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"level\":\"warn\"' | ForEach-Object { $_.Line | ConvertFrom-Json } | Group-Object msg | Select-Object Count, Name"
         },
         {
           "id": "json-numeric-filter",
           "title": "Filter on numbers",
-          "syntax": "jq -c 'select(.<field> == \"<value>\" and .<number-field> > <threshold>) | {<keys>}' <json-lines-file>",
-          "command": "jq -c 'select(.msg==\"eventloop.lag\" and .lag_ms > 1000) | {ts, pod, lag_ms}' app/checkout-service.log",
-          "explain": "Numeric comparisons and object construction `{a, b}` keep only the fields you care about.",
+          "syntax": "sed -n -E 's/.*\"<key>\":\"([^\"]*)\".*\"<key>\":\"([^\"]*)\".*\"<number-key>\":([0-9]+).*/\\1 \\2 \\3/p' <json-lines-file> | awk '$<column> > <threshold>'",
+          "command": "sed -n -E 's/.*\"ts\":\"([^\"]*)\".*\"pod\":\"([^\"]*)\".*\"lag_ms\":([0-9]+).*/\\1 \\2 \\3/p' app/checkout-service.log | awk '$3 > 1000'",
+          "explain": "`sed -n -E 's/.../\\1 \\2 \\3/p'` captures the fields you want and prints only lines where all of them were found. Numbers aren't quoted in JSON, hence `([0-9]+)`. Then awk compares the third column as a number.",
           "syntaxPowershell": "Select-String -Path <json-lines-file> -Pattern '<value>' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json } | Where-Object { $_.<number-field> -gt <threshold> } | Format-Table <keys>",
           "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'eventloop.lag' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json } | Where-Object { $_.lag_ms -gt 1000 } | Format-Table ts, pod, lag_ms"
         },
         {
           "id": "versions-over-time",
           "title": "Versions over time",
-          "syntax": "jq -r '[.<key>, .<key>, .<key>] | @tsv' <json-lines-file> | uniq -f<skip-fields> | less",
-          "command": "jq -r '[.ts, .pod, .version] | @tsv' app/checkout-service.log | uniq -f2 | less",
-          "explain": "`@tsv` turns arrays into tab-separated lines. Combined with `uniq`, you see when each pod switched version.",
-          "syntaxPowershell": "Get-Content <json-lines-file> | ForEach-Object { $j = $_ | ConvertFrom-Json; \"$($j.<key>)`t$($j.<key>)`t$($j.<key>)\" } | Out-Host -Paging",
-          "powershell": "Get-Content app\\checkout-service.log | ForEach-Object { $j = $_ | ConvertFrom-Json; \"$($j.ts)`t$($j.pod)`t$($j.version)\" } | Out-Host -Paging"
+          "syntax": "sed -E 's/.*\"<key>\":\"([^\"]*)\".*\"<key>\":\"([^\"]*)\".*\"<key>\":\"([^\"]*)\".*/\\1 \\2 \\3/' <json-lines-file> | awk '$<column> != seen[$<column>] {print; seen[$<column>] = $<column>}'",
+          "command": "sed -E 's/.*\"ts\":\"([^\"]*)\".*\"pod\":\"([^\"]*)\".*\"version\":\"([^\"]*)\".*/\\1 \\2 \\3/' app/checkout-service.log | awk '$3 != seen[$2] {print; seen[$2] = $3}'",
+          "explain": "sed turns each line into `ts pod version`; awk remembers the last version it saw per pod and prints only each pod's first line and every switch. You see exactly when each pod came up, and on which release.",
+          "syntaxPowershell": "$seen = @{}\nGet-Content <json-lines-file> | ForEach-Object { $j = $_ | ConvertFrom-Json; if ($seen[$j.<key>] -ne $j.<key>) { $seen[$j.<key>] = $j.<key>; \"$($j.<key>)`t$($j.<key>)`t$($j.<key>)\" } }",
+          "powershell": "$seen = @{}\nGet-Content app\\checkout-service.log | ForEach-Object { $j = $_ | ConvertFrom-Json; if ($seen[$j.pod] -ne $j.version) { $seen[$j.pod] = $j.version; \"$($j.ts)`t$($j.pod)`t$($j.version)\" } }"
         }
       ]
     },
@@ -658,9 +658,9 @@
         {
           "id": "rid-in-app-log",
           "title": "Find that request in the app log",
-          "syntax": "grep '<request-id>' <json-lines-file> | jq .",
-          "command": "grep '<rid>' app/checkout-service.log | jq .",
-          "explain": "The same request from the service's point of view: which pod, which order, which version, and did it finish?",
+          "syntax": "grep '<request-id>' <json-lines-file> | tr '<separator>' '<newline>'",
+          "command": "grep '<rid>' app/checkout-service.log | tr ',' '\\n'",
+          "explain": "Paste the rid from the previous command. You see the same request from the service's point of view, one field per line: which pod, which order, which version, and did it finish?",
           "syntaxPowershell": "Select-String -Path <json-lines-file> -Pattern '<request-id>' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json }",
           "powershell": "Select-String -Path app\\checkout-service.log -Pattern '<rid>' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json }"
         },
@@ -668,10 +668,10 @@
           "id": "customer-requests",
           "title": "All requests for one customer",
           "syntax": "grep '<customer-pattern>' <log-file> | awk '{print $<field>, $<field>, ...}'",
-          "command": "grep 'cid=cus_XXXX' nginx/access.log | awk '{print $4, $6, $7, $9, $(NF-2)}'",
-          "explain": "Retries from the same person line up here. Watch the timing between attempts.",
+          "command": "grep 'cid=cus_4734$' nginx/access.log | awk '{print $4, $6, $7, $9, $(NF-2)}'",
+          "explain": "Retries from the same person line up here (`cus_4734` is one of the customers who got errors). `$(NF-2)` is `urt=`, how long the upstream took. Watch the timing between attempts.",
           "syntaxPowershell": "Select-String -Path <log-file> -Pattern '<customer-regex>' | ForEach-Object Line",
-          "powershell": "Select-String -Path nginx\\access.log -Pattern 'cid=cus_XXXX\\b' | ForEach-Object Line"
+          "powershell": "Select-String -Path nginx\\access.log -Pattern 'cid=cus_4734$' | ForEach-Object Line"
         },
         {
           "id": "line-up-sources",
@@ -684,21 +684,21 @@
         },
         {
           "id": "never-finished",
-          "title": "Requests that never finished",
-          "syntax": "comm -23 <(jq -r 'select(.<field> == \"<start-value>\") | .<key>' <json-lines-file> | sort -u) <(jq -r 'select(.<field> == \"<end-value>\") | .<key>' <json-lines-file> | sort -u)",
-          "command": "comm -23 <(jq -r 'select(.msg==\"x.start\")|.rid' app.log | sort -u) <(jq -r 'select(.msg==\"x.done\")|.rid' app.log | sort -u)",
-          "explain": "`comm -23` prints lines only in the first sorted list: things that started but have no matching end.",
+          "title": "Started, never finished",
+          "syntax": "comm -23 <(grep '\"<field>\":\"<start-value>\"' <json-lines-file> | grep -o '\"<key>\":\"[^\"]*\"' | sort -u) <(grep '\"<field>\":\"<end-value>\"' <json-lines-file> | grep -o '\"<key>\":\"[^\"]*\"' | sort -u)",
+          "command": "comm -23 <(grep '\"msg\":\"server.start\"' app/checkout-service.log | grep -o '\"pod\":\"[^\"]*\"' | sort -u) <(grep '\"msg\":\"server.shutdown\"' app/checkout-service.log | grep -o '\"pod\":\"[^\"]*\"' | sort -u)",
+          "explain": "`comm -23` prints lines that are only in the first sorted list: things that started but have no matching end. This example pairs `server.start` with `server.shutdown` per pod (the pods still up when the log ends). Swap in a request's start and done messages and the key that ties them together.",
           "syntaxPowershell": "$done = @{}\nSelect-String -Path <json-lines-file> -Pattern '<end-snippet>' | ForEach-Object { $done[($_.Line | ConvertFrom-Json).<key>] = 1 }\nSelect-String -Path <json-lines-file> -Pattern '<start-snippet>' | ForEach-Object { $_.Line | ConvertFrom-Json } | Where-Object { -not $done.ContainsKey($_.<key>) }",
-          "powershell": "$done = @{}\nSelect-String -Path app.log -Pattern '\"msg\":\"x.done\"' | ForEach-Object { $done[($_.Line | ConvertFrom-Json).rid] = 1 }\nSelect-String -Path app.log -Pattern '\"msg\":\"x.start\"' | ForEach-Object { $_.Line | ConvertFrom-Json } | Where-Object { -not $done.ContainsKey($_.rid) }"
+          "powershell": "$done = @{}\nSelect-String -Path app\\checkout-service.log -Pattern '\"msg\":\"server.shutdown\"' | ForEach-Object { $done[($_.Line | ConvertFrom-Json).pod] = 1 }\nSelect-String -Path app\\checkout-service.log -Pattern '\"msg\":\"server.start\"' | ForEach-Object { $_.Line | ConvertFrom-Json } | Where-Object { -not $done.ContainsKey($_.pod) } | Select-Object ts, pod"
         },
         {
           "id": "pod-timeline",
           "title": "Pod timeline",
-          "syntax": "jq -r 'select(.<field> == \"<value>\") | \"\\(.<key>) \\(.<key>) \\(.<key>)\"' <json-lines-file> | less",
-          "command": "jq -r 'select(.pod==\"<pod>\") | \"\\(.ts) \\(.level) \\(.msg)\"' app/checkout-service.log | less",
-          "explain": "One pod's life story. Gaps (silence) can be as telling as errors.",
-          "syntaxPowershell": "Select-String -Path <json-lines-file> -Pattern '<value>' -SimpleMatch | ForEach-Object { $j = $_.Line | ConvertFrom-Json; \"$($j.<key>) $($j.<key>) $($j.<key>)\" } | Out-Host -Paging",
-          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '<pod>' -SimpleMatch | ForEach-Object { $j = $_.Line | ConvertFrom-Json; \"$($j.ts) $($j.level) $($j.msg)\" } | Out-Host -Paging"
+          "syntax": "grep '\"<field>\":\"<pod>\"' <json-lines-file> | grep -v '<noise-pattern>' | sed -E 's/.*\"<key>\":\"([^\"]*)\",\"<key>\":\"([^\"]*)\".*\"<key>\":\"([^\"]*)\".*/\\1 \\2 \\3/'",
+          "command": "grep '\"pod\":\"checkout-6b7f9c-a1b2c\"' app/checkout-service.log | grep -v '\"msg\":\"cart\\.' | sed -E 's/.*\"ts\":\"([^\"]*)\",\"level\":\"([^\"]*)\".*\"msg\":\"([^\"]*)\".*/\\1 \\2 \\3/'",
+          "explain": "One pod's life story, minus the cart chatter (this pod ran the v2.14.0 release; swap in any pod from the commands above). Gaps (silence) can be as telling as errors. Add `| head -n 50` or `| tail -n 50` to page through it.",
+          "syntaxPowershell": "Select-String -Path <json-lines-file> -Pattern '<pod-snippet>' | Where-Object { $_.Line -notmatch '<noise-regex>' } | ForEach-Object { $j = $_.Line | ConvertFrom-Json; \"$($j.<key>) $($j.<key>) $($j.<key>)\" }",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"pod\":\"checkout-6b7f9c-a1b2c\"' | Where-Object { $_.Line -notmatch '\"msg\":\"cart\\.' } | ForEach-Object { $j = $_.Line | ConvertFrom-Json; \"$($j.ts) $($j.level) $($j.msg)\" }"
         }
       ]
     },
@@ -710,7 +710,7 @@
           "title": "Epoch to UTC",
           "syntax": "date -u -d @<epoch-seconds>",
           "command": "date -u -d @1794531600",
-          "explain": "Converts unix epoch seconds to a human UTC time (GNU date). On macOS: `date -u -r 1794531600`.",
+          "explain": "Converts unix epoch seconds to a human UTC time. `date -d` is GNU (Linux, WSL, Git Bash); on macOS use `date -u -r 1794531600`. No `date` that fits? The awk version below works everywhere.",
           "syntaxPowershell": "[DateTimeOffset]::FromUnixTimeSeconds(<epoch-seconds>).UtcDateTime.ToString('<format>')",
           "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794531600).UtcDateTime.ToString('u')"
         },
@@ -719,7 +719,7 @@
           "title": "UTC to local (Israel)",
           "syntax": "TZ=<zone> date -d '<utc-timestamp>'",
           "command": "TZ=Asia/Jerusalem date -d '2026-11-13T00:30:00Z'",
-          "explain": "Shows what a UTC instant was on the office clock. In November, Israel is **UTC+02:00**.",
+          "explain": "Shows what a UTC instant was on the office clock. In November, Israel is **UTC+02:00**. `date -d` is GNU (Linux, WSL, Git Bash); on macOS use the epoch form: `TZ=Asia/Jerusalem date -r 1794529800`. Or just add two hours.",
           "syntaxPowershell": "([DateTimeOffset]'<utc-timestamp>').ToOffset([TimeSpan]'<offset>')",
           "powershell": "([DateTimeOffset]'2026-11-13T00:30:00Z').ToOffset([TimeSpan]'02:00')"
         },
@@ -728,43 +728,43 @@
           "title": "Local to UTC",
           "syntax": "date -u -d '<local-timestamp-with-offset>' +<format>",
           "command": "date -u -d '2026-11-13T02:30:00+02:00' +%H:%M:%S",
-          "explain": "Normalizes an offset timestamp (like the app log's) to UTC. `+%H:%M:%S` sets the output format.",
+          "explain": "Normalizes an offset timestamp (like the app log's) to UTC. `+%H:%M:%S` sets the output format. `date -d` is GNU (Linux, WSL, Git Bash); on macOS parse with `date -j -f`, or simply subtract the `+02:00` that is written right there in the timestamp.",
           "syntaxPowershell": "([DateTimeOffset]'<local-timestamp-with-offset>').UtcDateTime.ToString('<format>')",
           "powershell": "([DateTimeOffset]'2026-11-13T02:30:00+02:00').UtcDateTime.ToString('HH:mm:ss')"
         },
         {
           "id": "epoch-python",
-          "title": "Python one-liner",
-          "syntax": "python3 -c 'from datetime import datetime, timezone; print(datetime.fromtimestamp(<epoch-seconds>, timezone.utc))'",
-          "command": "python3 -c 'from datetime import datetime, timezone; print(datetime.fromtimestamp(1794531600, timezone.utc))'",
-          "explain": "Same conversion, but portable. Swap in `timezone(timedelta(hours=2))` to get local time.",
-          "syntaxPowershell": "[DateTimeOffset]::FromUnixTimeSeconds(<epoch-seconds>).ToString('<format>')",
-          "powershell": "# no Python needed on Windows:\n[DateTimeOffset]::FromUnixTimeSeconds(1794531600).ToString('yyyy-MM-dd HH:mm:ss zzz')"
+          "title": "Epoch to clock time in plain awk",
+          "syntax": "awk 'BEGIN {e = <epoch-seconds>; s = e % 86400; printf \"<format>\", int(s / 3600), int(s % 3600 / 60), s % 60; s = (e + <offset-seconds>) % 86400; printf \"<format>\", int(s / 3600), int(s % 3600 / 60), s % 60}'",
+          "command": "awk 'BEGIN {e = 1794531600; s = e % 86400; printf \"%02d:%02d:%02d UTC\\n\", int(s / 3600), int(s % 3600 / 60), s % 60; s = (e + 7200) % 86400; printf \"%02d:%02d:%02d +02:00\\n\", int(s / 3600), int(s % 3600 / 60), s % 60}'",
+          "explain": "Works on every OS, no `date` flags to remember: `epoch % 86400` is the number of seconds since midnight UTC, which awk splits into hours, minutes and seconds. Add `7200` (two hours) for +02:00. You lose the date, but every source in this pack covers the same night.",
+          "syntaxPowershell": "[DateTimeOffset]::FromUnixTimeSeconds(<epoch-seconds>).ToOffset([TimeSpan]'<offset>').ToString('<format>')",
+          "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794531600).ToOffset([TimeSpan]'02:00').ToString('yyyy-MM-dd HH:mm:ss zzz')"
         },
         {
           "id": "time-to-epoch",
           "title": "Human time to epoch",
           "syntax": "date -u -d '<utc-timestamp>' +%s",
           "command": "date -u -d '2026-11-13 01:00:00' +%s",
-          "explain": "Handy for finding the matching row in an epoch-indexed file like the metrics CSV.",
+          "explain": "Handy for finding the matching row in an epoch-indexed file like the metrics CSV. `date -d` is GNU (Linux, WSL, Git Bash); on macOS: `date -j -u -f '%Y-%m-%d %H:%M:%S' '2026-11-13 01:00:00' +%s`.",
           "syntaxPowershell": "([DateTimeOffset]'<utc-timestamp>').ToUnixTimeSeconds()",
           "powershell": "([DateTimeOffset]'2026-11-13T01:00:00Z').ToUnixTimeSeconds()"
         },
         {
           "id": "csv-epoch-column",
           "title": "Convert a whole CSV column",
-          "syntax": "awk -F, 'NR>1 {cmd=\"date -u -d @\"$<epoch-column>\" +<format>\"; cmd | getline t; close(cmd); print t, $0}' <csv-file> | head",
-          "command": "awk -F, 'NR>1 {cmd=\"date -u -d @\"$1\" +%H:%M:%S\"; cmd | getline t; close(cmd); print t, $0}' metrics/checkout_metrics.csv | head",
-          "explain": "Prefix every metrics row with a readable UTC time. Slow-ish (it forks `date` per row), but fine for a few hundred rows.",
+          "syntax": "awk -F, 'NR>1 {s = $<epoch-column> % 86400; printf \"<format>\", int(s / 3600), int(s % 3600 / 60), s % 60, $0}' <csv-file> | head",
+          "command": "awk -F, 'NR>1 {s = $1 % 86400; printf \"%02d:%02d:%02d %s\\n\", int(s / 3600), int(s % 3600 / 60), s % 60, $0}' metrics/checkout_metrics.csv | head",
+          "explain": "Prefixes every metrics row with a readable UTC time of day, using the same `epoch % 86400` arithmetic: instant, and the same on Linux, macOS and Git Bash. All rows are from the same night, so the time of day is enough.",
           "syntaxPowershell": "Import-Csv <csv-file> | Select-Object -First <count> @{n='utc'; e={ [DateTimeOffset]::FromUnixTimeSeconds([long]$_.<epoch-column>).ToString('<format>') }}, *",
           "powershell": "Import-Csv metrics\\checkout_metrics.csv | Select-Object -First 10 @{n='utc'; e={ [DateTimeOffset]::FromUnixTimeSeconds([long]$_.ts_epoch).ToString('HH:mm:ss') }}, *"
         },
         {
           "id": "slack-timestamps",
           "title": "Slack timestamps",
-          "syntax": "jq -r '.[] | \"\\(.<ts-key> | tonumber | floor | todate) \\(.<key>): \\(.<key>)\"' <json-array-file>",
-          "command": "jq -r '.[] | \"\\(.ts | tonumber | floor | todate) \\(.user): \\(.text)\"' slack/inc-checkout.json",
-          "explain": "Slack `ts` is an epoch *string* with a fractional part. `tonumber | floor | todate` gives ISO-8601 UTC.",
+          "syntax": "awk -F'\"' '$2 == \"<ts-key>\" {s = int($4) % 86400} $2 == \"<key>\" {u = $4} $2 == \"<key>\" {t = $0; sub(/<prefix-regex>/, \"\", t); sub(/<suffix-regex>/, \"\", t); printf \"<format>\", int(s / 3600), int(s % 3600 / 60), s % 60, u, t}' <json-array-file>",
+          "command": "awk -F'\"' '$2 == \"ts\" {s = int($4) % 86400} $2 == \"user\" {u = $4} $2 == \"text\" {t = $0; sub(/^ *\"text\": \"/, \"\", t); sub(/\"$/, \"\", t); printf \"%02d:%02d:%02d UTC %s: %s\\n\", int(s / 3600), int(s % 3600 / 60), s % 60, u, t}' slack/inc-checkout.json",
+          "explain": "The Slack export has one `\"key\": \"value\"` per line, so awk can remember `ts` and `user` and print a line when it reaches `text`. Slack `ts` is an epoch *string* with a fractional part: `int()` drops the fraction, and `% 86400` gives seconds since midnight UTC.",
           "syntaxPowershell": "(Get-Content <json-array-file> -Raw | ConvertFrom-Json) | ForEach-Object { '<format>' -f [DateTimeOffset]::FromUnixTimeSeconds([long][Math]::Floor([double]$_.<ts-key>)).ToString('u'), $_.<key>, $_.<key> }",
           "powershell": "(Get-Content slack\\inc-checkout.json -Raw | ConvertFrom-Json) | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][Math]::Floor([double]$_.ts)).ToString('u'), $_.user, $_.text }"
         }
@@ -776,11 +776,11 @@
         {
           "id": "csv-table",
           "title": "Pretty table",
-          "syntax": "column -s, -t < <csv-file> | less -S",
-          "command": "column -s, -t < metrics/checkout_metrics.csv | less -S",
-          "explain": "Aligns CSV columns so you can actually read them. `-s,` sets the separator and `-t` builds a table.",
-          "syntaxPowershell": "Import-Csv <csv-file> | Format-Table | Out-Host -Paging",
-          "powershell": "Import-Csv metrics\\checkout_metrics.csv | Format-Table | Out-Host -Paging"
+          "syntax": "head -n <count> <csv-file> | awk -F, '{for (i = 1; i <= NF; i++) printf \"%-<width>s\", $i; print \"\"}'",
+          "command": "head -n 20 metrics/checkout_metrics.csv | awk -F, '{for (i = 1; i <= NF; i++) printf \"%-21s\", $i; print \"\"}'",
+          "explain": "awk's `printf \"%-21s\"` pads every column to the same width, so the CSV reads like a table. Drop `head` to see every row, or pipe into `sed -n '100,140p'` for a window.",
+          "syntaxPowershell": "Import-Csv <csv-file> | Select-Object -First <count> | Format-Table",
+          "powershell": "Import-Csv metrics\\checkout_metrics.csv | Select-Object -First 20 | Format-Table"
         },
         {
           "id": "csv-header",
@@ -830,79 +830,79 @@
       ]
     },
     {
-      "category": "git forensics",
+      "category": "Code history forensics (git-log.txt)",
       "items": [
         {
           "id": "git-clone",
-          "title": "Clone a bundle",
-          "syntax": "git clone <bundle-file> && cd <repo-dir>",
-          "command": "git clone repo/shipfast-checkout.bundle && cd shipfast-checkout",
-          "explain": "A bundle is a whole repo in one file. Cloning it gives you a normal working copy with full history and tags. No git? `repo/git-log.txt` holds the same history as plain text (`git log -p --decorate --all`).",
-          "syntaxPowershell": "# git is optional: read <git-log-file> instead\nGet-Content <git-log-file> | Out-Host -Paging",
-          "powershell": "# git is optional: read repo\\git-log.txt instead\nGet-Content repo\\git-log.txt | Out-Host -Paging"
+          "title": "Open the code history",
+          "syntax": "head -n <count> <history-file>",
+          "command": "head -n 40 repo/git-log.txt",
+          "explain": "`repo/git-log.txt` is the repo's whole history (`git log -p --decorate --all`) as plain text, newest commit first: a `commit <sha> (tag: ...)` line, the author, the date, the message, then the diff. Every command in this section reads it with grep and awk; no git needed. The `.bundle` next to it is the same history for people who already use git.",
+          "syntaxPowershell": "Get-Content <history-file> -TotalCount <count>",
+          "powershell": "Get-Content repo\\git-log.txt -TotalCount 40"
         },
         {
           "id": "git-log-oneline",
           "title": "History at a glance",
-          "syntax": "git log --oneline --decorate --graph | head -<count>",
-          "command": "git log --oneline --decorate --graph | head -30",
-          "explain": "`--decorate` shows tags and branches next to commits, so you can see where each release sits. No git? `repo/git-log.txt` holds the same history as plain text (`git log -p --decorate --all`).",
-          "syntaxPowershell": "# git is optional: read <git-log-file> instead\nSelect-String -Path <git-log-file> -Pattern '<commit-line-regex>' -Context 0,<after> | Select-Object -First <count>",
-          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern '^commit ' -Context 0,5 | Select-Object -First 30"
+          "syntax": "awk '/^<commit-line-regex>/ {sha = substr($2, 1, <sha-length>); ref = $0; sub(/<commit-prefix-regex>/, \"\", ref); want = 1; next} want && /<message-line-regex>/ {sub(/^ +/, \"\"); print sha, $0, ref; want = 0}' <history-file> | head -n <count>",
+          "command": "awk '/^commit / {sha = substr($2, 1, 7); ref = $0; sub(/^commit [0-9a-f]+ */, \"\", ref); want = 1; next} want && /^    / {sub(/^ +/, \"\"); print sha, $0, ref; want = 0}' repo/git-log.txt | head -n 30",
+          "explain": "Rebuilds `git log --oneline --decorate` from the text export: for each `commit` line keep the short SHA (its first 7 characters) and the tags in brackets, and print them next to the first line of the commit message.",
+          "syntaxPowershell": "Select-String -Path <history-file> -Pattern '<commit-line-regex-with-two-groups>' -Context 0,<after> | ForEach-Object { '<format>' -f $_.Matches[0].Groups[1].Value, $_.Context.PostContext[<index>].Trim(), $_.Matches[0].Groups[2].Value } | Select-Object -First <count>",
+          "powershell": "Select-String -Path repo\\git-log.txt -Pattern '^commit (\\w{7})\\w* ?(.*)' -Context 0,4 | ForEach-Object { '{0} {1} {2}' -f $_.Matches[0].Groups[1].Value, $_.Context.PostContext[3].Trim(), $_.Matches[0].Groups[2].Value } | Select-Object -First 30"
         },
         {
           "id": "git-tags",
           "title": "List tags",
-          "syntax": "git tag --sort=<sort-key>",
-          "command": "git tag --sort=creatordate",
-          "explain": "Releases in order. Match them against the versions in deploy logs. No git? `repo/git-log.txt` holds the same history as plain text (`git log -p --decorate --all`).",
-          "syntaxPowershell": "# git is optional: read <git-log-file> instead\nSelect-String -Path <git-log-file> -Pattern '<tag-regex>' -AllMatches | ForEach-Object { $_.Matches.Value }",
-          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern 'tag: [^,)]+' -AllMatches | ForEach-Object { $_.Matches.Value }"
+          "syntax": "grep -E '^<commit-line-regex>.*<tag-marker>' <history-file>",
+          "command": "grep -E '^commit .*tag: ' repo/git-log.txt",
+          "explain": "Every tagged commit, newest first: the full SHA (its first 7 characters are the short SHA) and its tags. Match them against the versions and `commit=` values in the deploy log.",
+          "syntaxPowershell": "Select-String -Path <history-file> -Pattern '<tag-line-regex>' | ForEach-Object Line",
+          "powershell": "Select-String -Path repo\\git-log.txt -Pattern '^commit .*tag: ' | ForEach-Object Line"
         },
         {
           "id": "git-show-release",
           "title": "What's in a release?",
-          "syntax": "git show <release-tag> --stat",
-          "command": "git show <tag> --stat",
-          "explain": "Commit message, author, date and the files touched by the commit a tag points to. No git? `repo/git-log.txt` holds the same history as plain text (`git log -p --decorate --all`).",
+          "syntax": "awk '/^commit / {p = /tag: <release-tag>[,)]/; d = 0} /^diff --git/ {d = 1} p && (!d || /^diff --git/)' <history-file>",
+          "command": "awk '/^commit / {p = /tag: v2\\.14\\.0[,)]/; d = 0} /^diff --git/ {d = 1} p && (!d || /^diff --git/)' repo/git-log.txt",
+          "explain": "Like `git show <tag> --stat`: `p` switches on at the tagged commit and off at the next `commit` line, and `d` marks where the diff starts. You get the author, date and message, then one `diff --git` line per file the release touched. Drop `(!d || /^diff --git/)` (keep just `p`) for the full patch.",
           "syntaxPowershell": "# git is optional: read <git-log-file> instead\nSelect-String -Path <git-log-file> -Pattern '<tag-regex>' -Context 0,<after>",
-          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern 'tag: v2.14.1\\b' -Context 0,60"
+          "powershell": "Select-String -Path repo\\git-log.txt -Pattern 'tag: v2\\.14\\.0\\b' -Context 0,60"
         },
         {
           "id": "git-diff-releases",
           "title": "Diff two releases",
-          "syntax": "git diff <old-tag>..<new-tag> --stat",
-          "command": "git diff v2.13.4..v2.14.0 --stat",
-          "explain": "Everything that changed between two versions. Drop `--stat` for the full patch. No git? `repo/git-log.txt` holds the same history as plain text (`git log -p --decorate --all`).",
-          "syntaxPowershell": "# git is optional: read <git-log-file> instead\nSelect-String -Path <git-log-file> -Pattern '<commit-or-file-header-regex>' | Select-Object -First <count> Line",
-          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern '^commit |^\\+\\+\\+ b/' | Select-Object -First 40 Line"
+          "syntax": "awk '/^commit / {if (/tag: <new-tag>[,)]/) p = 1; if (/tag: <old-tag>[,)]/) p = 0} p && /^(commit|diff --git)/' <history-file>",
+          "command": "awk '/^commit / {if (/tag: v2\\.14\\.0[,)]/) p = 1; if (/tag: v2\\.13\\.4[,)]/) p = 0} p && /^(commit|diff --git)/' repo/git-log.txt",
+          "explain": "Like `git diff v2.13.4..v2.14.0 --stat`: the file is newest first, so start printing at the newer tag and stop at the older one. You get every commit in between and the files each one touched. Drop `&& /^(commit|diff --git)/` for the full patches.",
+          "syntaxPowershell": "$on = $false\nGet-Content <history-file> | ForEach-Object { if ($_ -match '<new-tag-regex>') { $on = $true }; if ($_ -match '<old-tag-regex>') { $on = $false }; if ($on -and $_ -match '<header-regex>') { $_ } }",
+          "powershell": "$on = $false\nGet-Content repo\\git-log.txt | ForEach-Object { if ($_ -match '^commit .*tag: v2\\.14\\.0[,)]') { $on = $true }; if ($_ -match '^commit .*tag: v2\\.13\\.4[,)]') { $on = $false }; if ($on -and $_ -match '^(commit|diff --git)') { $_ } }"
         },
         {
           "id": "git-pickaxe",
           "title": "Find who added a string",
-          "syntax": "git log -p -S'<string>' --oneline",
-          "command": "git log -p -S'pattern' --oneline",
-          "explain": "The \"pickaxe\": commits that added or removed occurrences of `pattern`, with their patches. No git? `repo/git-log.txt` holds the same history as plain text (`git log -p --decorate --all`).",
-          "syntaxPowershell": "# git is optional: read <git-log-file> instead\nSelect-String -Path <git-log-file> -Pattern '<commit-line-regex>|<changed-line-regex>' | ForEach-Object Line",
-          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern '^commit |^[+-].*pattern' | ForEach-Object Line"
+          "syntax": "awk '/^commit / {c = substr($2, 1, 7)} /^diff --git/ {f = substr($4, 3)} /^[+-].*<string>/ && !/^(\\+\\+\\+|---) / {print c, f, $0}' <history-file>",
+          "command": "awk '/^commit / {c = substr($2, 1, 7)} /^diff --git/ {f = substr($4, 3)} /^[+-].*duration_ms/ && !/^(\\+\\+\\+|---) / {print c, f, $0}' repo/git-log.txt",
+          "explain": "The \"pickaxe\" (`git log -S`): every added (`+`) or removed (`-`) line containing the string, with the short SHA and file it belongs to. The commit that first added it is the lowest one in the output.",
+          "syntaxPowershell": "Select-String -Path <history-file> -Pattern '<commit-line-regex>|<changed-line-regex>' | ForEach-Object Line",
+          "powershell": "Select-String -Path repo\\git-log.txt -Pattern '^commit |^[+-].*duration_ms' | ForEach-Object Line"
         },
         {
           "id": "git-grep",
-          "title": "Search code at a revision",
-          "syntax": "git grep -n '<pattern>' <tag>",
-          "command": "git grep -n 'pattern' <tag>",
-          "explain": "Greps the tree as it was at that tag, without checking it out. No git? `repo/git-log.txt` holds the same history as plain text (`git log -p --decorate --all`).",
-          "syntaxPowershell": "# git is optional: read <git-log-file> instead\nSelect-String -Path <git-log-file> -Pattern '<pattern>' -Context <before>,<after>",
-          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern 'pattern' -Context 2,2"
+          "title": "Search the added code",
+          "syntax": "grep -n -E '^\\+.*<pattern>' <history-file>",
+          "command": "grep -n -E '^\\+.*export (async )?function' repo/git-log.txt",
+          "explain": "Instead of grepping the tree at a tag, grep the diffs: `^\\+` keeps only added lines. `-n` gives the line number in `git-log.txt`, so you can read around a hit with `sed -n '40,90p' repo/git-log.txt`; the nearest `commit` line above it tells you which release added it.",
+          "syntaxPowershell": "Select-String -Path <history-file> -Pattern '<added-line-regex>' | Select-Object LineNumber, Line",
+          "powershell": "Select-String -Path repo\\git-log.txt -Pattern '^\\+.*export (async )?function' | Select-Object LineNumber, Line"
         },
         {
           "id": "git-blame",
-          "title": "Blame a line range",
-          "syntax": "git blame -L <start>,<end> <path>",
-          "command": "git blame -L 1,30 src/path/to/file.ts",
-          "explain": "Who last touched each line, and in which commit. Add `-w` to ignore whitespace changes. No git? `repo/git-log.txt` holds the same history as plain text (`git log -p --decorate --all`).",
+          "title": "Who touched a file?",
+          "syntax": "awk '/^commit / {c = substr($2, 1, 7)} /^Author:/ {a = $2 \" \" $3} /^Date:/ {d = $2} /^diff --git a\\/<escaped-path> / {print c, d, a}' <history-file>",
+          "command": "awk '/^commit / {c = substr($2, 1, 7)} /^Author:/ {a = $2 \" \" $3} /^Date:/ {d = $2} /^diff --git a\\/src\\/routes\\/checkout\\.ts / {print c, d, a}' repo/git-log.txt",
+          "explain": "A file-level blame: every commit that changed `src/routes/checkout.ts`, with its date and author, newest first. Then read that commit's hunks for the file to see exactly which lines it changed.",
           "syntaxPowershell": "# git is optional: read <git-log-file> instead\nSelect-String -Path <git-log-file> -Pattern '<commit-line-regex>|<author-line-regex>|<file-header-regex>' | ForEach-Object Line",
-          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern '^commit |^Author:|^\\+\\+\\+ b/src/path/to/file.ts' | ForEach-Object Line"
+          "powershell": "Select-String -Path repo\\git-log.txt -Pattern '^commit |^Author:|^diff --git a/src/routes/checkout\\.ts ' | ForEach-Object Line"
         }
       ]
     },
@@ -911,37 +911,37 @@
       "items": [
         {
           "id": "regex-timing",
-          "title": "Time a regex in Node (SAFE sizes only)",
-          "syntax": "node -e 'const re=/<regex>/; for (let n=<from>;n<=<to>;n++){const s=\"<char>\".repeat(n)+\"<tail>\"; const t=Date.now(); re.test(s); console.log(n, Date.now()-t, \"ms\")}'",
-          "command": "node -e 'const re=/^(a+)+$/; for (let n=18;n<=26;n++){const s=\"a\".repeat(n)+\"!\"; const t=Date.now(); re.test(s); console.log(n, Date.now()-t, \"ms\")}'",
-          "explain": "Measures how long a regex takes to **fail** on inputs of growing length that end in a char it can't match. `(a+)+` is the textbook evil pattern; swap in any regex you're suspicious of (and an input shape that suits it). If the time roughly **doubles per extra character**, it's exponential.\n\n**WARNING: never go above ~28 characters.** Each extra char doubles the runtime, so a few more and your terminal is frozen for minutes, or years. If that happens, `Ctrl+C`, or `pkill node` from another terminal.",
-          "syntaxPowershell": "$re = [regex]'<regex>'\nforeach ($n in <from>..<to>) { $s = ('<char>' * $n) + '<tail>'; $t = [Diagnostics.Stopwatch]::StartNew(); [void]$re.IsMatch($s); \"$n $($t.ElapsedMilliseconds) ms\" }",
-          "powershell": "$re = [regex]'^(a+)+$'\nforeach ($n in 18..24) { $s = ('a' * $n) + '!'; $t = [Diagnostics.Stopwatch]::StartNew(); [void]$re.IsMatch($s); \"$n $($t.ElapsedMilliseconds) ms\" }"
+          "title": "Hunt nested quantifiers in the diffs",
+          "syntax": "grep -n -E '^\\+.*<nested-quantifier-regex>' <history-file>",
+          "command": "grep -n -E '^\\+.*\\([^()]*[+*][^()]*\\)[*+]' repo/git-log.txt",
+          "explain": "A *nested quantifier* is a group that contains `+` or `*` and is itself repeated, like `(a+)+` or `(x*y)*`. This regex-for-regexes finds them on added lines. It's a heuristic, so read each hit.\n\nWhy not just time it? grep, sed and awk use non-backtracking engines: they never blow up, so they can't reproduce the problem. JavaScript, Python, Java and .NET (PowerShell) *do* backtrack. If you time one there, keep inputs under ~25 characters: each extra character can double the runtime.",
+          "syntaxPowershell": "Select-String -Path <history-file> -Pattern '<added-line-regex>' | Select-Object LineNumber, Line",
+          "powershell": "Select-String -Path repo\\git-log.txt -Pattern '^\\+.*\\([^()]*[+*][^()]*\\)[*+]' | Select-Object LineNumber, Line"
         },
         {
           "id": "regex-timing-python",
-          "title": "Same test in Python",
-          "syntax": "python3 -c '\nimport re, time\nfor n in range(<from>, <to>):\n    s = \"<char>\" * n + \"<tail>\"\n    t = time.time()\n    re.match(r\"<regex>\", s)\n    print(n, round((time.time() - t) * <scale>), \"ms\")\n'",
-          "command": "python3 -c '\nimport re, time\nfor n in range(18, 25):\n    s = \"a\" * n + \"!\"\n    t = time.time()\n    re.match(r\"^(a+)+$\", s)\n    print(n, round((time.time() - t) * 1000), \"ms\")\n'",
-          "explain": "Python's `re` is also a backtracking engine and blows up the same way. Paste it as-is: the multi-line string inside single quotes is fine in bash and zsh. **Same warning: keep n small.**",
+          "title": "Recognise the evil shape",
+          "syntax": "printf '%s\\n' '<regex>' '<regex>' | grep -E '<nested-quantifier-regex>'",
+          "command": "printf '%s\\n' '/^(a+)+$/' '/^([a-z]+ ?)*$/' '/^[a-z ]*$/' '/^(ab|cd)*$/' | grep -E '\\([^()]*[+*][^()]*\\)[*+]'",
+          "explain": "Practise on known regexes. The first two are nested quantifiers: a string of letters can be split between the inner and outer repeat in exponentially many ways, and a backtracking engine tries them all before it gives up. The last two are safe: one quantifier over a character class, or alternatives that can't overlap.\n\nOn Windows, PowerShell uses .NET's backtracking engine, so its version times the textbook `(a+)+` for real: each extra character roughly doubles the time. **Keep n at 24 or below.**",
           "syntaxPowershell": "# PowerShell uses .NET regex, which backtracks too:\n$re = [regex]'<regex>'\n<from>..<to> | ForEach-Object { $s = ('<char>' * $_) + '<tail>'; '<format>' -f $_, (Measure-Command { $re.IsMatch($s) }).TotalMilliseconds }",
           "powershell": "# PowerShell uses .NET regex, which backtracks too:\n$re = [regex]'^(a+)+$'\n18..24 | ForEach-Object { $s = ('a' * $_) + '!'; '{0} {1:N0} ms' -f $_, (Measure-Command { $re.IsMatch($s) }).TotalMilliseconds }"
         },
         {
           "id": "regex-timeout",
           "title": "Run with a hard timeout",
-          "syntax": "timeout <duration> node -e '<your test>'",
-          "command": "timeout 10s node -e '...your test...'",
-          "explain": "A safety net: kills the process after 10 seconds no matter what.",
+          "syntax": "<your-experiment> & pid=$!; (sleep <seconds>; kill $pid 2>/dev/null && echo \"killed after <seconds>s\") & wait $pid; echo \"exit status $?\"",
+          "command": "sleep 30 & pid=$!; (sleep 2; kill $pid 2>/dev/null && echo \"killed after 2s\") & wait $pid; echo \"exit status $?\"",
+          "explain": "A safety net that works in any bash (`timeout` isn't on macOS): run the experiment in the background, start a watchdog that kills it after N seconds, and wait. Exit status 143 means it was killed. Replace `sleep 30` with your experiment.",
           "syntaxPowershell": "$re = New-Object Text.RegularExpressions.Regex('<regex>', 'None', [TimeSpan]::FromSeconds(<seconds>))\ntry { $re.IsMatch(('<char>' * <n>) + '<tail>') } catch { 'timed out after <seconds>s' }",
           "powershell": "$re = New-Object Text.RegularExpressions.Regex('^(a+)+$', 'None', [TimeSpan]::FromSeconds(5))\ntry { $re.IsMatch(('a' * 40) + '!') } catch { 'timed out after 5s' }"
         },
         {
           "id": "regex-linear",
-          "title": "Compare to a linear version",
-          "syntax": "node -e 'const re=/<regex>/; const s=\"<chunk>\".repeat(<n>)+\"<tail>\"; console.time(\"t\"); re.test(s); console.timeEnd(\"t\")'",
-          "command": "node -e 'const re=/^[\\w\\s]*$/; const s=\"a \".repeat(5000)+\"!\"; console.time(\"t\"); re.test(s); console.timeEnd(\"t\")'",
-          "explain": "A character class with a single quantifier can't backtrack exponentially. Even on 10,000 characters it finishes in well under a millisecond.",
+          "title": "Check the linear rewrite",
+          "syntax": "printf '%s\\n' '<regex>' '<regex>' | grep -v -E '<nested-quantifier-regex>'",
+          "command": "printf '%s\\n' '/^([a-z]+ ?)*$/' '/^[a-z ]*$/' | grep -v -E '\\([^()]*[+*][^()]*\\)[*+]'",
+          "explain": "A single quantifier over a character class (`[a-z ]*`, `[\\w\\s]*`) can consume each character only one way, so it runs in linear time even on 10,000 characters. `grep -v` keeps the candidate rewrites that no longer contain a nested quantifier. On Windows, the PowerShell version times the rewrite on 10,000 characters: well under a millisecond.",
           "syntaxPowershell": "$re = [regex]'<regex>'; $s = ('<chunk>' * <n>) + '<tail>'\n(Measure-Command { $re.IsMatch($s) }).TotalMilliseconds",
           "powershell": "$re = [regex]'^[\\w\\s]*$'; $s = ('a ' * 5000) + '!'\n(Measure-Command { $re.IsMatch($s) }).TotalMilliseconds"
         }

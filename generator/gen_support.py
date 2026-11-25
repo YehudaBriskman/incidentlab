@@ -437,19 +437,24 @@ metrics/checkout_metrics.csv     checkout-service dashboard export, one row per 
 db/postgresql-slow.log           Postgres slow-query log (statements over 500 ms)
 deploys/deploys.log              deploy history for the last few days, all services
 slack/inc-checkout.json          export of the #inc-checkout channel from that night
-repo/shipfast-checkout.bundle    git bundle of the checkout-service source code
+repo/git-log.txt                 full history of the checkout-service code, with diffs (plain text)
+repo/shipfast-checkout.bundle    the same history as a git bundle (optional, needs git)
 
 
-HOW TO OPEN THE REPO
---------------------
+HOW TO READ THE CODE HISTORY
+----------------------------
+repo/git-log.txt is the whole history (`git log -p --decorate --all`) as plain
+text: every commit, its tags, its message and its diff. Read it with grep,
+awk or any editor; you don't need git. If you happen to have git anyway, the
+bundle clones to the same history:
     git clone repo/shipfast-checkout.bundle shipfast-checkout
-    cd shipfast-checkout
-    git log --oneline --decorate
 
 
 TIPS
 ----
-- Command-line tools (grep, awk, sort, uniq, jq, git) will get you a long way.
+- Nothing needs installing. The tools already on your machine (grep, awk, sed,
+  sort, uniq on Linux, macOS or Git Bash; Select-String and friends in Windows
+  PowerShell) are enough to solve every question.
 - People in the Slack channel were tired and guessing. Some of them were wrong.
 - Note: our systems don't all agree on what time it is.
 
