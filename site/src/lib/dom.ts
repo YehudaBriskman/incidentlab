@@ -145,7 +145,7 @@ export function snapshotFields(root: ParentNode): FieldSnapshot {
 }
 
 /**
- * Put snapshotted values back into freshly rendered, still-empty fields with the same id. Restored ids are
+ * Put snapshotted values back into freshly rendered fields with the same id. Restored ids are
  * removed from `snap` (each value is restored once). Fires "input" so views that track drafts stay in sync.
  */
 export function restoreFields(root: ParentNode, snap: FieldSnapshot): void {
@@ -153,8 +153,8 @@ export function restoreFields(root: ParentNode, snap: FieldSnapshot): void {
     const value = snap.get(el.id);
     if (value === undefined) continue;
     snap.delete(el.id);
-    if (el.value.length > 0) continue;
-    el.value = value;
+    if (el.value === value) continue;
+    el.value = value; // the user's text wins over anything the view prefilled (e.g. a ?code= class code)
     el.dispatchEvent(new Event("input", { bubbles: true }));
   }
 }

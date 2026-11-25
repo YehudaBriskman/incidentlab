@@ -8,7 +8,7 @@ import { cachedAccount, isAdmin, loadAccount, onAccountChange, signOut } from ".
 import { onEventChange, startEventPolling } from "./lib/event";
 import { TA } from "./i18n/strings-account";
 import { TG } from "./i18n/strings-game";
-import { renderAuthForm, stopAuthTimers, withApprovedAccount } from "./views/auth";
+import { stopAuthTimers, withApprovedAccount } from "./views/auth";
 import { renderStats } from "./views/stats";
 import { renderCase, stopCaseTimers } from "./views/case";
 import { renderHome } from "./views/home";
@@ -256,16 +256,19 @@ function route(): void {
       renderHome(appRoot);
       return;
     }
-    if (parts[0] === "login" && parts.length === 1) {
-      document.title = `${TA().signIn} · IncidentLab`;
-      // The instructor's session goes to the admin panel instead of the "sign in as a player" card.
-      withApprovedAccount(appRoot, "IncidentLab", () => void (window.location.hash = "#/"), { onAdmin: () => void (window.location.hash = "#/admin") });
-      return;
-    }
-    if (parts[0] === "signup" && parts.length === 1) {
-      // After sign-up the account is pending: the gate shows the approval screen, then goes home.
-      const goHome = (): void => void (window.location.hash = "#/");
-      renderAuthForm(appRoot, { context: "IncidentLab", mode: "sign-up", onSignedIn: () => withApprovedAccount(appRoot, "IncidentLab", goHome) });
+    if ((parts[0] === "login" || parts[0] === "signup") && parts.length === 1) {
+      const signUp = parts[0] === "signup";
+      document.title = `${signUp ? TA().signUpBtn : TA().signIn} · IncidentLab`;
+      const code = query.get("code")?.trim();
+      // Both routes run the account gate: signed out -> the form (a `?code=` class link prefills the class
+      // code); signed in -> the pending / rejected / password screens, or home once approved. The
+      // instructor's session goes to the admin panel instead of the "sign in as a player" card.
+      withApprovedAccount(appRoot, "IncidentLab", () => void (window.location.hash = "#/"), {
+        onAdmin: () => void (window.location.hash = "#/admin"),
+        signedOutMode: signUp ? "sign-up" : "sign-in",
+        inviteCode: code !== undefined && code.length > 0 ? code.slice(0, 40) : undefined,
+        titled: true,
+      });
       return;
     }
     if (parts[0] === "leaderboard" && parts.length === 1) {
