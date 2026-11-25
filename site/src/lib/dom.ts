@@ -1,5 +1,4 @@
-import { getLang } from "../i18n/i18n";
-const he = (): boolean => getLang() === "he";
+import { TP } from "../i18n/strings-play";
 type Listener = (event: Event) => void;
 export type AttrValue = string | number | boolean | null | undefined | Listener;
 export type Attrs = Record<string, AttrValue>;
@@ -50,35 +49,82 @@ export function html<K extends keyof HTMLElementTagNameMap>(
   return el;
 }
 
+/* ---------- screen-reader announcements ---------- */
+
+let announcer: HTMLElement | null = null;
+
 /**
- * Two-step inline confirmation: the first click swaps the button for
- * "Confirm / Cancel" so destructive actions never happen by accident.
+ * Create the shared polite live region (idempotent). It lives on <body>, outside the routed views, so it
+ * exists before any message is put in it and survives every re-render. Views call this when they mount.
+ */
+export function ensureAnnouncer(): HTMLElement {
+  if (announcer === null || !announcer.isConnected) {
+    announcer = h("p", { class: "visually-hidden", role: "status", "aria-live": "polite", "aria-atomic": "true" });
+    document.body.append(announcer);
+  }
+  return announcer;
+}
+
+/** Say `message` once through the polite region (cleared first, so a repeated message is re-read). */
+export function announce(message: string): void {
+  const el = ensureAnnouncer();
+  el.textContent = "";
+  window.setTimeout(() => (el.textContent = message), 60);
+}
+
+/* ---------- two-step inline confirm ---------- */
+
+export type ConfirmTone = "accent" | "neutral" | "danger";
+
+/**
+ * Two-step inline confirmation: the first click swaps the trigger for a short prompt with
+ * "Cancel / confirm". The safe choice (Cancel) gets focus, Escape cancels, and focus returns to the
+ * trigger. Both confirm buttons reuse `sizeClass`, so the row keeps its height when it switches.
+ * `prompt` states the full cost of the action before it is confirmed.
  */
 export function confirmButton(opts: {
   label: string;
   confirmLabel: string;
+  cancelLabel?: string;
+  prompt?: string;
   className?: string;
+  sizeClass?: string;
+  tone?: ConfirmTone;
   onConfirm: () => void;
 }): HTMLElement {
   const wrap = h("span", { class: "confirm-wrap" });
-  const showIdle = (): void => {
-    wrap.replaceChildren(
-      h("button", { type: "button", class: opts.className ?? "btn btn-ghost", onclick: showConfirm }, opts.label),
-    );
+  const size = opts.sizeClass ?? "";
+  const toneClass = { accent: "btn-primary", neutral: "", danger: "btn-danger" }[opts.tone ?? "accent"];
+  const showIdle = (focus: boolean): void => {
+    const trigger = h("button", { type: "button", class: opts.className ?? "btn btn-ghost", onclick: showConfirm }, opts.label);
+    wrap.replaceChildren(trigger);
+    if (focus) trigger.focus();
   };
+  const cancel = (): void => showIdle(true);
   const showConfirm = (): void => {
-    const yes = h("button", { type: "button", class: "btn btn-danger", onclick: () => opts.onConfirm() }, opts.confirmLabel);
-    const no = h("button", { type: "button", class: "btn btn-ghost", onclick: () => { showIdle(); focusFirst(); } }, he() ? "ביטול" : "Cancel");
-    wrap.replaceChildren(h("span", { class: "confirm-prompt", role: "group", "aria-label": he() ? "אישור פעולה" : "Confirm action" }, yes, no));
-    yes.focus();
+    const promptId = `confirm-${++confirmSeq}`;
+    const yes = h("button", { type: "button", class: `btn ${toneClass} ${size}`.trim(), onclick: () => opts.onConfirm() }, opts.confirmLabel);
+    const no = h("button", { type: "button", class: `btn btn-ghost ${size}`.trim(), onclick: cancel }, opts.cancelLabel ?? TP().cancel);
+    const group = h(
+      "span",
+      { class: "confirm-prompt", role: "group", "aria-labelledby": opts.prompt ? promptId : null, "aria-label": opts.prompt ? null : opts.label },
+      opts.prompt ? h("span", { class: "confirm-text", id: promptId }, opts.prompt) : null,
+      h("span", { class: "confirm-actions" }, no, yes),
+    );
+    group.addEventListener("keydown", (ev) => {
+      if (ev instanceof KeyboardEvent && ev.key === "Escape") {
+        ev.preventDefault();
+        ev.stopPropagation();
+        cancel();
+      }
+    });
+    wrap.replaceChildren(group);
+    no.focus();
   };
-  const focusFirst = (): void => {
-    const btn = wrap.querySelector("button");
-    if (btn) btn.focus();
-  };
-  showIdle();
+  showIdle(false);
   return wrap;
 }
+let confirmSeq = 0;
 
 export async function copyText(text: string): Promise<boolean> {
   try {
@@ -100,13 +146,17 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-export function copyButton(getText: () => string, label = he() ? "העתק" : "Copy"): HTMLButtonElement {
-  const btn = h("button", { type: "button", class: "btn btn-copy", "aria-label": label }, label);
+/** Copy button: its visible text is its name, so "Copied" is what a screen reader hears too (and it is announced). */
+export function copyButton(getText: () => string, label = TP().copy): HTMLButtonElement {
+  const btn = h("button", { type: "button", class: "btn btn-copy" }, label);
+  let timer: number | null = null;
   btn.addEventListener("click", () => {
     void copyText(getText()).then((ok) => {
-      btn.textContent = ok ? (he() ? "הועתק" : "Copied") : (he() ? "ההעתקה נכשלה" : "Copy failed");
+      btn.textContent = ok ? TP().copied : TP().copyFailed;
       btn.classList.toggle("is-copied", ok);
-      window.setTimeout(() => {
+      announce(ok ? TP().copiedAnnounce : TP().copyFailed);
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
         btn.textContent = label;
         btn.classList.remove("is-copied");
       }, 1600);

@@ -923,3 +923,13 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
   a { color: var(--text); }
   .table-wrap, .prose table { overflow: visible; display: table; }
 }
+
+/* ===== case play (wave 3) ===== */
+/* Case stage, stepper, answer form, inline confirms and the toolbox page. Tokens only; RTL by logical properties. */
+
+/* Inline confirm: the prompt states the full cost; the buttons keep the trigger's size class (no height jump). */
+.confirm-wrap { display: inline-flex; max-inline-size: 100%; }
+.confirm-prompt { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
+.confirm-text { font-size: var(--step--1); color: var(--text); }
+.confirm-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.reveal-trigger { color: var(--text-muted); font-weight: 500; }
