@@ -1,6 +1,6 @@
 // "My stats": the signed-in player's totals, rank and per-case breakdown.
 import { ACHIEVEMENT_IDS, type CaseStats, type UserStats } from "../../shared/contract";
-import { getCase } from "../content/load";
+import { caseSummary } from "../content/load";
 import { ApiError, fetchMyStats } from "../lib/api";
 import { h, setChildren } from "../lib/dom";
 import { formatElapsed } from "../lib/time";
@@ -22,7 +22,7 @@ function statusText(c: CaseStats): string {
 }
 
 function caseRow(c: CaseStats): HTMLElement {
-  const title = getCase(c.caseId)?.title ?? c.caseId;
+  const title = caseSummary(c.caseId)?.title ?? c.caseId;
   // maxScore is par, not a ceiling: bonuses (first blood, time, clean) can beat it. Cap the bar and say so.
   const pct = c.maxScore > 0 ? Math.min(100, Math.round((c.score / c.maxScore) * 100)) : 0;
   const abovePar = c.maxScore > 0 && c.score > c.maxScore;

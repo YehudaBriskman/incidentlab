@@ -1,7 +1,7 @@
 // Public leaderboard: overall or per case, polled every 10 s. `?projector=1` = big-screen mode for a class:
 // huge type, top 10, no header chrome, frozen badge. Usernames are rendered only as text nodes.
 import { usernameKey, type LeaderboardResponse } from "../../shared/contract";
-import { allCases, getCase } from "../content/load";
+import { caseSummaries, caseSummary } from "../content/load";
 import { fetchLeaderboard } from "../lib/api";
 import { h, setChildren } from "../lib/dom";
 import { cachedEvent, eventPhase, formatCountdown, isEventActive, onEventChange } from "../lib/event";
@@ -64,7 +64,7 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): vo
   stopLeaderboard();
   const projector = query.get("projector") === "1";
   const requested = query.get("case");
-  let caseId: string | null = requested !== null && getCase(requested) !== undefined ? requested : null;
+  let caseId: string | null = requested !== null && caseSummary(requested) !== undefined ? requested : null;
   document.title = `${TG().lbTitle} · IncidentLab`;
   document.body.classList.toggle("projector", projector);
 
@@ -75,18 +75,18 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): vo
     "select",
     { id: "lb-case", class: "input lb-select" },
     h("option", { value: "" }, TG().lbOverall),
-    allCases().map((c) => h("option", { value: c.id }, c.title)),
+    caseSummaries().map((c) => h("option", { value: c.id }, c.title)),
   );
   select.value = caseId ?? "";
   select.addEventListener("change", () => {
     caseId = select.value === "" ? null : select.value;
     history.replaceState(null, "", hashFor(caseId, projector));
     projectorLink.href = hashFor(caseId, !projector);
-    titleSub.textContent = caseId === null ? TG().lbOverall : (getCase(caseId)?.title ?? caseId);
+    titleSub.textContent = caseId === null ? TG().lbOverall : (caseSummary(caseId)?.title ?? caseId);
     void load();
   });
 
-  const titleSub = h("p", { class: "lb-case-title" }, caseId === null ? TG().lbOverall : (getCase(caseId)?.title ?? caseId));
+  const titleSub = h("p", { class: "lb-case-title" }, caseId === null ? TG().lbOverall : (caseSummary(caseId)?.title ?? caseId));
   const eventEl = h("p", { class: "lb-event mono" });
   const frozenEl = h("p", { class: "lb-frozen", hidden: true });
   const updatedEl = h("p", { class: "lb-updated muted small mono" });

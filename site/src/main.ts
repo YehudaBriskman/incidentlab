@@ -1,18 +1,14 @@
 import "./styles.css";
 import { applyLang, getLang, isRelabel, noteRoute, setLang } from "./i18n/i18n";
 import { T } from "./i18n/strings-player";
-import { getCase } from "./content/load";
+import { caseSummary, loadAllCases, loadCase } from "./content/load";
 import { onConnectivity } from "./lib/api";
 import { h, restoreFields, setChildren, snapshotFields, type FieldSnapshot } from "./lib/dom";
 import { cachedAccount, isAdmin, loadAccount, onAccountChange, signOut } from "./lib/session";
 import { cachedEvent, onEventChange, startEventPolling } from "./lib/event";
 import { TA } from "./i18n/strings-account";
 import { TG } from "./i18n/strings-game";
-import { stopAuthTimers, withApprovedAccount } from "./views/auth";
-import { renderStats } from "./views/stats";
-import { renderCase, stopCaseTimers } from "./views/case";
 import { renderHome } from "./views/home";
-import { renderToolbox } from "./views/toolbox";
 import { eventDisplayPhase, eventLine, eventWhen, renderLeaderboard, stopLeaderboard } from "./views/leaderboard";
 
 applyLang();
@@ -236,8 +232,12 @@ function loadingView(): void {
   setChildren(appRoot, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, T().loading)));
 }
 
+/**
+ * Render a view whose code or content loads asynchronously. A language switch keeps the current page up
+ * until the re-render is ready (no "Loading…" flash); a navigation shows the loading card at once.
+ */
 function lazyView(load: () => Promise<(root: HTMLElement) => void>): void {
-  loadingView();
+  if (!isRelabel() || appRoot.childElementCount === 0) loadingView();
   const token = routeToken;
   load()
     .then((render) => {
@@ -251,6 +251,19 @@ function lazyView(load: () => Promise<(root: HTMLElement) => void>): void {
 
 let routeToken = 0;
 
+/*
+ * The case, toolbox, stats and sign-in views (and the markdown renderer they pull in) are chunks of their
+ * own. Every view that uses the account gate imports the auth view, so each of their loaders also loads it
+ * here: whenever auth's timers could be running, `authView` is set and the router can stop them.
+ */
+type AuthView = typeof import("./views/auth");
+type CaseViews = typeof import("./views/case") & typeof import("./views/toolbox");
+let authView: AuthView | null = null;
+let caseViews: CaseViews | null = null;
+const loadAuthView = (): Promise<AuthView> => import("./views/auth").then((m) => (authView = m));
+const loadCaseViews = (): Promise<CaseViews> =>
+  Promise.all([import("./views/case"), import("./views/toolbox"), loadAuthView()]).then(([caseView, toolbox]) => (caseViews = { ...caseView, ...toolbox }));
+
 function route(): void {
   routeToken++;
   // Strip the "?query" part (Explorer deep links: #/case/<id>/explorer?f=...) before matching.
@@ -259,8 +272,8 @@ function route(): void {
   const query = new URLSearchParams(queryString ?? "");
   const parts = hash.split("/").filter((part) => part.length > 0).map(decodeURIComponent);
   noteRoute();
-  stopCaseTimers();
-  stopAuthTimers();
+  caseViews?.stopCaseTimers();
+  authView?.stopAuthTimers();
   stopLeaderboard();
   if (!isRelabel()) window.scrollTo(0, 0);
 
@@ -276,12 +289,16 @@ function route(): void {
       // Both routes run the account gate: signed out -> the form (a `?code=` class link prefills the class
       // code); signed in -> the pending / rejected / password screens, or home once approved. The
       // instructor's session goes to the admin panel instead of the "sign in as a player" card.
-      withApprovedAccount(appRoot, "IncidentLab", () => void (window.location.hash = "#/"), {
-        onAdmin: () => void (window.location.hash = "#/admin"),
-        signedOutMode: signUp ? "sign-up" : "sign-in",
-        inviteCode: code !== undefined && code.length > 0 ? code.slice(0, 40) : undefined,
-        titled: true,
-      });
+      lazyView(() =>
+        loadAuthView().then((auth) => (root: HTMLElement) =>
+          auth.withApprovedAccount(root, "IncidentLab", () => void (window.location.hash = "#/"), {
+            onAdmin: () => void (window.location.hash = "#/admin"),
+            signedOutMode: signUp ? "sign-up" : "sign-in",
+            inviteCode: code !== undefined && code.length > 0 ? code.slice(0, 40) : undefined,
+            titled: true,
+          }),
+        ),
+      );
       return;
     }
     if (parts[0] === "leaderboard" && parts.length === 1) {
@@ -289,24 +306,39 @@ function route(): void {
       return;
     }
     if (parts[0] === "me" && parts.length === 1) {
-      renderStats(appRoot);
+      lazyView(() => Promise.all([import("./views/stats"), loadAuthView()]).then(([m]) => m.renderStats));
       return;
     }
     if (parts[0] === "admin" && parts.length === 1) {
-      lazyView(() => import("./views/admin").then((m) => m.renderAdmin));
+      // Admin shows titles and question names of every case: load them all (in parallel with its code).
+      lazyView(() => Promise.all([import("./views/admin"), loadAllCases()]).then(([m]) => m.renderAdmin));
       return;
     }
     if (parts[0] === "case" && parts[1] !== undefined) {
-      const c = getCase(parts[1]);
-      if (!c) {
-        notFound(T().caseMissing(parts[1]));
+      const id = parts[1];
+      const sub = parts[2];
+      if (sub !== undefined && sub !== "toolbox" && sub !== "explorer") {
+        notFound(T().notOnRunbook);
         return;
       }
-      const sub = parts[2];
-      if (sub === undefined) renderCase(appRoot, c);
-      else if (sub === "toolbox") renderToolbox(appRoot, c);
-      else if (sub === "explorer") lazyView(() => import("./views/explorer").then((m) => (root: HTMLElement) => m.renderExplorer(root, c)));
-      else notFound(T().notOnRunbook);
+      if (caseSummary(id) === undefined) {
+        notFound(T().caseMissing(id));
+        return;
+      }
+      // The case's content is its own chunk (per language), fetched only now.
+      const missing = (): void => notFound(T().caseMissing(id));
+      if (sub === "explorer") {
+        lazyView(() =>
+          Promise.all([loadCase(id), import("./views/explorer")]).then(([c, m]) => (c === undefined ? missing : (root: HTMLElement) => m.renderExplorer(root, c))),
+        );
+      } else {
+        lazyView(() =>
+          Promise.all([loadCase(id), loadCaseViews()]).then(([c, views]) => {
+            const render = sub === "toolbox" ? views.renderToolbox : views.renderCase;
+            return c === undefined ? missing : (root: HTMLElement) => render(root, c);
+          }),
+        );
+      }
       return;
     }
     notFound(T().notOnRunbook);

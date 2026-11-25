@@ -9,7 +9,7 @@ import { confirmButton, copyButton, h, html, setChildren, type Child } from "../
 import { playErrorText } from "../lib/errors";
 import { md } from "../lib/markdown";
 import { isAdmin, loadAccount, loadToday } from "../lib/session";
-import { getCase } from "../content/load";
+import { caseSummary } from "../content/load";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { T } from "../i18n/strings-player";
@@ -240,7 +240,7 @@ function toolboxNote(c: Case, root: HTMLElement, state: PageState): HTMLElement 
   if (state.kind === "error") return h("p", { class: "notice form-error", role: "alert" }, state.message);
   const p = state.progress;
   if (state.locked !== null) {
-    const todayCase = state.locked.todayCaseId !== null ? getCase(state.locked.todayCaseId) : undefined;
+    const todayCase = state.locked.todayCaseId !== null ? caseSummary(state.locked.todayCaseId) : undefined;
     return h(
       "div",
       { class: "notice", role: "status" },

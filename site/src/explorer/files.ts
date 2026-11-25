@@ -1,4 +1,4 @@
-import { cases } from "../content/load";
+import { englishEvidenceFormats } from "../content/evidence-formats";
 import type { Case } from "../content/schema";
 import { T } from "../i18n/strings-tools";
 import type { StepKind } from "./core";
@@ -82,7 +82,7 @@ const plainText = (markdown: string): string => markdown.replace(/[`*_]/g, "");
 /** Sidebar catalog for a case: README first, then the case JSON's evidence list in order. */
 export function evidenceFilesFor(c: Case): EvidenceFile[] {
   // Format labels may be translated, so the mode always comes from the English case.
-  const englishFormat = new Map((cases.get(c.id)?.evidence ?? []).map((f) => [f.path, f.format]));
+  const englishFormat = new Map((englishEvidenceFormats(c.id) ?? []).map((f) => [f.path, f.format]));
   const localFormat = new Map(c.evidence.map((f) => [f.path, f.format]));
   const build = (path: string, size: string, description: string): EvidenceFile => {
     const en = englishFormat.get(path) ?? localFormat.get(path) ?? "";
@@ -102,7 +102,7 @@ export function evidenceUrl(caseId: string, path: string): string {
 
 /** Zones a case's evidence is written in, from its English format labels (UTC is always offered first). */
 export function caseZones(c: Case): string[] {
-  const labels = (cases.get(c.id)?.evidence ?? c.evidence).map((f) => f.format).join(" ");
+  const labels = (englishEvidenceFormats(c.id) ?? c.evidence).map((f) => f.format).join(" ");
   const zones: string[] = [];
   if (/\bEST\b|-0500/.test(labels)) zones.push("America/New_York");
   if (/\bCET\b/.test(labels)) zones.push("Europe/Paris");
