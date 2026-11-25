@@ -6,13 +6,21 @@ import { InMemoryKvStore } from "../repositories/KvStore.ts";
 import { createApp } from "../router.ts";
 
 export const ADMIN_KEY = "admin-key-for-tests-0123456789";
-const q = { points: 100, hintCosts: [10, 20, 40] };
+export const TARGET_SECONDS = 600;
+const q = { points: 100, hintCosts: [10, 20, 40], targetSeconds: TARGET_SECONDS };
+const hintTexts = (qid: string) => [1, 2, 3].map((n) => ({ en: `${qid} hint ${n}`, he: n === 1 ? `${qid} רמז ${n}` : null }));
 const caseSecrets = (id: string) => ({
   title: `Case ${id}`,
   answers: { q1: `${id}-a1`, q2: "a2", q3: "a3", q4: "a4", q5: "a5", q6: "a6" },
   debrief: `# debrief ${id}`,
   debriefHe: id === "alpha" ? `# תחקיר ${id}` : null,
-  questions: { q1: q, q2: q, q3: q, q4: q, q5: q, q6: { points: 150, hintCosts: [10, 20, 40] } },
+  questions: { q1: q, q2: q, q3: q, q4: q, q5: q, q6: { ...q, points: 150 } },
+  hints: { q1: hintTexts("q1"), q2: hintTexts("q2"), q3: hintTexts("q3"), q4: hintTexts("q4"), q5: hintTexts("q5"), q6: hintTexts("q6") },
+  tools: {
+    "grep-5xx": { command: "grep ' 5[0-9][0-9] ' access.log", powershell: "Select-String ' 5\\d\\d ' access.log" },
+    "jq-start": { command: "jq 'select(.msg==\"start\")' app.log", powershell: null },
+  },
+  estMinutes: 60,
 });
 export const SECRETS: Secrets = { cases: { alpha: caseSecrets("alpha"), beta: caseSecrets("beta") } };
 export const ALL_ANSWERS = ["a2", "a3", "a4", "a5", "a6"];

@@ -7,15 +7,20 @@ import {
   AnswerResponseSchema,
   DebriefResponseSchema,
   ErrorBodySchema,
+  EventResponseSchema,
+  LeaderboardResponseSchema,
   ProgressResponseSchema,
   TodayResponseSchema,
   UserStatsResponseSchema,
   type AccountView,
+  type LeaderboardResponse,
+  type LiveEvent,
   type ProgressView,
   type QuestionId,
   type TodayResponse,
   type UserStats,
 } from "../../shared/contract";
+import { getLang } from "../i18n/i18n";
 
 const rawBase: unknown = import.meta.env["VITE_API_BASE"];
 const API_BASE = typeof rawBase === "string" ? rawBase.replace(/\/$/, "") : "";
@@ -40,6 +45,14 @@ export class ApiError extends Error {
   /** Signed in, but the instructor hasn't approved (or has rejected) the account. */
   get isNotApproved(): boolean {
     return this.status === 403 && (this.code === "pending" || this.code === "rejected");
+  }
+  /** Signed in, but the gate has to run again (new password needed, or this is the admin session). */
+  get needsGate(): boolean {
+    return this.status === 403 && (this.code === "password-change-required" || this.code === "admin");
+  }
+  /** During an event that enforces its window: answers, hints and command reveals are refused. */
+  get isEventClosed(): boolean {
+    return this.status === 403 && this.code === "event-closed";
   }
 }
 
@@ -136,16 +149,20 @@ async function requestNoContent(path: string, body: unknown): Promise<void> {
   const res = await send("POST", path, body);
   if (!res.ok) {
     const parsed = ErrorBodySchema.safeParse(await readJson(res));
-    throw new ApiError(res.status, parsed.success ? parsed.data.error : `Request failed (${res.status})`);
+    throw new ApiError(res.status, parsed.success ? parsed.data.error : `Request failed (${res.status})`, {
+      code: parsed.success ? (parsed.data.code ?? null) : null,
+    });
   }
 }
 
 // ---- account / session ------------------------------------------------------
 
 type Credentials = { username: string; password: string };
+type Registration = Credentials & { inviteCode?: string };
 
-export async function register(credentials: Credentials): Promise<AccountView> {
-  return (await request("POST", "/api/auth/register", AccountResponseSchema, credentials)).account;
+/** Creates the account. With a valid class code it comes back already "approved". */
+export async function register(registration: Registration): Promise<AccountView> {
+  return (await request("POST", "/api/auth/register", AccountResponseSchema, registration)).account;
 }
 
 export async function login(credentials: Credentials): Promise<AccountView> {
@@ -170,13 +187,30 @@ export async function fetchMyStats(): Promise<UserStats> {
   return (await request("GET", "/api/me/stats", UserStatsResponseSchema)).stats;
 }
 
+/** Sets a new password (also clears the "must change password" flag after an instructor reset). */
+export async function changePassword(input: { currentPassword: string; newPassword: string }): Promise<AccountView> {
+  return (await request("POST", "/api/me/password", AccountResponseSchema, input)).account;
+}
+
 export async function fetchToday(): Promise<TodayResponse> {
   return request("GET", "/api/today", TodayResponseSchema);
 }
 
+/** The live event (public). `serverTime` lets the client correct its clock for countdowns. */
+export async function fetchEvent(): Promise<{ event: LiveEvent; serverTime: string }> {
+  return request("GET", "/api/event", EventResponseSchema);
+}
+
+/** Public leaderboard: overall when `caseId` is null, else for that case. */
+export async function fetchLeaderboard(caseId: string | null): Promise<LeaderboardResponse> {
+  const query = caseId === null ? "" : `?caseId=${encodeURIComponent(caseId)}`;
+  return request("GET", `/api/leaderboard${query}`, LeaderboardResponseSchema);
+}
+
 // ---- gameplay (per case) ----------------------------------------------------
 
-const casePath = (caseId: string, action: string): string => `/api/cases/${encodeURIComponent(caseId)}/${action}`;
+/** Every case route carries ?lang= so the server localizes the paid-for hint texts. */
+const casePath = (caseId: string, action: string): string => `/api/cases/${encodeURIComponent(caseId)}/${action}?lang=${getLang()}`;
 
 export async function getProgress(caseId: string): Promise<ProgressView> {
   return (await request("GET", casePath(caseId, "progress"), ProgressResponseSchema)).progress;
@@ -198,6 +232,11 @@ export async function revealAnswer(caseId: string, questionId: QuestionId): Prom
   return (await request("POST", casePath(caseId, "reveal"), ProgressResponseSchema, { questionId })).progress;
 }
 
-export async function getDebrief(caseId: string, lang: "en" | "he"): Promise<string> {
-  return (await request("GET", `${casePath(caseId, "debrief")}?lang=${lang}`, DebriefResponseSchema)).markdown;
+/** Pays COMMAND_COST on the active stage (free when already paid for or the case is completed). */
+export async function revealCommand(caseId: string, toolId: string): Promise<ProgressView> {
+  return (await request("POST", casePath(caseId, "reveal-command"), ProgressResponseSchema, { toolId })).progress;
+}
+
+export async function getDebrief(caseId: string): Promise<string> {
+  return (await request("GET", casePath(caseId, "debrief"), DebriefResponseSchema)).markdown;
 }

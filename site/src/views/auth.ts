@@ -1,10 +1,11 @@
-// Sign in / sign up, and the "waiting for approval" screen. `withApprovedAccount` is the single gate
-// every playable view goes through.
-import { CredentialsSchema, type AccountView } from "../../shared/contract";
-import { ApiError, login, register } from "../lib/api";
-import { h, setChildren } from "../lib/dom";
-import { loadAccount, setAccount, signOut } from "../lib/session";
+// Sign in / sign up, the "waiting for approval" screen and the forced password change.
+// `withApprovedAccount` is the single gate every playable view goes through.
+import { CredentialsSchema, PasswordSchema, type AccountView } from "../../shared/contract";
+import { ApiError, changePassword, login, register } from "../lib/api";
+import { h, setChildren, type Child } from "../lib/dom";
+import { isAdmin, loadAccount, setAccount, signOut } from "../lib/session";
 import { TA } from "../i18n/strings-account";
+import { TG } from "../i18n/strings-game";
 import { T } from "../i18n/strings-player";
 
 const PENDING_POLL_MS = 8_000;
@@ -17,18 +18,33 @@ export function stopAuthTimers(): void {
 
 type Mode = "sign-in" | "sign-up";
 
+/** Send the instructor's session to the admin panel (re-renders when already there). */
+export function goToAdmin(): void {
+  if (window.location.hash === "#/admin") window.dispatchEvent(new HashChangeEvent("hashchange"));
+  else window.location.hash = "#/admin";
+}
+
 /**
- * Resolves the signed-in account and calls `onReady` once it is approved. Otherwise renders the sign-in
- * form, the pending screen (polls until approved) or the rejected screen into `root`.
+ * Resolves the signed-in account and calls `onReady` once it is an approved player with a usable password.
+ * Otherwise renders the sign-in form, the pending screen (polls until approved), the rejected screen, the
+ * "set a new password" form, or (for the instructor's session) the "sign in as a player" card into `root`.
  */
-export function withApprovedAccount(root: HTMLElement, context: string, onReady: (account: AccountView) => void): void {
+export function withApprovedAccount(
+  root: HTMLElement,
+  context: string,
+  onReady: (account: AccountView) => void,
+  options: { onAdmin?: () => void } = {},
+): void {
   stopAuthTimers();
+  const again = (): void => withApprovedAccount(root, context, onReady, options);
   setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, T().loading)));
   loadAccount()
     .then((account) => {
-      if (account === null) renderAuthForm(root, { context, mode: "sign-in", onSignedIn: () => withApprovedAccount(root, context, onReady) });
-      else if (account.status === "pending") renderPending(root, account, () => withApprovedAccount(root, context, onReady));
+      if (account === null) renderAuthForm(root, { context, mode: "sign-in", onSignedIn: again });
+      else if (isAdmin(account)) (options.onAdmin ?? (() => renderAdminCard(root, again)))();
+      else if (account.status === "pending") renderPending(root, account, again);
       else if (account.status === "rejected") renderRejected(root);
+      else if (account.mustChangePassword) renderForcedPasswordChange(root, context, again);
       else onReady(account);
     })
     .catch((err: unknown) => {
@@ -39,7 +55,7 @@ export function withApprovedAccount(root: HTMLElement, context: string, onReady:
           { class: "center-card", role: "alert" },
           h("h1", {}, T().cantLoadProgress),
           h("p", { class: "muted" }, err instanceof ApiError ? err.message : T().genericError),
-          h("button", { type: "button", class: "btn btn-primary", onclick: () => withApprovedAccount(root, context, onReady) }, T().tryAgain),
+          h("button", { type: "button", class: "btn btn-primary", onclick: again }, T().tryAgain),
         ),
       );
     });
@@ -48,10 +64,42 @@ export function withApprovedAccount(root: HTMLElement, context: string, onReady:
 function authErrorText(err: unknown): string {
   if (!(err instanceof ApiError)) return T().genericError;
   if (err.code === "username-taken") return TA().usernameTaken;
+  if (err.code === "reserved") return TG().reservedName;
+  if (err.code === "bad-invite-code") return TG().badInvite;
   if (err.code === "bad-credentials") return TA().badCredentials;
   if (err.code === "rejected") return TA().rejectedLogin;
   if (err.isRateLimited) return TA().rateLimited(err.retryAfterSeconds ?? 60);
   return err.message;
+}
+
+/** A password input with a Show/Hide toggle. */
+function passwordField(opts: { id: string; label: string; autocomplete: string; help?: string }): { row: Child[]; input: HTMLInputElement } {
+  const helpId = `${opts.id}-help`;
+  const input = h("input", {
+    id: opts.id,
+    class: "input input-lg",
+    type: "password",
+    autocomplete: opts.autocomplete,
+    maxlength: "128",
+    required: true,
+    dir: "ltr",
+    "aria-describedby": opts.help ? helpId : null,
+  });
+  const toggle = h("button", { type: "button", class: "link-btn small", "aria-controls": opts.id, "aria-pressed": "false" }, TA().showPassword);
+  toggle.addEventListener("click", () => {
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    toggle.textContent = show ? TA().hidePassword : TA().showPassword;
+    toggle.setAttribute("aria-pressed", String(show));
+  });
+  return {
+    input,
+    row: [
+      h("div", { class: "field-label-row" }, h("label", { class: "field-label", for: opts.id }, opts.label), toggle),
+      input,
+      opts.help ? h("p", { id: helpId, class: "muted small" }, opts.help) : null,
+    ],
+  };
 }
 
 export function renderAuthForm(root: HTMLElement, opts: { context: string; mode: Mode; onSignedIn: () => void }): void {
@@ -70,24 +118,27 @@ export function renderAuthForm(root: HTMLElement, opts: { context: string; mode:
     dir: "auto",
     "aria-describedby": isSignUp ? "auth-username-help" : null,
   });
-  const password = h("input", {
+  const pw = passwordField({
     id: "auth-password",
-    class: "input input-lg",
-    type: "password",
-    name: "password",
+    label: TA().password,
     autocomplete: isSignUp ? "new-password" : "current-password",
-    maxlength: "128",
-    required: true,
-    dir: "ltr",
-    "aria-describedby": isSignUp ? "auth-password-help" : null,
+    help: isSignUp ? TA().passwordHelp : undefined,
   });
-  const toggle = h("button", { type: "button", class: "link-btn small", "aria-controls": "auth-password", "aria-pressed": "false" }, TA().showPassword);
-  toggle.addEventListener("click", () => {
-    const show = password.type === "password";
-    password.type = show ? "text" : "password";
-    toggle.textContent = show ? TA().hidePassword : TA().showPassword;
-    toggle.setAttribute("aria-pressed", String(show));
-  });
+  const password = pw.input;
+  const invite = isSignUp
+    ? h("input", {
+        id: "auth-invite",
+        class: "input",
+        type: "text",
+        name: "inviteCode",
+        autocomplete: "off",
+        autocapitalize: "none",
+        spellcheck: "false",
+        maxlength: "40",
+        dir: "ltr",
+        "aria-describedby": "auth-invite-help",
+      })
+    : null;
   const errorEl = h("p", { id: "auth-error", class: "form-error", role: "alert" });
   const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg btn-block" }, isSignUp ? TA().signUpBtn : TA().signInBtn);
   const switchMode = h(
@@ -105,19 +156,23 @@ export function renderAuthForm(root: HTMLElement, opts: { context: string; mode:
     h("label", { class: "field-label", for: "auth-username" }, TA().username),
     username,
     isSignUp ? h("p", { id: "auth-username-help", class: "muted small" }, TA().usernameHelp) : null,
-    h("div", { class: "field-label-row" }, h("label", { class: "field-label", for: "auth-password" }, TA().password), toggle),
-    password,
-    isSignUp ? h("p", { id: "auth-password-help", class: "muted small" }, TA().passwordHelp) : null,
+    pw.row,
+    invite
+      ? [
+          h("label", { class: "field-label", for: "auth-invite" }, TG().inviteLabel),
+          invite,
+          h("p", { id: "auth-invite-help", class: "muted small" }, TG().inviteHelp),
+        ]
+      : null,
     errorEl,
     submit,
     switchMode,
-    isSignUp ? null : h("p", { class: "muted small" }, TA().forgotPassword),
+    isSignUp ? null : h("p", { class: "muted small" }, TG().forgotPassword),
   );
 
   const fail = (message: string, field: HTMLInputElement | null): void => {
     errorEl.textContent = message;
-    username.removeAttribute("aria-invalid");
-    password.removeAttribute("aria-invalid");
+    for (const el of [username, password, invite]) el?.removeAttribute("aria-invalid");
     if (field) {
       field.setAttribute("aria-invalid", "true");
       field.focus();
@@ -141,21 +196,124 @@ export function renderAuthForm(root: HTMLElement, opts: { context: string; mode:
     errorEl.textContent = "";
     submit.disabled = true;
     submit.textContent = isSignUp ? TA().signingUp : TA().signingIn;
-    (isSignUp ? register(credentials) : login(credentials))
+    const inviteCode = invite?.value.trim() ?? "";
+    (isSignUp ? register(inviteCode.length > 0 ? { ...credentials, inviteCode } : credentials) : login(credentials))
       .then((account) => {
         setAccount(account);
-        opts.onSignedIn();
+        if (isAdmin(account)) goToAdmin();
+        else opts.onSignedIn();
       })
       .catch((err: unknown) => {
         submit.disabled = false;
         submit.textContent = isSignUp ? TA().signUpBtn : TA().signInBtn;
-        const isNameProblem = err instanceof ApiError && err.code === "username-taken";
-        fail(authErrorText(err), isNameProblem ? username : null);
+        const code = err instanceof ApiError ? err.code : null;
+        const field = code === "username-taken" || code === "reserved" ? username : code === "bad-invite-code" ? invite : null;
+        fail(authErrorText(err), field);
       });
   });
 
   setChildren(root, form);
   username.focus();
+}
+
+/* ================= password change ================= */
+
+/**
+ * "Current / new / confirm" password form posting to /api/me/password. `forced` = after an instructor
+ * reset (the current password is the temporary one). Calls `onChanged` with the updated account.
+ */
+export function passwordChangeForm(opts: { forced: boolean; onChanged: (account: AccountView) => void; idPrefix?: string }): HTMLFormElement {
+  const p = opts.idPrefix ?? "pw";
+  const current = passwordField({ id: `${p}-current`, label: opts.forced ? TG().currentPwForced : TG().currentPw, autocomplete: "current-password" });
+  const next = passwordField({ id: `${p}-new`, label: TG().newPw, autocomplete: "new-password", help: TG().pwHelp });
+  const confirm = passwordField({ id: `${p}-confirm`, label: TG().confirmPw, autocomplete: "new-password" });
+  const errorEl = h("p", { class: "form-error", role: "alert" });
+  const okEl = h("p", { class: "form-ok", role: "status" });
+  const submit = h("button", { type: "submit", class: `btn btn-primary${opts.forced ? " btn-lg btn-block" : ""}` }, TG().pwSave);
+  const form = h("form", { class: "pw-form", novalidate: true }, current.row, next.row, confirm.row, errorEl, okEl, h("div", {}, submit));
+
+  const fail = (message: string, field: HTMLInputElement | null): void => {
+    errorEl.textContent = message;
+    okEl.textContent = "";
+    for (const el of [current.input, next.input, confirm.input]) el.removeAttribute("aria-invalid");
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+  };
+
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const currentPassword = current.input.value;
+    const newPassword = next.input.value;
+    if (currentPassword.length === 0) return fail(TG().pwWrongCurrent, current.input);
+    if (!PasswordSchema.safeParse(newPassword).success) return fail(TA().passwordInvalid, next.input);
+    if (newPassword !== confirm.input.value) return fail(TG().pwMismatch, confirm.input);
+    if (newPassword === currentPassword) return fail(TG().pwSame, next.input);
+    errorEl.textContent = "";
+    submit.disabled = true;
+    submit.textContent = TG().pwSaving;
+    changePassword({ currentPassword, newPassword })
+      .then((account) => {
+        submit.disabled = false;
+        submit.textContent = TG().pwSave;
+        form.reset();
+        okEl.textContent = TG().pwSaved;
+        opts.onChanged(account);
+      })
+      .catch((err: unknown) => {
+        submit.disabled = false;
+        submit.textContent = TG().pwSave;
+        const wrongCurrent = err instanceof ApiError && err.code === "bad-credentials";
+        fail(wrongCurrent ? TG().pwWrongCurrent : authErrorText(err), wrongCurrent ? current.input : null);
+      });
+  });
+  return form;
+}
+
+function renderForcedPasswordChange(root: HTMLElement, context: string, onDone: () => void): void {
+  const form = passwordChangeForm({
+    forced: true,
+    idPrefix: "forced-pw",
+    onChanged: (account) => {
+      setAccount(account);
+      onDone();
+    },
+  });
+  setChildren(
+    root,
+    h(
+      "section",
+      { class: "center-card gate" },
+      h("p", { class: "eyebrow mono" }, context),
+      h("h1", {}, TG().pwTitleForced),
+      h("p", { class: "muted" }, TG().pwHelpForced),
+      form,
+      h("button", { type: "button", class: "link-btn", onclick: () => void signOut().finally(onDone) }, TA().signOut),
+    ),
+  );
+  form.querySelector("input")?.focus();
+}
+
+/* ================= other gate screens ================= */
+
+function renderAdminCard(root: HTMLElement, onSignedOut: () => void): void {
+  setChildren(
+    root,
+    h(
+      "section",
+      { class: "center-card" },
+      h("p", { class: "eyebrow mono" }, "admin"),
+      h("h1", {}, TG().adminTitle),
+      h("p", { class: "muted" }, TG().adminBody),
+      h(
+        "div",
+        { class: "row-center" },
+        h("a", { class: "btn btn-primary", href: "#/admin" }, TG().openAdmin),
+        h("button", { type: "button", class: "btn", onclick: () => void signOut().finally(onSignedOut) }, TA().signOut),
+      ),
+    ),
+  );
 }
 
 function renderPending(root: HTMLElement, account: AccountView, onApproved: () => void): void {

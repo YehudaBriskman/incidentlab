@@ -113,10 +113,11 @@
   "rules": [
     "Work only from the evidence pack. Don't read the generator source or the site's source code; that spoils the fun.",
     "Answers are case-insensitive, and leading and trailing whitespace is ignored. Stick to the format shown under each question.",
-    "Each hint costs the points shown on it. Hints are revealed in order, from a gentle nudge to almost the full command.",
+    "Hints cost the points shown on them and are revealed in order, from a gentle nudge to almost the full command. In the Toolbox, each command's syntax is free; seeing the full runnable command costs 5 points. Once you finish the case, every command is free.",
     "Working in pairs is encouraged. Talk through your reasoning out loud, just like a real incident review.",
     "Any tool is allowed: grep, awk, jq, Python, a spreadsheet, your favourite editor. The Toolbox tab lists commands that help.",
-    "Wrong answers cost nothing, so guess freely. Still, try to be able to explain *why* your answer is right.",
+    "Each wrong answer costs 2 points (at most 20 per stage), so check your reasoning before you submit. Try to be able to explain *why* your answer is right.",
+    "Speed and care pay: a fast solve earns a time bonus (up to +30 per stage, fading after the stage's target time), a clean solve with no hints, commands or wrong answers earns +10, the first player to solve a stage gets +15 first blood, and finishing all six stages without revealing an answer earns +50.",
     "Don't share flags with other teams until everyone is done. Sharing techniques is fine.",
     "Every IP, account id and key in the pack is fictional. Investigate the logs; don't point any of it at a real system."
   ],
@@ -147,6 +148,7 @@
       "answerFormat": "IPv4 address",
       "placeholder": "192.0.2.1",
       "points": 100,
+      "targetMinutes": 8,
       "hints": [
         {
           "cost": 10,
@@ -189,6 +191,7 @@
       "answerFormat": "HH:MM:SS (UTC)",
       "placeholder": "04:20:00",
       "points": 100,
+      "targetMinutes": 12,
       "hints": [
         {
           "cost": 10,
@@ -231,6 +234,7 @@
       "answerFormat": "Access key id (20 chars, starts with ASIA)",
       "placeholder": "ASIAEXAMPLE000000000",
       "points": 100,
+      "targetMinutes": 10,
       "hints": [
         {
           "cost": 10,
@@ -273,6 +277,7 @@
       "answerFormat": "Integer (distinct objects)",
       "placeholder": "42",
       "points": 100,
+      "targetMinutes": 12,
       "hints": [
         {
           "cost": 10,
@@ -314,6 +319,7 @@
       "answerFormat": "CloudTrail eventName, exact spelling",
       "placeholder": "DeleteObjects",
       "points": 100,
+      "targetMinutes": 12,
       "hints": [
         {
           "cost": 10,
@@ -354,6 +360,7 @@
       "answerFormat": "Policy statement Sid (exact)",
       "placeholder": "AllowSomething",
       "points": 150,
+      "targetMinutes": 16,
       "hints": [
         {
           "cost": 10,
@@ -378,6 +385,8 @@
         {
           "id": "unzip-evidence",
           "title": "Unpack the evidence",
+          "syntax": "unzip <evidence-zip> && cd <case-folder>",
+          "syntaxPowershell": "Expand-Archive .\\<evidence-zip> -DestinationPath .\ncd .\\<case-folder>",
           "command": "unzip who-deleted-prod-evidence.zip && cd who-deleted-prod",
           "explain": "Extracts the pack. Everything lives under one top-level folder.",
           "powershell": "Expand-Archive .\\who-deleted-prod-evidence.zip -DestinationPath .\ncd .\\who-deleted-prod"
@@ -385,6 +394,8 @@
         {
           "id": "list-files",
           "title": "See what you've got",
+          "syntax": "find <dir> -type f | sort | xargs ls -l",
+          "syntaxPowershell": "Get-ChildItem <dir> -Recurse -File | Select-Object FullName, Length",
           "command": "find . -type f | sort | xargs ls -l",
           "explain": "Every file with its size. The big ones (WAF log, flow logs, CloudTrail) are the ones you will filter, not read.",
           "powershell": "Get-ChildItem -Recurse -File | Select-Object FullName, Length"
@@ -392,6 +403,8 @@
         {
           "id": "read-readme",
           "title": "Read the README",
+          "syntax": "cat <readme-file>",
+          "syntaxPowershell": "Get-Content <readme-file>",
           "command": "cat README_FIRST.txt",
           "explain": "Time zones, formats and a glossary. Read it before anything else.",
           "powershell": "Get-Content README_FIRST.txt"
@@ -399,6 +412,8 @@
         {
           "id": "head-lines",
           "title": "Peek at the first lines",
+          "syntax": "head -n <count> <log-file>",
+          "syntaxPowershell": "Get-Content <log-file> -TotalCount <count>",
           "command": "head -n 3 waf/access.log",
           "explain": "Look at a format **before** you parse it. `tail -n 3` shows the end of the window.",
           "powershell": "Get-Content waf\\access.log -TotalCount 3"
@@ -406,6 +421,8 @@
         {
           "id": "line-count",
           "title": "How big is it?",
+          "syntax": "wc -l <log-file> <other-files...>",
+          "syntaxPowershell": "Get-ChildItem <log-file>, <other-files> | ForEach-Object { '{0,8} {1}' -f (Get-Content $_.FullName | Measure-Object -Line).Lines, $_.Name }",
           "command": "wc -l waf/access.log cloudtrail/*.jsonl s3-access-logs/*/*.log",
           "explain": "Line counts tell you whether to eyeball a file or aggregate it.",
           "powershell": "Get-ChildItem waf\\access.log, cloudtrail\\*.jsonl | ForEach-Object { '{0,8} {1}' -f (Get-Content $_.FullName | Measure-Object -Line).Lines, $_.Name }"
@@ -418,6 +435,8 @@
         {
           "id": "grep-fixed",
           "title": "Literal search",
+          "syntax": "grep -F '<literal-text>' <log-file> | head",
+          "syntaxPowershell": "Select-String -Path <log-file> -Pattern '<literal-text>' -SimpleMatch | Select-Object -First <count>",
           "command": "grep -F '169.254.169.254' waf/access.log | head",
           "explain": "`-F` treats the pattern as plain text, so the dots in an IP are dots, not \"any character\". It only finds the address **spelled exactly that way**.",
           "powershell": "Select-String -Path waf\\access.log -Pattern '169.254.169.254' -SimpleMatch | Select-Object -First 10"
@@ -425,6 +444,8 @@
         {
           "id": "grep-count",
           "title": "Count matches",
+          "syntax": "grep -c '<pattern>' <log-file>",
+          "syntaxPowershell": "(Select-String -Path <log-file> -Pattern '<pattern>' -SimpleMatch).Count",
           "command": "grep -c 'waf=block' waf/access.log",
           "explain": "`-c` prints how many lines match. Fast sanity checks.",
           "powershell": "(Select-String -Path waf\\access.log -Pattern 'waf=block' -SimpleMatch).Count"
@@ -432,6 +453,8 @@
         {
           "id": "grep-exclude",
           "title": "Invert / exclude",
+          "syntax": "grep -v -e '<pattern>' -e '<other-pattern>' <log-file> | head",
+          "syntaxPowershell": "Select-String -Path <log-file> -Pattern '<pattern>', '<other-pattern>' -NotMatch | Select-Object -First <count>",
           "command": "grep -v -e 'waf=block' -e '/static/' waf/access.log | head",
           "explain": "`-v` keeps lines that do **not** match. Each `-e` adds a pattern. Good for peeling off noise.",
           "powershell": "Select-String -Path waf\\access.log -Pattern 'waf=block', '/static/' -NotMatch | Select-Object -First 10"
@@ -439,6 +462,8 @@
         {
           "id": "grep-only-match",
           "title": "Print only the match",
+          "syntax": "grep -o '<field>=<regex>' <log-file> | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Select-String -Path <log-file> -Pattern '<field>=<regex>' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
           "command": "grep -o 'upstream=[^ ]*' waf/access.log | sort | uniq -c | sort -rn",
           "explain": "`-o` outputs just the matched text. Here: every upstream nginx connected to, with counts. Rare values deserve a look.",
           "powershell": "Select-String -Path waf\\access.log -Pattern 'upstream=\\S+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
@@ -446,6 +471,8 @@
         {
           "id": "grep-all-files",
           "title": "Search several files at once",
+          "syntax": "grep -h -F '<literal-text>' <dir>/<glob> | head",
+          "syntaxPowershell": "Select-String -Path <dir>\\<glob> -Pattern '<literal-text>' -SimpleMatch | Select-Object -First <count> -ExpandProperty Line",
           "command": "grep -h -F 'pattern' cloudtrail/*.jsonl | head",
           "explain": "`-h` drops the file name prefix so the output is still valid JSON lines you can pipe into `jq`.",
           "powershell": "Select-String -Path cloudtrail\\*.jsonl -Pattern 'pattern' -SimpleMatch | Select-Object -First 10 -ExpandProperty Line"
@@ -453,6 +480,8 @@
         {
           "id": "grep-context",
           "title": "Context around a hit",
+          "syntax": "grep -n -B<before> -A<after> '<pattern>' <log-file>",
+          "syntaxPowershell": "Select-String -Path <log-file> -Pattern '<pattern>' -Context <before>,<after>",
           "command": "grep -n -B2 -A4 'pattern' waf/access.log",
           "explain": "`-B`/`-A` show lines before and after each match: what else happened around that moment?",
           "powershell": "Select-String -Path waf\\access.log -Pattern 'pattern' -Context 2,4"
@@ -465,6 +494,8 @@
         {
           "id": "waf-fields",
           "title": "Pull fields from WAF lines",
+          "syntax": "awk '{print $<field>, $<field>, ...}' <waf-log> | head",
+          "syntaxPowershell": "Get-Content <waf-log> -TotalCount <count> | ForEach-Object { $f = $_ -split ' '; \"$($f[<index>]) $($f[<index>]) ...\" }",
           "command": "awk '{print $1, $4, $5, $7, $9}' waf/access.log | head",
           "explain": "Split on spaces: `$1` client IP, `$4 $5` time and offset, `$7` URI, `$9` status, `$10` bytes. The user agent contains spaces, so for later fields use `grep -o 'upstream=[^ ]*'` instead of counting.",
           "powershell": "Get-Content waf\\access.log -TotalCount 10 | ForEach-Object { $f = $_ -split ' '; \"$($f[0]) $($f[3]) $($f[4]) $($f[6]) $($f[8])\" }"
@@ -472,6 +503,8 @@
         {
           "id": "status-histogram",
           "title": "Status code histogram",
+          "syntax": "awk '{print $<status-field>}' <waf-log> | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Select-String -Path <waf-log> -Pattern '<status-regex-with-group>' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
           "command": "awk '{print $9}' waf/access.log | sort | uniq -c | sort -rn",
           "explain": "How many of each status. The classic first look at any access log.",
           "powershell": "Select-String -Path waf\\access.log -Pattern '\" (\\d{3}) ' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
@@ -479,6 +512,8 @@
         {
           "id": "ip-histogram",
           "title": "Top client IPs",
+          "syntax": "awk '{print $<ip-field>}' <waf-log> | sort | uniq -c | sort -rn | head -<count>",
+          "syntaxPowershell": "Select-String -Path <waf-log> -Pattern '<ip-regex-with-group>' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First <count> Count, Name",
           "command": "awk '{print $1}' waf/access.log | sort | uniq -c | sort -rn | head -20",
           "explain": "Who talks to us the most? Attackers are often *not* at the top: they make few, precise requests.",
           "powershell": "Select-String -Path waf\\access.log -Pattern '^(\\S+)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name"
@@ -486,6 +521,8 @@
         {
           "id": "field-filter",
           "title": "Filter by field, then by text",
+          "syntax": "awk '$<status-field> == <status>' <waf-log> | grep -F '<path>' | head",
+          "syntaxPowershell": "Select-String -Path <waf-log> -Pattern '<status-pattern>' | Where-Object { $_.Line -like '*<path>*' } | Select-Object -First <count> -ExpandProperty Line",
           "command": "awk '$9 == 200' waf/access.log | grep -F '/proxy/fetch' | head",
           "explain": "awk compares a field exactly (`200` won't match inside a byte count), then grep narrows by path.",
           "powershell": "Select-String -Path waf\\access.log -Pattern '\" 200 ' | Where-Object { $_.Line -like '*/proxy/fetch*' } | Select-Object -First 10 -ExpandProperty Line"
@@ -493,6 +530,8 @@
         {
           "id": "waf-blocked",
           "title": "What did the WAF block?",
+          "syntax": "grep -F '<block-marker>' <waf-log> | grep -o '<field>=<regex>' | sort | uniq -c",
+          "syntaxPowershell": "Select-String -Path <waf-log> -Pattern '<block-marker> <field>=(<regex>)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name",
           "command": "grep -F 'waf=block' waf/access.log | grep -o 'rule=[0-9]*' | sort | uniq -c",
           "explain": "Which custom rules fired, and how often. Then read those rules in `waf/edge-waf.conf`: what exactly do they match?",
           "powershell": "Select-String -Path waf\\access.log -Pattern 'waf=block rule=(\\d+)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name"
@@ -500,6 +539,8 @@
         {
           "id": "first-last-match",
           "title": "First and last occurrence",
+          "syntax": "grep -F '<literal-text>' <log-file> | sed -n '<first>p;<last>p'",
+          "syntaxPowershell": "$hits = Select-String -Path <log-file> -Pattern '<literal-text>' -SimpleMatch\n$hits[<first>].Line\n$hits[<last>].Line",
           "command": "grep -F 'pattern' waf/access.log | sed -n '1p;$p'",
           "explain": "Start and end of a phenomenon in one go. The log is in time order.",
           "powershell": "$hits = Select-String -Path waf\\access.log -Pattern 'pattern' -SimpleMatch\n$hits[0].Line\n$hits[-1].Line"
@@ -512,6 +553,8 @@
         {
           "id": "ct-pretty",
           "title": "Pretty-print one event",
+          "syntax": "head -n1 <cloudtrail-file> | jq .",
+          "syntaxPowershell": "Get-Content <cloudtrail-file> -TotalCount 1 | ConvertFrom-Json | ConvertTo-Json -Depth <depth>",
           "command": "head -n1 cloudtrail/*20261118.jsonl | jq .",
           "explain": "See every field a CloudTrail record carries: `userIdentity`, `sourceIPAddress`, `userAgent`, `eventName`, `requestParameters`, `errorCode`...",
           "powershell": "Get-Content cloudtrail\\*20261118.jsonl -TotalCount 1 | ConvertFrom-Json | ConvertTo-Json -Depth 10"
@@ -519,6 +562,8 @@
         {
           "id": "ct-event-names",
           "title": "Which API calls happened?",
+          "syntax": "cat <cloudtrail-files> | jq -r '.<field>' | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Group-Object <field> | Sort-Object Count -Descending | Select-Object Count, Name",
           "command": "cat cloudtrail/*.jsonl | jq -r '.eventName' | sort | uniq -c | sort -rn",
           "explain": "A histogram of `eventName`. Rare write calls stand out.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Group-Object eventName | Sort-Object Count -Descending | Select-Object Count, Name"
@@ -526,6 +571,8 @@
         {
           "id": "ct-who",
           "title": "Who signed the calls?",
+          "syntax": "cat <cloudtrail-files> | jq -r '.<path> // .<fallback-path>' | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | ForEach-Object { if ($_.<path>) { $_.<path> } else { $_.<fallback-path> } } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
           "command": "cat cloudtrail/*.jsonl | jq -r '.userIdentity.arn // .userIdentity.type' | sort | uniq -c | sort -rn",
           "explain": "Principals by volume. For an assumed role the ARN ends in the session name; for an EC2 instance role that is the instance id.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | ForEach-Object { if ($_.userIdentity.arn) { $_.userIdentity.arn } else { $_.userIdentity.type } } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
@@ -533,6 +580,8 @@
         {
           "id": "ct-where",
           "title": "Who, from where, with which key",
+          "syntax": "cat <cloudtrail-files> | jq -r '[.<path> // \"-\", .<path>, .<path> // \"-\"] | @tsv' | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | ForEach-Object { '{0} {1} {2}' -f $_.<path>, $_.<path>, $_.<path> } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
           "command": "cat cloudtrail/*.jsonl | jq -r '[.userIdentity.arn // \"-\", .sourceIPAddress, .userIdentity.accessKeyId // \"-\"] | @tsv' | sort | uniq -c | sort -rn",
           "explain": "Groups events by principal, source IP and access key. One principal should normally come from a small, predictable set of places.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | ForEach-Object { '{0} {1} {2}' -f $_.userIdentity.arn, $_.sourceIPAddress, $_.userIdentity.accessKeyId } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
@@ -540,6 +589,8 @@
         {
           "id": "ct-useragent",
           "title": "Which client made the call?",
+          "syntax": "cat <cloudtrail-files> | jq -r '[.<field>, .<field>[0:<length>]] | @tsv' | sort | uniq -c | sort -rn | head -<count>",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | ForEach-Object { '{0} {1}' -f $_.<field>, $_.<field>.Substring(0, [Math]::Min(<length>, $_.<field>.Length)) } | Group-Object | Sort-Object Count -Descending | Select-Object -First <count> Count, Name",
           "command": "cat cloudtrail/*.jsonl | jq -r '[.sourceIPAddress, .userAgent[0:40]] | @tsv' | sort | uniq -c | sort -rn | head -20",
           "explain": "The `userAgent` tells you the SDK or tool. A service written in Go doesn't suddenly start using a Python CLI.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | ForEach-Object { '{0} {1}' -f $_.sourceIPAddress, $_.userAgent.Substring(0, [Math]::Min(40, $_.userAgent.Length)) } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name"
@@ -547,6 +598,8 @@
         {
           "id": "ct-select-role",
           "title": "Only one role",
+          "syntax": "cat <cloudtrail-files> | jq -c 'select(.<path> == \"<value>\")' | head",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<path> -eq '<value>' } | Select-Object -First <count> <field>, <field>, <field>",
           "command": "cat cloudtrail/*.jsonl | jq -c 'select(.userIdentity.sessionContext.sessionIssuer.userName == \"<role-name>\")' | head",
           "explain": "`sessionIssuer.userName` is the role behind an assumed-role session, whatever the session is called.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.userIdentity.sessionContext.sessionIssuer.userName -eq '<role-name>' } | Select-Object -First 10 eventTime, eventName, sourceIPAddress"
@@ -554,6 +607,8 @@
         {
           "id": "ct-not-ip",
           "title": "Exclude known sources",
+          "syntax": "cat <cloudtrail-files> | jq -c 'select(.<field> != \"<value>\" and .<field> != \"<other-value>\")' | head",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<field> -notin @('<value>', '<other-value>') } | Select-Object -First <count> <field>, <field>, <field>",
           "command": "cat cloudtrail/*.jsonl | jq -c 'select(.sourceIPAddress != \"<ip>\" and .sourceIPAddress != \"<other-ip>\")' | head",
           "explain": "Drop the addresses you can explain and see what's left.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.sourceIPAddress -notin @('<ip>', '<other-ip>') } | Select-Object -First 10 eventTime, eventName, sourceIPAddress"
@@ -561,6 +616,8 @@
         {
           "id": "ct-errors",
           "title": "Failed calls",
+          "syntax": "cat <cloudtrail-files> | jq -r 'select(.<field>) | [.<field>, .<field>, ...] | @tsv'",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<field> } | Format-Table <field>, <field>, ...",
           "command": "cat cloudtrail/*.jsonl | jq -r 'select(.errorCode) | [.eventTime, .eventName, .errorCode, .sourceIPAddress] | @tsv'",
           "explain": "`errorCode` exists only when a call failed. A failure is an attempt, not an action, but attempts show intent.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.errorCode } | Format-Table eventTime, eventName, errorCode, sourceIPAddress"
@@ -568,6 +625,8 @@
         {
           "id": "ct-timeline",
           "title": "One actor's timeline",
+          "syntax": "cat <cloudtrail-files> | jq -r 'select(.<field> == \"<value>\") | [.<field>, .<field>, .<path> // \"-\", ...] | @tsv'",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<field> -eq '<value>' } | Format-Table <field>, <field>, @{n='<label>'; e={$_.<path>}}, ...",
           "command": "cat cloudtrail/*.jsonl | jq -r 'select(.sourceIPAddress == \"<ip>\") | [.eventTime, .eventName, .requestParameters.bucketName // \"-\", .errorCode // \"OK\", .readOnly] | @tsv'",
           "explain": "Everything one source did, in order, with the target bucket and whether it worked. `readOnly` is false for calls that change something.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.sourceIPAddress -eq '<ip>' } | Format-Table eventTime, eventName, @{n='bucket'; e={$_.requestParameters.bucketName}}, errorCode, readOnly"
@@ -575,6 +634,8 @@
         {
           "id": "ct-unique-objects",
           "title": "Distinct objects read",
+          "syntax": "cat <cloudtrail-files> | jq -r 'select(.<field> == \"<value>\" and (has(\"<field>\") | not)) | \"\\(.<path>)/\\(.<path>)\"' | sort -u | wc -l",
+          "syntaxPowershell": "(Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<field> -eq '<value>' -and -not $_.<field> } | ForEach-Object { $_.<path> + '/' + $_.<path> } | Sort-Object -Unique | Measure-Object).Count",
           "command": "cat cloudtrail/*.jsonl | jq -r 'select(.eventName == \"GetObject\" and (has(\"errorCode\") | not)) | \"\\(.requestParameters.bucketName)/\\(.requestParameters.key)\"' | sort -u | wc -l",
           "explain": "Builds `bucket/key` for every successful `GetObject` and counts unique ones. Add your own `select()` conditions for *who*.",
           "powershell": "(Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.eventName -eq 'GetObject' -and -not $_.errorCode } | ForEach-Object { $_.requestParameters.bucketName + '/' + $_.requestParameters.key } | Sort-Object -Unique | Measure-Object).Count"
@@ -587,6 +648,8 @@
         {
           "id": "s3-fields",
           "title": "S3 access log fields",
+          "syntax": "awk '{print $<field>, $<field>, ...}' <s3-access-logs> | head",
+          "syntaxPowershell": "Get-Content <s3-access-logs> -TotalCount <count> | ForEach-Object { $f = $_ -split ' '; \"$($f[<index>]) $($f[<index>]) ...\" }",
           "command": "awk '{print $3, $5, $6, $8, $9}' s3-access-logs/*/*.log | head",
           "explain": "`$2` bucket, `$3 $4` time (UTC), `$5` remote IP, `$6` requester (ARN, or a service), `$7` request id, `$8` operation, `$9` key. Status follows the quoted request line.",
           "powershell": "Get-Content s3-access-logs\\*\\*.log -TotalCount 10 | ForEach-Object { $f = $_ -split ' '; \"$($f[2]) $($f[4]) $($f[5]) $($f[7]) $($f[8])\" }"
@@ -594,6 +657,8 @@
         {
           "id": "s3-ops",
           "title": "Operations histogram",
+          "syntax": "awk '{print $<operation-field>}' <s3-access-logs> | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Get-Content <s3-access-logs> | ForEach-Object { ($_ -split ' ')[<operation-index>] } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
           "command": "awk '{print $8}' s3-access-logs/*/*.log | sort | uniq -c | sort -rn",
           "explain": "`REST.GET.OBJECT`, `REST.PUT.OBJECT`, ... and operations S3 performs on its own. Which ones only appear on one day?",
           "powershell": "Get-Content s3-access-logs\\*\\*.log | ForEach-Object { ($_ -split ' ')[7] } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
@@ -601,6 +666,8 @@
         {
           "id": "s3-requesters",
           "title": "Who touched the bucket, from where",
+          "syntax": "awk '{print $<field>, $<field>}' <s3-access-logs> | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Get-Content <s3-access-logs> | ForEach-Object { $f = $_ -split ' '; \"$($f[<index>]) $($f[<index>])\" } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
           "command": "awk '{print $5, $6}' s3-access-logs/*/*.log | sort | uniq -c | sort -rn",
           "explain": "Remote IP and requester together. The same requester ARN from two very different networks is a red flag.",
           "powershell": "Get-Content s3-access-logs\\*\\*.log | ForEach-Object { $f = $_ -split ' '; \"$($f[4]) $($f[5])\" } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
@@ -608,6 +675,8 @@
         {
           "id": "s3-by-ip",
           "title": "One source's requests",
+          "syntax": "awk '$<ip-field> == \"<value>\" {print $<field>, $<field>, ...}' <s3-access-logs> | head -<count>",
+          "syntaxPowershell": "Get-Content <s3-access-logs> | Where-Object { ($_ -split ' ')[<ip-index>] -eq '<value>' } | ForEach-Object { $f = $_ -split ' '; \"$($f[<index>]) $($f[<index>]) ...\" } | Select-Object -First <count>",
           "command": "awk '$5 == \"<ip>\" {print $3, $8, $9}' s3-access-logs/*/*.log | head -30",
           "explain": "Every request from one IP: time, operation and key.",
           "powershell": "Get-Content s3-access-logs\\*\\*.log | Where-Object { ($_ -split ' ')[4] -eq '<ip>' } | ForEach-Object { $f = $_ -split ' '; \"$($f[2]) $($f[7]) $($f[8])\" } | Select-Object -First 30"
@@ -615,6 +684,8 @@
         {
           "id": "s3-bytes",
           "title": "Bytes sent",
+          "syntax": "awk '$<ip-field> == \"<value>\" && $<operation-field> == \"<operation>\"' <s3-access-logs> | grep -oE '<bytes-regex>' | awk '{s += $NF} END {print s}'",
+          "syntaxPowershell": "Get-Content <s3-access-logs> | Where-Object { ($_ -split ' ')[<ip-index>] -eq '<value>' } | Select-String '<operation> <bytes-regex-with-group>' | ForEach-Object { [long]$_.Matches[0].Groups[1].Value } | Measure-Object -Sum",
           "command": "awk '$5 == \"<ip>\" && $8 == \"REST.GET.OBJECT\"' s3-access-logs/*/*.log | grep -oE 'HTTP/1.1\" 200 - [0-9]+' | awk '{s += $NF} END {print s}'",
           "explain": "Sums the bytes S3 sent for successful object reads. Useful for the breach report.",
           "powershell": "Get-Content s3-access-logs\\*\\*.log | Where-Object { ($_ -split ' ')[4] -eq '<ip>' } | Select-String 'REST.GET.OBJECT .*HTTP/1.1\" 200 - (\\d+)' | ForEach-Object { [long]$_.Matches[0].Groups[1].Value } | Measure-Object -Sum"
@@ -627,6 +698,8 @@
         {
           "id": "flow-header",
           "title": "Number the columns",
+          "syntax": "head -1 <flow-log> | tr '<separator>' '\\n' | nl",
+          "syntaxPowershell": "$i = 0; (Get-Content <flow-log> -TotalCount 1) -split '<separator>' | ForEach-Object { $i++; \"$i $_\" }",
           "command": "head -1 vpc-flow-logs/*.log | tr ' ' '\\n' | nl",
           "explain": "Flow log v2: `$4` srcaddr, `$5` dstaddr, `$6` srcport, `$7` dstport, `$10` bytes, `$11`/`$12` start/end (epoch), `$13` action.",
           "powershell": "$i = 0; (Get-Content vpc-flow-logs\\*.log -TotalCount 1) -split ' ' | ForEach-Object { $i++; \"$i $_\" }"
@@ -634,6 +707,8 @@
         {
           "id": "flow-by-ip",
           "title": "All flows with one host",
+          "syntax": "awk '$<src-field> == \"<value>\" || $<dst-field> == \"<value>\"' <flow-log>",
+          "syntaxPowershell": "Get-Content <flow-log> | Where-Object { $f = $_ -split ' '; $f[<src-index>] -eq '<value>' -or $f[<dst-index>] -eq '<value>' }",
           "command": "awk '$4 == \"<ip>\" || $5 == \"<ip>\"' vpc-flow-logs/*.log",
           "explain": "Both directions. Convert `start` with `date -u -d @<epoch>`.",
           "powershell": "Get-Content vpc-flow-logs\\*.log | Where-Object { $f = $_ -split ' '; $f[3] -eq '<ip>' -or $f[4] -eq '<ip>' }"
@@ -641,6 +716,8 @@
         {
           "id": "flow-outbound",
           "title": "Connections the instance started",
+          "syntax": "awk 'NR > 1 && $<src-field> ~ /<network-regex>/ && $<port-field> != <port> {print $<field> \":\" $<field>}' <flow-log> | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Get-Content <flow-log> | Select-Object -Skip 1 | ForEach-Object { $f = $_ -split ' '; if ($f[<src-index>] -like '<network-prefix>*' -and $f[<port-index>] -ne '<port>') { $f[<index>] + ':' + $f[<index>] } } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
           "command": "awk 'NR > 1 && $4 ~ /^10\\./ && $6 != 443 {print $5 \":\" $7}' vpc-flow-logs/*.log | sort | uniq -c | sort -rn",
           "explain": "A WAF mostly *answers* on 443. Flows where it is the source and the source port is not 443 are connections it opened itself. Where to?",
           "powershell": "Get-Content vpc-flow-logs\\*.log | Select-Object -Skip 1 | ForEach-Object { $f = $_ -split ' '; if ($f[3] -like '10.*' -and $f[5] -ne '443') { $f[4] + ':' + $f[6] } } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
@@ -648,6 +725,8 @@
         {
           "id": "flow-rejects",
           "title": "Rejected probes",
+          "syntax": "awk '$<action-field> == \"<action>\" {print $<field>, $<field>}' <flow-log> | sort | uniq -c | sort -rn | head",
+          "syntaxPowershell": "Get-Content <flow-log> | Where-Object { ($_ -split ' ')[<action-index>] -eq '<action>' } | ForEach-Object { $f = $_ -split ' '; \"$($f[<index>]) $($f[<index>])\" } | Group-Object | Sort-Object Count -Descending | Select-Object -First <count> Count, Name",
           "command": "awk '$13 == \"REJECT\" {print $4, $7}' vpc-flow-logs/*.log | sort | uniq -c | sort -rn | head",
           "explain": "What the security group dropped. Port scans are loud, common and usually not the story.",
           "powershell": "Get-Content vpc-flow-logs\\*.log | Where-Object { ($_ -split ' ')[12] -eq 'REJECT' } | ForEach-Object { $f = $_ -split ' '; \"$($f[3]) $($f[6])\" } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count, Name"
@@ -660,6 +739,8 @@
         {
           "id": "nginx-time-to-utc",
           "title": "nginx time to UTC",
+          "syntax": "echo '<nginx-timestamp>' | sed -E 's#<timestamp-regex>#<reordered-groups>#' | xargs -I{} date -u -d '{}' +%FT%TZ",
+          "syntaxPowershell": "$s = '<nginx-timestamp>' -replace '<offset-regex>', '<offset-with-colon>'\n[DateTimeOffset]::ParseExact($s, '<format>', [Globalization.CultureInfo]::InvariantCulture).UtcDateTime.ToString('u')",
           "command": "echo '[17/Nov/2026:21:15:00 -0500]' | sed -E 's#\\[([0-9]+)/([A-Za-z]+)/([0-9]+):([0-9:]+) ([-+][0-9]+)\\]#\\1 \\2 \\3 \\4 \\5#' | xargs -I{} date -u -d '{}' +%FT%TZ",
           "explain": "Turns `[dd/Mon/yyyy:HH:MM:SS -0500]` into an ISO UTC time. Watch the date: it may roll over.",
           "powershell": "$s = '17/Nov/2026:21:15:00 -0500' -replace '(\\d\\d)(\\d\\d)$', '$1:$2'\n[DateTimeOffset]::ParseExact($s, 'dd/MMM/yyyy:HH:mm:ss zzz', [Globalization.CultureInfo]::InvariantCulture).UtcDateTime.ToString('u')"
@@ -667,6 +748,8 @@
         {
           "id": "est-to-utc",
           "title": "EST to UTC",
+          "syntax": "date -u -d '<local-time> <offset>' +%H:%M:%S",
+          "syntaxPowershell": "([DateTimeOffset]'<local-time-with-offset>').UtcDateTime.ToString('HH:mm:ss')",
           "command": "date -u -d '17 Nov 2026 21:15:00 -0500' +%H:%M:%S",
           "explain": "In November, New York is UTC-05:00. Add five hours.",
           "powershell": "([DateTimeOffset]'2026-11-17T21:15:00-05:00').UtcDateTime.ToString('HH:mm:ss')"
@@ -674,6 +757,8 @@
         {
           "id": "utc-to-est",
           "title": "UTC to EST",
+          "syntax": "TZ=<time-zone> date -d '<utc-timestamp>'",
+          "syntaxPowershell": "([DateTimeOffset]'<utc-timestamp>').ToOffset([TimeSpan]'<offset>')",
           "command": "TZ=America/New_York date -d '2026-11-18T03:00:00Z'",
           "explain": "What a UTC instant was on the New York office clock.",
           "powershell": "([DateTimeOffset]'2026-11-18T03:00:00Z').ToOffset([TimeSpan]'-05:00')"
@@ -681,6 +766,8 @@
         {
           "id": "epoch-to-utc",
           "title": "Epoch to UTC",
+          "syntax": "date -u -d @<epoch-seconds>",
+          "syntaxPowershell": "[DateTimeOffset]::FromUnixTimeSeconds(<epoch-seconds>).UtcDateTime.ToString('u')",
           "command": "date -u -d @1794952800",
           "explain": "For flow logs and Slack. On macOS: `date -u -r 1794952800`.",
           "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794952800).UtcDateTime.ToString('u')"
@@ -688,6 +775,8 @@
         {
           "id": "slack-timestamps",
           "title": "Read the Slack channel",
+          "syntax": "jq -r '.[] | \"\\(.<ts-field> | tonumber | floor | todate) \\(.<field>): \\(.<field>)\"' <slack-export>",
+          "syntaxPowershell": "(Get-Content <slack-export> -Raw | ConvertFrom-Json) | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][Math]::Floor([double]$_.<ts-field>)).ToString('u'), $_.<field>, $_.<field> }",
           "command": "jq -r '.[] | \"\\(.ts | tonumber | floor | todate) \\(.user): \\(.text)\"' slack/inc-prod-exports.json",
           "explain": "Slack `ts` is an epoch string. `tonumber | floor | todate` gives ISO-8601 UTC.",
           "powershell": "(Get-Content slack\\inc-prod-exports.json -Raw | ConvertFrom-Json) | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][Math]::Floor([double]$_.ts)).ToString('u'), $_.user, $_.text }"
@@ -700,6 +789,8 @@
         {
           "id": "decimal-ip",
           "title": "Decimal number to IPv4",
+          "syntax": "n=<decimal-number>; echo $((n>><shift>&255)).$((n>><shift>&255)).$((n>><shift>&255)).$((n&255))",
+          "syntaxPowershell": "[System.Net.IPAddress]::Parse('<decimal-number>').ToString()",
           "command": "n=3232235777; echo $((n>>24&255)).$((n>>16&255)).$((n>>8&255)).$((n&255))",
           "explain": "An IPv4 address is just a 32-bit number. `http://3232235777/` and `http://192.168.1.1/` go to the same place, and string blocklists rarely know that.",
           "powershell": "[System.Net.IPAddress]::Parse('3232235777').ToString()"
@@ -707,6 +798,8 @@
         {
           "id": "url-decode",
           "title": "URL-decode a parameter",
+          "syntax": "python3 -c 'import sys, urllib.parse; print(urllib.parse.<decode-function>(sys.argv[1]))' '<encoded-value>'",
+          "syntaxPowershell": "[uri]::UnescapeDataString('<encoded-value>')",
           "command": "python3 -c 'import sys, urllib.parse; print(urllib.parse.unquote(sys.argv[1]))' 'http%3A%2F%2Fexample.com%2Fa%20b'",
           "explain": "`%3A` is `:`, `%2F` is `/`. Decode before you decide what a request was really asking for.",
           "powershell": "[uri]::UnescapeDataString('http%3A%2F%2Fexample.com%2Fa%20b')"
@@ -719,6 +812,8 @@
         {
           "id": "ec2-metadata-options",
           "title": "Instances, addresses, IMDS settings",
+          "syntax": "jq '.<path>[].<path>[] | {<field>, <field>, <label>: .<path>, <field>}' <describe-instances-file>",
+          "syntaxPowershell": "(Get-Content <describe-instances-file> -Raw | ConvertFrom-Json).<path>.<path> | Select-Object <field>, <field>, @{n='<label>'; e={$_.<path>}}, ...",
           "command": "jq '.Reservations[].Instances[] | {InstanceId, PrivateIpAddress, PublicIpAddress, profile: .IamInstanceProfile.Arn, MetadataOptions}' ec2/describe-instances.json",
           "explain": "Which instance profile each instance wears, its own IPs, and whether IMDSv2 is enforced (`HttpTokens: required`).",
           "powershell": "(Get-Content ec2\\describe-instances.json -Raw | ConvertFrom-Json).Reservations.Instances | Select-Object InstanceId, PrivateIpAddress, PublicIpAddress, @{n='profile'; e={$_.IamInstanceProfile.Arn}}, @{n='HttpTokens'; e={$_.MetadataOptions.HttpTokens}}"
@@ -726,6 +821,8 @@
         {
           "id": "iam-statements",
           "title": "Policy statements at a glance",
+          "syntax": "jq -r '.<path>[].<path>.<path>[] | [.<field>, .<field>, (.<field> | tostring), (.<field> | tostring)] | @tsv' <role-policy-file>",
+          "syntaxPowershell": "(Get-Content <role-policy-file> -Raw | ConvertFrom-Json).<path>.<path>.<path> | Format-Table <field>, <field>, @{n='<label>'; e={$_.<field> -join ','}}, ... -Wrap",
           "command": "jq -r '.RolePolicies[].PolicyDocument.Statement[] | [.Sid, .Effect, (.Action | tostring), (.Resource | tostring)] | @tsv' iam/roles/<role-name>.json",
           "explain": "One line per statement: Sid, Effect, Action and Resource. Wildcards (`*`) are where the surprises live.",
           "powershell": "(Get-Content iam\\roles\\<role-name>.json -Raw | ConvertFrom-Json).RolePolicies.PolicyDocument.Statement | Format-Table Sid, Effect, @{n='Action'; e={$_.Action -join ','}}, @{n='Resource'; e={$_.Resource -join ','}} -Wrap"
@@ -733,6 +830,8 @@
         {
           "id": "iam-action-names",
           "title": "API names vs IAM action names",
+          "syntax": "cat <cloudtrail-files> | jq -r 'select(.<field> == \"<value>\") | .<field>' | sort -u",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<field> -eq '<value>' } | Select-Object -ExpandProperty <field> -Unique",
           "command": "cat cloudtrail/*.jsonl | jq -r 'select(.eventSource == \"s3.amazonaws.com\") | .eventName' | sort -u",
           "explain": "CloudTrail logs the **API operation**; IAM authorizes an **action**, and for S3 they don't always match. `ListObjects` (V2) needs `s3:ListBucket`; `ListBuckets` needs `s3:ListAllMyBuckets`; several bucket-configuration APIs have their own action names. Check each one in the AWS Service Authorization Reference for Amazon S3.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.eventSource -eq 's3.amazonaws.com' } | Select-Object -ExpandProperty eventName -Unique"
@@ -740,6 +839,8 @@
         {
           "id": "iam-glob-test",
           "title": "Does a wildcard cover an action?",
+          "syntax": "[[ '<action-name>' == <wildcard-pattern> ]] && echo match || echo no-match",
+          "syntaxPowershell": "'<action-name>' -like '<wildcard-pattern>'",
           "command": "[[ 's3:GetObject' == s3:Get* ]] && echo match || echo no-match",
           "explain": "IAM `Action` and `Resource` patterns are globs: `*` matches any run of characters. Test the action and the resource ARN against every statement, and remember that an explicit `Deny` beats any `Allow`.",
           "powershell": "'s3:GetObject' -like 's3:Get*'"
@@ -747,6 +848,8 @@
         {
           "id": "access-keys-table",
           "title": "Long-lived keys",
+          "syntax": "column -s<separator> -t < <csv-file>",
+          "syntaxPowershell": "Import-Csv <csv-file> | Format-Table",
           "command": "column -s, -t < iam/access-keys.csv",
           "explain": "IAM user keys (`AKIA...`) and their status. Temporary role credentials (`ASIA...`) never appear here.",
           "powershell": "Import-Csv iam\\access-keys.csv | Format-Table"

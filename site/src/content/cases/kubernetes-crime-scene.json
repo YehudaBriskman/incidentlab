@@ -175,10 +175,11 @@
   "rules": [
     "Work only from the evidence pack. Don't read the generator source or the site's source code; that spoils the fun.",
     "Answers are case-insensitive, and leading and trailing whitespace is ignored. Stick to the format shown under each question.",
-    "Each hint costs the points shown on it. Hints are revealed in order, from a gentle nudge to almost the full command.",
+    "Each hint costs the points shown on it. Hints are revealed in order, from a gentle nudge to almost the full command. Toolbox commands show their syntax for free; revealing a full command costs 5 points. Once you finish the case, every command is free.",
     "Working in pairs is encouraged. Talk through your reasoning out loud, just like a real incident review.",
     "Any tool is allowed: grep, awk, jq, Python, a spreadsheet, your favourite editor. The Toolbox tab lists commands that help.",
-    "Wrong answers cost nothing, so guess freely. Still, try to be able to explain *why* your answer is right.",
+    "Each wrong answer costs 2 points, capped at 20 per stage. Think before you submit, and be ready to explain *why* your answer is right.",
+    "Speed and care pay off: a fast solve earns a time bonus of up to +30 per stage (it fades once you pass the stage's target time), a clean solve with no hints, commands or wrong answers earns +10, the first player to solve a stage gets +15 first blood, and finishing all six stages without revealing an answer earns +50.",
     "Don't share flags with other teams until everyone is done. Sharing techniques is fine.",
     "Never point the Toolbox commands at a real cluster. Everything you need is already in the pack."
   ],
@@ -223,7 +224,8 @@
           "text": "Join kernel kills to pods, all nodes at once, earliest first:\n\n```sh\nawk '/\"ContainerDied\"/ { match($0, /pod=\"[^\"]+\"/); p = substr($0, RSTART+5, RLENGTH-6)\n                         match($0, /\"Data\":\"[0-9a-f]+\"/); owner[substr($0, RSTART+8, RLENGTH-9)] = p; next }\n     /kernel: oom-kill:/ { match($0, /cri-containerd-[0-9a-f]+/); n++; t[n] = $3; c[n] = substr($0, RSTART+15, RLENGTH-15) }\n     END { for (i = 1; i <= n; i++) print t[i], owner[c[i]] }' nodes/*.journal.log | sort | head\n```\n\nCross-check with the 07:57:10 snapshot in `kubectl/get-pods-shop-snapshots.txt`: compare the `(… ago)` of each pod's last restart."
         }
       ],
-      "successNote": "An OOM kill is a **kernel** event. Kubernetes only learns about it afterwards (exit code 137, reason `OOMKilled`), and it keeps only the *last* termination of each container. The full history lives in the node's kernel log, keyed by container ID, not by pod name. And the pod that *looked* guilty on screen wasn't the first one: order events by evidence, not by whatever happens to be on your terminal."
+      "successNote": "An OOM kill is a **kernel** event. Kubernetes only learns about it afterwards (exit code 137, reason `OOMKilled`), and it keeps only the *last* termination of each container. The full history lives in the node's kernel log, keyed by container ID, not by pod name. And the pod that *looked* guilty on screen wasn't the first one: order events by evidence, not by whatever happens to be on your terminal.",
+      "targetMinutes": 7
     },
     {
       "stage": {
@@ -265,7 +267,8 @@
           "text": "```sh\ncolumn -t -s $'\\t' helm/history-pricing-api.txt\njq -r 'select(.controller==\"kustomization\" and (.output | has(\"HelmRelease/shop/pricing-api\"))) | \"\\(.ts) \\(.revision)\"' flux/flux-controllers.log\ngrep -A6 '^commit <first-7-chars>' gitops/git-log-p.txt\n```"
         }
       ],
-      "successNote": "In GitOps the deploy *is* a commit, but the chain has several hops: commit, source fetch, kustomize apply, Helm upgrade, ReplicaSet rollout. Each hop has its own log and its own clock. And read that commit message again: \"No functional change intended.\" A values refactor plus a chart major bump is a functional change until proven otherwise. Diff the **rendered** manifests (`helm diff`, `flux diff`), not just the values file."
+      "successNote": "In GitOps the deploy *is* a commit, but the chain has several hops: commit, source fetch, kustomize apply, Helm upgrade, ReplicaSet rollout. Each hop has its own log and its own clock. And read that commit message again: \"No functional change intended.\" A values refactor plus a chart major bump is a functional change until proven otherwise. Diff the **rendered** manifests (`helm diff`, `flux diff`), not just the values file.",
+      "targetMinutes": 10
     },
     {
       "stage": {
@@ -304,7 +307,8 @@
           "text": "```sh\nsed -n '/Limits:/,/Requests:/p' kubectl/describe-pod-pricing-api-*.txt\ndiff -u helm/values-rev13.yaml helm/values-rev14.yaml\n```"
         }
       ],
-      "successNote": "The JVM was allowed a 1 GiB heap (`-Xmx1g`) inside a container that may use much less **in total** (heap + metaspace + threads + direct buffers). The JVM never gets to throw `OutOfMemoryError`: the kernel kills it first, with no stack trace and no last log line. Size the heap from the limit (`-XX:MaxRAMPercentage`), set limits from measured usage, and never change one without the other."
+      "successNote": "The JVM was allowed a 1 GiB heap (`-Xmx1g`) inside a container that may use much less **in total** (heap + metaspace + threads + direct buffers). The JVM never gets to throw `OutOfMemoryError`: the kernel kills it first, with no stack trace and no last log line. Size the heap from the limit (`-XX:MaxRAMPercentage`), set limits from measured usage, and never change one without the other.",
+      "targetMinutes": 9
     },
     {
       "stage": {
@@ -344,7 +348,8 @@
           "text": "```sh\ngrep '^Selector:' kubectl/describe-svc-pricing-api.txt\nawk '$1 ~ /^pricing-api-/ {print $NF}' kubectl/get-pods-shop-labels.txt | tr ',' '\\n' | sort | uniq -c\n```"
         }
       ],
-      "successNote": "Labels are an API. The Deployment's own selector used the chart's new `app.kubernetes.io/*` labels, so the rollout looked perfect, but a Service that lives **outside** the chart still selected the old label. Nothing errors when a selector matches zero pods: you just get an empty Endpoints object. Alert on zero ready endpoints for every Service that takes traffic, and ship a Service in the same release as the pods it selects."
+      "successNote": "Labels are an API. The Deployment's own selector used the chart's new `app.kubernetes.io/*` labels, so the rollout looked perfect, but a Service that lives **outside** the chart still selected the old label. Nothing errors when a selector matches zero pods: you just get an empty Endpoints object. Alert on zero ready endpoints for every Service that takes traffic, and ship a Service in the same release as the pods it selects.",
+      "targetMinutes": 10
     },
     {
       "stage": {
@@ -385,7 +390,8 @@
           "text": "```sh\ngrep -E '^Name:|^  MemoryPressure' kubectl/describe-nodes.txt\njq -c '.items[] | select(.reason==\"Evicted\") | {t: .lastTimestamp, host: .source.host, pod: .involvedObject.name, msg: .message}' kubectl/get-events-A.json\ngrep -h 'Eviction manager' nodes/*.journal.log\n```"
         }
       ],
-      "successNote": "The new pricing pods requested far less memory than they really used, and the scheduler only looks at requests, so it packed them tightly onto one node. When real usage crossed the eviction threshold, the kubelet evicted the pod that was furthest over its own request: another team's sync job, not the pods that caused the problem. Requests that don't match real usage turn one team's bug into everyone's incident. Keep requests close to measured usage (or equal to limits for critical services)."
+      "successNote": "The new pricing pods requested far less memory than they really used, and the scheduler only looks at requests, so it packed them tightly onto one node. When real usage crossed the eviction threshold, the kubelet evicted the pod that was furthest over its own request: another team's sync job, not the pods that caused the problem. Requests that don't match real usage turn one team's bug into everyone's incident. Keep requests close to measured usage (or equal to limits for critical services).",
+      "targetMinutes": 11
     },
     {
       "stage": {
@@ -427,7 +433,8 @@
           "text": "Same join as stage 1, counted per pod:\n\n```sh\nawk '/\"ContainerDied\"/ { match($0, /pod=\"[^\"]+\"/); p = substr($0, RSTART+5, RLENGTH-6)\n                         match($0, /\"Data\":\"[0-9a-f]+\"/); owner[substr($0, RSTART+8, RLENGTH-9)] = p; next }\n     /kernel: oom-kill:/ { match($0, /cri-containerd-[0-9a-f]+/); n++; t[n] = $3; c[n] = substr($0, RSTART+15, RLENGTH-15) }\n     END { for (i = 1; i <= n; i++) print t[i], owner[c[i]] }' nodes/*.journal.log \\\n  | awk '{print $2}' | sort | uniq -c\n```\n\nThen add up the `shop/pricing-api-*` lines."
         }
       ],
-      "successNote": "Two different killers were at work: the kernel (memory limit too low for the heap) and the kubelet's liveness probe (the chart silently ignored the old probe settings, so slow warmups on a crowded node never got a chance). Both look like \"restarts\", and only one of them points at the root cause. Counting the right thing is how you separate the cause from the symptoms. And check that the probe settings you *think* you have are the ones in the pod spec: a renamed values key fails silently."
+      "successNote": "Two different killers were at work: the kernel (memory limit too low for the heap) and the kubelet's liveness probe (the chart silently ignored the old probe settings, so slow warmups on a crowded node never got a chance). Both look like \"restarts\", and only one of them points at the root cause. Counting the right thing is how you separate the cause from the symptoms. And check that the probe settings you *think* you have are the ones in the pod spec: a renamed values key fails silently.",
+      "targetMinutes": 13
     }
   ],
   "toolbox": [
@@ -438,36 +445,46 @@
           "id": "unzip-evidence",
           "title": "Unpack the evidence",
           "command": "unzip kubernetes-crime-scene-evidence.zip && cd kubernetes-crime-scene",
+          "syntax": "unzip <evidence-zip> && cd <case-folder>",
           "explain": "Extracts the pack. Everything lives under one top-level folder.",
-          "powershell": "Expand-Archive .\\kubernetes-crime-scene-evidence.zip -DestinationPath .\ncd .\\kubernetes-crime-scene"
+          "powershell": "Expand-Archive .\\kubernetes-crime-scene-evidence.zip -DestinationPath .\ncd .\\kubernetes-crime-scene",
+          "syntaxPowershell": "Expand-Archive .\\<evidence-zip> -DestinationPath .\ncd .\\<case-folder>"
         },
         {
           "id": "read-readme",
           "title": "Read the README",
           "command": "cat README_FIRST.txt",
+          "syntax": "cat <readme-file>",
           "explain": "Seriously. It has the time-zone table, and this case uses at least four clocks.",
-          "powershell": "Get-Content README_FIRST.txt"
+          "powershell": "Get-Content README_FIRST.txt",
+          "syntaxPowershell": "Get-Content <readme-file>"
         },
         {
           "id": "list-files",
           "title": "See what you've got",
           "command": "find . -type f | sort | xargs ls -l",
+          "syntax": "find <dir> -type f | sort | xargs ls -l",
           "explain": "Every file with its size. The big ones (journals, ingress, events) are the ones to search, not read.",
-          "powershell": "Get-ChildItem -Recurse -File | Select-Object FullName, Length"
+          "powershell": "Get-ChildItem -Recurse -File | Select-Object FullName, Length",
+          "syntaxPowershell": "Get-ChildItem -Path <dir> -Recurse -File | Select-Object <properties>"
         },
         {
           "id": "head-lines",
           "title": "Peek at the first lines",
           "command": "head -n 20 nodes/prod-eu1-general-6b4f-r7tq.journal.log",
+          "syntax": "head -n <count> <journal-file>",
           "explain": "Look at the format **before** you parse it: who logged the line, which clock, which fields.",
-          "powershell": "Get-Content nodes\\prod-eu1-general-6b4f-r7tq.journal.log -TotalCount 20"
+          "powershell": "Get-Content nodes\\prod-eu1-general-6b4f-r7tq.journal.log -TotalCount 20",
+          "syntaxPowershell": "Get-Content <journal-file> -TotalCount <count>"
         },
         {
           "id": "snapshot-index",
           "title": "When was each snapshot taken?",
           "command": "grep -n -A1 '^\\$ date -u' kubectl/get-pods-shop-snapshots.txt",
+          "syntax": "grep -n -A<n> '<block-marker>' <snapshot-file>",
           "explain": "Every kubectl block starts with the `date -u` that on-call ran first. That's your anchor for turning relative ages (`3m8s`, `21s ago`) back into times.",
-          "powershell": "Select-String -Path kubectl\\get-pods-shop-snapshots.txt -Pattern '^\\$ date -u' -Context 0,1"
+          "powershell": "Select-String -Path kubectl\\get-pods-shop-snapshots.txt -Pattern '^\\$ date -u' -Context 0,1",
+          "syntaxPowershell": "Select-String -Path <snapshot-file> -Pattern '<block-marker>' -Context 0,<n>"
         }
       ]
     },
@@ -478,36 +495,46 @@
           "id": "pods-restarts",
           "title": "pricing-api pods, snapshot by snapshot",
           "command": "awk '/^Tue Nov/ {print \"--\", $4} $1 ~ /^pricing-api/ {print $1, $2, $3, $4, $5, $6}' kubectl/get-pods-shop-snapshots.txt",
+          "syntax": "awk '/<header-pattern>/ {print \"--\", $<time-field>} $1 ~ /<pod-prefix>/ {print $<fields>}' <snapshot-file>",
           "explain": "Name, READY, STATUS and RESTARTS for every pricing-api pod in every snapshot. `1 (21s ago)` means one restart, the last one 21 s before the snapshot.",
-          "powershell": "Select-String -Path kubectl\\get-pods-shop-snapshots.txt -Pattern '^(Tue Nov|pricing-api)' | ForEach-Object Line"
+          "powershell": "Select-String -Path kubectl\\get-pods-shop-snapshots.txt -Pattern '^(Tue Nov|pricing-api)' | ForEach-Object Line",
+          "syntaxPowershell": "Select-String -Path <snapshot-file> -Pattern '^(<header-pattern>|<pod-prefix>)' | ForEach-Object Line"
         },
         {
           "id": "describe-section",
           "title": "One section of a describe",
           "command": "sed -n '/Last State:/,/Requests:/p' kubectl/describe-pod-*.txt",
+          "syntax": "sed -n '/<start-pattern>/,/<end-pattern>/p' <describe-files>",
           "explain": "`sed -n '/start/,/end/p'` prints a range of lines. Here: the last termination, readiness, restart count and limits.",
-          "powershell": "Select-String -Path kubectl\\describe-pod-*.txt -Pattern 'Last State:' -Context 0,12"
+          "powershell": "Select-String -Path kubectl\\describe-pod-*.txt -Pattern 'Last State:' -Context 0,12",
+          "syntaxPowershell": "Select-String -Path <describe-files> -Pattern '<start-pattern>' -Context 0,<n>"
         },
         {
           "id": "labels-split",
           "title": "Which labels do the pods carry?",
           "command": "awk '$1 ~ /^pricing-api/ {print $NF}' kubectl/get-pods-shop-labels.txt | tr ',' '\\n' | sort | uniq -c",
+          "syntax": "awk '$1 ~ /<pod-prefix>/ {print $NF}' <labels-file> | tr '<separator>' '\\n' | sort | uniq -c",
           "explain": "Splits the LABELS column into one `key=value` per line and counts how many pods carry each one.",
-          "powershell": "Get-Content kubectl\\get-pods-shop-labels.txt | Where-Object { $_ -match '^pricing-api' } | ForEach-Object { (($_ -split '\\s+')[-1]) -split ',' } | Group-Object | Select-Object Count, Name"
+          "powershell": "Get-Content kubectl\\get-pods-shop-labels.txt | Where-Object { $_ -match '^pricing-api' } | ForEach-Object { (($_ -split '\\s+')[-1]) -split ',' } | Group-Object | Select-Object Count, Name",
+          "syntaxPowershell": "Get-Content <labels-file> | Where-Object { $_ -match '<pod-prefix>' } | ForEach-Object { (($_ -split '\\s+')[-1]) -split '<separator>' } | Group-Object | Select-Object Count, Name"
         },
         {
           "id": "svc-selector",
           "title": "What does the Service select?",
           "command": "grep -E '^(Selector|Endpoints|TargetPort):' kubectl/describe-svc-pricing-api.txt",
+          "syntax": "grep -E '^(<field>|<field>|<field>):' <svc-describe-file>",
           "explain": "A Service routes only to Ready pods that carry **every** `key=value` in its selector. An empty `Endpoints:` means no pod matched.",
-          "powershell": "Select-String -Path kubectl\\describe-svc-pricing-api.txt -Pattern '^(Selector|Endpoints|TargetPort):'"
+          "powershell": "Select-String -Path kubectl\\describe-svc-pricing-api.txt -Pattern '^(Selector|Endpoints|TargetPort):'",
+          "syntaxPowershell": "Select-String -Path <svc-describe-file> -Pattern '^(<field>|<field>|<field>):'"
         },
         {
           "id": "node-conditions",
           "title": "Node conditions at a glance",
           "command": "grep -E '^Name:|^Taints:|^  (MemoryPressure|DiskPressure|Ready) ' kubectl/describe-nodes.txt",
+          "syntax": "grep -E '^<header>:|^<header>:|^  (<condition>|<condition>|<condition>) ' <nodes-describe-file>",
           "explain": "Each node's pressure conditions and taints. `LastTransitionTime` says when a condition flipped (in the laptop's +0200).",
-          "powershell": "Select-String -Path kubectl\\describe-nodes.txt -Pattern '^Name:|^Taints:|^  (MemoryPressure|DiskPressure|Ready) '"
+          "powershell": "Select-String -Path kubectl\\describe-nodes.txt -Pattern '^Name:|^Taints:|^  (MemoryPressure|DiskPressure|Ready) '",
+          "syntaxPowershell": "Select-String -Path <nodes-describe-file> -Pattern '^<header>:|^<header>:|^  (<condition>|<condition>|<condition>) '"
         }
       ]
     },
@@ -518,29 +545,37 @@
           "id": "events-sorted",
           "title": "Events in time order",
           "command": "jq -r '.items | sort_by(.firstTimestamp)[] | [.firstTimestamp, .count, .involvedObject.name, .reason, .message] | @tsv' kubectl/get-events-A.json | less -S",
+          "syntax": "jq -r '.items | sort_by(.<time-field>)[] | [.<field>, .<field>, .<path>, .<field>, .<field>] | @tsv' <events-json> | less -S",
           "explain": "`kubectl get events` is **not** sorted by time by default. The JSON has absolute UTC timestamps, so sort it yourself.",
-          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Sort-Object firstTimestamp | Format-Table firstTimestamp, count, @{n='object'; e={$_.involvedObject.name}}, reason, message | Out-Host -Paging"
+          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Sort-Object firstTimestamp | Format-Table firstTimestamp, count, @{n='object'; e={$_.involvedObject.name}}, reason, message | Out-Host -Paging",
+          "syntaxPowershell": "(Get-Content <events-json> -Raw | ConvertFrom-Json).items | Sort-Object <time-field> | Format-Table <columns> | Out-Host -Paging"
         },
         {
           "id": "events-reasons",
           "title": "Which kinds of events exist?",
           "command": "jq -r '.items[] | .reason' kubectl/get-events-A.json | sort | uniq -c | sort -rn",
+          "syntax": "jq -r '.items[] | .<field>' <events-json> | sort | uniq -c | sort -rn",
           "explain": "A histogram of event reasons. Notice what is **missing**: there is no `OOMKilled` event.",
-          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Group-Object reason | Sort-Object Count -Descending | Select-Object Count, Name"
+          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Group-Object reason | Sort-Object Count -Descending | Select-Object Count, Name",
+          "syntaxPowershell": "(Get-Content <events-json> -Raw | ConvertFrom-Json).items | Group-Object <field> | Sort-Object Count -Descending | Select-Object Count, Name"
         },
         {
           "id": "events-by-reason",
           "title": "Filter events by reason",
           "command": "jq -c '.items[] | select(.reason==\"Killing\") | {t: .lastTimestamp, n: .count, host: .source.host, obj: .involvedObject.name, msg: .message}' kubectl/get-events-A.json",
+          "syntax": "jq -c '.items[] | select(.<field> == \"<value>\") | {t: .<path>, n: .<path>, host: .<path>, obj: .<path>, msg: .<path>}' <events-json>",
           "explain": "Swap `Killing` for any reason from the histogram. `source.host` is the node that reported it.",
-          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Where-Object reason -eq 'Killing' | Format-Table lastTimestamp, count, @{n='host'; e={$_.source.host}}, @{n='object'; e={$_.involvedObject.name}}, message"
+          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Where-Object reason -eq 'Killing' | Format-Table lastTimestamp, count, @{n='host'; e={$_.source.host}}, @{n='object'; e={$_.involvedObject.name}}, message",
+          "syntaxPowershell": "(Get-Content <events-json> -Raw | ConvertFrom-Json).items | Where-Object <field> -eq '<value>' | Format-Table <columns>"
         },
         {
           "id": "events-count-sum",
           "title": "Events are aggregated",
           "command": "jq '[.items[] | select(.reason==\"BackOff\") | .count] | add' kubectl/get-events-A.json",
+          "syntax": "jq '[.items[] | select(.<field> == \"<value>\") | .<count-field>] | add' <events-json>",
           "explain": "Repeated events are merged into one object with a `count`. Counting objects is not counting occurrences.",
-          "powershell": "((Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Where-Object reason -eq 'BackOff' | Measure-Object count -Sum).Sum"
+          "powershell": "((Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Where-Object reason -eq 'BackOff' | Measure-Object count -Sum).Sum",
+          "syntaxPowershell": "((Get-Content <events-json> -Raw | ConvertFrom-Json).items | Where-Object <field> -eq '<value>' | Measure-Object <count-field> -Sum).Sum"
         }
       ]
     },
@@ -551,50 +586,64 @@
           "id": "journal-oom",
           "title": "Every OOM kill, all nodes",
           "command": "grep -h 'Killed process' nodes/*.journal.log | sort",
+          "syntax": "grep -h '<kernel-message>' <journal-files> | sort",
           "explain": "The kernel logs one `Killed process <pid> (<name>)` line per OOM kill. Syslog timestamps (UTC) sort fine within one day.",
-          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process' | ForEach-Object Line | Sort-Object"
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process' | ForEach-Object Line | Sort-Object",
+          "syntaxPowershell": "Select-String -Path <journal-files> -Pattern '<kernel-message>' | ForEach-Object Line | Sort-Object"
         },
         {
           "id": "journal-oom-memcg",
           "title": "Which cgroup was killed?",
           "command": "grep -h -B1 'Killed process' nodes/*.journal.log | grep -o 'task_memcg=[^,]*' | head",
+          "syntax": "grep -h -B<n> '<kernel-message>' <journal-files> | grep -o '<key>=[^,]*' | head",
           "explain": "The `oom-kill:` line just before each kill carries the cgroup path: the pod UID and `cri-containerd-<container id>.scope`.",
-          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'oom-kill:' | ForEach-Object { [regex]::Match($_.Line, 'task_memcg=[^,]*').Value } | Select-Object -First 10"
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'oom-kill:' | ForEach-Object { [regex]::Match($_.Line, 'task_memcg=[^,]*').Value } | Select-Object -First 10",
+          "syntaxPowershell": "Select-String -Path <journal-files> -Pattern '<kernel-marker>' | ForEach-Object { [regex]::Match($_.Line, '<key>=[^,]*').Value } | Select-Object -First <n>"
         },
         {
           "id": "journal-pleg-died",
           "title": "Container deaths, by pod",
           "command": "grep -h '\"ContainerDied\"' nodes/*.journal.log | grep -o 'pod=\"[^\"]*\".*' | head",
+          "syntax": "grep -h '<event-type>' <journal-files> | grep -o '<key>=\"[^\"]*\".*' | head",
           "explain": "The kubelet's PLEG logs `ContainerDied` with the pod name and, in `Data`, the container ID. That's the bridge between kernel lines and pod names.",
-          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern '\"ContainerDied\"' | ForEach-Object { [regex]::Match($_.Line, 'pod=\"[^\"]*\".*').Value } | Select-Object -First 10"
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern '\"ContainerDied\"' | ForEach-Object { [regex]::Match($_.Line, 'pod=\"[^\"]*\".*').Value } | Select-Object -First 10",
+          "syntaxPowershell": "Select-String -Path <journal-files> -Pattern '<event-type>' | ForEach-Object { [regex]::Match($_.Line, '<key>=\"[^\"]*\".*').Value } | Select-Object -First <n>"
         },
         {
           "id": "journal-find-cid",
           "title": "Follow one container ID",
           "command": "grep -h '<container-id>' nodes/*.journal.log",
+          "syntax": "grep -h '<container-id>' <journal-files>",
           "explain": "Everything every component said about one container: created, started, killed, died.",
-          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern '<container-id>' -SimpleMatch | ForEach-Object Line"
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern '<container-id>' -SimpleMatch | ForEach-Object Line",
+          "syntaxPowershell": "Select-String -Path <journal-files> -Pattern '<container-id>' -SimpleMatch | ForEach-Object Line"
         },
         {
           "id": "journal-eviction",
           "title": "Kubelet evictions",
           "command": "grep -h -E 'Eviction manager|NodeHas' nodes/*.journal.log",
+          "syntax": "grep -h -E '<pattern>|<pattern>' <journal-files>",
           "explain": "The eviction manager logs which resource ran low, how it ranked the pods and which one it evicted.",
-          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Eviction manager|NodeHas' | ForEach-Object Line"
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Eviction manager|NodeHas' | ForEach-Object Line",
+          "syntaxPowershell": "Select-String -Path <journal-files> -Pattern '<pattern>|<pattern>' | ForEach-Object Line"
         },
         {
           "id": "journal-per-node-count",
           "title": "Count per node",
           "command": "grep -c 'Killed process' nodes/*.journal.log",
+          "syntax": "grep -c '<kernel-message>' <journal-files>",
           "explain": "`grep -c` with several files prints one count per file.",
-          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process' | Group-Object Filename | Select-Object Count, Name"
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process' | Group-Object Filename | Select-Object Count, Name",
+          "syntaxPowershell": "Select-String -Path <journal-files> -Pattern '<kernel-message>' | Group-Object Filename | Select-Object Count, Name"
         },
         {
           "id": "journal-process-hist",
           "title": "Which processes were killed?",
           "command": "grep -ho 'Killed process [0-9]* ([^)]*)' nodes/*.journal.log | awk '{print $4}' | sort | uniq -c",
+          "syntax": "grep -ho '<kernel-message> [0-9]* ([^)]*)' <journal-files> | awk '{print $<field>}' | sort | uniq -c",
           "explain": "Groups OOM kills by process name. Careful: the same process name can belong to more than one workload.",
-          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process \\d+ \\(([^)]+)\\)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name"
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process \\d+ \\(([^)]+)\\)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name",
+          "syntaxPowershell": "Select-String -Path <journal-files> -Pattern '<kernel-message> \\d+ \\(([^)]+)\\)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name"
         }
       ]
     },
@@ -605,43 +654,55 @@
           "id": "helm-history",
           "title": "Helm release history",
           "command": "column -t -s $'\\t' helm/history-pricing-api.txt",
+          "syntax": "column -t -s $'<separator>' <history-file>",
           "explain": "One row per revision. UPDATED is when the upgrade **started**, printed in the laptop's local time with no zone.",
-          "powershell": "Get-Content helm\\history-pricing-api.txt | ForEach-Object { $_ -replace \"`t\", ' | ' }"
+          "powershell": "Get-Content helm\\history-pricing-api.txt | ForEach-Object { $_ -replace \"`t\", ' | ' }",
+          "syntaxPowershell": "Get-Content <history-file> | ForEach-Object { $_ -replace \"<separator>\", ' | ' }"
         },
         {
           "id": "values-diff",
           "title": "Diff two revisions' values",
           "command": "diff -u helm/values-rev13.yaml helm/values-rev14.yaml",
+          "syntax": "diff -u <old-values-file> <new-values-file>",
           "explain": "`helm get values` prints user-supplied values with sorted keys, so a plain diff works. `-` lines are only in the old one, `+` only in the new one.",
-          "powershell": "Compare-Object (Get-Content helm\\values-rev13.yaml) (Get-Content helm\\values-rev14.yaml)"
+          "powershell": "Compare-Object (Get-Content helm\\values-rev13.yaml) (Get-Content helm\\values-rev14.yaml)",
+          "syntaxPowershell": "Compare-Object (Get-Content <old-values-file>) (Get-Content <new-values-file>)"
         },
         {
           "id": "git-commits",
           "title": "GitOps history at a glance",
           "command": "grep -A5 '^commit ' gitops/git-log-p.txt",
+          "syntax": "grep -A<n> '<commit-header>' <git-log-file>",
           "explain": "SHA, author, date (with its offset) and subject of every commit.",
-          "powershell": "Select-String -Path gitops\\git-log-p.txt -Pattern '^commit ' -Context 0,5"
+          "powershell": "Select-String -Path gitops\\git-log-p.txt -Pattern '^commit ' -Context 0,5",
+          "syntaxPowershell": "Select-String -Path <git-log-file> -Pattern '<commit-header>' -Context 0,<n>"
         },
         {
           "id": "git-one-commit",
           "title": "Read one commit's diff",
           "command": "sed -n '/^commit abc1234/,/^commit /p' gitops/git-log-p.txt",
+          "syntax": "sed -n '/^commit <sha-prefix>/,/^commit /p' <git-log-file>",
           "explain": "Prints from that commit's header to the next one. Replace `abc1234` with the start of a real SHA.",
-          "powershell": "$l = Get-Content gitops\\git-log-p.txt; $i = ($l | Select-String '^commit abc1234').LineNumber; $l[($i - 1)..($i + 80)]"
+          "powershell": "$l = Get-Content gitops\\git-log-p.txt; $i = ($l | Select-String '^commit abc1234').LineNumber; $l[($i - 1)..($i + 80)]",
+          "syntaxPowershell": "$l = Get-Content <git-log-file>; $i = ($l | Select-String '^commit <sha-prefix>').LineNumber; $l[($i - 1)..($i + <n>)]"
         },
         {
           "id": "flux-applies",
           "title": "What did Flux apply, from which commit?",
           "command": "jq -c 'select(.controller==\"kustomization\" and (.output | length > 0)) | {ts, name, output, revision}' flux/flux-controllers.log",
+          "syntax": "jq -c 'select(.<field> == \"<value>\" and (.<field> | length > 0)) | {<fields>}' <flux-log>",
           "explain": "kustomize-controller logs each object it changed and the git `revision` it came from.",
-          "powershell": "Get-Content flux\\flux-controllers.log | ConvertFrom-Json | Where-Object { $_.controller -eq 'kustomization' -and @($_.output.PSObject.Properties).Count -gt 0 } | Format-List ts, name, output, revision"
+          "powershell": "Get-Content flux\\flux-controllers.log | ConvertFrom-Json | Where-Object { $_.controller -eq 'kustomization' -and @($_.output.PSObject.Properties).Count -gt 0 } | Format-List ts, name, output, revision",
+          "syntaxPowershell": "Get-Content <flux-log> | ConvertFrom-Json | Where-Object { $_.<field> -eq '<value>' -and @($_.<field>.PSObject.Properties).Count -gt 0 } | Format-List <fields>"
         },
         {
           "id": "flux-helm",
           "title": "What did helm-controller do?",
           "command": "jq -r 'select(.controller==\"helmrelease\") | \"\\(.ts) \\(.namespace)/\\(.name) \\(.msg)\"' flux/flux-controllers.log",
+          "syntax": "jq -r 'select(.<field> == \"<value>\") | \"\\(.<field>) \\(.<field>)/\\(.<field>) \\(.<field>)\"' <flux-log>",
           "explain": "Every Helm upgrade Flux ran: why (out-of-sync reason), when it started, and how it ended.",
-          "powershell": "Get-Content flux\\flux-controllers.log | ConvertFrom-Json | Where-Object controller -eq 'helmrelease' | ForEach-Object { \"$($_.ts) $($_.namespace)/$($_.name) $($_.msg)\" }"
+          "powershell": "Get-Content flux\\flux-controllers.log | ConvertFrom-Json | Where-Object controller -eq 'helmrelease' | ForEach-Object { \"$($_.ts) $($_.namespace)/$($_.name) $($_.msg)\" }",
+          "syntaxPowershell": "Get-Content <flux-log> | ConvertFrom-Json | Where-Object <field> -eq '<value>' | ForEach-Object { \"$($_.<field>) $($_.<field>)/$($_.<field>) $($_.<field>)\" }"
         }
       ]
     },
@@ -652,36 +713,46 @@
           "id": "local-to-utc",
           "title": "Local (+02:00) to UTC",
           "command": "date -u -d '2026-11-17 09:30:00 +0200' '+%F %T'",
+          "syntax": "date -u -d '<local-datetime> <offset>' '+%F %T'",
           "explain": "For `helm history`, `kubectl describe`, git dates and the chat. Subtracting two hours by hand works too, if you're careful.",
-          "powershell": "([DateTimeOffset]'2026-11-17T09:30:00+02:00').UtcDateTime.ToString('yyyy-MM-dd HH:mm:ss')"
+          "powershell": "([DateTimeOffset]'2026-11-17T09:30:00+02:00').UtcDateTime.ToString('yyyy-MM-dd HH:mm:ss')",
+          "syntaxPowershell": "([DateTimeOffset]'<local-datetime><offset>').UtcDateTime.ToString('yyyy-MM-dd HH:mm:ss')"
         },
         {
           "id": "age-to-time",
           "title": "Relative age to a time",
           "command": "date -u -d '2026-11-17 08:44:12 UTC - 47 minutes' +%T",
+          "syntax": "date -u -d '<snapshot-time> UTC - <age>' +%T",
           "explain": "Snapshot time (from the `date -u` above the block) minus the age. Ages over 10 minutes are rounded to whole minutes.",
-          "powershell": "([DateTimeOffset]'2026-11-17T08:44:12Z').AddMinutes(-47).UtcDateTime.ToString('HH:mm:ss')"
+          "powershell": "([DateTimeOffset]'2026-11-17T08:44:12Z').AddMinutes(-47).UtcDateTime.ToString('HH:mm:ss')",
+          "syntaxPowershell": "([DateTimeOffset]'<snapshot-time>Z').AddMinutes(-<minutes>).UtcDateTime.ToString('HH:mm:ss')"
         },
         {
           "id": "epoch-to-utc",
           "title": "Epoch to UTC",
           "command": "date -u -d @1794902400",
+          "syntax": "date -u -d @<epoch>",
           "explain": "For the metrics CSVs. On macOS: `date -u -r 1794902400`.",
-          "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794902400).UtcDateTime.ToString('u')"
+          "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794902400).UtcDateTime.ToString('u')",
+          "syntaxPowershell": "[DateTimeOffset]::FromUnixTimeSeconds(<epoch>).UtcDateTime.ToString('u')"
         },
         {
           "id": "utc-to-epoch",
           "title": "UTC to epoch",
           "command": "date -u -d '2026-11-17 08:00:00' +%s",
+          "syntax": "date -u -d '<utc-datetime>' +%s",
           "explain": "Find the matching rows in an epoch-indexed CSV.",
-          "powershell": "([DateTimeOffset]'2026-11-17T08:00:00Z').ToUnixTimeSeconds()"
+          "powershell": "([DateTimeOffset]'2026-11-17T08:00:00Z').ToUnixTimeSeconds()",
+          "syntaxPowershell": "([DateTimeOffset]'<utc-datetime>Z').ToUnixTimeSeconds()"
         },
         {
           "id": "csv-epoch-column",
           "title": "Readable times for a whole CSV",
           "command": "awk -F, 'NR>1 {cmd=\"date -u -d @\"$1\" +%T\"; cmd | getline t; close(cmd); print t, $0}' metrics/hpa-pricing-api.csv | head",
+          "syntax": "awk -F, 'NR>1 {cmd=\"date -u -d @\"$<epoch-column>\" +%T\"; cmd | getline t; close(cmd); print t, $0}' <metrics-csv> | head",
           "explain": "Prefixes every row with its UTC time. Slow-ish (one `date` per row), fine for a few hundred rows.",
-          "powershell": "Import-Csv metrics\\hpa-pricing-api.csv | Select-Object -First 10 @{n='utc'; e={ [DateTimeOffset]::FromUnixTimeSeconds([long]$_.ts_epoch).ToString('HH:mm:ss') }}, *"
+          "powershell": "Import-Csv metrics\\hpa-pricing-api.csv | Select-Object -First 10 @{n='utc'; e={ [DateTimeOffset]::FromUnixTimeSeconds([long]$_.ts_epoch).ToString('HH:mm:ss') }}, *",
+          "syntaxPowershell": "Import-Csv <metrics-csv> | Select-Object -First <n> @{n='utc'; e={ [DateTimeOffset]::FromUnixTimeSeconds([long]$_.<epoch-column>).ToString('HH:mm:ss') }}, *"
         }
       ]
     },
@@ -692,22 +763,28 @@
           "id": "csv-table",
           "title": "Pretty table",
           "command": "column -s, -t < metrics/hpa-pricing-api.csv | less -S",
+          "syntax": "column -s, -t < <metrics-csv> | less -S",
           "explain": "Aligns CSV columns so you can read them.",
-          "powershell": "Import-Csv metrics\\hpa-pricing-api.csv | Format-Table | Out-Host -Paging"
+          "powershell": "Import-Csv metrics\\hpa-pricing-api.csv | Format-Table | Out-Host -Paging",
+          "syntaxPowershell": "Import-Csv <metrics-csv> | Format-Table | Out-Host -Paging"
         },
         {
           "id": "csv-changes",
           "title": "Only the rows where a value changed",
           "command": "awk -F, 'NR>1 && $2 != prev {print; prev = $2}' metrics/hpa-pricing-api.csv",
+          "syntax": "awk -F, 'NR>1 && $<column> != prev {print; prev = $<column>}' <metrics-csv>",
           "explain": "Prints a row whenever column 2 changes: every scale event of the HPA.",
-          "powershell": "$p = ''; Import-Csv metrics\\hpa-pricing-api.csv | ForEach-Object { if ($_.spec_replicas -ne $p) { $_; $p = $_.spec_replicas } }"
+          "powershell": "$p = ''; Import-Csv metrics\\hpa-pricing-api.csv | ForEach-Object { if ($_.spec_replicas -ne $p) { $_; $p = $_.spec_replicas } }",
+          "syntaxPowershell": "$p = ''; Import-Csv <metrics-csv> | ForEach-Object { if ($_.<column> -ne $p) { $_; $p = $_.<column> } }"
         },
         {
           "id": "csv-threshold",
           "title": "Rows below a threshold",
           "command": "awk -F, 'NR>1 && $4 < $5' metrics/node-memory.csv",
+          "syntax": "awk -F, 'NR>1 && $<column> < $<column>' <metrics-csv>",
           "explain": "Node memory available under the kubelet's hard eviction threshold. Convert the epoch to see when.",
-          "powershell": "Import-Csv metrics\\node-memory.csv | Where-Object { [int]$_.memory_available_mib -lt [int]$_.eviction_threshold_mib }"
+          "powershell": "Import-Csv metrics\\node-memory.csv | Where-Object { [int]$_.memory_available_mib -lt [int]$_.eviction_threshold_mib }",
+          "syntaxPowershell": "Import-Csv <metrics-csv> | Where-Object { [int]$_.<column> -lt [int]$_.<column> }"
         }
       ]
     },
@@ -718,22 +795,28 @@
           "id": "unique-capture",
           "title": "Count by a captured value",
           "command": "grep -ho 'pod=\"shop/[^\"]*\"' nodes/*.journal.log | sort | uniq -c | sort -rn | head -20",
+          "syntax": "grep -ho '<key>=\"<namespace>/[^\"]*\"' <journal-files> | sort | uniq -c | sort -rn | head -<n>",
           "explain": "`grep -o` extracts one field from messy lines; `sort | uniq -c` counts each value.",
-          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'pod=\"(shop/[^\"]*)\"' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name"
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'pod=\"(shop/[^\"]*)\"' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name",
+          "syntaxPowershell": "Select-String -Path <journal-files> -Pattern '<key>=\"(<namespace>/[^\"]*)\"' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First <n> Count, Name"
         },
         {
           "id": "join-lists",
           "title": "Join two lists",
           "command": "awk 'NR==FNR {want[$1]; next} $1 in want' ids.txt other.txt",
+          "syntax": "awk 'NR==FNR {want[$<key-column>]; next} $<key-column> in want' <lookup-file> <data-file>",
           "explain": "Classic two-file awk: the first file builds a lookup table, the second is filtered (or enriched) with it. Same idea works within one file with an `END` block.",
-          "powershell": "$want = Get-Content ids.txt; Get-Content other.txt | Where-Object { $want -contains (($_ -split ' ')[0]) }"
+          "powershell": "$want = Get-Content ids.txt; Get-Content other.txt | Where-Object { $want -contains (($_ -split ' ')[0]) }",
+          "syntaxPowershell": "$want = Get-Content <lookup-file>; Get-Content <data-file> | Where-Object { $want -contains (($_ -split ' ')[<index>]) }"
         },
         {
           "id": "units",
           "title": "kB to MiB",
           "command": "echo $(( 1572864 / 1024 )) MiB",
+          "syntax": "echo $(( <kilobytes> / 1024 )) MiB",
           "explain": "Kernel memory numbers are in kB (really KiB). Divide by 1024 for MiB, again for GiB. `Mi` and `Gi` in Kubernetes are the same binary units.",
-          "powershell": "1572864 / 1024"
+          "powershell": "1572864 / 1024",
+          "syntaxPowershell": "<kilobytes> / 1024"
         }
       ]
     }

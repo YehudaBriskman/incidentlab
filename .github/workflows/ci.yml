@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [dev, main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build, solver + server tests, e2e
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      E2E_PORT: "8888"
+      E2E_BASE_URL: http://localhost:8888
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Node 24: `node --test --experimental-strip-types` (server tests, local server) works there.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            site/package-lock.json
+            tests/e2e/package-lock.json
+
+      - name: Install system tools (zip, jq, GNU awk)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zip jq gawk
+
+      - name: Configure git identity for the generated case repos
+        run: |
+          git config --global user.name "IncidentLab CI"
+          git config --global user.email "ci@incidentlab.invalid"
+          git config --global init.defaultBranch main
+
+      - name: Full build (generators, answer keys, packaging, solvers, site, server tests)
+        run: ./scripts/build-all.sh
+
+      - name: Install e2e dependencies
+        working-directory: tests/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Start local server
+        env:
+          # Throwaway key for the in-memory local server only (never a real secret).
+          ADMIN_KEY: ci-admin-key-0123456789abcdef
+        run: |
+          node --experimental-strip-types tests/local-server.ts "$E2E_PORT" > local-server.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -fsS "$E2E_BASE_URL/api/today" > /dev/null; then
+              echo "local server is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "local server did not come up" >&2
+          cat local-server.log >&2
+          exit 1
+
+      - name: End-to-end tests (Playwright)
+        working-directory: tests/e2e
+        env:
+          ADMIN_KEY: ci-admin-key-0123456789abcdef
+        run: npx playwright test
+
+      - name: Upload Playwright report and screenshots
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            tests/e2e/playwright-report/
+            tests/e2e/test-results/
+            local-server.log
+          retention-days: 14
+          if-no-files-found: ignore

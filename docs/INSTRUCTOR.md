@@ -56,8 +56,11 @@ Session shape: **10 min orientation, 40 min solve (pairs), then debrief and lect
   sign-ups during the intro.
 - Sessions are an HttpOnly cookie that lasts 30 days, so players stay signed in across reloads and come back
   to the same progress on any device after signing in.
-- Forgotten password: there is no email reset. Delete the account (it frees the username) and have them sign
-  up again. Their progress goes with the account.
+- **Class code:** in Accounts → Settings, set a code (or generate one) and write it on the board. Sign-ups that
+  enter it are approved instantly, so a full class can start without you clicking Approve 30 times. **Approve
+  all** handles the rest.
+- **Forgotten password:** Accounts → **Reset password** shows a one-time temporary password. Read it to the
+  player; they sign in with it and must pick a new one before playing. Their progress is kept.
 
 ## Incident of the day
 
@@ -66,10 +69,27 @@ shows that case as **Incident of the day** (dates are in the schedule's time zon
 **Lock to today's case** lets players *start* only today's case; anything they already started stays playable,
 so nobody is cut off at midnight.
 
+## Live event
+
+The **Event** tab runs a timed session: name, start, end, an optional **leaderboard freeze** (the public board
+stops updating so the final minutes stay suspenseful), and an **announcement** banner every player sees
+("Stage 3 hint is half price", "10 minutes left"). With **Enforce the window**, answers, hints and command
+reveals are refused before the start and after the end. Quick actions: Start now (60 min), Freeze now,
+End now. Put `#/leaderboard?projector=1` on the projector.
+
+## Scoring (what to tell players)
+
+Commands are shown as **syntax only**; seeing a full, copy-pasteable command costs 5 points (free once the case
+is done). Hints cost what they say. Each wrong answer costs 2 (max 20 per stage). Bonuses: up to +30 for
+speed per stage (full within the stage's target time, fading to 0 at 3× it), +10 for a clean solve (no hints,
+commands or wrong answers), +15 **first blood** for the first solver of a stage, +50 for finishing all six
+without revealing an answer. Players see a breakdown after every stage. Reset a case to reset its first bloods.
+
 ## Admin dashboard
 
-- **URL:** `<site-url>/#/admin`. It asks for the admin key and keeps it only in that browser tab's
-  `sessionStorage` (close the tab to forget it).
+- **Sign in:** on the site's sign-in page use username **`admin`** and the admin key as the password. You land
+  on `#/admin` (12-hour session). The old way still works: open `#/admin` and paste the key (kept only in that
+  tab). Every admin action is recorded in the **Audit** tab.
 - **Where the key lives:** the `ADMIN_KEY` environment variable on the Netlify site (production context).
   `scripts/deploy.sh` creates it on first deploy and saves a copy to `~/.incidentlab-admin-key` (mode 600)
   on the machine that deployed. Lost it? `npx -y netlify-cli@17 env:get ADMIN_KEY`. To rotate, set a new
