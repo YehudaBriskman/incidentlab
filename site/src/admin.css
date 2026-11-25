@@ -8,6 +8,8 @@
   font-family: var(--font-sans);
   display: grid;
   gap: var(--space-5);
+  /* Height of the sticky tab bar: sticky bits below it (the accounts search) and focus scrolling start here. */
+  --adm-tabs-h: calc(var(--control-md) + 1px);
 }
 
 .admin .panel,
@@ -81,7 +83,6 @@
 .admin-tile-value { font-family: var(--font-mono); font-size: clamp(1.6rem, 3.4vw, 2.4rem); font-weight: 600; line-height: 1.2; margin-top: var(--space-1); }
 .admin-tile-sub { font-size: var(--step--1); color: var(--text-2); }
 
-.admin-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--space-5); }
 
 /* ---- funnel: bars grow from the inline start, so they mirror with the labels in Hebrew ---- */
 .funnel-key { display: flex; align-items: center; gap: var(--space-2); margin: -6px 0 var(--space-3); }
@@ -96,28 +97,43 @@
 .funnel-done { background: var(--success-fg); opacity: 0.85; }
 .funnel-count { font-family: var(--font-mono); font-size: var(--step--1); text-align: end; color: var(--text-2); }
 
-/* ---- needs help ---- */
-.help-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); max-height: 320px; overflow-y: auto; }
+/* ---- needs help: first on the Live tab; one quiet line when nobody does ---- */
+.help-panel { border-color: var(--warning-fg); }
+.help-panel.is-empty { border: 0; padding: 0; background: none; box-shadow: none; }
+.help-ok { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); margin: 0; }
+.help-ok-mark { color: var(--success-fg); font-weight: 700; }
+.help-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-1) var(--space-3); margin-bottom: var(--space-3); }
+.help-head .admin-h2 { margin: 0; }
+.help-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
 .help-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px var(--space-3);
-  padding: var(--space-3);
+  grid-template-columns: minmax(8rem, 1.2fr) minmax(0, 2fr) auto auto;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-md);
   border-inline-start: 3px solid var(--warning-fg);
   background: var(--surface-2);
 }
 .help-item.is-alert { border-inline-start-color: var(--danger-fg); }
-.help-name { font-weight: 600; overflow-wrap: anywhere; }
-.help-stage { grid-column: 1; font-size: var(--step--1); color: var(--text-2); }
-.help-detail { grid-column: 1; font-size: var(--step--1); }
-.help-item .stuck-badge { grid-column: 2; grid-row: 1 / span 3; align-self: center; }
+.help-item.is-idle { border-inline-start-color: var(--border-strong); }
+/* dir=auto names keep their own direction but sit at the row's start, whatever the script. */
+.help-name { font-weight: 600; justify-self: start; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.help-more { margin-top: var(--space-2); }
+.help-stage { font-size: var(--step--1); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.help-reasons { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); justify-content: flex-end; }
 .admin-empty-small { margin: var(--space-1) 0; }
 
 /* ---- badges (pill tones; the base lives in styles.css) & cells ---- */
 .stuck-badge { font-family: var(--font-mono); }
 .stuck-badge.is-warn { --pill-fg: var(--warning-fg); --pill-bg: var(--warning-bg); --pill-line: var(--warning-fg); }
 .stuck-badge.is-alert { --pill-fg: var(--danger-fg); --pill-bg: var(--danger-bg); --pill-line: var(--danger-fg); }
+/* Help reasons share the pill base (styles.css) through .stuck-badge's tones. */
+.help-chip { display: inline-flex; align-items: center; padding: 1px var(--space-2); border-radius: var(--radius-full); border: 1px solid var(--pill-line, var(--border-strong)); color: var(--pill-fg, var(--text-2)); background: var(--pill-bg, transparent); font-size: var(--step--2); font-weight: 600; font-family: var(--font-mono); white-space: nowrap; }
+.help-chip.is-warn { --pill-fg: var(--warning-fg); --pill-bg: var(--warning-bg); --pill-line: var(--warning-fg); }
+.help-chip.is-alert { --pill-fg: var(--danger-fg); --pill-bg: var(--danger-bg); --pill-line: var(--danger-fg); }
+.help-chip.is-idle { --pill-fg: var(--text-muted); --pill-bg: var(--surface-2); --pill-line: var(--border-strong); font-weight: 400; }
+.count-badge.is-warn { --pill-fg: var(--warning-fg); --pill-bg: var(--warning-bg); --pill-line: var(--warning-fg); }
 
 .progress-cells { display: flex; gap: var(--space-1); }
 .cell { display: inline-block; width: 20px; height: 16px; border-radius: var(--radius-xs); border: 1px solid transparent; flex: none; }
@@ -158,7 +174,71 @@
 .stage-done { color: var(--success-fg); font-weight: 600; }
 .col-seen { white-space: nowrap; font-size: var(--step--1); }
 .col-actions { text-align: end; white-space: nowrap; }
-.col-actions .confirm-prompt { display: inline-flex; gap: var(--space-2); }
+
+/* Live grid: one line per player (stage title truncated, full text in the title), two densities. */
+.col-stage { max-width: 26rem; }
+/* Shrinks with the viewport so the 7 columns fit the wrapper down to the card breakpoint. */
+.stage-text { display: block; max-width: clamp(8rem, 100vw - 72rem, 20rem); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-onstage { white-space: nowrap; }
+.live-table td, .live-table th { padding-inline: var(--space-2); }
+.live-table-wrap.is-compact .admin-table td { padding-block: var(--space-1); }
+.live-table-wrap.is-compact .admin-table { font-size: var(--step--1); }
+.live-table-wrap.is-compact .col-score { font-size: var(--step--1); }
+.live-table-wrap.is-compact .cell { height: 12px; }
+.live-table-wrap.is-compact .acct-toggle { min-height: var(--control-xs); }
+.live-table-wrap.is-compact .row-menu-btn { min-height: var(--control-xs); }
+@keyframes admin-flash { from { background: var(--accent-soft); } }
+.is-flash td, .is-flash.player-card { animation: admin-flash var(--motion-dur-data) var(--motion-ease-standard); }
+.is-flash td:first-child { box-shadow: inset calc(3px * var(--dir)) 0 0 var(--accent); }
+.is-flash.player-card { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) {
+  .is-flash td, .is-flash.player-card { animation: none; background: var(--accent-soft); }
+}
+
+/* Segmented control (density) and checkbox labels: one tab stop each, 44px on touch. */
+.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-md); overflow: hidden; }
+.seg-btn { font: inherit; font-size: var(--step--1); color: var(--text-2); background: var(--surface); border: 0; padding: var(--space-1) var(--space-3); min-height: var(--control-sm); cursor: pointer; }
+.seg-btn + .seg-btn { border-inline-start: 1px solid var(--border-strong); }
+.seg-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; }
+.seg-btn:focus-visible { outline-offset: -2px; }
+.admin-check { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--control-sm); font-size: var(--step--1); cursor: pointer; }
+.admin-check input { width: 24px; height: 24px; margin: 0; accent-color: var(--accent); flex: none; }
+
+/* Row actions: "⋯" button and its menu (popover in the top layer, placed by script). */
+.row-menu-btn { gap: var(--space-1); }
+.row-menu-btn.is-icon { min-width: var(--control-sm); padding-inline: var(--space-2); }
+.row-menu-dots { font-size: var(--step-1); line-height: 1; }
+.row-menu {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  min-width: 12rem;
+  padding: var(--space-1);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+.row-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: var(--control-sm);
+  padding: var(--space-1) var(--space-3);
+  font: inherit;
+  font-size: var(--step--1);
+  text-align: start;
+  color: var(--text);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.row-menu-item:hover, .row-menu-item:focus-visible { background: var(--surface-2); }
+.row-menu-item:focus-visible { outline-offset: -2px; }
+.row-menu-item.is-danger { color: var(--danger-fg); }
+.row-menu-item.is-danger:not(:first-child) { margin-top: var(--space-1); border-top: 1px solid var(--border); border-top-left-radius: 0; border-top-right-radius: 0; }
 
 /* ---- empty state ---- */
 .admin-empty { text-align: center; padding: var(--space-6) var(--space-3); }
@@ -213,13 +293,21 @@ html.admin-board-open { overflow: hidden; }
 .board-score { font-family: var(--font-mono); font-weight: 700; text-align: end; }
 
 /* ---- tabs ---- */
+/* The tab bar sticks to the top while a tab scrolls, in one row (it scrolls sideways on phones). */
 .admin-tabs {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--space-1);
   border-bottom: 1px solid var(--border-strong);
   margin-bottom: -8px;
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: var(--canvas);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+html.admin-sticky-tabs { scroll-padding-top: calc(var(--adm-tabs-h, 45px) + var(--control-md) + var(--space-4)); }
 .admin-tab {
   font: inherit;
   font-weight: 600;
@@ -234,10 +322,13 @@ html.admin-board-open { overflow: hidden; }
   align-items: center;
   gap: var(--space-2);
   min-height: var(--control-md);
+  flex: none;
+  white-space: nowrap;
 }
+.admin-tab:focus-visible { outline-offset: -2px; }
 .admin-tab:hover { color: var(--text); }
 .admin-tab.is-active { color: var(--text); border-bottom-color: var(--accent); }
-.admin-tabpanel { display: grid; gap: var(--space-5); min-width: 0; }
+.admin-tabpanel { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-5); min-width: 0; }
 .admin-tabpanel[hidden] { display: none; }
 .tab-badge, .count-badge {
   --pill-fg: var(--on-accent);
@@ -257,7 +348,7 @@ html.admin-board-open { overflow: hidden; }
 .pending-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
 .pending-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 2px var(--space-3);
   padding: var(--space-3);
@@ -265,9 +356,14 @@ html.admin-board-open { overflow: hidden; }
   background: var(--surface-2);
   border-inline-start: 3px solid var(--warning-fg);
 }
-.pending-name { font-weight: 600; overflow-wrap: anywhere; }
-.pending-meta { grid-column: 1; }
-.pending-actions { grid-column: 2; grid-row: 1 / span 2; display: inline-flex; gap: var(--space-2); }
+.pending-item.is-selected { background: var(--accent-soft); }
+.pending-check { grid-column: 1; grid-row: 1 / span 2; display: inline-flex; align-items: center; justify-content: center; min-width: var(--target-min); min-height: var(--target-min); cursor: pointer; }
+.pending-check input { width: 24px; height: 24px; margin: 0; accent-color: var(--accent); }
+.pending-name { grid-column: 2; font-weight: 600; overflow-wrap: anywhere; justify-self: start; }
+.pending-meta { grid-column: 2; }
+.pending-actions { grid-column: 3; grid-row: 1 / span 2; display: inline-flex; gap: var(--space-2); }
+.pending-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin-bottom: var(--space-2); }
+.pending-bulk:empty { display: none; }
 .status-pill.is-pending { --pill-fg: var(--warning-fg); --pill-bg: var(--warning-bg); --pill-line: var(--warning-fg); }
 .status-pill.is-approved { --pill-fg: var(--success-fg); --pill-bg: var(--success-bg); --pill-line: var(--success-fg); }
 .status-pill.is-rejected { --pill-fg: var(--danger-fg); --pill-bg: var(--danger-bg); --pill-line: var(--danger-fg); }
@@ -301,16 +397,15 @@ html.admin-board-open { overflow: hidden; }
 .case-status.is-completed { color: var(--success-fg); font-weight: 600; }
 .case-status.is-in-progress { color: var(--info-fg); }
 .case-status.is-not-started { color: var(--text-muted); }
-.row-actions { display: inline-flex; flex-wrap: nowrap; justify-content: flex-end; gap: var(--space-2); align-items: center; }
-.btn-approve { color: var(--success-fg); border-color: var(--success-fg); }
 
 .admin-table .player-name { white-space: nowrap; }
 .acct-table .col-name { max-width: none; }
 
-/* ---- live toolbar ---- */
-.admin-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+/* ---- live toolbar: one row (case picker), no card around it ---- */
+.admin-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
 .admin-toolbar .admin-input { min-width: 240px; }
-.admin-live-body { display: grid; gap: var(--space-5); }
+.admin-live-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-5); }
+.admin-toolbar .admin-input { max-width: 100%; }
 .today-tag {
   --pill-fg: var(--info-fg);
   --pill-bg: var(--info-bg);
@@ -328,7 +423,7 @@ html.admin-board-open { overflow: hidden; }
 .sched-field { display: grid; gap: var(--space-2); min-width: 0; }
 .sched-field p { margin: 0; }
 .sched-check { display: inline-flex; align-items: center; gap: var(--space-2); font-weight: 600; cursor: pointer; min-height: var(--control-md); }
-.sched-check input { width: 18px; height: 18px; accent-color: var(--accent); }
+.sched-check input { width: 24px; height: 24px; accent-color: var(--accent); }
 .sched-invalid { color: var(--danger-fg); }
 .admin-input[aria-invalid="true"] { border-color: var(--danger-fg); }
 .sched-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); position: sticky; bottom: var(--space-2); z-index: 2; }
@@ -369,8 +464,30 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 .stats-case { display: grid; gap: var(--space-3); }
 .stats-case-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); }
 .stats-case-head .admin-h2 { margin: 0; }
-.admin-tiles-sm .admin-tile { padding: var(--space-3) var(--space-3); background: var(--surface-2); }
-.admin-tiles-sm .admin-tile-value { font-size: clamp(1.3rem, 2.6vw, 1.8rem); }
+/* Headline per case: completion leads, then median time, then the hardest stage with its numbers. */
+.stats-headline { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.6fr); gap: var(--space-3); }
+.stats-kpi { padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); background: var(--surface-2); min-width: 0; }
+.stats-kpi.is-lead { background: var(--accent-soft); }
+.stats-kpi-value { font-family: var(--font-mono); font-size: var(--step-3); font-weight: 600; line-height: 1.2; margin-top: var(--space-1); }
+.stats-kpi.is-lead .stats-kpi-value { color: var(--accent-strong); }
+.stats-kpi-text { font-family: var(--font-sans); font-size: var(--step-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-secondary { margin: 0; }
+.stats-q-title { margin: var(--space-2) 0 0; }
+.q-bars { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.q-bar-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(6rem, 2fr) minmax(0, 2.4fr); align-items: center; gap: var(--space-1) var(--space-3); }
+.q-bar-label { font-size: var(--step--1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-bar-row.is-hardest .q-bar-label { font-weight: 600; }
+.q-bar-track { display: flex; height: 14px; background: var(--surface-3); border-radius: var(--radius-xs); overflow: hidden; }
+.q-bar-seg { display: block; height: 100%; }
+.q-bar-seg.is-solved { background: var(--success-fg); }
+.q-bar-seg.is-revealed { background: repeating-linear-gradient(135deg, var(--warning-fg) 0 3px, var(--warning-bg) 3px 6px); }
+.q-bar-seg.is-open { background: var(--info-bg); box-shadow: inset 0 0 0 1px var(--info-fg); }
+.q-bar-nums { font-size: var(--step--1); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.key-revealed, .key-open { display: inline-block; width: 12px; height: 10px; border-radius: 3px; }
+.key-revealed { background: repeating-linear-gradient(135deg, var(--warning-fg) 0 2px, var(--warning-bg) 2px 4px); border: 1px solid var(--warning-fg); }
+.key-open { background: var(--info-bg); border: 1px solid var(--info-fg); }
+.stats-table-view summary { cursor: pointer; font-size: var(--step--1); color: var(--accent-strong); min-height: var(--target-min); display: inline-flex; align-items: center; }
+.stats-table-view[open] summary { margin-bottom: var(--space-2); }
 .q-id { font-family: var(--font-mono); color: var(--text-muted); }
 /* Hardest question: a neutral flag, not an error state. */
 .stats-q-table tr.is-hardest td { background: var(--surface-2); }
@@ -436,6 +553,7 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 .ev-time-row .admin-input { flex: 1 1 0; min-width: 0; width: 100%; }
 .adm-ev-form .sched-field { min-width: 0; grid-template-columns: minmax(0, 1fr); }
 .ev-tz { grid-column: 1 / -1; margin: 0; }
+.ev-time-preview { font-variant-numeric: tabular-nums; }
 .adm-ev-ann { display: grid; gap: var(--space-2); }
 .ev-ann { width: 100%; resize: vertical; min-height: 4.5em; }
 .adm-ev-ann-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
@@ -450,7 +568,6 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 
 /* ---- responsive ---- */
 @media (max-width: 900px) {
-  .admin-grid { grid-template-columns: minmax(0, 1fr); }
   .sched-form { grid-template-columns: minmax(0, 1fr); }
   .cal-day { min-height: 64px; }
   .admin-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -467,11 +584,181 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
   .cal-grid { gap: 3px; }
   .cal-day { padding: 3px; gap: 3px; }
   .cal-select { font-size: 0.7rem; padding: 3px 1px; }
-  .pending-item { grid-template-columns: minmax(0, 1fr); }
-  .pending-actions { grid-column: 1; grid-row: auto; }
   .adm-ev-form { grid-template-columns: minmax(0, 1fr); }
   .invite-input { width: 100%; flex: 1 1 100%; }
   .admin-pw .admin-share-url { font-size: var(--step-0); }
+}
+
+/* ---- accounts: search stays in view, column chooser ---- */
+.acct-searchbar {
+  position: sticky;
+  top: var(--adm-tabs-h);
+  z-index: 4;
+  margin-inline: calc(-1 * var(--space-2));
+  padding: var(--space-2);
+  background: var(--surface);
+}
+.acct-searchbar .admin-search { width: min(100%, 24rem); }
+.col-chooser { position: relative; }
+.col-chooser > summary { list-style: none; cursor: pointer; }
+.col-chooser > summary::-webkit-details-marker { display: none; }
+.col-chooser-pop {
+  position: absolute;
+  inset-inline-end: 0;
+  top: calc(100% + var(--space-1));
+  z-index: 8;
+  display: grid;
+  gap: 0 var(--space-3);
+  min-width: 14rem;
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+.col-chooser-pop legend { float: left; margin-bottom: var(--space-1); padding: 0; }
+.col-chooser-pop .btn { justify-self: start; margin-top: var(--space-2); }
+
+/* ---- KPI tiles that fold on phones/tablets ---- */
+.tiles-fold { display: grid; gap: var(--space-2); }
+.tiles-toggle {
+  display: none;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--control-md);
+  padding: var(--space-1) var(--space-3);
+  font: inherit;
+  font-size: var(--step--1);
+  text-align: start;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.tiles-toggle[aria-expanded="true"] .acct-caret { transform: rotate(90deg); }
+.tiles-summary { font-variant-numeric: tabular-nums; }
+
+/* ---- player and account cards (phones/tablets) ---- */
+.player-cards, .acct-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.player-card, .acct-card {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  min-width: 0;
+}
+.player-card.is-warn { border-inline-start: 3px solid var(--warning-fg); }
+.player-card.is-alert { border-inline-start: 3px solid var(--danger-fg); }
+.player-card.is-expanded, .acct-card.is-expanded { background: var(--surface-2); }
+.pc-head { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-2); }
+.pc-head .acct-toggle { min-width: 0; }
+.pc-head .player-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-score { font-family: var(--font-mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+.pc-meta { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: var(--step--1); }
+.pc-stage { flex: 1 1 auto; min-width: 0; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-meta > :last-child { flex: none; font-family: var(--font-mono); }
+.pc-seen { margin: 0; }
+.stage-strip { list-style: none; margin: var(--space-1) 0 0; padding: 0; display: grid; gap: var(--space-1); }
+.strip-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); font-size: var(--step--1); }
+.strip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.strip-status { color: var(--text-2); white-space: nowrap; }
+.strip-item .cell { animation: none; }
+.ac-facts { margin: 0; font-size: var(--step--1); font-variant-numeric: tabular-nums; }
+.ac-seen { margin: 0; }
+.ac-detail { display: grid; gap: var(--space-2); padding-top: var(--space-1); }
+.ac-detail p { margin: 0; }
+.case-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); font-size: var(--step--1); }
+.case-lines li { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
+.case-line-title { font-weight: 600; }
+
+/* ---- phones and tablets: compact chrome, cards, 44px targets ---- */
+[data-menu="head:more"] { display: none; }
+@media (max-width: 900px) {
+  /* Same values the pointer: coarse layer uses: every control here is a 44px target. */
+  .admin { --control-xs: var(--control-md); --control-sm: var(--control-md); --target-min: var(--control-md); gap: var(--space-4); padding-top: var(--space-3); }
+  .admin-head { flex-wrap: nowrap; align-items: center; }
+  .admin-head-title .eyebrow, .admin-session-tag { display: none; }
+  .admin-title { font-size: var(--step-1); margin: 0; }
+  .admin-head-actions { flex-wrap: nowrap; gap: var(--space-1); }
+  .admin-head-actions > .head-wide { display: none; }
+  [data-menu="head:more"] { display: inline-flex; }
+  .admin-updated { display: none; }
+  .tiles-toggle { display: flex; }
+  .tiles-fold.is-folded .admin-tiles { display: none; }
+  .admin-tiles { gap: var(--space-2); }
+  .admin-tile { padding: var(--space-2) var(--space-3); }
+  .admin-tile-value { font-size: var(--step-2); }
+  /* Two lines per player: name and reasons, then the stage; Jump on the end. */
+  .help-item { grid-template-columns: minmax(0, 1fr) auto auto; padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3); }
+  .help-name { grid-column: 1; grid-row: 1; }
+  .help-reasons { grid-column: 2; grid-row: 1; }
+  .help-stage { grid-column: 1 / span 2; grid-row: 2; }
+  .help-jump { grid-column: 3; grid-row: 1 / span 2; }
+  /* Cards ignore row density and table columns: those controls only exist for the grids. */
+  .seg, .col-chooser { display: none; }
+  .stats-headline { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .stats-kpi.is-hardest { grid-column: 1 / -1; }
+  .q-bar-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .q-bar-nums { grid-column: 1 / -1; }
+}
+/* Phones/tablets: checkboxes get a 44px hit box (a 24px visible box inside a transparent 10px border), so the
+   input itself meets the touch target, not just its label. Chromium/WebKit draw the tick with ::after. */
+@media (max-width: 900px) {
+  .admin-check input, .sched-check input, .pending-check input {
+    appearance: none;
+    box-sizing: border-box;
+    position: relative;
+    width: var(--control-md);
+    height: var(--control-md);
+    margin: calc(-1 * var(--space-2) - 2px);
+    border: calc(var(--space-2) + 2px) solid transparent;
+    border-radius: calc(var(--radius-xs) + var(--space-2) + 2px);
+    background: var(--surface) content-box;
+    box-shadow: inset 0 0 0 2px var(--border-strong);
+    cursor: pointer;
+  }
+  .admin-check input:checked, .sched-check input:checked, .pending-check input:checked,
+  .admin-check input:indeterminate, .pending-check input:indeterminate {
+    background: var(--accent) content-box;
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+  .admin-check input:checked::after, .sched-check input:checked::after, .pending-check input:checked::after {
+    content: "";
+    position: absolute;
+    inset-inline-start: 8px;
+    top: 3px;
+    width: 6px;
+    height: 12px;
+    border: solid var(--on-accent);
+    border-width: 0 3px 3px 0;
+    transform: rotate(45deg);
+  }
+  .admin-check input:indeterminate::after, .pending-check input:indeterminate::after {
+    content: "";
+    position: absolute;
+    inset-inline: 5px;
+    top: 10px;
+    height: 3px;
+    background: var(--on-accent);
+  }
+  .admin-check input:disabled, .pending-check input:disabled { opacity: 0.5; cursor: not-allowed; }
+}
+@media (max-width: 900px) and (forced-colors: active) {
+  .admin-check input, .sched-check input, .pending-check input { forced-color-adjust: none; background: Canvas content-box; box-shadow: inset 0 0 0 2px CanvasText; }
+  .admin-check input:checked, .sched-check input:checked, .pending-check input:checked { background: Highlight content-box; }
+  .admin-check input:checked::after, .sched-check input:checked::after, .pending-check input:checked::after { border-color: HighlightText; }
+}
+@media (max-width: 560px) {
+  .admin-head-actions > .btn:not(.row-menu-btn) { padding-inline: var(--space-2); }
+  .pending-item { grid-template-columns: auto minmax(0, 1fr); }
+  .pending-actions { grid-column: 1 / -1; grid-row: auto; }
+  .pending-bulk > .btn { flex: 1 1 auto; }
+  .stats-kpi-value { font-size: var(--step-2); }
 }
 
 /* ---- RTL (Hebrew) ----------------------------------------------------------
@@ -492,6 +779,11 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 [dir=rtl] .funnel-count,
 [dir=rtl] .admin-table .num,
 [dir=rtl] .board-score { text-align: end; }
+/* Values that carry a localized unit ("33 דק׳ 38 שנ׳", "לפני 6 דק׳") read in their own script's direction. */
+[dir=rtl] .admin-tile-value,
+[dir=rtl] .stats-kpi-value,
+[dir=rtl] .admin-table .num.col-onstage,
+[dir=rtl] .admin-table .num.col-seen { direction: rtl; unicode-bidi: plaintext; }
 
 /* ---- accounts table: the username and the row actions stay on screen while the middle scrolls ----
    Delete is never pressable on a row you can't identify. The edge shadow points into the scroller (--dir). */
@@ -567,4 +859,11 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
   .adm-ev-dot { forced-color-adjust: none; background: CanvasText; }
   .adm-ev-dot.is-live { background: Highlight; }
   .admin-board-row.rank-1 { border: 2px solid Highlight; }
+  .q-bar-track { forced-color-adjust: none; background: Canvas; border: 1px solid CanvasText; }
+  .q-bar-seg.is-solved, .key-done { forced-color-adjust: none; background: Highlight; }
+  .q-bar-seg.is-revealed, .key-revealed { forced-color-adjust: none; background: repeating-linear-gradient(135deg, CanvasText 0 2px, Canvas 2px 5px); }
+  .q-bar-seg.is-open, .key-open { forced-color-adjust: none; background: Canvas; box-shadow: inset 0 0 0 2px CanvasText; }
+  .seg-btn[aria-pressed="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+  .player-card.is-warn, .player-card.is-alert, .help-item { border-inline-start-color: CanvasText; }
+  .row-menu { border: 1px solid CanvasText; }
 }
