@@ -373,6 +373,12 @@ code, pre, .mono { font-family: var(--mono); }
 .stats-table tr.status-not-started th { color: var(--muted); font-weight: 400; }
 .bar { display: inline-block; width: 60px; height: 6px; margin-inline-start: 8px; border-radius: 3px; background: var(--surface-2); vertical-align: middle; overflow: hidden; }
 .bar-fill { display: block; height: 100%; background: var(--ok); }
+/* Score vs par: par is a target, so a full bar plus a marker means "beat par" (never > 100%). */
+.bar.is-above-par { box-shadow: 0 0 0 1px var(--ok); }
+.score-val { font-weight: 600; font-variant-numeric: tabular-nums; }
+.score-par { display: block; margin-top: 2px; font-family: var(--sans); }
+.score-par .above-par { color: var(--ok); font-weight: 600; }
+.score-big .above-par { margin-inline-start: 10px; font-size: 0.8rem; font-weight: 600; vertical-align: middle; }
 [dir=rtl] .stat-value, [dir=rtl] .case-status, [dir=rtl] .today-kicker { direction: rtl; }
 
 /* ============ round 2: commands (syntax vs revealed) ============ */

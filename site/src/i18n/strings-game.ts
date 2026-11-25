@@ -1,4 +1,4 @@
-import { defineStrings } from "./i18n";
+import { defineStrings, formatNumber as num } from "./i18n";
 
 // Round 2 player UI: paid commands, scoring v2, events, leaderboard, achievements, password changes.
 const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
@@ -56,6 +56,12 @@ export const TG = defineStrings({
     bdFirstBlood: "First blood 🩸",
     bdTotal: "Stage total",
     pts: (n: number): string => signed(n),
+    // score vs par: par (maxScore) is a target, not a maximum; first blood and bonuses can beat it
+    ptsUnit: "pts",
+    scorePts: (score: number): string => `${num(score)} pts`,
+    parOf: (par: number): string => `par ${num(par)}`,
+    scorePar: (score: number, par: number): string => `${num(score)} pts · par ${num(par)}`,
+    abovePar: "above par",
     meterLabel: "This stage so far",
     meterTime: (bonus: number): string => `Time bonus +${bonus}`,
     meterTimeFull: (left: string): string => `full for ${left}`,
@@ -183,6 +189,11 @@ export const TG = defineStrings({
     bdFirstBlood: "ראשונים לפתור 🩸",
     bdTotal: "סה\"כ לשלב",
     pts: (n: number): string => signed(n),
+    ptsUnit: "נק'",
+    scorePts: (score: number): string => `${num(score)} נק'`,
+    parOf: (par: number): string => `יעד ${num(par)}`,
+    scorePar: (score: number, par: number): string => `${num(score)} נק' · יעד ${num(par)}`,
+    abovePar: "מעל היעד",
     meterLabel: "השלב עד עכשיו",
     meterTime: (bonus: number): string => `בונוס זמן +${bonus}`,
     meterTimeFull: (left: string): string => `מלא עוד ${left}`,

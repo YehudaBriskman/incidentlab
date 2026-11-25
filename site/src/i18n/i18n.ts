@@ -23,6 +23,16 @@ export function setLang(lang: Lang): void {
   window.dispatchEvent(new HashChangeEvent("hashchange")); // re-render current route
 }
 
+/** BCP 47 locale for Intl formatters in the current language. */
+export function locale(lang: Lang = getLang()): string {
+  return lang === "he" ? "he-IL" : "en-US";
+}
+
+/** Whole numbers with the locale's thousands separator ("1,030"). */
+export function formatNumber(n: number): string {
+  return new Intl.NumberFormat(locale(), { maximumFractionDigits: 0 }).format(n);
+}
+
 export function defineStrings<S extends Record<string, string | ((...args: never[]) => string)>>(
   dict: { en: S; he: S },
 ): () => S {

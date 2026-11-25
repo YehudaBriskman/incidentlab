@@ -66,7 +66,7 @@ export const T = defineStrings({
     navCases: "← Cases",
     playingAs: "Playing as ",
     switchPlayer: "not you? switch",
-    progressStats: (solved: number, total: number, score: number, max: number, elapsed: string): string => `${solved} of ${total} · ${score} / ${max} par · ${elapsed}`,
+    progressStats: (solved: number, total: number, scorePar: string, elapsed: string): string => `${solved} of ${total} · ${scorePar} · ${elapsed}`,
     briefing: "Briefing: what happened",
     readyStart: "I'm ready → start Stage 1",
     setupKicker: "Stage 0 · Setup",
@@ -109,12 +109,11 @@ export const T = defineStrings({
     openExplorer: "Open the Evidence Explorer →",
     hints: "Hints",
     noMoreHints: "No more hints for this stage.",
-    shareText: (title: string, score: number, max: number, hints: number, elapsed: string): string =>
-      `IncidentLab · ${title} · ${score}/${max} pts · ${hints} ${plural(hints, "hint", "hints")} · ${elapsed}`,
+    shareText: (title: string, scorePar: string, hints: number, elapsed: string): string =>
+      `IncidentLab · ${title} · ${scorePar} · ${hints} ${plural(hints, "hint", "hints")} · ${elapsed}`,
     loadingDebrief: "Loading the debrief…",
     finishAll: "Finish every stage to unlock the debrief.",
     caseClosed: "Case closed. Here's the full story.",
-    ptsOf: (max: number): string => ` / ${max} pts`,
     copyResult: "Copy result",
   },
   he: {
@@ -176,7 +175,7 @@ export const T = defineStrings({
     navCases: "→ תיקים",
     playingAs: "משחק/ת בתור ",
     switchPlayer: "לא את/ה? החלפה",
-    progressStats: (solved: number, total: number, score: number, max: number, elapsed: string): string => `${solved} מתוך ${total} · ${score} / ${max} נק' יעד · ${elapsed}`,
+    progressStats: (solved: number, total: number, scorePar: string, elapsed: string): string => `${solved} מתוך ${total} · ${scorePar} · ${elapsed}`,
     briefing: "תדריך: מה קרה",
     readyStart: "מוכן/ה ← לשלב 1",
     setupKicker: "שלב 0 · הכנה",
@@ -219,12 +218,11 @@ export const T = defineStrings({
     openExplorer: "← לפתוח את ה-Evidence Explorer",
     hints: "רמזים",
     noMoreHints: "אין עוד רמזים לשלב הזה.",
-    shareText: (title: string, score: number, max: number, hints: number, elapsed: string): string =>
-      `IncidentLab · ${title} · ${score}/${max} נק' · ${hints} רמזים · ${elapsed}`,
+    shareText: (title: string, scorePar: string, hints: number, elapsed: string): string =>
+      `IncidentLab · ${title} · ${scorePar} · ${hints} רמזים · ${elapsed}`,
     loadingDebrief: "טוען את התחקיר…",
     finishAll: "סיימו את כל השלבים כדי לפתוח את התחקיר.",
     caseClosed: "התיק נסגר. הנה הסיפור המלא.",
-    ptsOf: (max: number): string => ` / ${max} נק'`,
     copyResult: "העתקת התוצאה",
   },
 });

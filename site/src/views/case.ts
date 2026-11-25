@@ -8,6 +8,7 @@ import { withApprovedAccount } from "./auth";
 import { confirmButton, copyButton, h, html, setChildren, type Child } from "../lib/dom";
 import { md, mdInline } from "../lib/markdown";
 import { formatElapsed } from "../lib/time";
+import { formatNumber } from "../i18n/i18n";
 import { commandCard, type CommandContext } from "./toolbox";
 import { T } from "../i18n/strings-player";
 
@@ -159,7 +160,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
     const solved = QUESTION_ORDER.filter((id) => isDone(stageProgress(player, id))).length;
     const start = Date.parse(player.setupDoneAt ?? player.startedAt ?? new Date().toISOString());
     const end = player.completedAt !== null ? Date.parse(player.completedAt) : Date.now();
-    elStats.textContent = T().progressStats(solved, QUESTION_ORDER.length, player.score, player.maxScore, formatElapsed(end - start));
+    elStats.textContent = T().progressStats(solved, QUESTION_ORDER.length, TG().scorePar(player.score, player.maxScore), formatElapsed(end - start));
     elFill.style.width = `${(solved / QUESTION_ORDER.length) * 100}%`;
   };
 
@@ -567,7 +568,7 @@ function renderQuestionStage(
 function shareText(c: Case, player: ProgressView): string {
   const hints = QUESTION_ORDER.reduce((n, id) => n + (player.stages[id]?.hintsRevealed ?? 0), 0);
   const end = player.completedAt !== null ? Date.parse(player.completedAt) : Date.now();
-  return T().shareText(c.title, player.score, player.maxScore, hints, formatElapsed(end - Date.parse(player.setupDoneAt ?? player.startedAt ?? new Date().toISOString())));
+  return T().shareText(c.title, TG().scorePar(player.score, player.maxScore), hints, formatElapsed(end - Date.parse(player.setupDoneAt ?? player.startedAt ?? new Date().toISOString())));
 }
 
 function renderDebrief(c: Case, player: ProgressView): HTMLElement {
@@ -589,7 +590,13 @@ function renderDebrief(c: Case, player: ProgressView): HTMLElement {
     h(
       "div",
       { class: "score-card" },
-      h("p", { class: "score-big mono" }, `${player.score}`, h("span", { class: "muted" }, T().ptsOf(player.maxScore))),
+      h(
+        "p",
+        { class: "score-big mono" },
+        formatNumber(player.score),
+        h("span", { class: "muted" }, ` ${TG().ptsUnit} · ${TG().parOf(player.maxScore)}`),
+        player.score > player.maxScore ? h("span", { class: "chip chip-completed above-par" }, `▲ ${TG().abovePar}`) : null,
+      ),
       stageTotals(c, player),
       h("code", { class: "share-text" }, shareText(c, player)),
       copyButton(() => shareText(c, player), T().copyResult),
@@ -625,7 +632,7 @@ function breakdownTable(b: ScoreBreakdown): HTMLElement {
       row(TG().bdClean, b.clean),
       row(TG().bdFirstBlood, b.firstBlood),
     ),
-    h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().bdTotal), h("td", { class: "num mono" }, String(b.total)))),
+    h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().bdTotal), h("td", { class: "num mono" }, formatNumber(b.total)))),
   );
 }
 
@@ -707,6 +714,6 @@ function stageTotals(c: Case, player: ProgressView): HTMLElement {
         h("td", { class: "num mono" }, TG().pts(player.completionBonus)),
       ),
     ),
-    h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().totalLabel), h("td", { class: "num mono" }, String(player.score)))),
+    h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().totalLabel), h("td", { class: "num mono" }, formatNumber(player.score)))),
   );
 }

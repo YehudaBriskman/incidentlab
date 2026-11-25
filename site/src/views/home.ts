@@ -33,7 +33,8 @@ const formatDate = (isoDate: string): string => {
 
 function statusLine(stats: CaseStats | undefined): string | null {
   if (!stats || stats.status === "not-started") return null;
-  return stats.status === "completed" ? TA().caseStatusDone(stats.score, stats.maxScore) : TA().caseStatusProgress(stats.score, stats.maxScore);
+  const scorePar = TG().scorePar(stats.score, stats.maxScore);
+  return stats.status === "completed" ? TA().caseStatusDone(scorePar) : TA().caseStatusProgress(scorePar);
 }
 
 /** Can this case be opened right now? (lock-to-today hides the button for other unstarted cases) */
