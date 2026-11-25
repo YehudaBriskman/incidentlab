@@ -1,27 +1,54 @@
-// Server-side domain types: the stored player record, secrets and case config.
+// Server-side domain types: stored records, secrets and case config.
 import { z } from "zod";
-import { QuestionIdSchema, StageProgressSchema } from "../../shared/contract.ts";
+import { AccountStatusSchema, QuestionIdSchema, StageProgressSchema } from "../../shared/contract.ts";
 import type { QuestionId } from "../../shared/contract.ts";
 
-export const PlayerRecordSchema = z.object({
+export const AccountRecordSchema = z.object({
   id: z.string(),
-  name: z.string(),
-  caseId: z.string(),
-  tokenHash: z.string(), // sha256 hex of the full token; the token itself is never stored
+  username: z.string(),      // as the player typed it (display)
+  usernameKey: z.string(),   // canonical, unique
+  passwordHash: z.string(),  // scrypt$N$r$p$salt$hash
+  status: AccountStatusSchema,
+  sessionEpoch: z.number().int().min(0), // bump to invalidate every session of the account
   createdAt: z.string(),
+  decidedAt: z.string().nullable(),      // when the admin approved/rejected
+  lastSeenAt: z.string().nullable(),
+  lastLoginAt: z.string().nullable(),
+});
+export type AccountRecord = z.infer<typeof AccountRecordSchema>;
+
+export const SessionRecordSchema = z.object({
+  accountId: z.string(),
+  epoch: z.number().int().min(0),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+});
+export type SessionRecord = z.infer<typeof SessionRecordSchema>;
+
+export const ProgressRecordSchema = z.object({
+  accountId: z.string(),
+  caseId: z.string(),
+  startedAt: z.string(),
   lastSeenAt: z.string(),
   setupDoneAt: z.string().nullable(),
   completedAt: z.string().nullable(),
   stages: z.record(QuestionIdSchema, StageProgressSchema),
   wrongAnswerTimestamps: z.partialRecord(QuestionIdSchema, z.array(z.number())), // epoch ms, pruned to the rate window
 });
-export type PlayerRecord = z.infer<typeof PlayerRecordSchema>;
+export type ProgressRecord = z.infer<typeof ProgressRecordSchema>;
 
-export const SecretsSchema = z.object({
-  caseId: z.string(),
+const QuestionConfigSchema = z.object({ points: z.number().int().positive(), hintCosts: z.array(z.number().int().min(0)) });
+
+export const CaseSecretsSchema = z.object({
+  title: z.string(),
   answers: z.record(QuestionIdSchema, z.string()),
   debrief: z.string(),
+  debriefHe: z.string().nullable(),
+  questions: z.record(QuestionIdSchema, QuestionConfigSchema),
 });
+export type CaseSecrets = z.infer<typeof CaseSecretsSchema>;
+
+export const SecretsSchema = z.object({ cases: z.record(z.string(), CaseSecretsSchema) });
 export type Secrets = z.infer<typeof SecretsSchema>;
 
 export type QuestionConfig = { readonly points: number; readonly hintCosts: readonly number[] };
@@ -29,10 +56,12 @@ export type CaseConfig = { readonly caseId: string; readonly questions: Readonly
 
 export class AppError extends Error {
   readonly status: number;
+  readonly code: string | undefined;
   readonly retryAfterSeconds: number | undefined;
-  constructor(status: number, message: string, retryAfterSeconds?: number) {
+  constructor(status: number, message: string, options: { code?: string; retryAfterSeconds?: number } = {}) {
     super(message);
     this.status = status;
-    this.retryAfterSeconds = retryAfterSeconds;
+    this.code = options.code;
+    this.retryAfterSeconds = options.retryAfterSeconds;
   }
 }

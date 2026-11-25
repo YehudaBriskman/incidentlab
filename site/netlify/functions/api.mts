@@ -1,19 +1,17 @@
 // Netlify Functions v2 entry point for /api/*. All logic lives in site/server (Controller -> Service -> Repository).
 import type { Context } from "@netlify/functions";
-import { BlobsPlayerRepository } from "../../server/repositories/BlobsPlayerRepository.ts";
-import { InMemoryPlayerRepository } from "../../server/repositories/InMemoryPlayerRepository.ts";
-import type { PlayerRepository } from "../../server/repositories/PlayerRepository.ts";
+import { errorResponse } from "../../server/controllers/http.ts";
+import { BlobsKvStore, InMemoryKvStore } from "../../server/repositories/KvStore.ts";
+import type { KvStore } from "../../server/repositories/KvStore.ts";
 import { createApp } from "../../server/router.ts";
 import type { App } from "../../server/router.ts";
-import { errorResponse } from "../../server/controllers/http.ts";
 
 let app: App | null = null;
 
-const selectRepository = (): PlayerRepository =>
-  process.env.INCIDENTLAB_STORE === "memory" ? new InMemoryPlayerRepository() : new BlobsPlayerRepository();
+const selectStore = (): KvStore => (process.env.INCIDENTLAB_STORE === "memory" ? new InMemoryKvStore() : new BlobsKvStore());
 
 const getApp = (): App => {
-  app ??= createApp({ repository: selectRepository(), adminKey: () => process.env.ADMIN_KEY });
+  app ??= createApp({ store: selectStore(), adminKey: () => process.env.ADMIN_KEY });
   return app;
 };
 
