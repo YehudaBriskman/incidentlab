@@ -113,10 +113,11 @@
   "rules": [
     "עובדים רק מחבילת הראיות. אל תקראו את קוד ה-generator או את קוד האתר; זה הורס את הכיף.",
     "התשובות לא רגישות לאותיות גדולות/קטנות, ורווחים בהתחלה ובסוף מתעלמים מהם. הקפידו על הפורמט שמופיע מתחת לכל שאלה.",
-    "כל רמז עולה את הנקודות שמופיעות עליו. הרמזים נחשפים לפי הסדר, מדחיפה עדינה ועד כמעט הפקודה המלאה.",
+    "כל רמז עולה את הנקודות שמופיעות עליו. הרמזים נחשפים לפי הסדר, מדחיפה עדינה ועד כמעט הפקודה המלאה. בלשונית Toolbox התחביר של כל פקודה חינמי; הצגת הפקודה המלאה והמוכנה להרצה עולה 5 נקודות. אחרי שמסיימים את התיק, כל הפקודות חינמיות.",
     "עבודה בזוגות מומלצת. דברו על ההיגיון שלכם בקול, בדיוק כמו ב-incident review אמיתי.",
     "כל כלי מותר: grep, awk, jq, Python, גיליון אלקטרוני, העורך האהוב עליכם. בלשונית Toolbox יש פקודות שיעזרו.",
-    "תשובות שגויות לא עולות כלום, אז נחשו בחופשיות. ובכל זאת, נסו להיות מסוגלים להסביר *למה* התשובה שלכם נכונה.",
+    "כל תשובה שגויה עולה 2 נקודות (עד 20 לכל שלב), אז בדקו את ההיגיון לפני שאתם שולחים. נסו להיות מסוגלים להסביר *למה* התשובה שלכם נכונה.",
+    "מהירות ודיוק משתלמים: פתרון מהיר מזכה בבונוס זמן (עד +30 לכל שלב, שהולך ופוחת אחרי זמן היעד של השלב), פתרון נקי בלי רמזים, פקודות או תשובות שגויות מזכה ב-+10, מי שפותר שלב ראשון מקבל +15 first blood, וסיום כל ששת השלבים בלי לחשוף תשובה מזכה ב-+50.",
     "אל תשתפו flags עם צוותים אחרים עד שכולם מסיימים. לשתף טכניקות זה בסדר.",
     "כל כתובת IP, מזהה חשבון ומפתח בחבילה הם בדויים. חקרו את הלוגים; אל תכוונו שום דבר מהם למערכת אמיתית."
   ],
@@ -147,6 +148,7 @@
       "answerFormat": "כתובת IPv4",
       "placeholder": "192.0.2.1",
       "points": 100,
+      "targetMinutes": 8,
       "hints": [
         {
           "cost": 10,
@@ -189,6 +191,7 @@
       "answerFormat": "HH:MM:SS (UTC)",
       "placeholder": "04:20:00",
       "points": 100,
+      "targetMinutes": 12,
       "hints": [
         {
           "cost": 10,
@@ -231,6 +234,7 @@
       "answerFormat": "מזהה access key (20 תווים, מתחיל ב-ASIA)",
       "placeholder": "ASIAEXAMPLE000000000",
       "points": 100,
+      "targetMinutes": 10,
       "hints": [
         {
           "cost": 10,
@@ -273,6 +277,7 @@
       "answerFormat": "מספר שלם (אובייקטים ייחודיים)",
       "placeholder": "42",
       "points": 100,
+      "targetMinutes": 12,
       "hints": [
         {
           "cost": 10,
@@ -314,6 +319,7 @@
       "answerFormat": "eventName של CloudTrail, באיות מדויק",
       "placeholder": "DeleteObjects",
       "points": 100,
+      "targetMinutes": 12,
       "hints": [
         {
           "cost": 10,
@@ -354,6 +360,7 @@
       "answerFormat": "ה-Sid של ה-statement (מדויק)",
       "placeholder": "AllowSomething",
       "points": 150,
+      "targetMinutes": 16,
       "hints": [
         {
           "cost": 10,
@@ -378,6 +385,8 @@
         {
           "id": "unzip-evidence",
           "title": "פריסת הראיות",
+          "syntax": "unzip <evidence-zip> && cd <case-folder>",
+          "syntaxPowershell": "Expand-Archive .\\<evidence-zip> -DestinationPath .\ncd .\\<case-folder>",
           "command": "unzip who-deleted-prod-evidence.zip && cd who-deleted-prod",
           "explain": "פורס את החבילה. הכול נמצא תחת תיקייה עליונה אחת.",
           "powershell": "Expand-Archive .\\who-deleted-prod-evidence.zip -DestinationPath .\ncd .\\who-deleted-prod"
@@ -385,6 +394,8 @@
         {
           "id": "list-files",
           "title": "מה יש לנו כאן",
+          "syntax": "find <dir> -type f | sort | xargs ls -l",
+          "syntaxPowershell": "Get-ChildItem <dir> -Recurse -File | Select-Object FullName, Length",
           "command": "find . -type f | sort | xargs ls -l",
           "explain": "כל הקבצים עם הגודל שלהם. הגדולים (לוג ה-WAF, ה-flow logs, ה-CloudTrail) הם אלה שמסננים, לא קוראים.",
           "powershell": "Get-ChildItem -Recurse -File | Select-Object FullName, Length"
@@ -392,6 +403,8 @@
         {
           "id": "read-readme",
           "title": "קראו את ה-README",
+          "syntax": "cat <readme-file>",
+          "syntaxPowershell": "Get-Content <readme-file>",
           "command": "cat README_FIRST.txt",
           "explain": "אזורי זמן, פורמטים ומילון מונחים. קראו אותו לפני כל דבר אחר.",
           "powershell": "Get-Content README_FIRST.txt"
@@ -399,6 +412,8 @@
         {
           "id": "head-lines",
           "title": "הצצה לשורות הראשונות",
+          "syntax": "head -n <count> <log-file>",
+          "syntaxPowershell": "Get-Content <log-file> -TotalCount <count>",
           "command": "head -n 3 waf/access.log",
           "explain": "הסתכלו על הפורמט **לפני** שאתם מפרסרים אותו. `tail -n 3` מציג את סוף החלון.",
           "powershell": "Get-Content waf\\access.log -TotalCount 3"
@@ -406,6 +421,8 @@
         {
           "id": "line-count",
           "title": "כמה זה גדול?",
+          "syntax": "wc -l <log-file> <other-files...>",
+          "syntaxPowershell": "Get-ChildItem <log-file>, <other-files> | ForEach-Object { '{0,8} {1}' -f (Get-Content $_.FullName | Measure-Object -Line).Lines, $_.Name }",
           "command": "wc -l waf/access.log cloudtrail/*.jsonl s3-access-logs/*/*.log",
           "explain": "מספר השורות אומר לכם אם אפשר לעבור על הקובץ בעיניים או שצריך לסכם אותו.",
           "powershell": "Get-ChildItem waf\\access.log, cloudtrail\\*.jsonl | ForEach-Object { '{0,8} {1}' -f (Get-Content $_.FullName | Measure-Object -Line).Lines, $_.Name }"
@@ -418,6 +435,8 @@
         {
           "id": "grep-fixed",
           "title": "חיפוש מילולי",
+          "syntax": "grep -F '<literal-text>' <log-file> | head",
+          "syntaxPowershell": "Select-String -Path <log-file> -Pattern '<literal-text>' -SimpleMatch | Select-Object -First <count>",
           "command": "grep -F '169.254.169.254' waf/access.log | head",
           "explain": "`-F` מתייחס לתבנית כטקסט רגיל, כך שהנקודות בכתובת IP הן נקודות ולא \"כל תו\". הוא מוצא את הכתובת רק אם היא **כתובה בדיוק כך**.",
           "powershell": "Select-String -Path waf\\access.log -Pattern '169.254.169.254' -SimpleMatch | Select-Object -First 10"
@@ -425,6 +444,8 @@
         {
           "id": "grep-count",
           "title": "ספירת התאמות",
+          "syntax": "grep -c '<pattern>' <log-file>",
+          "syntaxPowershell": "(Select-String -Path <log-file> -Pattern '<pattern>' -SimpleMatch).Count",
           "command": "grep -c 'waf=block' waf/access.log",
           "explain": "`-c` מדפיס כמה שורות תואמות. בדיקות שפיות מהירות.",
           "powershell": "(Select-String -Path waf\\access.log -Pattern 'waf=block' -SimpleMatch).Count"
@@ -432,6 +453,8 @@
         {
           "id": "grep-exclude",
           "title": "היפוך / החרגה",
+          "syntax": "grep -v -e '<pattern>' -e '<other-pattern>' <log-file> | head",
+          "syntaxPowershell": "Select-String -Path <log-file> -Pattern '<pattern>', '<other-pattern>' -NotMatch | Select-Object -First <count>",
           "command": "grep -v -e 'waf=block' -e '/static/' waf/access.log | head",
           "explain": "`-v` משאיר שורות ש**לא** תואמות. כל `-e` מוסיף תבנית. טוב לקילוף רעש.",
           "powershell": "Select-String -Path waf\\access.log -Pattern 'waf=block', '/static/' -NotMatch | Select-Object -First 10"
@@ -439,6 +462,8 @@
         {
           "id": "grep-only-match",
           "title": "להדפיס רק את ההתאמה",
+          "syntax": "grep -o '<field>=<regex>' <log-file> | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Select-String -Path <log-file> -Pattern '<field>=<regex>' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
           "command": "grep -o 'upstream=[^ ]*' waf/access.log | sort | uniq -c | sort -rn",
           "explain": "`-o` מוציא רק את הטקסט שהתאים. כאן: כל upstream ש-nginx התחבר אליו, עם ספירה. ערכים נדירים שווים בדיקה.",
           "powershell": "Select-String -Path waf\\access.log -Pattern 'upstream=\\S+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
@@ -446,6 +471,8 @@
         {
           "id": "grep-all-files",
           "title": "חיפוש בכמה קבצים יחד",
+          "syntax": "grep -h -F '<literal-text>' <dir>/<glob> | head",
+          "syntaxPowershell": "Select-String -Path <dir>\\<glob> -Pattern '<literal-text>' -SimpleMatch | Select-Object -First <count> -ExpandProperty Line",
           "command": "grep -h -F 'pattern' cloudtrail/*.jsonl | head",
           "explain": "`-h` מוריד את קידומת שם הקובץ, כך שהפלט עדיין JSON lines תקין שאפשר להעביר ל-`jq`.",
           "powershell": "Select-String -Path cloudtrail\\*.jsonl -Pattern 'pattern' -SimpleMatch | Select-Object -First 10 -ExpandProperty Line"
@@ -453,6 +480,8 @@
         {
           "id": "grep-context",
           "title": "הקשר סביב התאמה",
+          "syntax": "grep -n -B<before> -A<after> '<pattern>' <log-file>",
+          "syntaxPowershell": "Select-String -Path <log-file> -Pattern '<pattern>' -Context <before>,<after>",
           "command": "grep -n -B2 -A4 'pattern' waf/access.log",
           "explain": "`-B`/`-A` מציגים שורות לפני ואחרי כל התאמה: מה עוד קרה סביב הרגע הזה?",
           "powershell": "Select-String -Path waf\\access.log -Pattern 'pattern' -Context 2,4"
@@ -465,6 +494,8 @@
         {
           "id": "waf-fields",
           "title": "שליפת שדות משורות WAF",
+          "syntax": "awk '{print $<field>, $<field>, ...}' <waf-log> | head",
+          "syntaxPowershell": "Get-Content <waf-log> -TotalCount <count> | ForEach-Object { $f = $_ -split ' '; \"$($f[<index>]) $($f[<index>]) ...\" }",
           "command": "awk '{print $1, $4, $5, $7, $9}' waf/access.log | head",
           "explain": "פיצול לפי רווחים: `$1` כתובת הלקוח, `$4 $5` הזמן וההיסט, `$7` ה-URI, `$9` ה-status, `$10` הבתים. ב-user agent יש רווחים, אז לשדות שאחריו השתמשו ב-`grep -o 'upstream=[^ ]*'` במקום לספור.",
           "powershell": "Get-Content waf\\access.log -TotalCount 10 | ForEach-Object { $f = $_ -split ' '; \"$($f[0]) $($f[3]) $($f[4]) $($f[6]) $($f[8])\" }"
@@ -472,6 +503,8 @@
         {
           "id": "status-histogram",
           "title": "היסטוגרמה של status",
+          "syntax": "awk '{print $<status-field>}' <waf-log> | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Select-String -Path <waf-log> -Pattern '<status-regex-with-group>' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
           "command": "awk '{print $9}' waf/access.log | sort | uniq -c | sort -rn",
           "explain": "כמה מכל status. המבט הראשון הקלאסי על כל access log.",
           "powershell": "Select-String -Path waf\\access.log -Pattern '\" (\\d{3}) ' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
@@ -479,6 +512,8 @@
         {
           "id": "ip-histogram",
           "title": "כתובות הלקוח המובילות",
+          "syntax": "awk '{print $<ip-field>}' <waf-log> | sort | uniq -c | sort -rn | head -<count>",
+          "syntaxPowershell": "Select-String -Path <waf-log> -Pattern '<ip-regex-with-group>' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First <count> Count, Name",
           "command": "awk '{print $1}' waf/access.log | sort | uniq -c | sort -rn | head -20",
           "explain": "מי מדבר איתנו הכי הרבה? תוקפים הם לרוב *לא* בראש הרשימה: הם שולחים מעט בקשות מדויקות.",
           "powershell": "Select-String -Path waf\\access.log -Pattern '^(\\S+)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name"
@@ -486,6 +521,8 @@
         {
           "id": "field-filter",
           "title": "סינון לפי שדה ואז לפי טקסט",
+          "syntax": "awk '$<status-field> == <status>' <waf-log> | grep -F '<path>' | head",
+          "syntaxPowershell": "Select-String -Path <waf-log> -Pattern '<status-pattern>' | Where-Object { $_.Line -like '*<path>*' } | Select-Object -First <count> -ExpandProperty Line",
           "command": "awk '$9 == 200' waf/access.log | grep -F '/proxy/fetch' | head",
           "explain": "awk משווה שדה במדויק (`200` לא יתאים בתוך מספר בתים), ואז grep מצמצם לפי path.",
           "powershell": "Select-String -Path waf\\access.log -Pattern '\" 200 ' | Where-Object { $_.Line -like '*/proxy/fetch*' } | Select-Object -First 10 -ExpandProperty Line"
@@ -493,6 +530,8 @@
         {
           "id": "waf-blocked",
           "title": "מה ה-WAF חסם?",
+          "syntax": "grep -F '<block-marker>' <waf-log> | grep -o '<field>=<regex>' | sort | uniq -c",
+          "syntaxPowershell": "Select-String -Path <waf-log> -Pattern '<block-marker> <field>=(<regex>)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name",
           "command": "grep -F 'waf=block' waf/access.log | grep -o 'rule=[0-9]*' | sort | uniq -c",
           "explain": "אילו חוקים מותאמים הופעלו וכמה פעמים. אחר כך קראו את החוקים האלה ב-`waf/edge-waf.conf`: על מה בדיוק הם מתאימים?",
           "powershell": "Select-String -Path waf\\access.log -Pattern 'waf=block rule=(\\d+)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name"
@@ -500,6 +539,8 @@
         {
           "id": "first-last-match",
           "title": "המופע הראשון והאחרון",
+          "syntax": "grep -F '<literal-text>' <log-file> | sed -n '<first>p;<last>p'",
+          "syntaxPowershell": "$hits = Select-String -Path <log-file> -Pattern '<literal-text>' -SimpleMatch\n$hits[<first>].Line\n$hits[<last>].Line",
           "command": "grep -F 'pattern' waf/access.log | sed -n '1p;$p'",
           "explain": "ההתחלה והסוף של תופעה בבת אחת. הלוג מסודר לפי זמן.",
           "powershell": "$hits = Select-String -Path waf\\access.log -Pattern 'pattern' -SimpleMatch\n$hits[0].Line\n$hits[-1].Line"
@@ -512,6 +553,8 @@
         {
           "id": "ct-pretty",
           "title": "הצגה יפה של אירוע אחד",
+          "syntax": "head -n1 <cloudtrail-file> | jq .",
+          "syntaxPowershell": "Get-Content <cloudtrail-file> -TotalCount 1 | ConvertFrom-Json | ConvertTo-Json -Depth <depth>",
           "command": "head -n1 cloudtrail/*20261118.jsonl | jq .",
           "explain": "ראו כל שדה שרשומת CloudTrail מכילה: `userIdentity`, `sourceIPAddress`, `userAgent`, `eventName`, `requestParameters`, `errorCode`...",
           "powershell": "Get-Content cloudtrail\\*20261118.jsonl -TotalCount 1 | ConvertFrom-Json | ConvertTo-Json -Depth 10"
@@ -519,6 +562,8 @@
         {
           "id": "ct-event-names",
           "title": "אילו קריאות API היו?",
+          "syntax": "cat <cloudtrail-files> | jq -r '.<field>' | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Group-Object <field> | Sort-Object Count -Descending | Select-Object Count, Name",
           "command": "cat cloudtrail/*.jsonl | jq -r '.eventName' | sort | uniq -c | sort -rn",
           "explain": "היסטוגרמה של `eventName`. קריאות כתיבה נדירות בולטות מיד.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Group-Object eventName | Sort-Object Count -Descending | Select-Object Count, Name"
@@ -526,6 +571,8 @@
         {
           "id": "ct-who",
           "title": "מי חתם על הקריאות?",
+          "syntax": "cat <cloudtrail-files> | jq -r '.<path> // .<fallback-path>' | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | ForEach-Object { if ($_.<path>) { $_.<path> } else { $_.<fallback-path> } } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
           "command": "cat cloudtrail/*.jsonl | jq -r '.userIdentity.arn // .userIdentity.type' | sort | uniq -c | sort -rn",
           "explain": "ה-principals לפי נפח. ב-assumed role ה-ARN מסתיים בשם ה-session; ב-role של מכונת EC2 זה ה-instance id.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | ForEach-Object { if ($_.userIdentity.arn) { $_.userIdentity.arn } else { $_.userIdentity.type } } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
@@ -533,6 +580,8 @@
         {
           "id": "ct-where",
           "title": "מי, מאיפה, ועם איזה מפתח",
+          "syntax": "cat <cloudtrail-files> | jq -r '[.<path> // \"-\", .<path>, .<path> // \"-\"] | @tsv' | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | ForEach-Object { '{0} {1} {2}' -f $_.<path>, $_.<path>, $_.<path> } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
           "command": "cat cloudtrail/*.jsonl | jq -r '[.userIdentity.arn // \"-\", .sourceIPAddress, .userIdentity.accessKeyId // \"-\"] | @tsv' | sort | uniq -c | sort -rn",
           "explain": "מקבץ אירועים לפי principal, כתובת מקור ו-access key. principal אחד אמור בדרך כלל להגיע ממספר קטן וצפוי של מקומות.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | ForEach-Object { '{0} {1} {2}' -f $_.userIdentity.arn, $_.sourceIPAddress, $_.userIdentity.accessKeyId } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
@@ -540,6 +589,8 @@
         {
           "id": "ct-useragent",
           "title": "איזה לקוח ביצע את הקריאה?",
+          "syntax": "cat <cloudtrail-files> | jq -r '[.<field>, .<field>[0:<length>]] | @tsv' | sort | uniq -c | sort -rn | head -<count>",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | ForEach-Object { '{0} {1}' -f $_.<field>, $_.<field>.Substring(0, [Math]::Min(<length>, $_.<field>.Length)) } | Group-Object | Sort-Object Count -Descending | Select-Object -First <count> Count, Name",
           "command": "cat cloudtrail/*.jsonl | jq -r '[.sourceIPAddress, .userAgent[0:40]] | @tsv' | sort | uniq -c | sort -rn | head -20",
           "explain": "ה-`userAgent` מגלה את ה-SDK או הכלי. שירות שכתוב ב-Go לא מתחיל פתאום להשתמש ב-CLI של Python.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | ForEach-Object { '{0} {1}' -f $_.sourceIPAddress, $_.userAgent.Substring(0, [Math]::Min(40, $_.userAgent.Length)) } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name"
@@ -547,6 +598,8 @@
         {
           "id": "ct-select-role",
           "title": "רק role אחד",
+          "syntax": "cat <cloudtrail-files> | jq -c 'select(.<path> == \"<value>\")' | head",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<path> -eq '<value>' } | Select-Object -First <count> <field>, <field>, <field>",
           "command": "cat cloudtrail/*.jsonl | jq -c 'select(.userIdentity.sessionContext.sessionIssuer.userName == \"<role-name>\")' | head",
           "explain": "`sessionIssuer.userName` הוא ה-role שמאחורי session של assumed role, לא משנה איך ה-session נקרא.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.userIdentity.sessionContext.sessionIssuer.userName -eq '<role-name>' } | Select-Object -First 10 eventTime, eventName, sourceIPAddress"
@@ -554,6 +607,8 @@
         {
           "id": "ct-not-ip",
           "title": "החרגת מקורות מוכרים",
+          "syntax": "cat <cloudtrail-files> | jq -c 'select(.<field> != \"<value>\" and .<field> != \"<other-value>\")' | head",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<field> -notin @('<value>', '<other-value>') } | Select-Object -First <count> <field>, <field>, <field>",
           "command": "cat cloudtrail/*.jsonl | jq -c 'select(.sourceIPAddress != \"<ip>\" and .sourceIPAddress != \"<other-ip>\")' | head",
           "explain": "הורידו את הכתובות שאתם יודעים להסביר, וראו מה נשאר.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.sourceIPAddress -notin @('<ip>', '<other-ip>') } | Select-Object -First 10 eventTime, eventName, sourceIPAddress"
@@ -561,6 +616,8 @@
         {
           "id": "ct-errors",
           "title": "קריאות שנכשלו",
+          "syntax": "cat <cloudtrail-files> | jq -r 'select(.<field>) | [.<field>, .<field>, ...] | @tsv'",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<field> } | Format-Table <field>, <field>, ...",
           "command": "cat cloudtrail/*.jsonl | jq -r 'select(.errorCode) | [.eventTime, .eventName, .errorCode, .sourceIPAddress] | @tsv'",
           "explain": "`errorCode` קיים רק כשקריאה נכשלה. כישלון הוא ניסיון ולא פעולה, אבל ניסיונות מראים כוונה.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.errorCode } | Format-Table eventTime, eventName, errorCode, sourceIPAddress"
@@ -568,6 +625,8 @@
         {
           "id": "ct-timeline",
           "title": "ציר הזמן של שחקן אחד",
+          "syntax": "cat <cloudtrail-files> | jq -r 'select(.<field> == \"<value>\") | [.<field>, .<field>, .<path> // \"-\", ...] | @tsv'",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<field> -eq '<value>' } | Format-Table <field>, <field>, @{n='<label>'; e={$_.<path>}}, ...",
           "command": "cat cloudtrail/*.jsonl | jq -r 'select(.sourceIPAddress == \"<ip>\") | [.eventTime, .eventName, .requestParameters.bucketName // \"-\", .errorCode // \"OK\", .readOnly] | @tsv'",
           "explain": "כל מה שמקור אחד עשה, לפי הסדר, עם ה-bucket והאם זה הצליח. `readOnly` הוא false בקריאות שמשנות משהו.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.sourceIPAddress -eq '<ip>' } | Format-Table eventTime, eventName, @{n='bucket'; e={$_.requestParameters.bucketName}}, errorCode, readOnly"
@@ -575,6 +634,8 @@
         {
           "id": "ct-unique-objects",
           "title": "אובייקטים ייחודיים שנקראו",
+          "syntax": "cat <cloudtrail-files> | jq -r 'select(.<field> == \"<value>\" and (has(\"<field>\") | not)) | \"\\(.<path>)/\\(.<path>)\"' | sort -u | wc -l",
+          "syntaxPowershell": "(Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<field> -eq '<value>' -and -not $_.<field> } | ForEach-Object { $_.<path> + '/' + $_.<path> } | Sort-Object -Unique | Measure-Object).Count",
           "command": "cat cloudtrail/*.jsonl | jq -r 'select(.eventName == \"GetObject\" and (has(\"errorCode\") | not)) | \"\\(.requestParameters.bucketName)/\\(.requestParameters.key)\"' | sort -u | wc -l",
           "explain": "בונה `bucket/key` לכל `GetObject` מוצלח וסופר ערכים ייחודיים. הוסיפו תנאי `select()` משלכם בשביל ה*מי*.",
           "powershell": "(Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.eventName -eq 'GetObject' -and -not $_.errorCode } | ForEach-Object { $_.requestParameters.bucketName + '/' + $_.requestParameters.key } | Sort-Object -Unique | Measure-Object).Count"
@@ -587,6 +648,8 @@
         {
           "id": "s3-fields",
           "title": "שדות בלוג גישה של S3",
+          "syntax": "awk '{print $<field>, $<field>, ...}' <s3-access-logs> | head",
+          "syntaxPowershell": "Get-Content <s3-access-logs> -TotalCount <count> | ForEach-Object { $f = $_ -split ' '; \"$($f[<index>]) $($f[<index>]) ...\" }",
           "command": "awk '{print $3, $5, $6, $8, $9}' s3-access-logs/*/*.log | head",
           "explain": "`$2` bucket, `$3 $4` זמן (UTC), `$5` כתובת מרוחקת, `$6` ה-requester (ARN, או שירות), `$7` request id, `$8` הפעולה, `$9` ה-key. ה-status בא אחרי שורת הבקשה שבמירכאות.",
           "powershell": "Get-Content s3-access-logs\\*\\*.log -TotalCount 10 | ForEach-Object { $f = $_ -split ' '; \"$($f[2]) $($f[4]) $($f[5]) $($f[7]) $($f[8])\" }"
@@ -594,6 +657,8 @@
         {
           "id": "s3-ops",
           "title": "היסטוגרמת פעולות",
+          "syntax": "awk '{print $<operation-field>}' <s3-access-logs> | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Get-Content <s3-access-logs> | ForEach-Object { ($_ -split ' ')[<operation-index>] } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
           "command": "awk '{print $8}' s3-access-logs/*/*.log | sort | uniq -c | sort -rn",
           "explain": "`REST.GET.OBJECT`, `REST.PUT.OBJECT`, ... ופעולות ש-S3 מבצע בעצמו. אילו מופיעות רק ביום אחד?",
           "powershell": "Get-Content s3-access-logs\\*\\*.log | ForEach-Object { ($_ -split ' ')[7] } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
@@ -601,6 +666,8 @@
         {
           "id": "s3-requesters",
           "title": "מי נגע ב-bucket, ומאיפה",
+          "syntax": "awk '{print $<field>, $<field>}' <s3-access-logs> | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Get-Content <s3-access-logs> | ForEach-Object { $f = $_ -split ' '; \"$($f[<index>]) $($f[<index>])\" } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
           "command": "awk '{print $5, $6}' s3-access-logs/*/*.log | sort | uniq -c | sort -rn",
           "explain": "כתובת מרוחקת ו-requester יחד. אותו ARN משתי רשתות שונות לגמרי הוא דגל אדום.",
           "powershell": "Get-Content s3-access-logs\\*\\*.log | ForEach-Object { $f = $_ -split ' '; \"$($f[4]) $($f[5])\" } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
@@ -608,6 +675,8 @@
         {
           "id": "s3-by-ip",
           "title": "הבקשות של מקור אחד",
+          "syntax": "awk '$<ip-field> == \"<value>\" {print $<field>, $<field>, ...}' <s3-access-logs> | head -<count>",
+          "syntaxPowershell": "Get-Content <s3-access-logs> | Where-Object { ($_ -split ' ')[<ip-index>] -eq '<value>' } | ForEach-Object { $f = $_ -split ' '; \"$($f[<index>]) $($f[<index>]) ...\" } | Select-Object -First <count>",
           "command": "awk '$5 == \"<ip>\" {print $3, $8, $9}' s3-access-logs/*/*.log | head -30",
           "explain": "כל הבקשות מכתובת אחת: זמן, פעולה ו-key.",
           "powershell": "Get-Content s3-access-logs\\*\\*.log | Where-Object { ($_ -split ' ')[4] -eq '<ip>' } | ForEach-Object { $f = $_ -split ' '; \"$($f[2]) $($f[7]) $($f[8])\" } | Select-Object -First 30"
@@ -615,6 +684,8 @@
         {
           "id": "s3-bytes",
           "title": "בתים שנשלחו",
+          "syntax": "awk '$<ip-field> == \"<value>\" && $<operation-field> == \"<operation>\"' <s3-access-logs> | grep -oE '<bytes-regex>' | awk '{s += $NF} END {print s}'",
+          "syntaxPowershell": "Get-Content <s3-access-logs> | Where-Object { ($_ -split ' ')[<ip-index>] -eq '<value>' } | Select-String '<operation> <bytes-regex-with-group>' | ForEach-Object { [long]$_.Matches[0].Groups[1].Value } | Measure-Object -Sum",
           "command": "awk '$5 == \"<ip>\" && $8 == \"REST.GET.OBJECT\"' s3-access-logs/*/*.log | grep -oE 'HTTP/1.1\" 200 - [0-9]+' | awk '{s += $NF} END {print s}'",
           "explain": "סוכם את הבתים ש-S3 שלח בקריאות אובייקטים מוצלחות. שימושי לדוח הדליפה.",
           "powershell": "Get-Content s3-access-logs\\*\\*.log | Where-Object { ($_ -split ' ')[4] -eq '<ip>' } | Select-String 'REST.GET.OBJECT .*HTTP/1.1\" 200 - (\\d+)' | ForEach-Object { [long]$_.Matches[0].Groups[1].Value } | Measure-Object -Sum"
@@ -627,6 +698,8 @@
         {
           "id": "flow-header",
           "title": "מספור העמודות",
+          "syntax": "head -1 <flow-log> | tr '<separator>' '\\n' | nl",
+          "syntaxPowershell": "$i = 0; (Get-Content <flow-log> -TotalCount 1) -split '<separator>' | ForEach-Object { $i++; \"$i $_\" }",
           "command": "head -1 vpc-flow-logs/*.log | tr ' ' '\\n' | nl",
           "explain": "Flow log v2: `$4` srcaddr, `$5` dstaddr, `$6` srcport, `$7` dstport, `$10` bytes, `$11`/`$12` התחלה/סוף (epoch), `$13` action.",
           "powershell": "$i = 0; (Get-Content vpc-flow-logs\\*.log -TotalCount 1) -split ' ' | ForEach-Object { $i++; \"$i $_\" }"
@@ -634,6 +707,8 @@
         {
           "id": "flow-by-ip",
           "title": "כל ה-flows עם host אחד",
+          "syntax": "awk '$<src-field> == \"<value>\" || $<dst-field> == \"<value>\"' <flow-log>",
+          "syntaxPowershell": "Get-Content <flow-log> | Where-Object { $f = $_ -split ' '; $f[<src-index>] -eq '<value>' -or $f[<dst-index>] -eq '<value>' }",
           "command": "awk '$4 == \"<ip>\" || $5 == \"<ip>\"' vpc-flow-logs/*.log",
           "explain": "בשני הכיוונים. המירו את `start` עם `date -u -d @<epoch>`.",
           "powershell": "Get-Content vpc-flow-logs\\*.log | Where-Object { $f = $_ -split ' '; $f[3] -eq '<ip>' -or $f[4] -eq '<ip>' }"
@@ -641,6 +716,8 @@
         {
           "id": "flow-outbound",
           "title": "חיבורים שהמכונה פתחה",
+          "syntax": "awk 'NR > 1 && $<src-field> ~ /<network-regex>/ && $<port-field> != <port> {print $<field> \":\" $<field>}' <flow-log> | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Get-Content <flow-log> | Select-Object -Skip 1 | ForEach-Object { $f = $_ -split ' '; if ($f[<src-index>] -like '<network-prefix>*' -and $f[<port-index>] -ne '<port>') { $f[<index>] + ':' + $f[<index>] } } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
           "command": "awk 'NR > 1 && $4 ~ /^10\\./ && $6 != 443 {print $5 \":\" $7}' vpc-flow-logs/*.log | sort | uniq -c | sort -rn",
           "explain": "WAF בעיקר *עונה* על 443. flows שבהם הוא המקור ופורט המקור אינו 443 הם חיבורים שהוא פתח בעצמו. לאן?",
           "powershell": "Get-Content vpc-flow-logs\\*.log | Select-Object -Skip 1 | ForEach-Object { $f = $_ -split ' '; if ($f[3] -like '10.*' -and $f[5] -ne '443') { $f[4] + ':' + $f[6] } } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
@@ -648,6 +725,8 @@
         {
           "id": "flow-rejects",
           "title": "ניסיונות שנחסמו",
+          "syntax": "awk '$<action-field> == \"<action>\" {print $<field>, $<field>}' <flow-log> | sort | uniq -c | sort -rn | head",
+          "syntaxPowershell": "Get-Content <flow-log> | Where-Object { ($_ -split ' ')[<action-index>] -eq '<action>' } | ForEach-Object { $f = $_ -split ' '; \"$($f[<index>]) $($f[<index>])\" } | Group-Object | Sort-Object Count -Descending | Select-Object -First <count> Count, Name",
           "command": "awk '$13 == \"REJECT\" {print $4, $7}' vpc-flow-logs/*.log | sort | uniq -c | sort -rn | head",
           "explain": "מה ש-security group זרק. סריקות פורטים רועשות, נפוצות, ובדרך כלל הן לא הסיפור.",
           "powershell": "Get-Content vpc-flow-logs\\*.log | Where-Object { ($_ -split ' ')[12] -eq 'REJECT' } | ForEach-Object { $f = $_ -split ' '; \"$($f[3]) $($f[6])\" } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count, Name"
@@ -660,6 +739,8 @@
         {
           "id": "nginx-time-to-utc",
           "title": "זמן nginx ל-UTC",
+          "syntax": "echo '<nginx-timestamp>' | sed -E 's#<timestamp-regex>#<reordered-groups>#' | xargs -I{} date -u -d '{}' +%FT%TZ",
+          "syntaxPowershell": "$s = '<nginx-timestamp>' -replace '<offset-regex>', '<offset-with-colon>'\n[DateTimeOffset]::ParseExact($s, '<format>', [Globalization.CultureInfo]::InvariantCulture).UtcDateTime.ToString('u')",
           "command": "echo '[17/Nov/2026:21:15:00 -0500]' | sed -E 's#\\[([0-9]+)/([A-Za-z]+)/([0-9]+):([0-9:]+) ([-+][0-9]+)\\]#\\1 \\2 \\3 \\4 \\5#' | xargs -I{} date -u -d '{}' +%FT%TZ",
           "explain": "הופך `[dd/Mon/yyyy:HH:MM:SS -0500]` לזמן UTC בפורמט ISO. שימו לב לתאריך: הוא יכול להתחלף.",
           "powershell": "$s = '17/Nov/2026:21:15:00 -0500' -replace '(\\d\\d)(\\d\\d)$', '$1:$2'\n[DateTimeOffset]::ParseExact($s, 'dd/MMM/yyyy:HH:mm:ss zzz', [Globalization.CultureInfo]::InvariantCulture).UtcDateTime.ToString('u')"
@@ -667,6 +748,8 @@
         {
           "id": "est-to-utc",
           "title": "EST ל-UTC",
+          "syntax": "date -u -d '<local-time> <offset>' +%H:%M:%S",
+          "syntaxPowershell": "([DateTimeOffset]'<local-time-with-offset>').UtcDateTime.ToString('HH:mm:ss')",
           "command": "date -u -d '17 Nov 2026 21:15:00 -0500' +%H:%M:%S",
           "explain": "בנובמבר, ניו יורק היא UTC-05:00. מוסיפים חמש שעות.",
           "powershell": "([DateTimeOffset]'2026-11-17T21:15:00-05:00').UtcDateTime.ToString('HH:mm:ss')"
@@ -674,6 +757,8 @@
         {
           "id": "utc-to-est",
           "title": "UTC ל-EST",
+          "syntax": "TZ=<time-zone> date -d '<utc-timestamp>'",
+          "syntaxPowershell": "([DateTimeOffset]'<utc-timestamp>').ToOffset([TimeSpan]'<offset>')",
           "command": "TZ=America/New_York date -d '2026-11-18T03:00:00Z'",
           "explain": "מה הייתה השעה במשרד בניו יורק ברגע UTC נתון.",
           "powershell": "([DateTimeOffset]'2026-11-18T03:00:00Z').ToOffset([TimeSpan]'-05:00')"
@@ -681,6 +766,8 @@
         {
           "id": "epoch-to-utc",
           "title": "Epoch ל-UTC",
+          "syntax": "date -u -d @<epoch-seconds>",
+          "syntaxPowershell": "[DateTimeOffset]::FromUnixTimeSeconds(<epoch-seconds>).UtcDateTime.ToString('u')",
           "command": "date -u -d @1794952800",
           "explain": "בשביל ה-flow logs וה-Slack. ב-macOS: `date -u -r 1794952800`.",
           "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794952800).UtcDateTime.ToString('u')"
@@ -688,6 +775,8 @@
         {
           "id": "slack-timestamps",
           "title": "קריאת ערוץ ה-Slack",
+          "syntax": "jq -r '.[] | \"\\(.<ts-field> | tonumber | floor | todate) \\(.<field>): \\(.<field>)\"' <slack-export>",
+          "syntaxPowershell": "(Get-Content <slack-export> -Raw | ConvertFrom-Json) | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][Math]::Floor([double]$_.<ts-field>)).ToString('u'), $_.<field>, $_.<field> }",
           "command": "jq -r '.[] | \"\\(.ts | tonumber | floor | todate) \\(.user): \\(.text)\"' slack/inc-prod-exports.json",
           "explain": "ה-`ts` של Slack הוא epoch כמחרוזת. `tonumber | floor | todate` נותן ISO-8601 ב-UTC.",
           "powershell": "(Get-Content slack\\inc-prod-exports.json -Raw | ConvertFrom-Json) | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][Math]::Floor([double]$_.ts)).ToString('u'), $_.user, $_.text }"
@@ -700,6 +789,8 @@
         {
           "id": "decimal-ip",
           "title": "ממספר עשרוני ל-IPv4",
+          "syntax": "n=<decimal-number>; echo $((n>><shift>&255)).$((n>><shift>&255)).$((n>><shift>&255)).$((n&255))",
+          "syntaxPowershell": "[System.Net.IPAddress]::Parse('<decimal-number>').ToString()",
           "command": "n=3232235777; echo $((n>>24&255)).$((n>>16&255)).$((n>>8&255)).$((n&255))",
           "explain": "כתובת IPv4 היא בסך הכול מספר של 32 ביט. `http://3232235777/` ו-`http://192.168.1.1/` מגיעים לאותו מקום, ורשימות חסימה של מחרוזות כמעט אף פעם לא יודעות את זה.",
           "powershell": "[System.Net.IPAddress]::Parse('3232235777').ToString()"
@@ -707,6 +798,8 @@
         {
           "id": "url-decode",
           "title": "פענוח URL של פרמטר",
+          "syntax": "python3 -c 'import sys, urllib.parse; print(urllib.parse.<decode-function>(sys.argv[1]))' '<encoded-value>'",
+          "syntaxPowershell": "[uri]::UnescapeDataString('<encoded-value>')",
           "command": "python3 -c 'import sys, urllib.parse; print(urllib.parse.unquote(sys.argv[1]))' 'http%3A%2F%2Fexample.com%2Fa%20b'",
           "explain": "`%3A` הוא `:`, `%2F` הוא `/`. פענחו לפני שאתם מחליטים מה הבקשה באמת ביקשה.",
           "powershell": "[uri]::UnescapeDataString('http%3A%2F%2Fexample.com%2Fa%20b')"
@@ -719,6 +812,8 @@
         {
           "id": "ec2-metadata-options",
           "title": "מכונות, כתובות והגדרות IMDS",
+          "syntax": "jq '.<path>[].<path>[] | {<field>, <field>, <label>: .<path>, <field>}' <describe-instances-file>",
+          "syntaxPowershell": "(Get-Content <describe-instances-file> -Raw | ConvertFrom-Json).<path>.<path> | Select-Object <field>, <field>, @{n='<label>'; e={$_.<path>}}, ...",
           "command": "jq '.Reservations[].Instances[] | {InstanceId, PrivateIpAddress, PublicIpAddress, profile: .IamInstanceProfile.Arn, MetadataOptions}' ec2/describe-instances.json",
           "explain": "איזה instance profile כל מכונה לובשת, הכתובות שלה, והאם IMDSv2 נאכף (`HttpTokens: required`).",
           "powershell": "(Get-Content ec2\\describe-instances.json -Raw | ConvertFrom-Json).Reservations.Instances | Select-Object InstanceId, PrivateIpAddress, PublicIpAddress, @{n='profile'; e={$_.IamInstanceProfile.Arn}}, @{n='HttpTokens'; e={$_.MetadataOptions.HttpTokens}}"
@@ -726,6 +821,8 @@
         {
           "id": "iam-statements",
           "title": "ה-statements של ה-policy במבט אחד",
+          "syntax": "jq -r '.<path>[].<path>.<path>[] | [.<field>, .<field>, (.<field> | tostring), (.<field> | tostring)] | @tsv' <role-policy-file>",
+          "syntaxPowershell": "(Get-Content <role-policy-file> -Raw | ConvertFrom-Json).<path>.<path>.<path> | Format-Table <field>, <field>, @{n='<label>'; e={$_.<field> -join ','}}, ... -Wrap",
           "command": "jq -r '.RolePolicies[].PolicyDocument.Statement[] | [.Sid, .Effect, (.Action | tostring), (.Resource | tostring)] | @tsv' iam/roles/<role-name>.json",
           "explain": "שורה לכל statement: Sid, Effect, Action ו-Resource. הפתעות גרות בתווים כלליים (`*`).",
           "powershell": "(Get-Content iam\\roles\\<role-name>.json -Raw | ConvertFrom-Json).RolePolicies.PolicyDocument.Statement | Format-Table Sid, Effect, @{n='Action'; e={$_.Action -join ','}}, @{n='Resource'; e={$_.Resource -join ','}} -Wrap"
@@ -733,6 +830,8 @@
         {
           "id": "iam-action-names",
           "title": "שמות API מול שמות actions ב-IAM",
+          "syntax": "cat <cloudtrail-files> | jq -r 'select(.<field> == \"<value>\") | .<field>' | sort -u",
+          "syntaxPowershell": "Get-Content <cloudtrail-files> | ConvertFrom-Json | Where-Object { $_.<field> -eq '<value>' } | Select-Object -ExpandProperty <field> -Unique",
           "command": "cat cloudtrail/*.jsonl | jq -r 'select(.eventSource == \"s3.amazonaws.com\") | .eventName' | sort -u",
           "explain": "CloudTrail רושם את **פעולת ה-API**; IAM מאשר **action**, וב-S3 הם לא תמיד זהים. `ListObjects` (V2) דורש `s3:ListBucket`; `ListBuckets` דורש `s3:ListAllMyBuckets`; לכמה APIs של קונפיגורציית bucket יש שמות action משלהם. בדקו כל אחד ב-AWS Service Authorization Reference של Amazon S3.",
           "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.eventSource -eq 's3.amazonaws.com' } | Select-Object -ExpandProperty eventName -Unique"
@@ -740,6 +839,8 @@
         {
           "id": "iam-glob-test",
           "title": "האם תו כללי מכסה action?",
+          "syntax": "[[ '<action-name>' == <wildcard-pattern> ]] && echo match || echo no-match",
+          "syntaxPowershell": "'<action-name>' -like '<wildcard-pattern>'",
           "command": "[[ 's3:GetObject' == s3:Get* ]] && echo match || echo no-match",
           "explain": "תבניות `Action` ו-`Resource` ב-IAM הן globs: `*` מתאים לכל רצף תווים. בדקו את ה-action ואת ה-ARN של המשאב מול כל statement, וזכרו ש-`Deny` מפורש גובר על כל `Allow`.",
           "powershell": "'s3:GetObject' -like 's3:Get*'"
@@ -747,6 +848,8 @@
         {
           "id": "access-keys-table",
           "title": "מפתחות ארוכי טווח",
+          "syntax": "column -s<separator> -t < <csv-file>",
+          "syntaxPowershell": "Import-Csv <csv-file> | Format-Table",
           "command": "column -s, -t < iam/access-keys.csv",
           "explain": "מפתחות של משתמשי IAM (`AKIA...`) והסטטוס שלהם. credentials זמניים של roles (`ASIA...`) לא מופיעים כאן לעולם.",
           "powershell": "Import-Csv iam\\access-keys.csv | Format-Table"
