@@ -8,6 +8,7 @@ import { cachedAccount, isAdmin, loadAccount, onAccountChange, signOut } from ".
 import { cachedEvent, onEventChange, startEventPolling } from "./lib/event";
 import { TA } from "./i18n/strings-account";
 import { TG } from "./i18n/strings-game";
+import { TO } from "./i18n/strings-onboard";
 import { renderHome } from "./views/home";
 import { eventDisplayPhase, eventLine, eventWhen, renderLeaderboard, stopLeaderboard } from "./views/leaderboard";
 
@@ -94,10 +95,11 @@ function mountAccountMenu(): void {
       h("span", { class: "account-name", dir: "auto" }, account.username),
       isAdmin(account)
         ? h("a", { class: "btn btn-sm btn-ghost", href: "#/admin" }, TG().adminLink)
-        : account.status === "approved"
+        : account.status === "approved" && !account.mustChangePassword // the forced password screen gates every view
           ? h("a", { class: "btn btn-sm btn-ghost", href: "#/me" }, TA().myStats)
           : null,
-      h("button", { type: "button", class: "btn btn-sm btn-ghost", onclick: () => void signOut().then(() => (window.location.hash = "#/")) }, TA().signOut),
+      // finally, not then: offline sign-out still clears the local account, so leave the signed-in page too
+      h("button", { type: "button", class: "btn btn-sm btn-ghost", onclick: () => void signOut().catch(() => undefined).finally(() => (window.location.hash = "#/")) }, TA().signOut),
     );
   };
   bar.querySelector(".lang-toggle")?.before(wrap);
@@ -197,12 +199,44 @@ const appRoot: HTMLElement = root;
 new MutationObserver(() => applyPendingRestore()).observe(appRoot, { childList: true, subtree: true });
 
 /* ---------- global safety net: never white-screen ---------- */
+/*
+ * Error toasts (the global safety net): one polite host, no per-toast role, so nothing is announced twice.
+ * The same message is never stacked: a repeat bumps a "×n" counter. They stay until dismissed (WCAG 2.2.1,
+ * errors never auto-dismiss); at most 3 on screen, the oldest goes first.
+ */
+const TOAST_MAX = 3;
 const toastHost = h("div", { class: "toast-host", "aria-live": "polite" });
 document.body.append(toastHost);
+type ToastEntry = { el: HTMLElement; count: number; countEl: HTMLElement };
+const toasts = new Map<string, ToastEntry>();
+
+function removeToast(message: string): void {
+  const entry = toasts.get(message);
+  if (entry === undefined) return;
+  const hadFocus = entry.el.contains(document.activeElement);
+  entry.el.remove();
+  toasts.delete(message);
+  if (hadFocus) document.getElementById("app")?.focus({ preventScroll: true });
+}
+
 function toast(message: string): void {
-  const el = h("div", { class: "toast", role: "status" }, message);
+  const existing = toasts.get(message);
+  if (existing !== undefined) {
+    existing.count++;
+    existing.countEl.textContent = TO().toastCount(existing.count);
+    existing.countEl.hidden = false;
+    return;
+  }
+  const countEl = h("span", { class: "toast-count", hidden: true });
+  const close = h("button", { type: "button", class: "toast-close", "aria-label": TO().toastDismiss, onclick: () => removeToast(message) }, "×");
+  const el = h("div", { class: "toast toast-error" }, h("p", { class: "toast-text" }, message, " ", countEl), close);
+  toasts.set(message, { el, count: 1, countEl });
   toastHost.append(el);
-  window.setTimeout(() => el.remove(), 5000);
+  while (toasts.size > TOAST_MAX) {
+    const oldest = toasts.keys().next().value;
+    if (oldest === undefined) break;
+    removeToast(oldest);
+  }
 }
 window.addEventListener("error", (ev) => {
   console.error(ev.error ?? ev.message);
@@ -224,7 +258,19 @@ function notFound(message: string): void {
   document.title = T().notFoundTitle;
   setChildren(
     appRoot,
-    h("section", { class: "center-card" }, h("p", { class: "mono accent" }, "404"), h("h1", {}, message), h("a", { class: "btn btn-primary", href: "#/" }, T().backToCases)),
+    h(
+      "section",
+      { class: "center-card not-found" },
+      h("p", { class: "not-found-code mono" }, "404"),
+      h("h1", {}, message),
+      message === TO().notOnRunbook ? h("p", { class: "muted" }, TO().notFoundHint) : null,
+      h(
+        "div",
+        { class: "row-center" },
+        h("a", { class: "btn btn-primary", href: "#/" }, T().backToCases),
+        h("a", { class: "btn btn-ghost", href: "#/leaderboard" }, TO().toLeaderboard),
+      ),
+    ),
   );
 }
 
@@ -318,7 +364,7 @@ function route(): void {
       const id = parts[1];
       const sub = parts[2];
       if (sub !== undefined && sub !== "toolbox" && sub !== "explorer") {
-        notFound(T().notOnRunbook);
+        notFound(TO().notOnRunbook);
         return;
       }
       if (caseSummary(id) === undefined) {
@@ -341,7 +387,7 @@ function route(): void {
       }
       return;
     }
-    notFound(T().notOnRunbook);
+    notFound(TO().notOnRunbook);
   } catch (err) {
     console.error(err);
     notFound(T().pageBroke);
