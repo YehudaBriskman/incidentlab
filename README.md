@@ -17,27 +17,38 @@ PowerShell version), or entirely in the browser with the built-in **Evidence Exp
 | Status | Case | Skills |
 |---|---|---|
 | Live | **The 3 AM Outage** (`3am-outage`): checkout is down in the middle of the night and the chat is full of theories | log forensics, time zones, correlation, git archaeology |
-| Coming soon | 4 more cases (teasers on the site's home page) | |
+| Live | **Ghost in the Network** (`ghost-in-the-network`): Small requests work. Big ones hang forever. Half the fleet resolves an IP that hasn't existed since Tuesday. Nothing is down, yet nothing quite works. | tcpdump, wireshark, mtu, pmtud, icmp |
+| Live | **The Insider Commit** (`the-insider-commit`): SSH logins got 500 ms slower after a routine library update. A trusted maintainer, a tarball that doesn't match the repo. Follow the half-second. | supply-chain, git-archaeology, release-artifacts, autotools, binary-analysis |
+| Live | **Kubernetes Crime Scene** (`kubernetes-crime-scene`): Pods in CrashLoopBackOff, a node under pressure, a Service with no endpoints, and an HPA that can't make up its mind. Every one of them is a witness, and only one of them is telling the truth. | kubernetes, kubectl, oomkilled, probes, service-selectors |
+| Live | **Who Deleted Prod?** (`who-deleted-prod`): 100 million customer records walked out the door, and every API call was made with our own role. Reconstruct the attack from CloudTrail, WAF logs and one very chatty metadata endpoint. | cloud-forensics, aws, cloudtrail, ssrf, imds |
 
 ## Architecture
 
-- **Static site** (`site/dist`, Vite): case content, Toolbox, the Evidence Explorer (reads the loose
-  evidence files from `/evidence/files/`), and the evidence zip.
-- **One Netlify Function** (`site/netlify/functions`, served at `/api/*`): registers players, checks
-  answers, hands out hints/reveals, unlocks the debrief and serves the admin dashboard data. The answer
-  key and the debrief (`site/server/generated/secrets.json`, gitignored) are bundled into the function
-  only; they are never published as static files.
-- **Netlify Blobs**: per-player progress and scores, so the instructor sees everyone live at `#/admin`.
+- **Static site** (`site/dist`, Vite): case content, Toolbox, the Evidence Explorer (reads each case's loose
+  evidence files from `/evidence/<case-id>/files/`), and the evidence zips (`/evidence/<case-id>-evidence.zip`).
+- **One Netlify Function** (`site/netlify/functions`, served at `/api/*`): accounts and sessions, answer
+  checking, hints/reveals, debriefs, the incident-of-the-day schedule, stats and the admin API. The answer keys
+  and debriefs (`site/server/generated/secrets.json`, gitignored) are bundled into the function only; they are
+  never published as static files. See `docs/API.md`.
+- **Accounts:** unique username + password (scrypt). New sign-ups wait for the instructor's approval in
+  `#/admin`. The session is an HttpOnly cookie, so progress follows the account across reloads and devices.
+- **Netlify Blobs** (store `incidentlab-v2`): accounts, sessions, per-account-per-case progress, the schedule.
+  The instructor dashboard at `#/admin` approves players, picks the incident of the day, and shows live
+  progress and stats.
 
 ## Repo layout
 
 ```
 docs/
-  CASE_BIBLE.md          SPOILERS: the true story, timeline and answers for each case
+  CASE_BIBLE.md          SPOILERS: the true story, timeline and answers for 3am-outage
+  CASE_CONTRACT.md       how a case plugs in (files, generator output, questions, solver)
+  cases/<id>.md          SPOILERS: the bible of every other case
+  API.md                 the /api contract (accounts, sessions, gameplay, schedule, stats, admin)
   SITE_SCHEMA.ts.txt     content schema shared by the generators and the site
   INSTRUCTOR.md          presenter run-sheet (SPOILERS)
   POSTMORTEM_TEMPLATE.md blameless postmortem template for players
-generator/               Python 3 (stdlib) generators that build the evidence pack deterministically
+generator/               Python 3 (stdlib) generators that build the evidence packs deterministically
+  cases/<id>/build.py    one generator per case (docs/CASE_CONTRACT.md); 3am-outage uses the files below
   timeline.py            canonical constants for the case
   build_repo.py          builds the service git repo and bundle
   gen_logs.py            nginx and application logs
@@ -67,8 +78,13 @@ cd site && npm run dev            # local dev server (the /api function needs `n
 ## Tests
 
 ```bash
-bash solutions/solve.sh           # derives every answer from the evidence and compares to build/truth
-cd site && npm run test:server    # Netlify Function / answer-checking tests
+bash solutions/solve.sh           # 3am-outage: derives every answer from the evidence, compares to build/truth
+bash solutions/<case-id>/solve.sh # same, for every other case
+cd site && npm run test:server    # Netlify Function tests (accounts, gameplay, schedule, stats, admin)
+
+# the built site + real API on http://localhost:8888 (in-memory store, admin key printed on start)
+node --experimental-strip-types tests/local-server.ts
+node tests/smoke-api.mjs http://localhost:8888 <admin-key-file> [case-id]   # end-to-end API smoke test
 ```
 
 Both run automatically inside `./scripts/build-all.sh`.
@@ -102,20 +118,15 @@ be committed or copied into `site/dist`.
 
 ## Adding a new case
 
-1. **Bible.** Write the true story, a UTC timeline, the questions and where each answer comes from in
-   `docs/CASE_BIBLE.md` (or a sibling bible file). This is the contract for everything else.
-2. **Generator.** Add a `timeline.py`-style constants module and generators that write the evidence pack to
-   `build/evidence/<case-id>/` and any generated answers to `build/truth/*.json`. Use stdlib only and a
-   fixed seed so builds are reproducible.
-3. **Content JSON.** Add `site/src/content/cases/<case-id>.json` (briefing, evidence list, questions, hints,
-   toolbox, debrief) that validates against the schema. It must contain no answers. Move the case's teaser
-   out of `teasers.json`.
-4. **Answers.** Extend `scripts/make_flags.py` to compute the new case's answers into the server secrets, and
-   `scripts/package.sh` to zip its evidence and copy the Explorer files. Wire both into `scripts/build-all.sh`.
-5. Run `./scripts/build-all.sh`, then solve the case end to end yourself before showing it to players.
+Follow `docs/CASE_CONTRACT.md`. In short, a case owns only its own files: the bible `docs/cases/<id>.md`,
+the generator `generator/cases/<id>/build.py` (writes `build/evidence/<id>/` and
+`build/truth/<id>.answers.json`), the sealed debriefs `content-sealed/<id>.debrief(.he).md`, the content
+`site/src/content/cases/<id>(.he).json`, and the solver `solutions/<id>/solve.sh`. The pipeline discovers it
+automatically: no edits to `make_flags.py`, `package.sh` or `build-all.sh`. Run `./scripts/build-all.sh`, solve
+it yourself end to end, then schedule it in `#/admin`.
 
 ## Spoilers: keep the repo private
 
-`docs/CASE_BIBLE.md`, `docs/INSTRUCTOR.md`, `solutions/` and `build/truth/` contain the answers. Keep this
+`docs/CASE_BIBLE.md`, `docs/cases/`, `docs/INSTRUCTOR.md`, `solutions/`, `content-sealed/` and `build/truth/` contain the answers. Keep this
 repository private, or remove those paths before sharing it with players. Only `site/dist` should ever be
 public, plus the function bundle that `deploy.sh` uploads.

@@ -13,7 +13,7 @@ Session shape: **10 min orientation, 40 min solve (pairs), then debrief and lect
 
 - [ ] `./scripts/build-all.sh` finishes cleanly: the `make_flags` table prints all six answers, the solver
       step prints six `PASS` lines, and `npm run test:server` passes.
-- [ ] `cat build/truth/answers.json` and keep it open on your own screen (not the projector). q2 and q6
+- [ ] `cat build/truth/all-answers.json` (every case) and keep it open on your own screen (not the projector). q2 and q6
       change when the generators change, so always read them from this file, never from memory.
 - [ ] Deploy: `./scripts/deploy.sh` (needs `NETLIFY_AUTH_TOKEN` or `~/.netlify-token`). Drag-and-drop no
       longer works because answer checking runs in a Netlify Function.
@@ -23,7 +23,10 @@ Session shape: **10 min orientation, 40 min solve (pairs), then debrief and lect
   - [ ] open the **Evidence Explorer** and load `nginx/access.log` (it is large; give it a few seconds);
   - [ ] submit every answer from `answers.json` and confirm each one is accepted (also try one with extra
         spaces or different case to confirm normalization);
-  - [ ] reveal one hint, then open `#/admin`, confirm your test player shows up, and **Reset all players**.
+  - [ ] sign up a test account, approve it in `#/admin` → **Accounts**, reveal one hint, confirm it shows
+        up in **Live**, then delete the test account.
+- [ ] In `#/admin` → **Schedule**, set the session date to the case you're running (or turn on
+      **Lock to today's case** so nobody wanders into another case).
 - [ ] Solve it yourself end to end once with only the toolbox. Time yourself.
 
 **Players' machines** (send this out ahead of time)
@@ -43,6 +46,26 @@ Session shape: **10 min orientation, 40 min solve (pairs), then debrief and lect
 
 ---
 
+## Accounts and approval
+
+- Players sign up at the site with a **unique username + password** (usernames are case-insensitive, so
+  `Dana` and `dana` are the same person). New accounts are **pending**: they see a "waiting for approval"
+  screen that refreshes itself.
+- In `#/admin` → **Accounts**, pending sign-ups are listed first. **Approve** your players; **Reject** strangers
+  (rejecting also signs them out). Approving during orientation takes a few seconds per player, so start
+  sign-ups during the intro.
+- Sessions are an HttpOnly cookie that lasts 30 days, so players stay signed in across reloads and come back
+  to the same progress on any device after signing in.
+- Forgotten password: there is no email reset. Delete the account (it frees the username) and have them sign
+  up again. Their progress goes with the account.
+
+## Incident of the day
+
+`#/admin` → **Schedule** is a calendar: pick a case per date, plus a default for unscheduled days. The home page
+shows that case as **Incident of the day** (dates are in the schedule's time zone, default Asia/Jerusalem).
+**Lock to today's case** lets players *start* only today's case; anything they already started stays playable,
+so nobody is cut off at midnight.
+
 ## Admin dashboard
 
 - **URL:** `<site-url>/#/admin`. It asks for the admin key and keeps it only in that browser tab's
@@ -51,8 +74,9 @@ Session shape: **10 min orientation, 40 min solve (pairs), then debrief and lect
   `scripts/deploy.sh` creates it on first deploy and saves a copy to `~/.incidentlab-admin-key` (mode 600)
   on the machine that deployed. Lost it? `npx -y netlify-cli@17 env:get ADMIN_KEY`. To rotate, set a new
   value with `env:set` and redeploy.
-- **What you see:** every player, their current stage, score, hints used, wrong attempts and when they were
-  last seen. The list refreshes live.
+- **What you see:** tabs for **Accounts** (approval, per-user stats and rank), **Live** (pick a case: every player's
+  current stage, score, hints, wrong attempts, last seen; refreshes live), **Schedule** and **Stats** (per case:
+  completion, average score and time, the hardest question; plus a leaderboard).
 - **"Stuck"** = minutes since the player's *current* stage became active (not since their last action).
   The dashboard flags **8+ min** (amber) and **15+ min** (red). That's your cue to walk over and use the
   nudges in the "If they're stuck on" table below.
@@ -60,10 +84,9 @@ Session shape: **10 min orientation, 40 min solve (pairs), then debrief and lect
   for that stage, and the next stage unlocks. Encourage hints first (they cost less), and suggest
   "reveal" only to pairs that are 15+ min stuck and losing momentum. Revealed stages show as such on the
   dashboard, so nobody wins on reveals.
-- **Reset between sessions:** on the dashboard, **Reset all players** (asks you to confirm) deletes every
-  player from Netlify Blobs. You can also delete a single player (e.g. a test account). Players who still
-  have the site open will be asked to register again. Do this right before each session, after your own
-  test run.
+- **Reset between sessions:** in **Live**, reset the case (asks you to confirm) to wipe everyone's progress on
+  it while keeping their accounts, or restart a single player's case. Deleting an account removes the
+  account, its sessions and all its progress.
 
 ## No-install path
 
