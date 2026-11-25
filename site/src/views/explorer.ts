@@ -207,7 +207,9 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
   const tagline = h("p", { class: "ex-status" }, T().exTagline);
   const announcer = h("p", { class: "ex-sr", role: "status", "aria-live": "polite", "aria-atomic": "true" });
   const notice = h("div", { class: "ex-notice", hidden: true });
-  const fileList = h("ul", { class: "ex-files" });
+  const fileList = h("ul", { class: "ex-files", id: "ex-files" });
+  const fileSearch = h("input", { class: "ex-input ex-file-search", id: "ex-file-search", type: "search", placeholder: T().exFileSearchPh, spellcheck: "false", autocomplete: "off", "aria-controls": "ex-files" });
+  const noFiles = h("p", { class: "ex-muted ex-no-files", role: "status", hidden: true }, T().exNoFiles);
   const sidebar = h("aside", { class: "ex-sidebar", id: "ex-sidebar", "aria-label": T().exFilesTime });
   const sideToggle = h("button", { class: "btn btn-sm ex-side-toggle", type: "button", "aria-expanded": "false", "aria-controls": "ex-sidebar" }, T().exFilesTime);
 
@@ -252,7 +254,11 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
   const linkLineBtn = h("button", { class: "btn btn-sm btn-ghost", type: "button" }, T().exLinkLine);
   const wrapCb = h("input", { type: "checkbox", id: "ex-wrap" });
   wrapCb.checked = wrap;
-  const actionButtons = [firstBtn, lastBtn, copyBtn, shareBtn, copyLineBtn, linkLineBtn];
+  const prevMatchBtn = h("button", { class: "btn btn-sm", type: "button", "aria-keyshortcuts": "Shift+N" }, T().exPrevMatch);
+  const nextMatchBtn = h("button", { class: "btn btn-sm", type: "button", "aria-keyshortcuts": "N" }, T().exNextMatch);
+  const matchPos = h("span", { class: "ex-match-pos", "aria-live": "polite", "aria-atomic": "true" });
+  const matchNav = h("div", { class: "ex-match-nav", role: "group", "aria-label": T().exMatchNav, hidden: true }, prevMatchBtn, matchPos, nextMatchBtn);
+  const actionButtons = [firstBtn, lastBtn, prevMatchBtn, nextMatchBtn, copyBtn, shareBtn, copyLineBtn, linkLineBtn];
 
   const makeAgg = (kind: Agg["kind"], label: string, placeholder: string): Agg => {
     const id = `ex-${kind}`;
@@ -517,8 +523,12 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
 
   /* ---------------------------------------------------------------- files */
   function renderFileList(): void {
+    const q = fileSearch.value.trim().toLowerCase();
+    const shown = q === "" ? EVIDENCE_FILES : EVIDENCE_FILES.filter((f) => f.path.toLowerCase().includes(q));
+    noFiles.hidden = shown.length > 0;
+    fileList.hidden = shown.length === 0;
     fileList.replaceChildren(
-      ...EVIDENCE_FILES.map((f) => {
+      ...shown.map((f) => {
         const bytes = knownBytes.get(f.path);
         const size = bytes !== undefined ? fmtBytes(bytes) : f.size;
         const active = file?.path === f.path;
@@ -737,10 +747,15 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     }
   }
 
+  function activeFilterCount(): number {
+    return steps.filter((s) => s.text !== "").length + (json && file?.mode === "json" ? 1 : 0);
+  }
+
   function paintBadge(): void {
-    const active = steps.filter((s) => s.text !== "").length + (json && file?.mode === "json" ? 1 : 0);
+    const active = activeFilterCount();
     filtersBadge.textContent = active > 0 ? String(active) : "";
     filtersBadge.hidden = active === 0;
+    paintMatchNav();
   }
 
   function paintSteps(): void {
@@ -1026,6 +1041,24 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     firstBtn.disabled = !has;
     lastBtn.disabled = !has;
     copyBtn.disabled = !has;
+    paintMatchNav();
+  }
+
+  /** Previous/next match: only meaningful while filters narrow the view, where every row is a match. */
+  function paintMatchNav(): void {
+    const on = file !== null && activeFilterCount() > 0;
+    matchNav.hidden = !on;
+    const has = on && count > 0;
+    prevMatchBtn.disabled = !has;
+    nextMatchBtn.disabled = !has;
+    matchPos.textContent = has && cursor >= 0 ? fillText(T().exMatchPos, { i: fmtCount(cursor + 1), n: fmtCount(count) }) : "";
+  }
+
+  /** Steps the line cursor through the filtered result, wrapping at both ends. */
+  function stepMatch(dir: 1 | -1): void {
+    if (!file || count === 0) return;
+    const from = cursor >= 0 ? cursor : dir === 1 ? -1 : count;
+    setCursor((((from + dir) % count) + count) % count, true);
   }
 
   function copyLine(): void {
@@ -1072,6 +1105,11 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     if (next !== null) {
       e.preventDefault();
       setCursor(next, true);
+      return;
+    }
+    if ((e.key === "n" || e.key === "N") && !e.ctrlKey && !e.metaKey && activeFilterCount() > 0) {
+      e.preventDefault();
+      stepMatch(e.key === "N" ? -1 : 1);
       return;
     }
     if (cursor < 0 || e.target === viewport) return;
@@ -1379,6 +1417,9 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
   });
   firstBtn.addEventListener("click", () => setCursor(0, true));
   lastBtn.addEventListener("click", () => setCursor(count - 1, true));
+  prevMatchBtn.addEventListener("click", () => stepMatch(-1));
+  nextMatchBtn.addEventListener("click", () => stepMatch(1));
+  fileSearch.addEventListener("input", renderFileList);
   copyBtn.addEventListener("click", () => {
     if (!file || !inWorker.has(file.path)) return;
     copyJob = client.job();
@@ -1465,6 +1506,9 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
 
   sidebar.append(
     h("h3", { class: "ex-side-h" }, T().exEvidenceFiles),
+    h("label", { class: "ex-sr", for: "ex-file-search" }, T().exFileSearch),
+    fileSearch,
+    noFiles,
     fileList,
     h("section", { class: "ex-time", "aria-labelledby": "ex-time-h" },
       h("h3", { class: "ex-side-h", id: "ex-time-h" }, T().exTimeConverter),
@@ -1492,7 +1536,7 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     h("div", { class: "ex-head" }, h("div", { class: "ex-head-title" }, title, fileFormat), countEl),
     controls,
     notice,
-    h("div", { class: "ex-actions" }, firstBtn, lastBtn, copyLineBtn, linkLineBtn, copyBtn, shareBtn,
+    h("div", { class: "ex-actions" }, firstBtn, lastBtn, matchNav, copyLineBtn, linkLineBtn, copyBtn, shareBtn,
       h("label", { class: "ex-toggle", for: "ex-wrap" }, wrapCb, T().exWrap)),
     keysHelp,
     view,
