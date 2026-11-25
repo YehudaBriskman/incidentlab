@@ -13,18 +13,23 @@ import {
   ErrorBodySchema,
   EventResponseSchema,
   EventSchema,
+  LeaderboardResponseSchema,
   ResetPasswordResponseSchema,
   ScheduleResponseSchema,
   ScheduleSchema,
   SettingsResponseSchema,
   SettingsSchema,
   TodayResponseSchema,
+  TrashResponseSchema,
+  TrashRestoreResponseSchema,
   type AccountView,
   type AuditEntry,
+  type LeaderboardResponse,
   type LiveEvent,
   type Schedule,
   type Settings,
   type TodayResponse,
+  type TrashEntry,
 } from "../../shared/contract";
 
 const ADMIN_KEY_STORAGE = "il.adminKey";
@@ -38,10 +43,13 @@ export type AdminEventResult = z.infer<typeof EventResponseSchema>;
 
 export class AdminApiError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  /** machine-readable error code from the body (e.g. "conflict"), when the server sent one */
+  readonly code: string | null;
+  constructor(status: number, message: string, code: string | null = null) {
     super(message);
     this.name = "AdminApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -70,15 +78,15 @@ export function clearAdminKey(): void {
   }
 }
 
-async function readErrorMessage(res: Response): Promise<string> {
+async function readError(res: Response): Promise<AdminApiError> {
   try {
     const body: unknown = await res.json();
     const parsed = ErrorBodySchema.safeParse(body);
-    if (parsed.success) return parsed.data.error;
+    if (parsed.success) return new AdminApiError(res.status, parsed.data.error, parsed.data.code ?? null);
   } catch {
     // non-JSON error body
   }
-  return `Request failed (${res.status})`;
+  return new AdminApiError(res.status, `Request failed (${res.status})`);
 }
 
 /** admin: true adds X-Admin-Key when a key was entered in this tab. The session cookie is always sent. */
@@ -100,7 +108,7 @@ async function apiFetch(path: string, opts: { admin: boolean; init?: RequestInit
   } finally {
     window.clearTimeout(timer);
   }
-  if (!res.ok) throw new AdminApiError(res.status, await readErrorMessage(res));
+  if (!res.ok) throw await readError(res);
   return res;
 }
 
@@ -147,6 +155,12 @@ export async function logoutSession(): Promise<void> {
   await apiFetch("/api/auth/logout", { admin: false, init: jsonInit("POST", {}) });
 }
 
+/** The public leaderboard (overall when caseId is null). It honours the freeze, so it is safe to project. */
+export async function fetchPublicLeaderboard(caseId: string | null): Promise<LeaderboardResponse> {
+  const path = caseId === null ? "/api/leaderboard" : `/api/leaderboard?caseId=${seg(caseId)}`;
+  return parseJson(await apiFetch(path, { admin: false }), LeaderboardResponseSchema, "/api/leaderboard");
+}
+
 // ---- accounts ----------------------------------------------------------------
 
 export async function fetchAccounts(): Promise<AdminAccountsResult> {
@@ -191,6 +205,19 @@ export async function restartPlayerCase(accountId: string, caseId: string): Prom
 export async function resetProgress(caseId?: string): Promise<void> {
   const body = AdminResetRequestSchema.parse(caseId === undefined ? { confirm: "RESET" } : { confirm: "RESET", caseId });
   await adminFetch("/api/admin/reset", jsonInit("POST", body));
+}
+
+// ---- trash (recently deleted accounts and case progress) ----------------------
+
+export async function fetchTrash(): Promise<TrashEntry[]> {
+  const path = "/api/admin/trash";
+  return (await parseJson(await adminFetch(path), TrashResponseSchema, path)).entries;
+}
+
+/** Restores a trash entry. Records that would overwrite newer data are skipped; 409 "conflict" when the account was taken again. */
+export async function restoreTrash(id: string): Promise<{ restored: number; skipped: number }> {
+  const path = `/api/admin/trash/${seg(id)}/restore`;
+  return parseJson(await adminFetch(path, jsonInit("POST", {})), TrashRestoreResponseSchema, "/api/admin/trash/:id/restore");
 }
 
 // ---- schedule ----------------------------------------------------------------
