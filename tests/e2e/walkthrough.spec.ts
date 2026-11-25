@@ -18,7 +18,7 @@ const ui = {
   openTodayCase: (p: Page) => ui.todayCard(p).locator(`a[href^="#/case/"]`).first(),
   readyButton: (p: Page) => p.getByRole("button", { name: /ready/i }),
   answerInput: (p: Page) => p.locator(".answer-form input"),
-  answerSubmit: (p: Page) => p.locator(".answer-form").getByRole("button", { name: /submit/i }),
+  answerSubmit: (p: Page) => p.locator(".answer-form").getByRole("button", { name: /check answer/i }),
   wrongFeedback: (p: Page) => p.locator(".feedback.is-wrong"),
   revealCommand: (p: Page) => p.getByRole("button", { name: /reveal full command/i }),
   // Inline confirm ("Yes, −5 pts · charged to stage 1") or a dialog's confirm button.
@@ -91,7 +91,7 @@ test("player walkthrough: sign up to first solved stage, then admin sign-in", as
   });
 
   await test.step("wrong answer, then the right q1 answer", async () => {
-    await ui.answerInput(page).fill("definitely-not-the-answer");
+    await ui.answerInput(page).fill("00:00:00"); // right format (HH:MM:SS), wrong value: a malformed answer is rejected for free
     await ui.answerSubmit(page).click();
     await expect(ui.wrongFeedback(page)).toBeVisible();
 

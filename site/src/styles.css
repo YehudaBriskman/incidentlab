@@ -950,3 +950,59 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
   .tb-section { scroll-margin-block-start: var(--space-8); }
   html:has(.toolbox-page) { scroll-padding-block-start: var(--space-8); }
 }
+
+/* Stepper: the current stage carries the accent ring (aria-current); the viewed one only an underline. */
+.step.is-viewing { background: none; box-shadow: inset 0 calc(-1 * var(--space-1)) 0 var(--accent); border-radius: var(--radius-md) var(--radius-md) 0 0; }
+.step[aria-disabled="true"] { cursor: default; color: var(--text-muted); }
+.step[aria-disabled="true"]:hover { background: none; }
+.step[aria-disabled="true"] .step-icon { border-style: dotted; }
+.step.is-current .step-icon { border-width: 3px; }
+.step-now { display: none; margin: var(--space-2) 0 0; font-size: var(--step--1); font-weight: 600; color: var(--text); }
+@media (max-width: 640px) {
+  .step-now { display: block; }
+  .step { min-block-size: var(--control-md); }
+}
+@media (forced-colors: active) {
+  .step.is-viewing { box-shadow: none; border-block-end: var(--space-1) solid Highlight; }
+}
+
+/* Stage: compact "Look for" and a phone-only jump to the answer field. */
+.look-for > summary {
+  display: list-item; cursor: pointer; min-block-size: var(--target-min); padding-block: var(--space-1);
+  font-size: var(--step--1); font-weight: 600; text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted);
+}
+[dir=rtl] .look-for > summary { text-transform: none; letter-spacing: 0; }
+.look-for[open] > summary { margin-block-end: var(--space-2); }
+.answer-jump { display: none; }
+@media (max-width: 640px) {
+  .answer-jump { display: inline-flex; align-self: flex-start; margin-block: calc(-1 * var(--space-4)) 0; }
+}
+.stage-goal:focus, .result-title:focus, .hint:focus { outline-offset: var(--focus-offset); }
+.stage-link { display: inline-flex; align-items: center; min-block-size: var(--target-min); }
+.briefing > summary, .quiet-details > summary { min-block-size: var(--target-min); }
+
+/* Answer form: a wrong or malformed answer marks the field (aria-invalid) with a 2px danger edge. */
+.answer-form .input[aria-invalid="true"] { border-width: 2px; border-color: var(--danger-fg); }
+.answer-form .input::placeholder { font-style: italic; opacity: 1; }
+.answer-form .cost-note { margin-block: var(--space-3) 0; }
+.answer-submit { min-inline-size: 10em; }
+[dir=rtl] .answer-form .input::placeholder { text-align: start; }
+
+/* Live meter: bonuses still on the table, and the ones already lost (struck through, not colour only). */
+.meter-upto { font-weight: 700; --pill-fg: var(--text); --pill-line: var(--border-strong); }
+.meter-bonus { --pill-fg: var(--success-fg); --pill-line: var(--success-fg); }
+.meter-bonus.is-lost { --pill-fg: var(--text-muted); --pill-line: var(--border-strong); text-decoration: line-through; }
+
+/* Debrief share line: follows the UI direction; only its LTR parts are isolated (<bdi>). */
+.share-line { flex: 1; min-inline-size: 0; margin: 0; font-size: var(--step--1); color: var(--text-2); overflow-wrap: break-word; }
+
+/* Prose: wrap long words only when they don't fit, never mid-timestamp; table cells widen (the table scrolls). */
+.prose { overflow-wrap: break-word; word-break: normal; }
+.prose td, .prose th { overflow-wrap: normal; word-break: normal; }
+.prose td code, .prose th code { white-space: nowrap; }
+[dir=rtl] .prose em { font-style: normal; font-weight: 600; }
+
+.check input { inline-size: var(--space-5); block-size: var(--space-5); margin-top: 0; }
+.stage-totals th { font-variant-numeric: tabular-nums; }
+.answer-format { font-weight: 600; color: var(--text); }
+[dir=rtl] .answer-form .input::placeholder { font-style: normal; } /* no faux italics on Hebrew */
