@@ -1006,3 +1006,47 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
 .stage-totals th { font-variant-numeric: tabular-nums; }
 .answer-format { font-weight: 600; color: var(--text); }
 [dir=rtl] .answer-form .input::placeholder { font-style: normal; } /* no faux italics on Hebrew */
+
+/* ===== onboarding & public pages (wave 3) =====
+   Auth errors and summary, pending/rejected, toasts, 404, home landing, stats KPIs, leaderboard + projector.
+   Roles and steps only (DESIGN.md). Amber is spent on one primary action per view. */
+
+/* --- centred cards: one column with a gap (404, pending, rejected, errors), phone-friendly top margin --- */
+.center-card:not(.gate) { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); }
+.center-card { margin-block-start: clamp(var(--space-4), 6vh, var(--space-7)); }
+.not-found-code { color: var(--text-muted); font-size: var(--step--1); }
+.not-found .row-center { margin-top: var(--space-3); }
+
+/* --- auth: hint and error sit between label and field; the summary leads the form --- */
+.field-help { margin-top: calc(-1 * var(--space-2)); }
+.field-error { margin: calc(-1 * var(--space-1)) 0 0; color: var(--danger-fg); font-size: var(--step--1); font-weight: 600; }
+.field-error::before { content: "⚠ "; }
+.field-error[hidden] { display: none; }
+.error-summary {
+  border: 2px solid var(--danger-fg); border-inline-start-width: 5px; border-radius: var(--radius-md);
+  background: var(--surface); padding: var(--space-3) var(--space-4); scroll-margin-block-start: var(--space-8);
+}
+.error-summary[hidden] { display: none; }
+.error-summary h2 { font-size: var(--step-0); margin: 0 0 var(--space-1); }
+.error-summary-list { margin: 0; padding-inline-start: var(--space-4); }
+.error-summary-list a, .error-summary-msg { color: var(--danger-fg); font-weight: 600; }
+.error-summary-list a { display: inline-flex; min-block-size: var(--target-min); align-items: center; }
+.error-summary-msg { font-variant-numeric: tabular-nums; }
+.center-card.gate > .error-summary { margin-block-end: var(--space-2); }
+.pw-form > .error-summary { max-width: 100%; }
+.btn[aria-disabled="true"] { opacity: 0.6; cursor: not-allowed; }
+.btn-primary[aria-disabled="true"]:hover { filter: none; }
+.auth-forgot { margin-top: var(--space-1); }
+
+/* --- pending / rejected --- */
+.pending-icon { font-size: var(--step-3); line-height: 1; }
+.pending-status { font-weight: 600; color: var(--success-fg); }
+.pending-status:empty, .pending-checked:empty { display: none; }
+.center-card h1[tabindex="-1"]:focus { outline: none; }
+.center-card h1[tabindex="-1"]:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); }
+
+@media (forced-colors: active) {
+  .error-summary, .lb-frozen-banner, .toast { border-color: CanvasText; }
+  .resume-seg.is-done { forced-color-adjust: none; background: Highlight; }
+}
+.pw-toggle { align-self: flex-end; margin-top: calc(-1 * var(--space-2)); }

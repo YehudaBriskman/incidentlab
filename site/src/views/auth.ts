@@ -1,19 +1,38 @@
 // Sign in / sign up, the "waiting for approval" screen and the forced password change.
 // `withApprovedAccount` is the single gate every playable view goes through.
-import { CredentialsSchema, PasswordSchema, type AccountView } from "../../shared/contract";
+import { PasswordSchema, UsernameSchema, type AccountView } from "../../shared/contract";
 import { ApiError, changePassword, login, register } from "../lib/api";
 import { h, setChildren, type Child } from "../lib/dom";
+import { getLang } from "../i18n/i18n";
 import { isAdmin, loadAccount, setAccount, signOut } from "../lib/session";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
+import { TO } from "../i18n/strings-onboard";
 import { T } from "../i18n/strings-player";
 
 const PENDING_POLL_MS = 8_000;
+/** How long "Password changed" stays on screen before the gate moves on. */
+const CONFIRM_MS = 1_500;
 let pendingTimer: number | null = null;
+let pendingVisibility: (() => void) | null = null;
+let rateTimer: number | null = null;
+let doneTimer: number | null = null;
+
+/**
+ * The temporary password the player just signed in with, kept in memory only (never stored), so the
+ * forced "set a new password" screen doesn't ask for it again (WCAG 3.3.7). Cleared once used or on sign-out.
+ */
+let carriedTempPassword: string | null = null;
 
 export function stopAuthTimers(): void {
   if (pendingTimer !== null) window.clearInterval(pendingTimer);
   pendingTimer = null;
+  if (pendingVisibility !== null) document.removeEventListener("visibilitychange", pendingVisibility);
+  pendingVisibility = null;
+  if (rateTimer !== null) window.clearInterval(rateTimer);
+  rateTimer = null;
+  if (doneTimer !== null) window.clearTimeout(doneTimer);
+  doneTimer = null;
 }
 
 type Mode = "sign-in" | "sign-up";
@@ -27,6 +46,8 @@ export type GateOptions = {
   inviteCode?: string;
   /** Set `document.title` for the auth screens (the #/login and #/signup routes). */
   titled?: boolean;
+  /** Heading of the sign-in form when this gate guards a specific page (e.g. "Sign in to see your stats"). */
+  signInTitle?: string;
 };
 
 const pageTitle = (title: string): string => `${title} · IncidentLab`;
@@ -36,6 +57,8 @@ export function goToAdmin(): void {
   if (window.location.hash === "#/admin") window.dispatchEvent(new HashChangeEvent("hashchange"));
   else window.location.hash = "#/admin";
 }
+
+const timeFmt = (): Intl.DateTimeFormat => new Intl.DateTimeFormat(getLang() === "he" ? "he-IL" : "en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
 /**
  * Resolves the signed-in account and calls `onReady` once it is an approved player with a usable password.
@@ -54,11 +77,18 @@ export function withApprovedAccount(
   loadAccount()
     .then((account) => {
       if (account === null) {
-        renderAuthForm(root, { context, mode: options.signedOutMode ?? "sign-in", onSignedIn: again, inviteCode: options.inviteCode, titled: options.titled });
-      }
-      else if (isAdmin(account)) (options.onAdmin ?? (() => renderAdminCard(root, again)))();
+        carriedTempPassword = null;
+        renderAuthForm(root, {
+          context,
+          mode: options.signedOutMode ?? "sign-in",
+          onSignedIn: again,
+          inviteCode: options.inviteCode,
+          titled: options.titled,
+          signInTitle: options.signInTitle,
+        });
+      } else if (isAdmin(account)) (options.onAdmin ?? (() => renderAdminCard(root, again)))();
       else if (account.status === "pending") renderPending(root, account, again);
-      else if (account.status === "rejected") renderRejected(root);
+      else if (account.status === "rejected") renderRejected(root, account.username, again);
       else if (account.mustChangePassword) renderForcedPasswordChange(root, context, again);
       else onReady(account);
     })
@@ -69,223 +99,443 @@ export function withApprovedAccount(
           "section",
           { class: "center-card", role: "alert" },
           h("h1", {}, T().cantLoadProgress),
-          h("p", { class: "muted" }, err instanceof ApiError ? err.message : T().genericError),
+          h("p", { class: "muted" }, errorText(err)),
           h("button", { type: "button", class: "btn btn-primary", onclick: again }, T().tryAgain),
         ),
       );
     });
 }
 
-function authErrorText(err: unknown): string {
+/** User-facing text for any API failure (translated; the network error never shows the English fallback). */
+function errorText(err: unknown): string {
   if (!(err instanceof ApiError)) return T().genericError;
+  if (err.status === 0) return TO().offline;
   if (err.code === "username-taken") return TA().usernameTaken;
   if (err.code === "reserved") return TG().reservedName;
   if (err.code === "bad-invite-code") return TG().badInvite;
   if (err.code === "bad-credentials") return TA().badCredentials;
   if (err.code === "rejected") return TA().rejectedLogin;
-  if (err.isRateLimited) return TA().rateLimited(err.retryAfterSeconds ?? 60);
   return err.message;
 }
 
-/** A password input with a Show/Hide toggle. */
-function passwordField(opts: { id: string; label: string; autocomplete: string; help?: string }): { row: Child[]; input: HTMLInputElement } {
-  const helpId = `${opts.id}-help`;
+/* ================= fields, inline errors and the error summary ================= */
+
+type Field = {
+  input: HTMLInputElement;
+  /** The visible label text (used for the summary and the Show/Hide toggle name). */
+  label: string;
+  /** label row, hint, error slot and input, in reading order */
+  nodes: Child[];
+  setError: (message: string | null) => void;
+  hasError: () => boolean;
+};
+
+/**
+ * One labelled field: label (with an optional Show/Hide toggle), hint, inline error, input.
+ * The hint and the error sit between the label and the input and are linked by `aria-describedby`.
+ */
+function makeField(opts: { input: HTMLInputElement; label: string; help?: string; toggle?: HTMLElement }): Field {
+  const id = opts.input.id;
+  const helpId = `${id}-help`;
+  const errorId = `${id}-error`;
+  const errorEl = h("p", { id: errorId, class: "field-error", hidden: true });
+  const describe = (): void => {
+    const ids = [opts.help ? helpId : null, errorEl.hidden ? null : errorId].filter((v): v is string => v !== null);
+    if (ids.length > 0) opts.input.setAttribute("aria-describedby", ids.join(" "));
+    else opts.input.removeAttribute("aria-describedby");
+  };
+  describe();
+  const setError = (message: string | null): void => {
+    errorEl.textContent = message ?? "";
+    errorEl.hidden = message === null;
+    if (message === null) opts.input.removeAttribute("aria-invalid");
+    else opts.input.setAttribute("aria-invalid", "true");
+    describe();
+  };
+  return {
+    input: opts.input,
+    label: opts.label,
+    setError,
+    hasError: () => !errorEl.hidden,
+    nodes: [
+      h("label", { class: "field-label", for: id }, opts.label),
+      opts.help ? h("p", { id: helpId, class: "field-help muted small" }, opts.help) : null,
+      errorEl,
+      opts.input,
+      // After the input, so Tab goes username → password → submit without stopping on the toggle first.
+      opts.toggle ?? null,
+    ],
+  };
+}
+
+/** A password input with a Show/Hide toggle whose name says which field it reveals ("Show new password"). */
+function passwordField(opts: { id: string; name: string; label: string; autocomplete: string; help?: string }): Field {
   const input = h("input", {
     id: opts.id,
+    name: opts.name,
     class: "input input-lg",
     type: "password",
     autocomplete: opts.autocomplete,
     maxlength: "128",
     required: true,
     dir: "ltr",
-    "aria-describedby": opts.help ? helpId : null,
+    enterkeyhint: "go",
   });
-  const toggle = h("button", { type: "button", class: "link-btn small", "aria-controls": opts.id, "aria-pressed": "false" }, TA().showPassword);
+  // Visible text "Show"/"Hide"; the accessible name adds the field ("Show password") and still starts with
+  // the visible word (WCAG 2.5.3). No aria-pressed: the changing name already carries the state.
+  const toggle = h("button", { type: "button", class: "link-btn small pw-toggle", "aria-controls": opts.id, "aria-label": TO().showField(opts.label) }, TA().showPassword);
   toggle.addEventListener("click", () => {
     const show = input.type === "password";
     input.type = show ? "text" : "password";
     toggle.textContent = show ? TA().hidePassword : TA().showPassword;
-    toggle.setAttribute("aria-pressed", String(show));
+    toggle.setAttribute("aria-label", show ? TO().hideField(opts.label) : TO().showField(opts.label));
   });
+  return makeField({ input, label: opts.label, help: opts.help, toggle });
+}
+
+type Problem = { field: Field | null; message: string };
+
+/**
+ * The form's error summary (GOV.UK pattern): heading + one link per problem, focused after a failed submit
+ * with 2+ problems or after a server error that has no single field. One problem on one field → focus the
+ * field instead. The page title gets an "Error: " prefix while errors show.
+ */
+function errorSummary(baseTitle: () => string): {
+  el: HTMLElement;
+  show: (problems: readonly Problem[]) => HTMLElement;
+  clear: () => void;
+} {
+  const list = h("ul", { class: "error-summary-list" });
+  const el = h("div", { class: "error-summary", tabindex: "-1", "aria-labelledby": "error-summary-title", hidden: true }, h("h2", { id: "error-summary-title" }, TO().errorSummaryTitle), list);
+  const setTitle = (error: boolean): void => {
+    document.title = error ? `${TO().errorTitlePrefix}${baseTitle()}` : baseTitle();
+  };
   return {
-    input,
-    row: [
-      h("div", { class: "field-label-row" }, h("label", { class: "field-label", for: opts.id }, opts.label), toggle),
-      input,
-      opts.help ? h("p", { id: helpId, class: "muted small" }, opts.help) : null,
-    ],
+    el,
+    show: (problems) => {
+      setChildren(
+        list,
+        problems.map((p, i) => {
+          const item = h("li", { id: `error-summary-item-${i}` });
+          if (p.field === null) {
+            item.append(h("span", { class: "error-summary-msg" }, p.message));
+          } else {
+            const target = p.field.input;
+            item.append(
+              h(
+                "a",
+                {
+                  href: `#${target.id}`,
+                  onclick: (ev: Event) => {
+                    ev.preventDefault(); // the hash is the router: never navigate
+                    target.focus();
+                  },
+                },
+                p.message,
+              ),
+            );
+          }
+          return item;
+        }),
+      );
+      el.hidden = false;
+      setTitle(true);
+      return el;
+    },
+    clear: () => {
+      el.hidden = true;
+      setChildren(list);
+      setTitle(false);
+    },
   };
 }
 
+/** Run each field's check, in field order. */
+function collectProblems(fields: readonly Field[], check: (f: Field) => string | null): Problem[] {
+  const problems: Problem[] = [];
+  for (const field of fields) {
+    const message = check(field);
+    if (message !== null) problems.push({ field, message });
+  }
+  return problems;
+}
+
+/**
+ * Apply client-side problems: every field shows its own message; with two or more, the summary lists them
+ * and takes focus; with one, focus goes to that field. Returns true when there were problems.
+ */
+function reportProblems(problems: readonly Problem[], fields: readonly Field[], summary: ReturnType<typeof errorSummary>): boolean {
+  for (const f of fields) f.setError(problems.find((p) => p.field === f)?.message ?? null);
+  if (problems.length === 0) {
+    summary.clear();
+    return false;
+  }
+  if (problems.length >= 2) summary.show(problems).focus();
+  else {
+    summary.clear();
+    if (!document.title.startsWith(TO().errorTitlePrefix)) document.title = `${TO().errorTitlePrefix}${document.title}`;
+    (problems[0]?.field?.input ?? summary.el).focus();
+  }
+  return true;
+}
+
+/** Busy / blocked state on the submit button: `aria-disabled` keeps focus on it (a disabled button drops focus to <body>). */
+function setBusy(button: HTMLButtonElement, busy: boolean, label: string): void {
+  if (busy) button.setAttribute("aria-disabled", "true");
+  else button.removeAttribute("aria-disabled");
+  button.textContent = label;
+}
+
+/* ================= sign in / sign up ================= */
+
 export function renderAuthForm(
   root: HTMLElement,
-  opts: { context: string; mode: Mode; onSignedIn: () => void; inviteCode?: string; titled?: boolean },
+  opts: { context: string; mode: Mode; onSignedIn: () => void; inviteCode?: string; titled?: boolean; signInTitle?: string },
 ): void {
   stopAuthTimers();
   const isSignUp = opts.mode === "sign-up";
-  if (opts.titled) document.title = pageTitle(isSignUp ? TA().signUpBtn : TA().signIn);
-  const username = h("input", {
-    id: "auth-username",
-    class: "input input-lg",
-    type: "text",
-    name: "username",
-    autocomplete: "username",
-    autocapitalize: "none",
-    spellcheck: "false",
-    maxlength: "24",
-    required: true,
-    dir: "auto",
-    "aria-describedby": isSignUp ? "auth-username-help" : null,
+  const titleText = (): string => pageTitle(isSignUp ? TA().signUpBtn : TA().signIn);
+  if (opts.titled) document.title = titleText();
+  const baseTitle = (): string => (opts.titled ? titleText() : document.title.replace(TO().errorTitlePrefix, ""));
+  const user = makeField({
+    label: TA().username,
+    help: isSignUp ? TA().usernameHelp : undefined,
+    input: h("input", {
+      id: "auth-username",
+      class: "input input-lg",
+      type: "text",
+      name: "username",
+      autocomplete: "username",
+      autocapitalize: "none",
+      spellcheck: "false",
+      maxlength: "24",
+      required: true,
+      dir: "auto",
+      enterkeyhint: "next",
+    }),
   });
   const pw = passwordField({
     id: "auth-password",
+    name: "password",
     label: TA().password,
     autocomplete: isSignUp ? "new-password" : "current-password",
     help: isSignUp ? TA().passwordHelp : undefined,
   });
-  const password = pw.input;
   const invite = isSignUp
-    ? h("input", {
-        id: "auth-invite",
-        class: "input",
-        type: "text",
-        name: "inviteCode",
-        autocomplete: "off",
-        autocapitalize: "none",
-        spellcheck: "false",
-        maxlength: "40",
-        dir: "ltr",
-        "aria-describedby": "auth-invite-help",
+    ? makeField({
+        label: TG().inviteLabel,
+        help: TG().inviteHelp,
+        input: h("input", {
+          id: "auth-invite",
+          class: "input",
+          type: "text",
+          name: "inviteCode",
+          autocomplete: "off",
+          autocapitalize: "none",
+          spellcheck: "false",
+          maxlength: "40",
+          dir: "ltr",
+        }),
       })
     : null;
-  if (invite !== null && opts.inviteCode !== undefined) invite.value = opts.inviteCode;
-  const errorEl = h("p", { id: "auth-error", class: "form-error", role: "alert" });
-  const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg btn-block" }, isSignUp ? TA().signUpBtn : TA().signInBtn);
+  if (invite !== null && opts.inviteCode !== undefined) invite.input.value = opts.inviteCode;
+  const fields: Field[] = [user, pw, ...(invite ? [invite] : [])];
+  const summary = errorSummary(baseTitle);
+  const submitLabel = isSignUp ? TA().signUpBtn : TA().signInBtn;
+  const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg btn-block" }, submitLabel);
   const switchMode = h(
     "button",
-    { type: "button", class: "link-btn", onclick: () => renderAuthForm(root, { ...opts, mode: isSignUp ? "sign-in" : "sign-up", inviteCode: invite?.value.trim() || opts.inviteCode }) },
+    {
+      type: "button",
+      class: "link-btn",
+      onclick: () => renderAuthForm(root, { ...opts, mode: isSignUp ? "sign-in" : "sign-up", inviteCode: invite?.input.value.trim() || opts.inviteCode }),
+    },
     isSignUp ? TA().toSignIn : TA().toSignUp,
   );
 
   const form = h(
     "form",
     { class: "center-card gate", novalidate: true },
+    summary.el,
     h("p", { class: "eyebrow mono" }, opts.context),
-    h("h1", {}, isSignUp ? TA().authTitleSignUp : TA().authTitleSignIn),
+    h("h1", {}, isSignUp ? TA().authTitleSignUp : (opts.signInTitle ?? TA().authTitleSignIn)),
     h("p", { class: "muted" }, isSignUp ? TA().authHelpSignUp : TA().authHelpSignIn),
-    h("label", { class: "field-label", for: "auth-username" }, TA().username),
-    username,
-    isSignUp ? h("p", { id: "auth-username-help", class: "muted small" }, TA().usernameHelp) : null,
-    pw.row,
-    invite
-      ? [
-          h("label", { class: "field-label", for: "auth-invite" }, TG().inviteLabel),
-          invite,
-          h("p", { id: "auth-invite-help", class: "muted small" }, TG().inviteHelp),
-        ]
-      : null,
-    errorEl,
+    user.nodes,
+    pw.nodes,
+    invite ? invite.nodes : null,
     submit,
     switchMode,
-    isSignUp ? null : h("p", { class: "muted small" }, TG().forgotPassword),
+    isSignUp ? null : h("p", { class: "muted small auth-forgot" }, TG().forgotPassword),
   );
 
-  const fail = (message: string, field: HTMLInputElement | null): void => {
-    errorEl.textContent = message;
-    for (const el of [username, password, invite]) el?.removeAttribute("aria-invalid");
-    if (field) {
-      field.setAttribute("aria-invalid", "true");
-      field.focus();
+  /** Client checks for one field: sign-up checks the format, sign-in only that it isn't empty. */
+  const check = (f: Field): string | null => {
+    const value = f === user ? f.input.value.trim() : f.input.value;
+    if (f === user) {
+      if (value.length === 0) return TO().enterUsername;
+      return isSignUp && !UsernameSchema.safeParse(value).success ? TA().usernameInvalid : null;
     }
+    if (f === pw) {
+      if (value.length === 0) return TO().enterPassword;
+      return isSignUp && !PasswordSchema.safeParse(value).success ? TA().passwordInvalid : null;
+    }
+    return null;
+  };
+  // Never add an error while typing; clear it as soon as the value is fixed.
+  for (const f of fields) {
+    f.input.addEventListener("input", () => {
+      // A field marked only by a form-level error (wrong credentials) is cleared as soon as it is edited.
+      const markedOnly = !f.hasError() && f.input.getAttribute("aria-invalid") === "true";
+      if (markedOnly || (f.hasError() && check(f) === null)) f.setError(null);
+    });
+  }
+
+  let busy = false;
+  let blockedUntil = 0;
+  const startRateLimit = (seconds: number): void => {
+    blockedUntil = Date.now() + seconds * 1000;
+    setBusy(submit, true, submitLabel);
+    summary.show([{ field: null, message: TO().rateLimited(seconds) }]).focus();
+    const msg = summary.el.querySelector(".error-summary-msg") ?? h("span", {});
+    // The countdown text updates silently (the summary is not a live region): it was read once on focus.
+    rateTimer = window.setInterval(() => {
+      const left = Math.ceil((blockedUntil - Date.now()) / 1000);
+      if (!form.isConnected) {
+        stopAuthTimers();
+        return;
+      }
+      if (left > 0) {
+        msg.textContent = TO().rateLimited(left);
+        return;
+      }
+      msg.textContent = TO().rateLimitOver;
+      setBusy(submit, false, submitLabel);
+      if (rateTimer !== null) window.clearInterval(rateTimer);
+      rateTimer = null;
+    }, 1000);
   };
 
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
-    const credentials = { username: username.value.trim(), password: password.value };
-    if (isSignUp) {
-      const parsed = CredentialsSchema.safeParse(credentials);
-      if (!parsed.success) {
-        const badUser = parsed.error.issues.some((i) => i.path[0] === "username");
-        fail(badUser ? TA().usernameInvalid : TA().passwordInvalid, badUser ? username : password);
-        return;
-      }
-    } else if (credentials.username.length === 0 || credentials.password.length === 0) {
-      fail(TA().badCredentials, credentials.username.length === 0 ? username : password);
-      return;
-    }
-    errorEl.textContent = "";
-    submit.disabled = true;
-    submit.textContent = isSignUp ? TA().signingUp : TA().signingIn;
-    const inviteCode = invite?.value.trim() ?? "";
+    if (busy || Date.now() < blockedUntil) return;
+    const problems = collectProblems([user, pw], check);
+    if (reportProblems(problems, fields, summary)) return;
+    const credentials = { username: user.input.value.trim(), password: pw.input.value };
+    busy = true;
+    setBusy(submit, true, isSignUp ? TA().signingUp : TA().signingIn);
+    const inviteCode = invite?.input.value.trim() ?? "";
     (isSignUp ? register(inviteCode.length > 0 ? { ...credentials, inviteCode } : credentials) : login(credentials))
       .then((account) => {
+        carriedTempPassword = !isSignUp && account.mustChangePassword ? credentials.password : null;
+        summary.clear();
         setAccount(account);
         if (isAdmin(account)) goToAdmin();
         else opts.onSignedIn();
       })
       .catch((err: unknown) => {
-        submit.disabled = false;
-        submit.textContent = isSignUp ? TA().signUpBtn : TA().signInBtn;
+        busy = false;
+        setBusy(submit, false, submitLabel);
         const code = err instanceof ApiError ? err.code : null;
-        const field = code === "username-taken" || code === "reserved" ? username : code === "bad-invite-code" ? invite : null;
-        fail(authErrorText(err), field);
+        if (code === "rejected") {
+          // Not an input error: say what happened and what to do next, on its own screen.
+          renderRejected(root, credentials.username, () => renderAuthForm(root, opts));
+          return;
+        }
+        if (err instanceof ApiError && err.isRateLimited) {
+          startRateLimit(err.retryAfterSeconds ?? 60);
+          return;
+        }
+        const field = code === "username-taken" || code === "reserved" ? user : code === "bad-invite-code" ? invite : null;
+        if (field !== null) {
+          reportProblems([{ field, message: errorText(err) }], fields, summary);
+          return;
+        }
+        // No single field to blame: say it in the summary, and for wrong credentials mark both fields and
+        // clear the password (keep the username).
+        for (const f of fields) f.setError(null);
+        if (code === "bad-credentials") {
+          pw.input.value = "";
+          summary.show([{ field: user, message: TA().badCredentials }]).focus();
+          for (const f of [user, pw]) {
+            f.input.setAttribute("aria-invalid", "true");
+            f.input.setAttribute("aria-describedby", "error-summary-item-0");
+          }
+          return;
+        }
+        summary.show([{ field: null, message: errorText(err) }]).focus();
       });
   });
 
   setChildren(root, form);
-  username.focus();
+  user.input.focus();
 }
 
 /* ================= password change ================= */
 
 /**
- * "Current / new / confirm" password form posting to /api/me/password. `forced` = after an instructor
- * reset (the current password is the temporary one). Calls `onChanged` with the updated account.
+ * New-password form posting to /api/me/password, with a Show toggle instead of a "confirm" field.
+ * `forced` = after an instructor reset: when the temporary password from this sign-in is still in memory it
+ * is sent for the player, so the form asks only for the new password. Calls `onChanged` with the account.
  */
 export function passwordChangeForm(opts: { forced: boolean; onChanged: (account: AccountView) => void; idPrefix?: string }): HTMLFormElement {
   const p = opts.idPrefix ?? "pw";
-  const current = passwordField({ id: `${p}-current`, label: opts.forced ? TG().currentPwForced : TG().currentPw, autocomplete: "current-password" });
-  const next = passwordField({ id: `${p}-new`, label: TG().newPw, autocomplete: "new-password", help: TG().pwHelp });
-  const confirm = passwordField({ id: `${p}-confirm`, label: TG().confirmPw, autocomplete: "new-password" });
-  const errorEl = h("p", { class: "form-error", role: "alert" });
+  const carried = opts.forced ? carriedTempPassword : null;
+  const current =
+    carried === null
+      ? passwordField({ id: `${p}-current`, name: "current-password", label: opts.forced ? TG().currentPwForced : TG().currentPw, autocomplete: "current-password" })
+      : null;
+  const next = passwordField({ id: `${p}-new`, name: "new-password", label: TG().newPw, autocomplete: "new-password", help: TG().pwHelp });
+  const fields: Field[] = current ? [current, next] : [next];
+  const formError = h("p", { class: "form-error", role: "alert" });
   const okEl = h("p", { class: "form-ok", role: "status" });
   const submit = h("button", { type: "submit", class: `btn btn-primary${opts.forced ? " btn-lg btn-block" : ""}` }, TG().pwSave);
-  const form = h("form", { class: "pw-form", novalidate: true }, current.row, next.row, confirm.row, errorEl, okEl, h("div", {}, submit));
+  const summary = errorSummary(() => document.title.replace(TO().errorTitlePrefix, ""));
+  const form = h("form", { class: "pw-form", novalidate: true }, summary.el, fields.map((f) => f.nodes), formError, okEl, h("div", {}, submit));
 
-  const fail = (message: string, field: HTMLInputElement | null): void => {
-    errorEl.textContent = message;
-    okEl.textContent = "";
-    for (const el of [current.input, next.input, confirm.input]) el.removeAttribute("aria-invalid");
-    if (field) {
-      field.setAttribute("aria-invalid", "true");
-      field.focus();
-    }
+  const check = (f: Field): string | null => {
+    const value = f.input.value;
+    if (f === current) return value.length === 0 ? (opts.forced ? TO().enterTempPassword : TO().enterCurrentPassword) : null;
+    if (!PasswordSchema.safeParse(value).success) return TA().passwordInvalid;
+    const currentValue = current?.input.value ?? carried ?? "";
+    return value === currentValue ? TG().pwSame : null;
   };
+  for (const f of fields) {
+    f.input.addEventListener("input", () => {
+      if (f.hasError() && check(f) === null) f.setError(null);
+    });
+  }
 
+  let busy = false;
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
-    const currentPassword = current.input.value;
-    const newPassword = next.input.value;
-    if (currentPassword.length === 0) return fail(TG().pwWrongCurrent, current.input);
-    if (!PasswordSchema.safeParse(newPassword).success) return fail(TA().passwordInvalid, next.input);
-    if (newPassword !== confirm.input.value) return fail(TG().pwMismatch, confirm.input);
-    if (newPassword === currentPassword) return fail(TG().pwSame, next.input);
-    errorEl.textContent = "";
-    submit.disabled = true;
-    submit.textContent = TG().pwSaving;
-    changePassword({ currentPassword, newPassword })
+    if (busy) return;
+    formError.textContent = "";
+    okEl.textContent = "";
+    const problems = collectProblems(fields, check);
+    if (reportProblems(problems, fields, summary)) return;
+    const currentPassword = current?.input.value ?? carried ?? "";
+    busy = true;
+    setBusy(submit, true, TG().pwSaving);
+    changePassword({ currentPassword, newPassword: next.input.value })
       .then((account) => {
-        submit.disabled = false;
-        submit.textContent = TG().pwSave;
+        busy = false;
+        setBusy(submit, false, TG().pwSave);
+        carriedTempPassword = null;
         form.reset();
-        okEl.textContent = TG().pwSaved;
+        okEl.textContent = opts.forced ? TO().pwChangedContinue : TG().pwSaved;
         opts.onChanged(account);
       })
       .catch((err: unknown) => {
-        submit.disabled = false;
-        submit.textContent = TG().pwSave;
+        busy = false;
+        setBusy(submit, false, TG().pwSave);
         const wrongCurrent = err instanceof ApiError && err.code === "bad-credentials";
-        fail(wrongCurrent ? TG().pwWrongCurrent : authErrorText(err), wrongCurrent ? current.input : null);
+        if (wrongCurrent && current !== null) {
+          reportProblems([{ field: current, message: TG().pwWrongCurrent }], fields, summary);
+          return;
+        }
+        if (wrongCurrent) carriedTempPassword = null; // the carried password no longer works: ask for it next time
+        formError.textContent = wrongCurrent ? TG().pwWrongCurrent : errorText(err);
+        submit.focus();
       });
   });
   return form;
@@ -293,12 +543,18 @@ export function passwordChangeForm(opts: { forced: boolean; onChanged: (account:
 
 function renderForcedPasswordChange(root: HTMLElement, context: string, onDone: () => void): void {
   document.title = pageTitle(TG().pwTitleForced);
+  const carried = carriedTempPassword !== null;
   const form = passwordChangeForm({
     forced: true,
     idPrefix: "forced-pw",
     onChanged: (account) => {
-      setAccount(account);
-      onDone();
+      // Keep "Password changed" on screen (and announced) for a moment before the gate moves on.
+      setChildren(form, h("p", { class: "form-ok", role: "status" }, TO().pwChangedContinue));
+      doneTimer = window.setTimeout(() => {
+        doneTimer = null;
+        setAccount(account);
+        onDone();
+      }, CONFIRM_MS);
     },
   });
   setChildren(
@@ -308,9 +564,20 @@ function renderForcedPasswordChange(root: HTMLElement, context: string, onDone: 
       { class: "center-card gate" },
       h("p", { class: "eyebrow mono" }, context),
       h("h1", {}, TG().pwTitleForced),
-      h("p", { class: "muted" }, TG().pwHelpForced),
+      h("p", { class: "muted" }, carried ? TO().pwHelpForcedCarried : TG().pwHelpForced),
       form,
-      h("button", { type: "button", class: "link-btn", onclick: () => void signOut().finally(onDone) }, TA().signOut),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "link-btn",
+          onclick: () => {
+            carriedTempPassword = null;
+            void signOut().finally(onDone);
+          },
+        },
+        TA().signOut,
+      ),
     ),
   );
   form.querySelector("input")?.focus();
@@ -337,54 +604,100 @@ function renderAdminCard(root: HTMLElement, onSignedOut: () => void): void {
   );
 }
 
+/**
+ * Waiting for the instructor. Polls quietly (paused while the tab is hidden) and shows a muted
+ * "Last checked" time that is NOT a live region; the polite status region speaks only when the state
+ * changes (approved, or not approved).
+ */
 function renderPending(root: HTMLElement, account: AccountView, onApproved: () => void): void {
   stopAuthTimers();
   document.title = pageTitle(TA().pendingTitle);
-  const status = h("p", { class: "muted small", "aria-live": "polite" });
+  const status = h("p", { class: "pending-status", role: "status" });
+  const lastChecked = h("p", { class: "muted small pending-checked" });
+  let checking = false;
   const check = (): void => {
-    status.textContent = TA().pendingChecking;
+    if (checking) return;
+    checking = true;
     loadAccount(true)
       .then((fresh) => {
-        status.textContent = "";
-        if (fresh === null || fresh.status !== "pending") {
-          stopAuthTimers();
-          onApproved();
+        lastChecked.textContent = TO().pendingLastChecked(timeFmt().format(new Date()));
+        if (fresh !== null && fresh.status === "pending") return;
+        stopAuthTimers();
+        if (fresh === null) {
+          onApproved(); // the session ended: the gate shows the sign-in form
+          return;
         }
+        if (fresh.status === "rejected") {
+          renderRejected(root, fresh.username, onApproved);
+          return;
+        }
+        status.textContent = TO().pendingApproved;
+        doneTimer = window.setTimeout(() => {
+          doneTimer = null;
+          onApproved();
+        }, CONFIRM_MS);
       })
-      .catch(() => {
-        status.textContent = "";
+      .catch(() => undefined)
+      .finally(() => {
+        checking = false;
       });
+  };
+  const start = (): void => {
+    if (pendingTimer !== null) window.clearInterval(pendingTimer);
+    pendingTimer = document.hidden ? null : window.setInterval(check, PENDING_POLL_MS);
+  };
+  pendingVisibility = (): void => {
+    if (!root.isConnected) return;
+    start();
+    if (!document.hidden) check(); // back on the tab: look right away
   };
   setChildren(
     root,
     h(
       "section",
       { class: "center-card" },
-      h("p", { class: "eyebrow mono" }, "⏳"),
+      h("p", { class: "pending-icon", "aria-hidden": "true" }, "⏳"),
       h("h1", {}, TA().pendingTitle),
-      h("p", { class: "muted" }, TA().pendingBody(account.username)),
+      h("p", {}, TO().pendingHi, h("bdi", {}, account.username), "!"),
+      h("p", { class: "muted" }, TO().pendingBody),
       h(
         "div",
         { class: "row-center" },
         h("button", { type: "button", class: "btn", onclick: check }, TA().pendingCheckNow),
         h("button", { type: "button", class: "link-btn", onclick: () => void signOut().finally(onApproved) }, TA().signOut),
       ),
+      lastChecked,
       status,
     ),
   );
-  pendingTimer = window.setInterval(check, PENDING_POLL_MS);
+  document.addEventListener("visibilitychange", pendingVisibility);
+  start();
 }
 
-function renderRejected(root: HTMLElement): void {
+/**
+ * The instructor rejected this account: reached from a session (`/api/me` says "rejected") or from a sign-in
+ * attempt. Offers a new account (primary) and a way back. `onBack` re-runs the gate after signing out.
+ */
+function renderRejected(root: HTMLElement, username: string, onBack: () => void): void {
+  stopAuthTimers();
   document.title = pageTitle(TA().rejectedTitle);
+  const title = h("h1", { tabindex: "-1" }, TA().rejectedTitle);
+  const leave = (then: () => void): void => void signOut().catch(() => undefined).finally(then);
   setChildren(
     root,
     h(
       "section",
-      { class: "center-card", role: "alert" },
-      h("h1", {}, TA().rejectedTitle),
-      h("p", { class: "muted" }, TA().rejectedBody),
-      h("button", { type: "button", class: "btn", onclick: () => void signOut().finally(() => (window.location.hash = "#/login")) }, TA().signOut),
+      { class: "center-card" },
+      title,
+      h("p", { class: "muted" }, TO().rejectedLead, h("bdi", {}, username), TO().rejectedTail),
+      h(
+        "div",
+        { class: "row-center" },
+        h("button", { type: "button", class: "btn btn-primary", onclick: () => leave(() => (window.location.hash = "#/signup")) }, TO().createNewAccount),
+        h("button", { type: "button", class: "btn", onclick: () => leave(onBack) }, TO().backToSignIn),
+      ),
     ),
   );
+  // A final state: move focus to the heading so it is read once (no role=alert on the whole card).
+  title.focus();
 }
