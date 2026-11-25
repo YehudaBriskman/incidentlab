@@ -25,6 +25,11 @@ Session shape: **10 min orientation, 40 min solve (pairs), then debrief and lect
         spaces or different case to confirm normalization);
   - [ ] sign up a test account, approve it in `#/admin` → **Accounts**, reveal one hint, confirm it shows
         up in **Live**, then delete the test account.
+- [ ] `deploy.sh` backs up production before deploying, and a nightly backup runs too. For a manual snapshot
+      before the session: `node --experimental-strip-types scripts/data.ts backup`. See `docs/DATA.md`.
+- [ ] Want to rehearse without touching production? Run a local preview:
+      `node --experimental-strip-types tests/local-server.ts`, then (another terminal)
+      `node tests/seed-demo.mjs http://localhost:8888` for demo players, a schedule, an event and a class code.
 - [ ] In `#/admin` → **Schedule**, set the session date to the case you're running (or turn on
       **Lock to today's case** so nobody wanders into another case).
 - [ ] Solve it yourself end to end once with only the toolbox. Time yourself.
@@ -61,6 +66,8 @@ Session shape: **10 min orientation, 40 min solve (pairs), then debrief and lect
 - **Class code:** in Accounts → Settings, set a code (or generate one) and write it on the board. Sign-ups that
   enter it are approved instantly, so a full class can start without you clicking Approve 30 times. **Approve
   all** handles the rest.
+- **Class-code signup link:** `#/signup?code=XYZ` (on the live URL) opens sign-up with the code already filled
+  in. Put it on the first slide as a QR code and players skip typing it.
 - **Forgotten password:** Accounts → **Reset password** shows a one-time temporary password. Read it to the
   player; they sign in with it and must pick a new one before playing. Their progress is kept.
 
@@ -77,7 +84,8 @@ The **Event** tab runs a timed session: name, start, end, an optional **leaderbo
 stops updating so the final minutes stay suspenseful), and an **announcement** banner every player sees
 ("Stage 3 hint is half price", "10 minutes left"). With **Enforce the window**, answers, hints and command
 reveals are refused before the start and after the end. Quick actions: Start now (60 min), Freeze now,
-End now. Put `#/leaderboard?projector=1` on the projector.
+End now (End and Freeze ask you to confirm). Put `#/leaderboard?projector=1` on the projector: it honours the
+freeze, so the board stops updating on the projector too.
 
 ## Scoring (what to tell players)
 
@@ -86,6 +94,9 @@ is done). Hints cost what they say. Each wrong answer costs 2 (max 20 per stage)
 speed per stage (full within the stage's target time, fading to 0 at 3× it), +10 for a clean solve (no hints,
 commands or wrong answers), +15 **first blood** for the first solver of a stage, +50 for finishing all six
 without revealing an answer. Players see a breakdown after every stage. Reset a case to reset its first bloods.
+
+Before confirming any paid action (hint, full command, reveal), players see its **full cost**, including the
+bonuses it forfeits (for example the clean-solve bonus). No surprises at the debrief.
 
 ## Admin dashboard
 
@@ -99,6 +110,8 @@ without revealing an answer. Players see a breakdown after every stage. Reset a 
 - **What you see:** tabs for **Accounts** (approval, per-user stats and rank), **Live** (pick a case: every player's
   current stage, score, hints, wrong attempts, last seen; refreshes live), **Schedule** and **Stats** (per case:
   completion, average score and time, the hardest question; plus a leaderboard).
+- **Deep links:** every tab has its own URL, so bookmark the one you need, e.g. `#/admin?tab=live` for the
+  room view (also `accounts`, `schedule`, `event`, `stats`, `audit`).
 - **"Stuck"** = minutes since the player's *current* stage became active (not since their last action).
   The dashboard flags **8+ min** (amber) and **15+ min** (red). That's your cue to walk over and use the
   nudges in the "If they're stuck on" table below.
@@ -108,7 +121,10 @@ without revealing an answer. Players see a breakdown after every stage. Reset a 
   dashboard, so nobody wins on reveals.
 - **Reset between sessions:** in **Live**, reset the case (asks you to confirm) to wipe everyone's progress on
   it while keeping their accounts, or restart a single player's case. Deleting an account removes the
-  account, its sessions and all its progress.
+  account, its sessions and all its progress, and signs the player out.
+- **Recently deleted:** deleted accounts and reset cases are not gone. They wait in Accounts → **Recently
+  deleted** for 7 days; **Restore** brings them back (it never overwrites newer data). Data rules and the
+  backup runbook: `docs/DATA.md`.
 
 ## No-install path
 
