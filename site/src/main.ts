@@ -12,7 +12,14 @@ import { TO } from "./i18n/strings-onboard";
 import { renderHome } from "./views/home";
 import { eventDisplayPhase, eventLine, eventWhen, renderLeaderboard, stopLeaderboard } from "./views/leaderboard";
 
+/** The skip link is static HTML: relabel it in the current language. */
+function labelSkipLink(): void {
+  const link = document.querySelector(".skip-link");
+  if (link !== null) link.textContent = TO().skipToContent;
+}
+
 applyLang();
+labelSkipLink();
 
 /* ---------- language toggle (header, every page) ---------- */
 
@@ -55,6 +62,7 @@ function switchLang(lang: "en" | "he", button: HTMLElement): void {
     until: Date.now() + RESTORE_WINDOW_MS,
   };
   setLang(lang);
+  labelSkipLink();
   applyPendingRestore();
 }
 

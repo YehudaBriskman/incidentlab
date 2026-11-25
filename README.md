@@ -36,6 +36,8 @@ PowerShell version), or entirely in the browser with the built-in **Evidence Exp
   The instructor dashboard at `#/admin` approves players, picks the incident of the day, and shows live
   progress and stats.
 
+Design decisions (tokens, type, components, themes) are recorded in `DESIGN.md`.
+
 ## Repo layout
 
 ```
@@ -44,6 +46,7 @@ docs/
   CASE_CONTRACT.md       how a case plugs in (files, generator output, questions, solver)
   cases/<id>.md          SPOILERS: the bible of every other case
   API.md                 the /api contract (accounts, sessions, gameplay, schedule, stats, admin)
+  DATA.md                production data rules, backups, restores and migrations
   SITE_SCHEMA.ts.txt     content schema shared by the generators and the site
   INSTRUCTOR.md          presenter run-sheet (SPOILERS)
   POSTMORTEM_TEMPLATE.md blameless postmortem template for players
@@ -58,7 +61,8 @@ scripts/
   package.sh             exports repo/git-log.txt, zips the evidence pack into site/public/evidence/,
                          and copies loose files to site/public/evidence/files/ for the Explorer
   build-all.sh           runs the whole pipeline + tests (solver, then server tests)
-  deploy.sh              build-all.sh + ADMIN_KEY setup + netlify deploy (site + function)
+  deploy.sh              build-all.sh + ADMIN_KEY setup + backup + netlify deploy (site + function)
+  data.ts                production data: backup, list-backups, restore, migrate (dry run by default)
 site/                    the player-facing web app (Vite) + server code (site/server, site/netlify/functions)
 solutions/               SPOILERS: reference solutions
 build/                   generated output (git-ignored); build/truth/ holds the plaintext answers
@@ -74,6 +78,16 @@ Requirements: Python 3.10+, git, zip, Node 20+.
 
 cd site && npm run dev            # local dev server (the /api function needs `netlify dev` to run locally)
 ```
+
+**Local preview with the real API and demo data** (after `build-all.sh` once):
+
+```bash
+node --experimental-strip-types tests/local-server.ts   # http://localhost:8888, in-memory store
+node tests/seed-demo.mjs http://localhost:8888          # in another terminal: players, schedule, event, class code
+```
+
+`seed-demo.mjs` prints the demo credentials. Sign in as `admin` with the local admin key
+(`local-admin-key-0123456789`).
 
 ## Tests
 
@@ -101,10 +115,24 @@ export NETLIFY_AUTH_TOKEN=...      # or put the token in ~/.netlify-token
 
 `deploy.sh` runs `build-all.sh`, makes sure the site has an `ADMIN_KEY` env var (on first run it
 generates one, sets it in the production context and saves a copy to `~/.incidentlab-admin-key`, mode
-600; the key is never printed), then runs
-`npx -y netlify-cli@17 deploy --prod --dir=site/dist --functions=site/netlify/functions`.
+600; the key is never printed), **backs up production data and aborts if the backup fails**, then runs
+`npx -y netlify-cli@17 deploy --prod --dir=site/dist --functions=site/netlify/functions`. Pending data
+migrations are reported, and applied only with `--migrate`.
 
 Drag-and-drop deploys no longer work: the site needs its function.
+
+## Production data
+
+Player data lives in Netlify Blobs and is treated as production data:
+
+- **Nightly backups:** a scheduled function snapshots the store every day and keeps 30 days.
+- **`scripts/data.ts`:** `backup`, `list-backups`, `restore` and `migrate`. Every command is a dry run until
+  you pass `--apply`, and restore and migrate take a backup first.
+- **Deploys back up first** (see above).
+- **Recently deleted:** deleting an account or resetting a case moves the data to the trash. Restore it from
+  `#/admin` → Accounts → Recently deleted within 7 days.
+
+Rules for changing stored records, the runbook and how to recover from a bad deploy: `docs/DATA.md`.
 
 ## How answer checking works
 

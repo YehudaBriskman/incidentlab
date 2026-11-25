@@ -992,6 +992,11 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
 .meter-upto { font-weight: 700; --pill-fg: var(--text); --pill-line: var(--border-strong); }
 .meter-bonus { --pill-fg: var(--success-fg); --pill-line: var(--success-fg); }
 .meter-bonus.is-lost { --pill-fg: var(--text-muted); --pill-line: var(--border-strong); text-decoration: line-through; }
+/* Time bonus fill: scaled on the compositor (scaleX) instead of animating width; anchored to the inline start.
+   (`transform-origin` has no logical keywords, so RTL flips the anchor explicitly.) */
+.meter-fill { inline-size: 100%; transform: scaleX(1); transform-origin: left center; transition: transform var(--motion-dur-data) linear; }
+[dir=rtl] .meter-fill { transform-origin: right center; }
+@media (prefers-reduced-motion: reduce) { .meter-fill { transition: none; } }
 
 /* Debrief share line: follows the UI direction; only its LTR parts are isolated (<bdi>). */
 .share-line { flex: 1; min-inline-size: 0; margin: 0; font-size: var(--step--1); color: var(--text-2); overflow-wrap: break-word; }
@@ -1122,6 +1127,10 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
 .pw-section > summary { cursor: pointer; display: flex; align-items: center; min-block-size: var(--control-md); }
 .pw-section[open] > summary { margin-bottom: var(--space-3); }
 @media (max-width: 720px) { .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* --- locked achievements (#/me): full-opacity greyscale icon on a strong edge (>= 3:1); text keeps --text-2 / --text-muted (>= 4.5:1) --- */
+.ach.is-locked .ach-icon { opacity: 1; filter: grayscale(1) contrast(1.2); border: 1px solid var(--border-strong); }
+.ach.is-locked .ach-desc, .ach.is-locked .ach-when { color: var(--text-muted); }
+
 /* phones: the per-case table becomes one card per case, each value labelled */
 @media (max-width: 600px) {
   .per-case-wrap { border: 0; overflow: visible; }

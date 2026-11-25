@@ -2,6 +2,7 @@
 // the countdown, the home page and the leaderboard. Countdowns use the server clock (corrected for skew).
 import type { LiveEvent } from "../../shared/contract";
 import { fetchEvent } from "./api";
+import { TO } from "../i18n/strings-onboard";
 
 const POLL_MS = 30_000;
 
@@ -73,7 +74,7 @@ export function isEventActive(event: LiveEvent | null): event is LiveEvent {
   return event !== null && (event.name.length > 0 || event.startsAt !== null || event.endsAt !== null);
 }
 
-/** "1:02:03" / "12:05" / "2d 4h" countdown text. */
+/** "1:02:03" / "12:05" / localized "2d 4h 5m" countdown text. */
 export function formatCountdown(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000));
   const days = Math.floor(total / 86_400);
@@ -81,6 +82,6 @@ export function formatCountdown(ms: number): string {
   const minutes = Math.floor((total % 3600) / 60);
   const seconds = total % 60;
   const pad = (n: number): string => String(n).padStart(2, "0");
-  if (days > 0) return `${days}d ${hours}h`;
+  if (days > 0) return TO().countdownLong(days, hours, minutes);
   return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`;
 }
