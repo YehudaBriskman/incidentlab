@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
-import { summarize, type CatalogEntry } from "./src/content/catalog-schema.ts";
+import { summarize, type CatalogEntry, type EvidenceFormats } from "./src/content/catalog-schema.ts";
 import { CaseSchema } from "./src/content/schema.ts";
 
 /**
@@ -57,16 +57,22 @@ const stripPaidContentPlugin = (): Plugin => ({
  * instead of every case in both languages. Full case files are lazy chunks (src/content/load.ts).
  * Invalid cases are left out here, as the runtime loader would reject them too. `_*.json` samples are only
  * included under `vite dev`, and only when no real case has the same id.
+ *
+ * `virtual:case-evidence-formats`: each case's English evidence format labels, which only the (lazy)
+ * Explorer needs, so it ships in the Explorer's chunk rather than the entry.
  */
 const CATALOG_ID = "virtual:case-catalog";
 const RESOLVED_CATALOG_ID = `\0${CATALOG_ID}`;
+const FORMATS_ID = "virtual:case-evidence-formats";
+const RESOLVED_FORMATS_ID = `\0${FORMATS_ID}`;
 const CASES_DIR = fileURLToPath(new URL("./src/content/cases/", import.meta.url));
 
 function readCase(file: string): ReturnType<typeof CaseSchema.safeParse> {
   return CaseSchema.safeParse(JSON.parse(readFileSync(`${CASES_DIR}${file}`, "utf8")));
 }
 
-export function buildCatalog(includeDevSamples: boolean): CatalogEntry[] {
+export function buildCatalog(includeDevSamples: boolean): { entries: CatalogEntry[]; formats: EvidenceFormats } {
+  const formats: EvidenceFormats = {};
   const all = readdirSync(CASES_DIR);
   const files = all.filter((f) => f.endsWith(".json") && !f.endsWith(".he.json"))
     .sort((a, b) => Number(a.startsWith("_")) - Number(b.startsWith("_")) || a.localeCompare(b)); // samples last
@@ -87,10 +93,10 @@ export function buildCatalog(includeDevSamples: boolean): CatalogEntry[] {
       file: stem,
       en: summarize(en.data),
       he: he?.success && he.data.id === en.data.id ? summarize(he.data) : undefined,
-      evidenceFormats: en.data.evidence.map((f) => ({ path: f.path, format: f.format })),
     });
+    formats[en.data.id] = en.data.evidence.map((f) => ({ path: f.path, format: f.format }));
   }
-  return [...entries.values()];
+  return { entries: [...entries.values()], formats };
 }
 
 const caseCatalogPlugin = (): Plugin => {
@@ -101,19 +107,21 @@ const caseCatalogPlugin = (): Plugin => {
       includeDevSamples = config.command === "serve";
     },
     resolveId(id) {
-      return id === CATALOG_ID ? RESOLVED_CATALOG_ID : null;
+      return id === CATALOG_ID || id === FORMATS_ID ? `\0${id}` : null;
     },
     load(id) {
-      if (id !== RESOLVED_CATALOG_ID) return null;
-      return `export default ${JSON.stringify(buildCatalog(includeDevSamples))};`;
+      if (id === RESOLVED_CATALOG_ID) return `export default ${JSON.stringify(buildCatalog(includeDevSamples).entries)};`;
+      if (id === RESOLVED_FORMATS_ID) return `export default ${JSON.stringify(buildCatalog(includeDevSamples).formats)};`;
+      return null;
     },
     configureServer(server) {
       // Editing a case JSON changes the catalog too: rebuild it and reload the page.
       const refresh = (file: string): void => {
         if (!CASE_JSON.test(file)) return;
-        const mod = server.moduleGraph.getModuleById(RESOLVED_CATALOG_ID);
-        if (mod === undefined) return;
-        server.moduleGraph.invalidateModule(mod);
+        for (const id of [RESOLVED_CATALOG_ID, RESOLVED_FORMATS_ID]) {
+          const mod = server.moduleGraph.getModuleById(id);
+          if (mod !== undefined) server.moduleGraph.invalidateModule(mod);
+        }
         server.ws.send({ type: "full-reload" });
       };
       server.watcher.on("change", refresh).on("add", refresh).on("unlink", refresh);

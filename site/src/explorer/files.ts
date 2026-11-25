@@ -1,4 +1,4 @@
-import { englishEvidenceFormats } from "../content/load";
+import { englishEvidenceFormats } from "../content/evidence-formats";
 import type { Case } from "../content/schema";
 import { T } from "../i18n/strings-tools";
 import type { StepKind } from "./core";

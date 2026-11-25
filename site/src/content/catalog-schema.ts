@@ -22,14 +22,16 @@ export const CatalogEntrySchema = z.object({
   file: z.string(),
   en: CaseSummarySchema,
   he: CaseSummarySchema.optional(),
-  /** English evidence format labels: the Explorer picks a file's mode from them, whatever the UI language */
-  evidenceFormats: z.array(z.object({ path: z.string(), format: z.string() })),
 });
 
 export const CatalogSchema = z.array(CatalogEntrySchema);
 
+/** English evidence format labels per case id (virtual:case-evidence-formats, Explorer only). */
+export const EvidenceFormatsSchema = z.record(z.string(), z.array(z.object({ path: z.string(), format: z.string() })));
+
 export type CaseSummary = z.infer<typeof CaseSummarySchema>;
 export type CatalogEntry = z.infer<typeof CatalogEntrySchema>;
+export type EvidenceFormats = z.infer<typeof EvidenceFormatsSchema>;
 
 export function summarize(c: Case): CaseSummary {
   return {

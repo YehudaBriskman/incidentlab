@@ -74,11 +74,6 @@ export function caseSummaries(): CaseSummary[] {
     .map((e) => summaryIn(e, lang));
 }
 
-/** The English evidence format labels of a case (the Explorer derives file modes from them). */
-export function englishEvidenceFormats(id: string): ReadonlyArray<{ path: string; format: string }> | undefined {
-  return catalog.get(id)?.evidenceFormats;
-}
-
 /* ---------- full cases (lazy, one chunk per case and language) ---------- */
 
 const pending = new Map<string, Promise<Case | undefined>>();
