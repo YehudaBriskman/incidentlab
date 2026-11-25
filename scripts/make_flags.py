@@ -111,17 +111,52 @@ def build_answers(repo: dict, logs: dict) -> dict[str, str]:
     return {"q1": q1, "q2": q2, "q3": q3, "q4": q4, "q5": q5, "q6": q6}
 
 
-def case_config(case_id: str) -> tuple[str, dict[str, dict]]:
-    """Title + {qid: {points, hintCosts}} from the player-facing case JSON."""
+def case_config(case_id: str) -> dict:
+    """Title, points, hint costs/texts, target times and full commands from the case JSONs (EN + optional HE).
+
+    Hint texts and full commands are paid content: the site bundle has them stripped
+    (site/vite.config.ts) and the server hands them out only after charging for them.
+    """
     data = load_json(CASES_JSON_DIR / f"{case_id}.json")
+    he_path = CASES_JSON_DIR / f"{case_id}.he.json"
+    he = load_json(he_path) if he_path.is_file() else {}
+    est_minutes = int(data.get("estMinutes", 60))
     questions = {q.get("id"): q for q in data.get("questions", []) if isinstance(q, dict)}
+    he_questions = {q.get("id"): q for q in he.get("questions", []) if isinstance(q, dict)}
     config: dict[str, dict] = {}
+    hints: dict[str, list] = {}
     for qid in QUESTION_IDS:
         q = questions.get(qid)
         if q is None:
             fail(f"{case_id}.json has no question {qid}")
-        config[qid] = {"points": int(q["points"]), "hintCosts": [int(h["cost"]) for h in q["hints"]]}
-    return str(data.get("title", case_id)), config
+        target_minutes = float(q.get("targetMinutes") or est_minutes / len(QUESTION_IDS))
+        config[qid] = {
+            "points": int(q["points"]),
+            "hintCosts": [int(h["cost"]) for h in q["hints"]],
+            "targetSeconds": max(60, round(target_minutes * 60)),
+        }
+        he_hints = (he_questions.get(qid) or {}).get("hints") or []
+        hints[qid] = []
+        for i, h in enumerate(q["hints"]):
+            text = h.get("text")
+            if not text:
+                fail(f"{case_id}.json {qid} hint {i + 1} has no text")
+            he_text = he_hints[i].get("text") if i < len(he_hints) and isinstance(he_hints[i], dict) else None
+            hints[qid].append({"en": text, "he": he_text or None})
+    tools: dict[str, dict] = {}
+    for section in data.get("toolbox", []):
+        for item in section.get("items", []):
+            tool_id, command = item.get("id"), item.get("command")
+            if not tool_id or not command:
+                continue
+            tools[tool_id] = {"command": command, "powershell": item.get("powershell") or None}
+    return {
+        "title": str(data.get("title", case_id)),
+        "estMinutes": est_minutes,
+        "questions": config,
+        "hints": hints,
+        "tools": tools,
+    }
 
 
 def debriefs(case_id: str) -> tuple[str, str | None]:
@@ -165,14 +200,12 @@ def main() -> int:
 
     cases: dict[str, dict] = {}
     for case_id, answers in all_answers.items():
-        title, questions = case_config(case_id)
         debrief_en, debrief_he = debriefs(case_id)
         cases[case_id] = {
-            "title": title,
+            **case_config(case_id),
             "answers": {qid: normalize_answer(a) for qid, a in answers.items()},
             "debrief": debrief_en,
             "debriefHe": debrief_he,
-            "questions": questions,
         }
 
     SECRETS_OUT.parent.mkdir(parents=True, exist_ok=True)
