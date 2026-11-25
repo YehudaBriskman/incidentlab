@@ -1,0 +1,742 @@
+{
+  "setupChecklist": [
+    "Get the evidence: download and unzip the **evidence pack**, *or* open the **Evidence Explorer** to browse every file in your browser (no installs).",
+    "Read `README_FIRST.txt` end to end, especially the time-zone table.",
+    "Note the clocks: node journals, Flux, the events JSON and container logs are **UTC**; `kubectl describe`, `helm history`, git dates and the chat are **local time (UTC+02:00)**; `get pods` and `get events` ages are **relative** to the `date -u` above each block; metrics use **epoch seconds**.",
+    "Pick your path: **bash** (Linux, macOS or WSL) with `jq`, **Windows PowerShell** (every Toolbox command has a PowerShell version), or the **browser Explorer**.",
+    "No cluster needed: every `kubectl` command has already been run for you. Treat its output as plain text."
+  ],
+  "id": "kubernetes-crime-scene",
+  "title": "Kubernetes Crime Scene",
+  "subtitle": "Pods in CrashLoopBackOff, a node under pressure, a Service with no endpoints, and an HPA that can't make up its mind. Every one of them is a witness, and only one of them is telling the truth.",
+  "difficulty": "hard",
+  "estMinutes": 60,
+  "tags": [
+    "kubernetes",
+    "kubectl",
+    "oomkilled",
+    "probes",
+    "service-selectors",
+    "scheduling",
+    "helm",
+    "gitops",
+    "jq",
+    "time-zones"
+  ],
+  "inspiredBy": {
+    "title": "Reddit Pi-Day outage",
+    "year": 2023,
+    "summary": "On 14 March 2023 Reddit was down for about 314 minutes after a Kubernetes cluster was upgraded from 1.23 to 1.24. The upgrade replaced the `master` node-role label with `control-plane`, but the Calico route reflector configuration still selected nodes by the old label, so pod networking broke across the cluster. Engineers eventually restored the cluster from a backup."
+  },
+  "briefing": "**Tuesday, 11:30. Lumenmart platform team.**\n\nAt 09:55 local time, prices disappeared from the Lumenmart app and website. For about **46 minutes** the incident channel chased pods in CrashLoopBackOff, a node under memory pressure, an evicted pod from another team, an HPA that couldn't make up its mind and a Service with no endpoints. Then one commit to the GitOps repo made it all go away.\n\nEvery one of those symptoms is a witness. Only one of them is telling the truth about the cause.\n\nThe **evidence pack** holds what on-call saved: `kubectl` output (events, pods, describe), the node journals, Flux and Helm history, the GitOps `git log -p`, container logs, the ingress log, metrics and the incident chat. **Read `README_FIRST.txt` first**: these sources use at least four different clocks.\n\nSix stages follow a real RCA: the **first victim**, **what changed**, the **mechanism**, why traffic **couldn't reach** the pods that were up, the **collateral damage**, and finally separating the **cause from the symptoms**. Each answer is a small, exact value. Stuck? Use the Toolbox and the hints.",
+  "evidenceZip": "/evidence/kubernetes-crime-scene-evidence.zip",
+  "evidence": [
+    {
+      "path": "README_FIRST.txt",
+      "format": "text",
+      "description": "Briefing, file list and the time-zone table. Start here."
+    },
+    {
+      "path": "chat/inc-4127-pricing-api.txt",
+      "format": "chat (local time)",
+      "description": "Export of the incident channel. Busy people, competing theories."
+    },
+    {
+      "path": "flux/flux-controllers.log",
+      "format": "JSON lines (UTC)",
+      "description": "source-, kustomize- and helm-controller logs: what Flux fetched, applied and upgraded, with git revisions."
+    },
+    {
+      "path": "gitops/apps/shop/pricing-api/service.yaml",
+      "format": "YAML",
+      "description": "The pricing-api Service manifest. It lives next to the HelmRelease, not inside the chart."
+    },
+    {
+      "path": "gitops/git-log-p.txt",
+      "format": "git log -p (+0200)",
+      "description": "Recent history of the platform-gitops repo, with full diffs."
+    },
+    {
+      "path": "helm/history-pricing-api.txt",
+      "format": "helm (local time, no zone)",
+      "description": "`helm history` of the pricing-api release, from the on-call laptop."
+    },
+    {
+      "path": "helm/values-rev13.yaml",
+      "format": "YAML",
+      "description": "`helm get values --revision 13`."
+    },
+    {
+      "path": "helm/values-rev14.yaml",
+      "format": "YAML",
+      "description": "`helm get values --revision 14`."
+    },
+    {
+      "path": "ingress/ingress-nginx-controller.log",
+      "format": "nginx log (UTC)",
+      "description": "Ingress controller log: access lines for the shop APIs plus controller warnings."
+    },
+    {
+      "path": "kubectl/describe-hpa-pricing-api.txt",
+      "format": "kubectl",
+      "description": "The pricing-api HorizontalPodAutoscaler: metrics, conditions and scaling events."
+    },
+    {
+      "path": "kubectl/describe-nodes.txt",
+      "format": "kubectl (times +0200)",
+      "description": "All three worker nodes during the incident: conditions, taints, pods, requests and node events."
+    },
+    {
+      "path": "kubectl/describe-pod-pricing-api-6d5b8c7f9-bq9tz.txt",
+      "format": "kubectl (times +0200)",
+      "description": "`kubectl describe pod pricing-api-6d5b8c7f9-bq9tz` during the incident."
+    },
+    {
+      "path": "kubectl/describe-pod-pricing-api-6d5b8c7f9-f2lsv.txt",
+      "format": "kubectl (times +0200)",
+      "description": "`kubectl describe pod pricing-api-6d5b8c7f9-f2lsv` during the incident."
+    },
+    {
+      "path": "kubectl/describe-svc-pricing-api.txt",
+      "format": "kubectl",
+      "description": "`describe svc pricing-api`, plus every Service in shop with its selector."
+    },
+    {
+      "path": "kubectl/get-endpoints-pricing-api.txt",
+      "format": "kubectl",
+      "description": "Endpoints and EndpointSlices of the pricing-api Service at three moments."
+    },
+    {
+      "path": "kubectl/get-events-A-wide.txt",
+      "format": "kubectl (relative ages)",
+      "description": "`kubectl get events -A -o wide` exactly as on-call ran it: default order, ages relative to the capture time."
+    },
+    {
+      "path": "kubectl/get-events-A.json",
+      "format": "JSON (UTC)",
+      "description": "The same events as `-o json`, with absolute first/last timestamps and counts."
+    },
+    {
+      "path": "kubectl/get-pods-A.txt",
+      "format": "kubectl (relative ages)",
+      "description": "Every pod in the cluster, near the end of the incident."
+    },
+    {
+      "path": "kubectl/get-pods-shop-labels.txt",
+      "format": "kubectl",
+      "description": "shop pods with their labels, plus the pricing-api Deployment selector."
+    },
+    {
+      "path": "kubectl/get-pods-shop-snapshots.txt",
+      "format": "kubectl (relative ages)",
+      "description": "`kubectl -n shop get pods -o wide`, run seven times, from just before the deploy until after the fix."
+    },
+    {
+      "path": "logs/pricing-api-6d5b8c7f9-bq9tz.log",
+      "format": "Spring Boot log (UTC)",
+      "description": "`kubectl -n shop logs pricing-api-6d5b8c7f9-bq9tz`: the current container."
+    },
+    {
+      "path": "logs/pricing-api-6d5b8c7f9-bq9tz.previous.log",
+      "format": "Spring Boot log (UTC)",
+      "description": "`kubectl -n shop logs pricing-api-6d5b8c7f9-bq9tz --previous`: the previous (terminated) container."
+    },
+    {
+      "path": "logs/pricing-api-6d5b8c7f9-f2lsv.previous.log",
+      "format": "Spring Boot log (UTC)",
+      "description": "`kubectl -n shop logs pricing-api-6d5b8c7f9-f2lsv --previous`: the previous (terminated) container."
+    },
+    {
+      "path": "metrics/hpa-pricing-api.csv",
+      "format": "CSV (epoch)",
+      "description": "HPA status every 15 s: replicas, ready pods, CPU utilization as a percentage of request."
+    },
+    {
+      "path": "metrics/node-memory.csv",
+      "format": "CSV (epoch)",
+      "description": "Memory working set and available memory per node every 15 s, with the eviction threshold."
+    },
+    {
+      "path": "nodes/prod-eu1-general-6b4f-k2m9.journal.log",
+      "format": "syslog + klog (UTC)",
+      "description": "Kernel, kubelet and containerd journal of node `prod-eu1-general-6b4f-k2m9`."
+    },
+    {
+      "path": "nodes/prod-eu1-general-6b4f-r7tq.journal.log",
+      "format": "syslog + klog (UTC)",
+      "description": "Kernel, kubelet and containerd journal of node `prod-eu1-general-6b4f-r7tq`."
+    },
+    {
+      "path": "nodes/prod-eu1-general-6b4f-w3zx.journal.log",
+      "format": "syslog + klog (UTC)",
+      "description": "Kernel, kubelet and containerd journal of node `prod-eu1-general-6b4f-w3zx`."
+    }
+  ],
+  "rules": [
+    "Work only from the evidence pack. Don't read the generator source or the site's source code; that spoils the fun.",
+    "Answers are case-insensitive, and leading and trailing whitespace is ignored. Stick to the format shown under each question.",
+    "Each hint costs the points shown on it. Hints are revealed in order, from a gentle nudge to almost the full command.",
+    "Working in pairs is encouraged. Talk through your reasoning out loud, just like a real incident review.",
+    "Any tool is allowed: grep, awk, jq, Python, a spreadsheet, your favourite editor. The Toolbox tab lists commands that help.",
+    "Wrong answers cost nothing, so guess freely. Still, try to be able to explain *why* your answer is right.",
+    "Don't share flags with other teams until everyone is done. Sharing techniques is fine.",
+    "Never point the Toolbox commands at a real cluster. Everything you need is already in the pack."
+  ],
+  "questions": [
+    {
+      "stage": {
+        "name": "First to fall",
+        "goal": "Find the pricing-api pod whose container the kernel OOM-killed first.",
+        "lookFor": [
+          "Kubernetes has no `OOMKilled` event: the kernel kills, the kubelet only notices afterwards",
+          "Each node has its own journal (UTC): compare all three",
+          "A kernel `oom-kill:` line names a container ID, not a pod",
+          "`describe` keeps only the *last* termination, and `get pods` ages are relative"
+        ],
+        "tools": [
+          "journal-oom",
+          "journal-oom-memcg",
+          "journal-pleg-died",
+          "journal-find-cid",
+          "pods-restarts",
+          "age-to-time"
+        ],
+        "explorerTip": "Open each `nodes/*.journal.log`, add a **contains** filter `Killed process` and use **First match** to find the earliest OOM kill on that node (skip anything that isn't `java`). Copy the container ID from the `oom-kill:` line just above it (`cri-containerd-<id>.scope`), then replace the filter with that ID: the kubelet `ContainerDied` line names the pod. Compare the times across the three nodes."
+      },
+      "id": "q1",
+      "title": "First to fall",
+      "prompt": "The first thing everyone noticed was pricing-api pods restarting with `OOMKilled`.\n\nWhich **pricing-api pod** was the **first** to have its container OOM-killed?\n\nAnswer with the **full pod name** (without the namespace).",
+      "answerFormat": "Pod name, e.g. `pricing-api-<hash>-<suffix>`",
+      "placeholder": "pricing-api-0a1b2c3d4-xxxxx",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Don't trust the order of `kubectl get events`, or the STATUS column of a single snapshot: the pod that *looks* OOM-killed may not be the first. The ground truth for OOM kills is the kernel log in each node's journal (UTC)."
+        },
+        {
+          "cost": 20,
+          "text": "In each journal the kernel's `oom-kill:` line ends its `task_memcg=` path in `cri-containerd-<container id>.scope`. Moments later the kubelet logs `\"SyncLoop (PLEG): event for pod\" pod=\"shop/...\"` with `\"Type\":\"ContainerDied\",\"Data\":\"<container id>\"`. Join the two on the container ID, keep `shop/pricing-api-*`, and take the earliest across **all three** nodes."
+        },
+        {
+          "cost": 40,
+          "text": "Join kernel kills to pods, all nodes at once, earliest first:\n\n```sh\nawk '/\"ContainerDied\"/ { match($0, /pod=\"[^\"]+\"/); p = substr($0, RSTART+5, RLENGTH-6)\n                         match($0, /\"Data\":\"[0-9a-f]+\"/); owner[substr($0, RSTART+8, RLENGTH-9)] = p; next }\n     /kernel: oom-kill:/ { match($0, /cri-containerd-[0-9a-f]+/); n++; t[n] = $3; c[n] = substr($0, RSTART+15, RLENGTH-15) }\n     END { for (i = 1; i <= n; i++) print t[i], owner[c[i]] }' nodes/*.journal.log | sort | head\n```\n\nCross-check with the 07:57:10 snapshot in `kubectl/get-pods-shop-snapshots.txt`: compare the `(… ago)` of each pod's last restart."
+        }
+      ],
+      "successNote": "An OOM kill is a **kernel** event. Kubernetes only learns about it afterwards (exit code 137, reason `OOMKilled`), and it keeps only the *last* termination of each container. The full history lives in the node's kernel log, keyed by container ID, not by pod name. And the pod that *looked* guilty on screen wasn't the first one: order events by evidence, not by whatever happens to be on your terminal."
+    },
+    {
+      "stage": {
+        "name": "What changed?",
+        "goal": "Identify the GitOps commit behind the Helm revision that was running when the OOM kills began.",
+        "lookFor": [
+          "`helm history` prints the laptop's local time (UTC+02:00) with no zone",
+          "Which revision was live at your stage 1 time?",
+          "Flux logs (UTC) tie every apply to a `main@sha1:` revision",
+          "The image tag never changed. So what did?"
+        ],
+        "tools": [
+          "helm-history",
+          "local-to-utc",
+          "flux-applies",
+          "flux-helm",
+          "git-commits",
+          "git-one-commit"
+        ],
+        "explorerTip": "Open `helm/history-pricing-api.txt` and convert each UPDATED time to UTC (minus 2 hours). Then open `flux/flux-controllers.log` in **JSON pretty view** and filter **contains** `HelmRelease/shop/pricing-api`: each apply shows its `revision`. Take the one just before that Helm upgrade, then filter `gitops/git-log-p.txt` **contains** its first 7 characters to read the diff."
+      },
+      "id": "q2",
+      "title": "What changed?",
+      "prompt": "Pods don't change their own limits. Something was deployed.\n\nFind the **commit in the `platform-gitops` repo** that produced the Helm revision that was running when the first OOM kill happened.\n\nAnswer with its **short SHA** (first 7 hex characters).",
+      "answerFormat": "7-char commit SHA (hex)",
+      "placeholder": "a1b2c3d",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "There were several pricing-api releases that morning. `helm/history-pricing-api.txt` lists them, but in **local time (UTC+02:00)**. Convert, then find the last revision that started before your stage 1 timestamp."
+        },
+        {
+          "cost": 20,
+          "text": "Helm doesn't know about git. Flux does: in `flux/flux-controllers.log`, the kustomize-controller line `server-side apply completed` whose `output` contains `HelmRelease/shop/pricing-api` carries the `revision` (`main@sha1:...`). The last one before that Helm upgrade is your commit. Confirm in `gitops/git-log-p.txt` that its diff could cause OOM kills."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ncolumn -t -s $'\\t' helm/history-pricing-api.txt\njq -r 'select(.controller==\"kustomization\" and (.output | has(\"HelmRelease/shop/pricing-api\"))) | \"\\(.ts) \\(.revision)\"' flux/flux-controllers.log\ngrep -A6 '^commit <first-7-chars>' gitops/git-log-p.txt\n```"
+        }
+      ],
+      "successNote": "In GitOps the deploy *is* a commit, but the chain has several hops: commit, source fetch, kustomize apply, Helm upgrade, ReplicaSet rollout. Each hop has its own log and its own clock. And read that commit message again: \"No functional change intended.\" A values refactor plus a chart major bump is a functional change until proven otherwise. Diff the **rendered** manifests (`helm diff`, `flux diff`), not just the values file."
+    },
+    {
+      "stage": {
+        "name": "The mechanism",
+        "goal": "Find the memory limit the OOM-killed containers were actually running with.",
+        "lookFor": [
+          "Limits and Requests are different numbers, and only one of them gets you OOM-killed",
+          "The kernel prints the cgroup's usage and limit in kB on every OOM kill",
+          "Compare the JVM's `-Xmx` with the container's limit"
+        ],
+        "tools": [
+          "describe-section",
+          "values-diff",
+          "journal-oom",
+          "units"
+        ],
+        "explorerTip": "Open a `kubectl/describe-pod-pricing-api-*.txt` file and read the **Limits** block of the container. Cross-check in any node journal: filter **contains** `memory: usage` and divide the kB value by 1024 to get MiB."
+      },
+      "id": "q3",
+      "title": "The mechanism",
+      "prompt": "Exit code 137 with reason `OOMKilled` means a container hit its **memory limit**.\n\nWhat memory limit were the crashing pricing-api containers running with?\n\nAnswer **exactly as written in the pod spec** (the Limits of `kubectl describe pod`), e.g. `2Gi` or `300Mi`.",
+      "answerFormat": "Kubernetes quantity as in the pod spec (e.g. `2Gi`)",
+      "placeholder": "2Gi",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "`kubectl describe pod` shows both **Limits** and **Requests**. The OOM killer only cares about one of them."
+        },
+        {
+          "cost": 20,
+          "text": "Three sources agree: the Limits block in `kubectl/describe-pod-*.txt`, `resources.limits.memory` in `helm/values-rev14.yaml`, and the kernel's `memory: usage ...kB, limit ...kB` line in any node journal (kB here means KiB: divide by 1024 for MiB). Compare with `-Xmx1g` in the same describe output."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\nsed -n '/Limits:/,/Requests:/p' kubectl/describe-pod-pricing-api-*.txt\ndiff -u helm/values-rev13.yaml helm/values-rev14.yaml\n```"
+        }
+      ],
+      "successNote": "The JVM was allowed a 1 GiB heap (`-Xmx1g`) inside a container that may use much less **in total** (heap + metaspace + threads + direct buffers). The JVM never gets to throw `OutOfMemoryError`: the kernel kills it first, with no stack trace and no last log line. Size the heap from the limit (`-XX:MaxRAMPercentage`), set limits from measured usage, and never change one without the other."
+    },
+    {
+      "stage": {
+        "name": "Empty endpoints",
+        "goal": "Find the Service selector label that no pricing-api pod carries any more.",
+        "lookFor": [
+          "Some new pods were `Running 1/1` (Ready), yet the Service had no endpoints",
+          "A Service selects pods that carry **all** of its `key=value` pairs",
+          "This Service is a separate manifest, not part of the Helm chart",
+          "Compare the selector with the labels on the new pods"
+        ],
+        "tools": [
+          "svc-selector",
+          "labels-split",
+          "values-diff",
+          "git-one-commit"
+        ],
+        "explorerTip": "Open `kubectl/describe-svc-pricing-api.txt` and note every `key=value` in **Selector**. Then open `kubectl/get-pods-shop-labels.txt`, filter **contains** `pricing-api-` and check each selector pair against the LABELS column. `gitops/apps/shop/pricing-api/service.yaml` shows the same selector as YAML."
+      },
+      "id": "q4",
+      "title": "Empty endpoints",
+      "prompt": "Even when some pricing-api pods were `Running` and `1/1` Ready, the Service `shop/pricing-api` had **no endpoints**, so ingress answered 503.\n\nWhich **`key=value` pair** of the Service's selector matches **none** of the pricing-api pods after the change?",
+      "answerFormat": "One `key=value` pair, exactly as in the selector",
+      "placeholder": "tier=frontend",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Readiness isn't the problem: look at the endpoints at 08:06 next to the pod list at about the same time. A Service only picks pods that carry **every** label in its selector."
+        },
+        {
+          "cost": 20,
+          "text": "`Selector:` in the describe output lists the pairs, and `--show-labels` lists what the pods really carry. One pair is on the new pods and one isn't. The values diff (`extraPodLabels` vs `podLabels`) shows how it got lost."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngrep '^Selector:' kubectl/describe-svc-pricing-api.txt\nawk '$1 ~ /^pricing-api-/ {print $NF}' kubectl/get-pods-shop-labels.txt | tr ',' '\\n' | sort | uniq -c\n```"
+        }
+      ],
+      "successNote": "Labels are an API. The Deployment's own selector used the chart's new `app.kubernetes.io/*` labels, so the rollout looked perfect, but a Service that lives **outside** the chart still selected the old label. Nothing errors when a selector matches zero pods: you just get an empty Endpoints object. Alert on zero ready endpoints for every Service that takes traffic, and ship a Service in the same release as the pods it selects."
+    },
+    {
+      "stage": {
+        "name": "Collateral damage",
+        "goal": "Name the other team's pod that the kubelet evicted when a node ran out of memory.",
+        "lookFor": [
+          "One node reported a `MemoryPressure` condition",
+          "`kubectl get pods -A` shows more than one `Evicted` pod: check *why* and *where* each one was evicted",
+          "The eviction message says which resource ran low",
+          "The scheduler packs pods by their requests, but memory pressure comes from what they actually use"
+        ],
+        "tools": [
+          "node-conditions",
+          "events-by-reason",
+          "journal-eviction",
+          "csv-threshold",
+          "epoch-to-utc"
+        ],
+        "explorerTip": "Open `kubectl/describe-nodes.txt` and filter **contains** `MemoryPressure` to find the node where it's `True`. Then open `kubectl/get-events-A-wide.txt` and filter **contains** `Evicted`: each row shows the pod, the SOURCE node and the message. That node's journal (filter **contains** `Eviction manager`) shows the same decision from the kubelet's side."
+      },
+      "id": "q5",
+      "title": "Collateral damage",
+      "prompt": "The pricing-api pods overloaded a node, and the kubelet evicted a pod that **had nothing to do with pricing** to get memory back.\n\nWhich pod was it? Answer with the **full pod name** (without the namespace).",
+      "answerFormat": "Pod name",
+      "placeholder": "some-worker-5d8c7b9f4-xxxxx",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Find the node first: `describe nodes` has a Conditions table, and one node says `MemoryPressure True`. An eviction because of **ephemeral-storage** is a different story."
+        },
+        {
+          "cost": 20,
+          "text": "Evictions show up as `Evicted` events on the pod (`source.host` is the node) and as `Eviction manager: pod is evicted successfully` in that node's kubelet journal. Only one of them was about **memory**."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngrep -E '^Name:|^  MemoryPressure' kubectl/describe-nodes.txt\njq -c '.items[] | select(.reason==\"Evicted\") | {t: .lastTimestamp, host: .source.host, pod: .involvedObject.name, msg: .message}' kubectl/get-events-A.json\ngrep -h 'Eviction manager' nodes/*.journal.log\n```"
+        }
+      ],
+      "successNote": "The new pricing pods requested far less memory than they really used, and the scheduler only looks at requests, so it packed them tightly onto one node. When real usage crossed the eviction threshold, the kubelet evicted the pod that was furthest over its own request: another team's sync job, not the pods that caused the problem. Requests that don't match real usage turn one team's bug into everyone's incident. Keep requests close to measured usage (or equal to limits for critical services)."
+    },
+    {
+      "stage": {
+        "name": "Cause vs. symptoms",
+        "goal": "Count how many times pricing-api containers were OOM-killed during the incident.",
+        "lookFor": [
+          "RESTARTS counts every restart: OOM kills **and** liveness-probe kills",
+          "Not every OOM kill in the journals belongs to pricing-api",
+          "Look at all three nodes",
+          "Each kill is one kernel `oom-kill:` line with a container ID"
+        ],
+        "tools": [
+          "journal-oom",
+          "journal-process-hist",
+          "journal-per-node-count",
+          "journal-pleg-died",
+          "join-lists",
+          "unique-capture"
+        ],
+        "explorerTip": "In each `nodes/*.journal.log` add a **regex** filter `Killed process \\d+ \\(java\\)` and note the match count. Use **Unique values** with `Killed process \\d+ \\((\\S+)\\)` to see which processes were killed. Then rule out any `java` that isn't pricing-api: copy its container ID from the `oom-kill:` line and filter for it to see its pod (or compare its `anon-rss` with the pricing-api limit). Add up the three nodes."
+      },
+      "id": "q6",
+      "title": "Cause vs. symptoms",
+      "prompt": "The pods restarted dozens of times, but not every restart was an OOM kill: some containers were killed by their **liveness probe** while they were still warming up.\n\nHow many times in total did the kernel **OOM-kill a pricing-api container** during the incident (all pods, all nodes)?\n\nAnswer with an **integer**.",
+      "answerFormat": "Integer",
+      "placeholder": "42",
+      "points": 150,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Don't add up RESTARTS: a liveness kill (exit 143, reason `Error`) is a restart too. Count kernel OOM kills instead, and remember there are three nodes."
+        },
+        {
+          "cost": 20,
+          "text": "Every OOM kill is one `oom-kill:` + `Killed process` pair in a journal. Some belong to other workloads (a different process name, or a `java` from another namespace with a much bigger limit). Map each container ID to its pod through the kubelet `ContainerDied` line and keep only `shop/pricing-api-*`."
+        },
+        {
+          "cost": 40,
+          "text": "Same join as stage 1, counted per pod:\n\n```sh\nawk '/\"ContainerDied\"/ { match($0, /pod=\"[^\"]+\"/); p = substr($0, RSTART+5, RLENGTH-6)\n                         match($0, /\"Data\":\"[0-9a-f]+\"/); owner[substr($0, RSTART+8, RLENGTH-9)] = p; next }\n     /kernel: oom-kill:/ { match($0, /cri-containerd-[0-9a-f]+/); n++; t[n] = $3; c[n] = substr($0, RSTART+15, RLENGTH-15) }\n     END { for (i = 1; i <= n; i++) print t[i], owner[c[i]] }' nodes/*.journal.log \\\n  | awk '{print $2}' | sort | uniq -c\n```\n\nThen add up the `shop/pricing-api-*` lines."
+        }
+      ],
+      "successNote": "Two different killers were at work: the kernel (memory limit too low for the heap) and the kubelet's liveness probe (the chart silently ignored the old probe settings, so slow warmups on a crowded node never got a chance). Both look like \"restarts\", and only one of them points at the root cause. Counting the right thing is how you separate the cause from the symptoms. And check that the probe settings you *think* you have are the ones in the pod spec: a renamed values key fails silently."
+    }
+  ],
+  "toolbox": [
+    {
+      "category": "Getting oriented",
+      "items": [
+        {
+          "id": "unzip-evidence",
+          "title": "Unpack the evidence",
+          "command": "unzip kubernetes-crime-scene-evidence.zip && cd kubernetes-crime-scene",
+          "explain": "Extracts the pack. Everything lives under one top-level folder.",
+          "powershell": "Expand-Archive .\\kubernetes-crime-scene-evidence.zip -DestinationPath .\ncd .\\kubernetes-crime-scene"
+        },
+        {
+          "id": "read-readme",
+          "title": "Read the README",
+          "command": "cat README_FIRST.txt",
+          "explain": "Seriously. It has the time-zone table, and this case uses at least four clocks.",
+          "powershell": "Get-Content README_FIRST.txt"
+        },
+        {
+          "id": "list-files",
+          "title": "See what you've got",
+          "command": "find . -type f | sort | xargs ls -l",
+          "explain": "Every file with its size. The big ones (journals, ingress, events) are the ones to search, not read.",
+          "powershell": "Get-ChildItem -Recurse -File | Select-Object FullName, Length"
+        },
+        {
+          "id": "head-lines",
+          "title": "Peek at the first lines",
+          "command": "head -n 20 nodes/prod-eu1-general-6b4f-r7tq.journal.log",
+          "explain": "Look at the format **before** you parse it: who logged the line, which clock, which fields.",
+          "powershell": "Get-Content nodes\\prod-eu1-general-6b4f-r7tq.journal.log -TotalCount 20"
+        },
+        {
+          "id": "snapshot-index",
+          "title": "When was each snapshot taken?",
+          "command": "grep -n -A1 '^\\$ date -u' kubectl/get-pods-shop-snapshots.txt",
+          "explain": "Every kubectl block starts with the `date -u` that on-call ran first. That's your anchor for turning relative ages (`3m8s`, `21s ago`) back into times.",
+          "powershell": "Select-String -Path kubectl\\get-pods-shop-snapshots.txt -Pattern '^\\$ date -u' -Context 0,1"
+        }
+      ]
+    },
+    {
+      "category": "Reading kubectl output",
+      "items": [
+        {
+          "id": "pods-restarts",
+          "title": "pricing-api pods, snapshot by snapshot",
+          "command": "awk '/^Tue Nov/ {print \"--\", $4} $1 ~ /^pricing-api/ {print $1, $2, $3, $4, $5, $6}' kubectl/get-pods-shop-snapshots.txt",
+          "explain": "Name, READY, STATUS and RESTARTS for every pricing-api pod in every snapshot. `1 (21s ago)` means one restart, the last one 21 s before the snapshot.",
+          "powershell": "Select-String -Path kubectl\\get-pods-shop-snapshots.txt -Pattern '^(Tue Nov|pricing-api)' | ForEach-Object Line"
+        },
+        {
+          "id": "describe-section",
+          "title": "One section of a describe",
+          "command": "sed -n '/Last State:/,/Requests:/p' kubectl/describe-pod-*.txt",
+          "explain": "`sed -n '/start/,/end/p'` prints a range of lines. Here: the last termination, readiness, restart count and limits.",
+          "powershell": "Select-String -Path kubectl\\describe-pod-*.txt -Pattern 'Last State:' -Context 0,12"
+        },
+        {
+          "id": "labels-split",
+          "title": "Which labels do the pods carry?",
+          "command": "awk '$1 ~ /^pricing-api/ {print $NF}' kubectl/get-pods-shop-labels.txt | tr ',' '\\n' | sort | uniq -c",
+          "explain": "Splits the LABELS column into one `key=value` per line and counts how many pods carry each one.",
+          "powershell": "Get-Content kubectl\\get-pods-shop-labels.txt | Where-Object { $_ -match '^pricing-api' } | ForEach-Object { (($_ -split '\\s+')[-1]) -split ',' } | Group-Object | Select-Object Count, Name"
+        },
+        {
+          "id": "svc-selector",
+          "title": "What does the Service select?",
+          "command": "grep -E '^(Selector|Endpoints|TargetPort):' kubectl/describe-svc-pricing-api.txt",
+          "explain": "A Service routes only to Ready pods that carry **every** `key=value` in its selector. An empty `Endpoints:` means no pod matched.",
+          "powershell": "Select-String -Path kubectl\\describe-svc-pricing-api.txt -Pattern '^(Selector|Endpoints|TargetPort):'"
+        },
+        {
+          "id": "node-conditions",
+          "title": "Node conditions at a glance",
+          "command": "grep -E '^Name:|^Taints:|^  (MemoryPressure|DiskPressure|Ready) ' kubectl/describe-nodes.txt",
+          "explain": "Each node's pressure conditions and taints. `LastTransitionTime` says when a condition flipped (in the laptop's +0200).",
+          "powershell": "Select-String -Path kubectl\\describe-nodes.txt -Pattern '^Name:|^Taints:|^  (MemoryPressure|DiskPressure|Ready) '"
+        }
+      ]
+    },
+    {
+      "category": "Kubernetes events (jq)",
+      "items": [
+        {
+          "id": "events-sorted",
+          "title": "Events in time order",
+          "command": "jq -r '.items | sort_by(.firstTimestamp)[] | [.firstTimestamp, .count, .involvedObject.name, .reason, .message] | @tsv' kubectl/get-events-A.json | less -S",
+          "explain": "`kubectl get events` is **not** sorted by time by default. The JSON has absolute UTC timestamps, so sort it yourself.",
+          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Sort-Object firstTimestamp | Format-Table firstTimestamp, count, @{n='object'; e={$_.involvedObject.name}}, reason, message | Out-Host -Paging"
+        },
+        {
+          "id": "events-reasons",
+          "title": "Which kinds of events exist?",
+          "command": "jq -r '.items[] | .reason' kubectl/get-events-A.json | sort | uniq -c | sort -rn",
+          "explain": "A histogram of event reasons. Notice what is **missing**: there is no `OOMKilled` event.",
+          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Group-Object reason | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "events-by-reason",
+          "title": "Filter events by reason",
+          "command": "jq -c '.items[] | select(.reason==\"Killing\") | {t: .lastTimestamp, n: .count, host: .source.host, obj: .involvedObject.name, msg: .message}' kubectl/get-events-A.json",
+          "explain": "Swap `Killing` for any reason from the histogram. `source.host` is the node that reported it.",
+          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Where-Object reason -eq 'Killing' | Format-Table lastTimestamp, count, @{n='host'; e={$_.source.host}}, @{n='object'; e={$_.involvedObject.name}}, message"
+        },
+        {
+          "id": "events-count-sum",
+          "title": "Events are aggregated",
+          "command": "jq '[.items[] | select(.reason==\"BackOff\") | .count] | add' kubectl/get-events-A.json",
+          "explain": "Repeated events are merged into one object with a `count`. Counting objects is not counting occurrences.",
+          "powershell": "((Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Where-Object reason -eq 'BackOff' | Measure-Object count -Sum).Sum"
+        }
+      ]
+    },
+    {
+      "category": "Node journals",
+      "items": [
+        {
+          "id": "journal-oom",
+          "title": "Every OOM kill, all nodes",
+          "command": "grep -h 'Killed process' nodes/*.journal.log | sort",
+          "explain": "The kernel logs one `Killed process <pid> (<name>)` line per OOM kill. Syslog timestamps (UTC) sort fine within one day.",
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process' | ForEach-Object Line | Sort-Object"
+        },
+        {
+          "id": "journal-oom-memcg",
+          "title": "Which cgroup was killed?",
+          "command": "grep -h -B1 'Killed process' nodes/*.journal.log | grep -o 'task_memcg=[^,]*' | head",
+          "explain": "The `oom-kill:` line just before each kill carries the cgroup path: the pod UID and `cri-containerd-<container id>.scope`.",
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'oom-kill:' | ForEach-Object { [regex]::Match($_.Line, 'task_memcg=[^,]*').Value } | Select-Object -First 10"
+        },
+        {
+          "id": "journal-pleg-died",
+          "title": "Container deaths, by pod",
+          "command": "grep -h '\"ContainerDied\"' nodes/*.journal.log | grep -o 'pod=\"[^\"]*\".*' | head",
+          "explain": "The kubelet's PLEG logs `ContainerDied` with the pod name and, in `Data`, the container ID. That's the bridge between kernel lines and pod names.",
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern '\"ContainerDied\"' | ForEach-Object { [regex]::Match($_.Line, 'pod=\"[^\"]*\".*').Value } | Select-Object -First 10"
+        },
+        {
+          "id": "journal-find-cid",
+          "title": "Follow one container ID",
+          "command": "grep -h '<container-id>' nodes/*.journal.log",
+          "explain": "Everything every component said about one container: created, started, killed, died.",
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern '<container-id>' -SimpleMatch | ForEach-Object Line"
+        },
+        {
+          "id": "journal-eviction",
+          "title": "Kubelet evictions",
+          "command": "grep -h -E 'Eviction manager|NodeHas' nodes/*.journal.log",
+          "explain": "The eviction manager logs which resource ran low, how it ranked the pods and which one it evicted.",
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Eviction manager|NodeHas' | ForEach-Object Line"
+        },
+        {
+          "id": "journal-per-node-count",
+          "title": "Count per node",
+          "command": "grep -c 'Killed process' nodes/*.journal.log",
+          "explain": "`grep -c` with several files prints one count per file.",
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process' | Group-Object Filename | Select-Object Count, Name"
+        },
+        {
+          "id": "journal-process-hist",
+          "title": "Which processes were killed?",
+          "command": "grep -ho 'Killed process [0-9]* ([^)]*)' nodes/*.journal.log | awk '{print $4}' | sort | uniq -c",
+          "explain": "Groups OOM kills by process name. Careful: the same process name can belong to more than one workload.",
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process \\d+ \\(([^)]+)\\)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name"
+        }
+      ]
+    },
+    {
+      "category": "GitOps, Flux and Helm",
+      "items": [
+        {
+          "id": "helm-history",
+          "title": "Helm release history",
+          "command": "column -t -s $'\\t' helm/history-pricing-api.txt",
+          "explain": "One row per revision. UPDATED is when the upgrade **started**, printed in the laptop's local time with no zone.",
+          "powershell": "Get-Content helm\\history-pricing-api.txt | ForEach-Object { $_ -replace \"`t\", ' | ' }"
+        },
+        {
+          "id": "values-diff",
+          "title": "Diff two revisions' values",
+          "command": "diff -u helm/values-rev13.yaml helm/values-rev14.yaml",
+          "explain": "`helm get values` prints user-supplied values with sorted keys, so a plain diff works. `-` lines are only in the old one, `+` only in the new one.",
+          "powershell": "Compare-Object (Get-Content helm\\values-rev13.yaml) (Get-Content helm\\values-rev14.yaml)"
+        },
+        {
+          "id": "git-commits",
+          "title": "GitOps history at a glance",
+          "command": "grep -A5 '^commit ' gitops/git-log-p.txt",
+          "explain": "SHA, author, date (with its offset) and subject of every commit.",
+          "powershell": "Select-String -Path gitops\\git-log-p.txt -Pattern '^commit ' -Context 0,5"
+        },
+        {
+          "id": "git-one-commit",
+          "title": "Read one commit's diff",
+          "command": "sed -n '/^commit abc1234/,/^commit /p' gitops/git-log-p.txt",
+          "explain": "Prints from that commit's header to the next one. Replace `abc1234` with the start of a real SHA.",
+          "powershell": "$l = Get-Content gitops\\git-log-p.txt; $i = ($l | Select-String '^commit abc1234').LineNumber; $l[($i - 1)..($i + 80)]"
+        },
+        {
+          "id": "flux-applies",
+          "title": "What did Flux apply, from which commit?",
+          "command": "jq -c 'select(.controller==\"kustomization\" and (.output | length > 0)) | {ts, name, output, revision}' flux/flux-controllers.log",
+          "explain": "kustomize-controller logs each object it changed and the git `revision` it came from.",
+          "powershell": "Get-Content flux\\flux-controllers.log | ConvertFrom-Json | Where-Object { $_.controller -eq 'kustomization' -and @($_.output.PSObject.Properties).Count -gt 0 } | Format-List ts, name, output, revision"
+        },
+        {
+          "id": "flux-helm",
+          "title": "What did helm-controller do?",
+          "command": "jq -r 'select(.controller==\"helmrelease\") | \"\\(.ts) \\(.namespace)/\\(.name) \\(.msg)\"' flux/flux-controllers.log",
+          "explain": "Every Helm upgrade Flux ran: why (out-of-sync reason), when it started, and how it ended.",
+          "powershell": "Get-Content flux\\flux-controllers.log | ConvertFrom-Json | Where-Object controller -eq 'helmrelease' | ForEach-Object { \"$($_.ts) $($_.namespace)/$($_.name) $($_.msg)\" }"
+        }
+      ]
+    },
+    {
+      "category": "Time zones and timestamps",
+      "items": [
+        {
+          "id": "local-to-utc",
+          "title": "Local (+02:00) to UTC",
+          "command": "date -u -d '2026-11-17 09:30:00 +0200' '+%F %T'",
+          "explain": "For `helm history`, `kubectl describe`, git dates and the chat. Subtracting two hours by hand works too, if you're careful.",
+          "powershell": "([DateTimeOffset]'2026-11-17T09:30:00+02:00').UtcDateTime.ToString('yyyy-MM-dd HH:mm:ss')"
+        },
+        {
+          "id": "age-to-time",
+          "title": "Relative age to a time",
+          "command": "date -u -d '2026-11-17 08:44:12 UTC - 47 minutes' +%T",
+          "explain": "Snapshot time (from the `date -u` above the block) minus the age. Ages over 10 minutes are rounded to whole minutes.",
+          "powershell": "([DateTimeOffset]'2026-11-17T08:44:12Z').AddMinutes(-47).UtcDateTime.ToString('HH:mm:ss')"
+        },
+        {
+          "id": "epoch-to-utc",
+          "title": "Epoch to UTC",
+          "command": "date -u -d @1794902400",
+          "explain": "For the metrics CSVs. On macOS: `date -u -r 1794902400`.",
+          "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794902400).UtcDateTime.ToString('u')"
+        },
+        {
+          "id": "utc-to-epoch",
+          "title": "UTC to epoch",
+          "command": "date -u -d '2026-11-17 08:00:00' +%s",
+          "explain": "Find the matching rows in an epoch-indexed CSV.",
+          "powershell": "([DateTimeOffset]'2026-11-17T08:00:00Z').ToUnixTimeSeconds()"
+        },
+        {
+          "id": "csv-epoch-column",
+          "title": "Readable times for a whole CSV",
+          "command": "awk -F, 'NR>1 {cmd=\"date -u -d @\"$1\" +%T\"; cmd | getline t; close(cmd); print t, $0}' metrics/hpa-pricing-api.csv | head",
+          "explain": "Prefixes every row with its UTC time. Slow-ish (one `date` per row), fine for a few hundred rows.",
+          "powershell": "Import-Csv metrics\\hpa-pricing-api.csv | Select-Object -First 10 @{n='utc'; e={ [DateTimeOffset]::FromUnixTimeSeconds([long]$_.ts_epoch).ToString('HH:mm:ss') }}, *"
+        }
+      ]
+    },
+    {
+      "category": "CSV metrics",
+      "items": [
+        {
+          "id": "csv-table",
+          "title": "Pretty table",
+          "command": "column -s, -t < metrics/hpa-pricing-api.csv | less -S",
+          "explain": "Aligns CSV columns so you can read them.",
+          "powershell": "Import-Csv metrics\\hpa-pricing-api.csv | Format-Table | Out-Host -Paging"
+        },
+        {
+          "id": "csv-changes",
+          "title": "Only the rows where a value changed",
+          "command": "awk -F, 'NR>1 && $2 != prev {print; prev = $2}' metrics/hpa-pricing-api.csv",
+          "explain": "Prints a row whenever column 2 changes: every scale event of the HPA.",
+          "powershell": "$p = ''; Import-Csv metrics\\hpa-pricing-api.csv | ForEach-Object { if ($_.spec_replicas -ne $p) { $_; $p = $_.spec_replicas } }"
+        },
+        {
+          "id": "csv-threshold",
+          "title": "Rows below a threshold",
+          "command": "awk -F, 'NR>1 && $4 < $5' metrics/node-memory.csv",
+          "explain": "Node memory available under the kubelet's hard eviction threshold. Convert the epoch to see when.",
+          "powershell": "Import-Csv metrics\\node-memory.csv | Where-Object { [int]$_.memory_available_mib -lt [int]$_.eviction_threshold_mib }"
+        }
+      ]
+    },
+    {
+      "category": "Counting and joining",
+      "items": [
+        {
+          "id": "unique-capture",
+          "title": "Count by a captured value",
+          "command": "grep -ho 'pod=\"shop/[^\"]*\"' nodes/*.journal.log | sort | uniq -c | sort -rn | head -20",
+          "explain": "`grep -o` extracts one field from messy lines; `sort | uniq -c` counts each value.",
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'pod=\"(shop/[^\"]*)\"' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name"
+        },
+        {
+          "id": "join-lists",
+          "title": "Join two lists",
+          "command": "awk 'NR==FNR {want[$1]; next} $1 in want' ids.txt other.txt",
+          "explain": "Classic two-file awk: the first file builds a lookup table, the second is filtered (or enriched) with it. Same idea works within one file with an `END` block.",
+          "powershell": "$want = Get-Content ids.txt; Get-Content other.txt | Where-Object { $want -contains (($_ -split ' ')[0]) }"
+        },
+        {
+          "id": "units",
+          "title": "kB to MiB",
+          "command": "echo $(( 1572864 / 1024 )) MiB",
+          "explain": "Kernel memory numbers are in kB (really KiB). Divide by 1024 for MiB, again for GiB. `Mi` and `Gi` in Kubernetes are the same binary units.",
+          "powershell": "1572864 / 1024"
+        }
+      ]
+    }
+  ],
+  "debrief": "_Sealed._ Finish all six stages to unlock the debrief."
+}

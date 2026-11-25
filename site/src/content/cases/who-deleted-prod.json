@@ -1,0 +1,758 @@
+{
+  "id": "who-deleted-prod",
+  "title": "Who Deleted Prod?",
+  "subtitle": "100 million customer records walked out the door, and every API call was made with our own role. Reconstruct the attack from CloudTrail, WAF logs and one very chatty metadata endpoint.",
+  "difficulty": "hard",
+  "estMinutes": 70,
+  "tags": [
+    "cloud-forensics",
+    "aws",
+    "cloudtrail",
+    "ssrf",
+    "imds",
+    "iam",
+    "jq",
+    "incident-response"
+  ],
+  "inspiredBy": {
+    "title": "Capital One data breach",
+    "year": 2019,
+    "summary": "In March 2019 an attacker abused a misconfigured web application firewall at Capital One to make server-side requests to the EC2 instance metadata service and obtained temporary credentials for the WAF's IAM role. With them she listed and copied S3 data on about 106 million credit card customers and applicants in the US and Canada. The breach was disclosed in July 2019, the bank was later fined 80 million US dollars, and AWS released IMDSv2 that November."
+  },
+  "briefing": "**Thursday 19 November 2026, 14:30 UTC. Fernhill Credit, security team.**\n\nThis morning the statements portal started failing for every statement older than yesterday. Most of `fh-prod-customer-exports`, a week of full customer exports (about 100 million rows), is simply gone. Versioning was never on.\n\nThe incident channel already has suspects: an engineer who ran S3 deletes on Tuesday evening, a developer key that leaked on GitHub, maybe AWS itself. Security noticed something stranger: our own WAF instance role calling S3 with a user agent the WAF never uses.\n\nThe **evidence pack** holds the WAF log and config, CloudTrail, S3 server access logs, VPC flow logs, IAM and EC2 snapshots, GuardDuty, a change ticket and the Slack channel. **Read `README_FIRST.txt` first**, and mind the clocks: the WAF logs New York time, AWS logs UTC.\n\nSix stages rebuild the attack: **the way in**, **when the keys were stolen**, **whose hands** held them, **what was taken**, **what deleted prod** and **why it was allowed**. Each answer is a small, exact value. Stuck? Use the Toolbox and the hints.",
+  "setupChecklist": [
+    "Get the evidence: download and unzip the **evidence pack**, *or* open the **Evidence Explorer** to browse every file in your browser (no installs).",
+    "Read `README_FIRST.txt` end to end, including the glossary.",
+    "Note each source's clock: the WAF log is **US Eastern (-0500)**; CloudTrail, S3 access logs and GuardDuty are **UTC**; flow logs and Slack use **epoch seconds**.",
+    "Pick your path: **bash** with `jq` (Linux, macOS or WSL), **Windows PowerShell** (every Toolbox command has a PowerShell version), or the **browser Explorer**.",
+    "No AWS account needed. Everything in the pack is fictional, so don't try any of it against real systems."
+  ],
+  "evidenceZip": "/evidence/who-deleted-prod-evidence.zip",
+  "evidence": [
+    {
+      "path": "README_FIRST.txt",
+      "format": "text",
+      "description": "Briefing from the incident lead, the file list, time-zone notes and a short AWS glossary. Start here."
+    },
+    {
+      "path": "waf/access.log",
+      "format": "nginx log (EST, -0500)",
+      "description": "Every request through the edge WAF / reverse proxy: client IP, request, status, bytes, user agent, the `upstream=` nginx connected to and the WAF verdict."
+    },
+    {
+      "path": "waf/edge-waf.conf",
+      "format": "nginx config",
+      "description": "The WAF's `log_format`, its custom ModSecurity rules and its routes. Read it to understand each log field."
+    },
+    {
+      "path": "cloudtrail/111122223333_CloudTrail_us-east-1_20261117.jsonl",
+      "format": "JSON lines (UTC)",
+      "description": "CloudTrail for 17 Nov, 22:00Z to midnight: one event per line, management and S3 data events."
+    },
+    {
+      "path": "cloudtrail/111122223333_CloudTrail_us-east-1_20261118.jsonl",
+      "format": "JSON lines (UTC)",
+      "description": "CloudTrail for 18 Nov, midnight to 08:00Z. Most of the night happens here."
+    },
+    {
+      "path": "s3-access-logs/fh-prod-customer-exports/2026-11-18.log",
+      "format": "S3 access log (UTC)",
+      "description": "S3 server access log of the prod exports bucket, 18 Nov: remote IP, requester, operation, key, status, bytes."
+    },
+    {
+      "path": "s3-access-logs/fh-prod-customer-exports/2026-11-19.log",
+      "format": "S3 access log (UTC)",
+      "description": "The same bucket on 19 Nov, until 13:00Z."
+    },
+    {
+      "path": "vpc-flow-logs/eni-0c7d1e2f3a4b5c6d7.log",
+      "format": "VPC flow log v2 (epoch)",
+      "description": "Flow logs of the WAF instance's network interface, 10-minute aggregation. `start`/`end` are epoch seconds."
+    },
+    {
+      "path": "ec2/describe-instances.json",
+      "format": "JSON",
+      "description": "`aws ec2 describe-instances` for the WAF and the statements-api instances: addresses, instance profiles, metadata options."
+    },
+    {
+      "path": "iam/roles/fh-waf-edge-role.json",
+      "format": "JSON",
+      "description": "The WAF instance role: trust policy, instance profile, attached and inline policies."
+    },
+    {
+      "path": "iam/roles/fh-statements-api-role.json",
+      "format": "JSON",
+      "description": "The statements-api role, for comparison."
+    },
+    {
+      "path": "iam/access-keys.csv",
+      "format": "CSV",
+      "description": "Long-lived IAM user access keys, their status and last use."
+    },
+    {
+      "path": "guardduty/findings.json",
+      "format": "JSON (UTC)",
+      "description": "GuardDuty findings export. Active findings only."
+    },
+    {
+      "path": "guardduty/suppression-rules.json",
+      "format": "JSON",
+      "description": "GuardDuty suppression rules (filters that auto-archive findings)."
+    },
+    {
+      "path": "slack/inc-prod-exports.json",
+      "format": "Slack export (JSON)",
+      "description": "The incident channel on 19 Nov. `ts` is epoch seconds as a string. Theories, not facts."
+    },
+    {
+      "path": "tickets/CHG-4471.txt",
+      "format": "text (EST)",
+      "description": "The change ticket for Tuesday evening's staging cleanup."
+    }
+  ],
+  "rules": [
+    "Work only from the evidence pack. Don't read the generator source or the site's source code; that spoils the fun.",
+    "Answers are case-insensitive, and leading and trailing whitespace is ignored. Stick to the format shown under each question.",
+    "Each hint costs the points shown on it. Hints are revealed in order, from a gentle nudge to almost the full command.",
+    "Working in pairs is encouraged. Talk through your reasoning out loud, just like a real incident review.",
+    "Any tool is allowed: grep, awk, jq, Python, a spreadsheet, your favourite editor. The Toolbox tab lists commands that help.",
+    "Wrong answers cost nothing, so guess freely. Still, try to be able to explain *why* your answer is right.",
+    "Don't share flags with other teams until everyone is done. Sharing techniques is fine.",
+    "Every IP, account id and key in the pack is fictional. Investigate the logs; don't point any of it at a real system."
+  ],
+  "questions": [
+    {
+      "stage": {
+        "name": "The way in",
+        "goal": "Find the client IP whose request through the WAF got a successful answer from the instance metadata service.",
+        "lookFor": [
+          "`waf/access.log` has an `upstream=` field: where nginx really connected",
+          "The metadata service lives at 169.254.169.254, but an address can be written more than one way",
+          "Blocked requests (`waf=block`, 403) never reached it",
+          "Only a 200 counts as success"
+        ],
+        "tools": [
+          "grep-fixed",
+          "grep-only-match",
+          "waf-fields",
+          "waf-blocked",
+          "flow-outbound",
+          "decimal-ip"
+        ],
+        "explorerTip": "Open `waf/access.log` and add a **contains** filter `upstream=169.254.169.254`, then a **regex** filter `\" 200 `. Run **Count unique** with the regex `^(\\S+)` to list the client IPs that remain. Now compare with a plain **contains** `169.254.169.254` filter: how is the address written in the requests that got through?"
+      },
+      "id": "q1",
+      "title": "The way in",
+      "prompt": "Someone made our WAF talk to the EC2 instance metadata service (`169.254.169.254`), the internal endpoint that hands out the instance role's credentials. Plenty of scanners tried that night.\n\n**Which client IP actually got a successful (HTTP 200) answer from it** through the WAF?\n\nAnswer with the IPv4 address.",
+      "answerFormat": "IPv4 address",
+      "placeholder": "192.0.2.1",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "`grep 169.254.169.254` finds plenty of probes from several IPs, all blocked with 403. The requests that worked may not contain that string in the URL at all. Open `waf/edge-waf.conf`: which log field records where nginx *really* connected?"
+        },
+        {
+          "cost": 20,
+          "text": "Filter on the `upstream=` field instead of the URL, keep only status `200` (field `$9`), then list the client IPs (field `$1`). Look at how those URLs spell the address: a single decimal number is a valid IPv4 address too."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngrep -F 'upstream=169.254.169.254' waf/access.log | awk '$9 == 200 {print $1}' | sort | uniq -c\n```"
+        }
+      ],
+      "successNote": "Blocklists match strings, not destinations. Rule `100231` looked for the text `169.254.169.254`, while the attacker wrote the same address as one decimal number and walked straight past it. The real bug is `proxy_pass $arg_u`: a proxy that fetches any URL a stranger hands it. Fixes: an allowlist of destination hosts, checking the **resolved IP** after DNS, and blocking link-local ranges at the network layer.\n\nNotice the warm-up too: harmless URLs first, then a request to the attacker's own server on port 8000. The flow logs show the WAF connecting **out** to it, the classic out-of-band SSRF test."
+    },
+    {
+      "stage": {
+        "name": "When were the keys stolen?",
+        "goal": "Find the UTC time of the first request that returned the role's temporary credentials.",
+        "lookFor": [
+          "`.../iam/security-credentials/` on its own only lists the role name",
+          "The keys come from `.../security-credentials/<role-name>`",
+          "The WAF logs US Eastern time (-0500)",
+          "Late evening in New York is already the next day in UTC"
+        ],
+        "tools": [
+          "grep-fixed",
+          "first-last-match",
+          "waf-fields",
+          "nginx-time-to-utc",
+          "est-to-utc",
+          "utc-to-est"
+        ],
+        "explorerTip": "In `waf/access.log`, filter **contains** `security-credentials/` and **contains** your stage 1 IP. Look at the response sizes, pick the right path, use **First match**, then turn the `-0500` time into UTC with the **time converter**."
+      },
+      "id": "q2",
+      "title": "When were the keys stolen?",
+      "prompt": "The metadata service hands out credentials at `/latest/meta-data/iam/security-credentials/<role-name>`.\n\nWhen did the attacker **first** successfully retrieve the role's credentials?\n\nAnswer with the time **in UTC** as `HH:MM:SS` (no date).",
+      "answerFormat": "HH:MM:SS (UTC)",
+      "placeholder": "04:20:00",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Two paths look alike. The one ending in `security-credentials/` returns only the role name (look at its tiny response size). Only the one with the role name appended returns keys, and the attacker fetched it more than once."
+        },
+        {
+          "cost": 20,
+          "text": "Take the **earliest** such line with status 200 from your stage 1 IP. Its time is EST (`-0500`): add five hours, and expect the date to change."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngrep -F 'upstream=169.254.169.254' waf/access.log \\\n  | awk '$9 == 200 && $7 ~ /security-credentials\\/[^\\/]+$/ {print $4, $5}'\ndate -u -d '17 Nov 2026 HH:MM:SS -0500' +%H:%M:%S\n```"
+        }
+      ],
+      "successNote": "IMDSv1 answers any plain `GET` from inside the instance, including one your own reverse proxy makes for a stranger. **IMDSv2** demands a session token that must first be requested with a `PUT` carrying a special header, which a URL-fetching SSRF like this one cannot send. `ec2/describe-instances.json` shows `HttpTokens: optional` on the WAF and `required` on the newer instances.\n\nCloudTrail even labels such sessions: `ec2RoleDelivery: 1.0` means the credentials were delivered by IMDSv1. That is worth an alert on its own."
+    },
+    {
+      "stage": {
+        "name": "Whose hands?",
+        "goal": "Find the temporary access key id that was used by someone other than the WAF instance.",
+        "lookFor": [
+          "For an EC2 instance role, the CloudTrail session name is the instance id",
+          "Role credentials rotate: the instance itself uses several keys during the night",
+          "`ec2/describe-instances.json` gives the instance's own addresses",
+          "Same role, same key, different `sourceIPAddress` and `userAgent`"
+        ],
+        "tools": [
+          "ct-pretty",
+          "ct-where",
+          "ct-useragent",
+          "ct-select-role",
+          "ec2-metadata-options",
+          "access-keys-table"
+        ],
+        "explorerTip": "Open the 18 Nov CloudTrail file and add the **JSON field filter** `userIdentity.sessionContext.sessionIssuer.userName = <role-name>`. Run **Count unique** with the regex `\"sourceIPAddress\":\"([^\"]+)\"`, then add a **NOT** filter for the instance's own public IP and **Count unique** with `\"accessKeyId\":\"(\\w+)\"`."
+      },
+      "id": "q3",
+      "title": "Whose hands?",
+      "prompt": "Every suspicious call in CloudTrail is signed by our own WAF instance role, and the instance uses that role all night long too.\n\n**Which temporary access key id (`ASIA...`) was used by someone who was not the instance?**\n\nAnswer with the 20-character key id.",
+      "answerFormat": "Access key id (20 chars, starts with ASIA)",
+      "placeholder": "ASIAEXAMPLE000000000",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Find the WAF instance's own public and private IP in `ec2/describe-instances.json` (match its instance profile to the role in `iam/roles/`). Anything the role does from any other address deserves a hard look."
+        },
+        {
+          "cost": 20,
+          "text": "Group the role's events by `sourceIPAddress`, `userAgent` and `userIdentity.accessKeyId`. You will see three keys, because IMDS rotates them. Only one of them also shows up from an address that isn't the instance, with a very different client."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ncat cloudtrail/*.jsonl | jq -r 'select(.userIdentity.sessionContext.sessionIssuer.userName == \"<role-name>\")\n  | [.sourceIPAddress, .userIdentity.accessKeyId, .userAgent[0:30]] | @tsv' | sort | uniq -c\n```"
+        }
+      ],
+      "successNote": "Role credentials are bearer tokens: whoever holds them *is* the role, from anywhere on the internet. CloudTrail can't tell you *who* is behind a session, only **where** each call came from and **which client** made it. Here the very same key was used from the WAF's address by a Go log shipper and, at the same time, from an unknown address by `aws-cli`. That pattern is exactly what GuardDuty's `InstanceCredentialExfiltration.OutsideAWS` finding detects. Ours went straight to the archive: a 2024 suppression rule muted every finding for this role.\n\nNote also that the API calls came from a **different IP** than the SSRF. A data-perimeter condition such as `aws:SourceVpce` (the statements-api role has one) would have made the stolen keys useless outside our network."
+    },
+    {
+      "stage": {
+        "name": "What was taken?",
+        "goal": "Count the distinct objects the stolen credentials downloaded successfully.",
+        "lookFor": [
+          "Only `GetObject` events without an `errorCode`",
+          "Count objects (bucket + key), not calls: some files were fetched twice",
+          "Filter on where the call came from, not only on the key: the instance used the same key",
+          "Every bucket counts, not just prod"
+        ],
+        "tools": [
+          "ct-timeline",
+          "ct-errors",
+          "ct-not-ip",
+          "ct-unique-objects",
+          "s3-by-ip",
+          "s3-bytes"
+        ],
+        "explorerTip": "In the 18 Nov CloudTrail file, filter **contains** the address the stolen key was used from, **contains** `\"eventName\":\"GetObject\"`, and add a **NOT** filter `errorCode`. Then run **Count unique** with the regex `arn:aws:s3:::([^\"/]+/[^\"]+)` (the object ARN is bucket + key): the number of unique values is your answer."
+      },
+      "id": "q4",
+      "title": "What was taken?",
+      "prompt": "How much did they take?\n\nCount the **distinct objects** (bucket + key) that the stolen credentials **successfully** downloaded with `GetObject`, across **all buckets**. Failed attempts don't count, and a file downloaded twice counts once.\n\nAnswer with an integer.",
+      "answerFormat": "Integer (distinct objects)",
+      "placeholder": "42",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Start from the events you isolated in stage 3: the role, used from outside. Keep only `GetObject` without an `errorCode`. `AccessDenied` and `NoSuchKey` are attempts, not downloads."
+        },
+        {
+          "cost": 20,
+          "text": "Build `bucket/key` from `requestParameters` and dedupe with `sort -u`. Don't filter on the access key alone: the instance read its own config files with that very key. You can cross-check the prod part with `s3-access-logs/` (`REST.GET.OBJECT`, status 200, the attacker's IP)."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ncat cloudtrail/*.jsonl | jq -r 'select(.sourceIPAddress == \"<api-ip>\" and .eventName == \"GetObject\" and (has(\"errorCode\") | not))\n  | \"\\(.requestParameters.bucketName)/\\(.requestParameters.key)\"' | sort -u | wc -l\n```"
+        }
+      ],
+      "successNote": "This number drives the breach notification: which customers, which data, which regulators. Count **objects**, not requests, and only the ones that succeeded. The attacker also went for the cardholder vault and was stopped because the role had no `kms:Decrypt` on the vault's key. That is worth saying out loud in the report: a KMS key with its own policy is a real second wall. Plain SSE-S3 is not, because S3 decrypts for anyone allowed to `GetObject`.\n\nThe attacker also copied the WAF's own rules and config, which tells you they were studying the defences."
+    },
+    {
+      "stage": {
+        "name": "Who deleted prod?",
+        "goal": "Find the API call that actually made prod's objects disappear.",
+        "lookFor": [
+          "The S3 access log shows *how* the objects disappeared and who the requester was",
+          "`Delete*` calls on prod were attempted: did any of them succeed?",
+          "Some API calls change what S3 will do later, not right now",
+          "The staging cleanup happened on different buckets"
+        ],
+        "tools": [
+          "s3-ops",
+          "s3-requesters",
+          "ct-event-names",
+          "ct-errors",
+          "ct-timeline"
+        ],
+        "explorerTip": "Open `s3-access-logs/fh-prod-customer-exports/2026-11-19.log` and run **Count unique** with the regex `\\] \\S+ \\S+ \\S+ (\\S+)` to list the operations. Then open the 18 Nov CloudTrail file, filter **contains** the attacker's API address, add **contains** `\"readOnly\":false` and a **NOT** filter `errorCode`."
+      },
+      "id": "q5",
+      "title": "Who deleted prod?",
+      "prompt": "By 19 Nov most of the objects were gone, yet no `DeleteObject` or `DeleteBucket` on prod ever succeeded.\n\n**Which API call actually destroyed prod's data?**\n\nAnswer with its `eventName`, **exactly as CloudTrail logs it**.",
+      "answerFormat": "CloudTrail eventName, exact spelling",
+      "placeholder": "DeleteObjects",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Look at the operation column of the 19 Nov S3 access log. The deletions there have no IP address and the requester is `AmazonS3`: S3 removed the objects itself, because something told it to."
+        },
+        {
+          "cost": 20,
+          "text": "The attacker's `DeleteObject` and `DeleteBucket` calls failed with `AccessDenied` (an explicit deny). Look at what the same source did next, on the same bucket, that succeeded and was not read-only. Yoni's look-alike call on Tuesday was on a staging bucket."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ncat cloudtrail/*.jsonl | jq -r 'select(.sourceIPAddress == \"<api-ip>\" and .readOnly == false)\n  | [.eventTime, .eventName, .requestParameters.bucketName, .errorCode // \"OK\"] | @tsv'\n```"
+        }
+      ],
+      "successNote": "A deny list is only as good as the actions it names. The role had an explicit deny on `s3:DeleteObject` and `s3:DeleteBucket` for `fh-prod-*`, so the attacker had S3 do the deleting: a bucket rule that expires every object after one day. S3 removed the objects on its own schedule, after midnight UTC. Those removals appear in the S3 server access log as `S3.EXPIRE.OBJECT` by `AmazonS3`, and **never** in CloudTrail as deletes. That is why grepping CloudTrail for `Delete` pointed at Yoni.\n\nProtect buckets that matter with **versioning plus Object Lock** (or MFA delete), deny bucket-configuration changes as well as deletes, and alert on every one of them."
+    },
+    {
+      "stage": {
+        "name": "Why was it allowed?",
+        "goal": "Find the policy statement that granted the call from stage 5.",
+        "lookFor": [
+          "`iam/roles/fh-waf-edge-role.json` holds the role's inline policy",
+          "CloudTrail event names are not always IAM action names",
+          "A statement must match both the action and the resource",
+          "An explicit deny wins, but only for the actions it lists"
+        ],
+        "tools": [
+          "iam-statements",
+          "iam-action-names",
+          "iam-glob-test",
+          "ec2-metadata-options"
+        ],
+        "explorerTip": "Open `iam/roles/fh-waf-edge-role.json` and read each statement's `Sid`, `Effect`, `Action` and `Resource`. Translate your stage 5 event into its IAM action (Toolbox: *API names vs IAM action names*), then test it against every `Action` pattern and check that the `Resource` covers the bucket ARN."
+      },
+      "id": "q6",
+      "title": "Why was it allowed?",
+      "prompt": "The WAF only ever needed to read its rules and ship its logs.\n\n**Which statement in the role's inline policy allowed the call from stage 5?**\n\nAnswer with the statement's `Sid`, exactly as written.",
+      "answerFormat": "Policy statement Sid (exact)",
+      "placeholder": "AllowSomething",
+      "points": 150,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "CloudTrail logs the API operation, but IAM authorizes an **action**, and for S3 bucket-configuration APIs the two names differ. Look your stage 5 event up in the AWS Service Authorization Reference for Amazon S3."
+        },
+        {
+          "cost": 20,
+          "text": "The action you need is `s3:PutLifecycleConfiguration`, on the resource `arn:aws:s3:::<bucket>`. Which `Allow` statement has an `Action` pattern that matches it *and* a `Resource` that covers the bucket? Does any `Deny` name it?"
+        },
+        {
+          "cost": 40,
+          "text": "```sh\njq -r '.RolePolicies[].PolicyDocument.Statement[] | [.Sid, .Effect, (.Action | tostring), (.Resource | tostring)] | @tsv' \\\n  iam/roles/fh-waf-edge-role.json\n[[ s3:PutLifecycleConfiguration == <pattern> ]] && echo matches   # try each Action pattern\n```"
+        }
+      ],
+      "successNote": "Wildcards age badly. A *temporary* `s3:Put*` on `*`, added for a 2024 log migration and never removed, quietly included `s3:PutLifecycleConfiguration`, `s3:PutBucketPolicy` and every other `Put` on every bucket in the account. Next to `s3:Get*` and `s3:List*` on `*`, a WAF role became a read-and-reconfigure-everything role, and the delete-only deny never stood a chance.\n\nThe whole chain: **SSRF** in the WAF's preview proxy, **IMDSv1** answering it, an **over-broad role**, and **no detection** because the findings were suppressed. Break any one link and this story ends much earlier. Least privilege means named actions on named resources, plus data-perimeter conditions; IAM Access Analyzer's unused-access findings and policy generation make it practical."
+    }
+  ],
+  "toolbox": [
+    {
+      "category": "Getting oriented",
+      "items": [
+        {
+          "id": "unzip-evidence",
+          "title": "Unpack the evidence",
+          "command": "unzip who-deleted-prod-evidence.zip && cd who-deleted-prod",
+          "explain": "Extracts the pack. Everything lives under one top-level folder.",
+          "powershell": "Expand-Archive .\\who-deleted-prod-evidence.zip -DestinationPath .\ncd .\\who-deleted-prod"
+        },
+        {
+          "id": "list-files",
+          "title": "See what you've got",
+          "command": "find . -type f | sort | xargs ls -l",
+          "explain": "Every file with its size. The big ones (WAF log, flow logs, CloudTrail) are the ones you will filter, not read.",
+          "powershell": "Get-ChildItem -Recurse -File | Select-Object FullName, Length"
+        },
+        {
+          "id": "read-readme",
+          "title": "Read the README",
+          "command": "cat README_FIRST.txt",
+          "explain": "Time zones, formats and a glossary. Read it before anything else.",
+          "powershell": "Get-Content README_FIRST.txt"
+        },
+        {
+          "id": "head-lines",
+          "title": "Peek at the first lines",
+          "command": "head -n 3 waf/access.log",
+          "explain": "Look at a format **before** you parse it. `tail -n 3` shows the end of the window.",
+          "powershell": "Get-Content waf\\access.log -TotalCount 3"
+        },
+        {
+          "id": "line-count",
+          "title": "How big is it?",
+          "command": "wc -l waf/access.log cloudtrail/*.jsonl s3-access-logs/*/*.log",
+          "explain": "Line counts tell you whether to eyeball a file or aggregate it.",
+          "powershell": "Get-ChildItem waf\\access.log, cloudtrail\\*.jsonl | ForEach-Object { '{0,8} {1}' -f (Get-Content $_.FullName | Measure-Object -Line).Lines, $_.Name }"
+        }
+      ]
+    },
+    {
+      "category": "grep & friends",
+      "items": [
+        {
+          "id": "grep-fixed",
+          "title": "Literal search",
+          "command": "grep -F '169.254.169.254' waf/access.log | head",
+          "explain": "`-F` treats the pattern as plain text, so the dots in an IP are dots, not \"any character\". It only finds the address **spelled exactly that way**.",
+          "powershell": "Select-String -Path waf\\access.log -Pattern '169.254.169.254' -SimpleMatch | Select-Object -First 10"
+        },
+        {
+          "id": "grep-count",
+          "title": "Count matches",
+          "command": "grep -c 'waf=block' waf/access.log",
+          "explain": "`-c` prints how many lines match. Fast sanity checks.",
+          "powershell": "(Select-String -Path waf\\access.log -Pattern 'waf=block' -SimpleMatch).Count"
+        },
+        {
+          "id": "grep-exclude",
+          "title": "Invert / exclude",
+          "command": "grep -v -e 'waf=block' -e '/static/' waf/access.log | head",
+          "explain": "`-v` keeps lines that do **not** match. Each `-e` adds a pattern. Good for peeling off noise.",
+          "powershell": "Select-String -Path waf\\access.log -Pattern 'waf=block', '/static/' -NotMatch | Select-Object -First 10"
+        },
+        {
+          "id": "grep-only-match",
+          "title": "Print only the match",
+          "command": "grep -o 'upstream=[^ ]*' waf/access.log | sort | uniq -c | sort -rn",
+          "explain": "`-o` outputs just the matched text. Here: every upstream nginx connected to, with counts. Rare values deserve a look.",
+          "powershell": "Select-String -Path waf\\access.log -Pattern 'upstream=\\S+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "grep-all-files",
+          "title": "Search several files at once",
+          "command": "grep -h -F 'pattern' cloudtrail/*.jsonl | head",
+          "explain": "`-h` drops the file name prefix so the output is still valid JSON lines you can pipe into `jq`.",
+          "powershell": "Select-String -Path cloudtrail\\*.jsonl -Pattern 'pattern' -SimpleMatch | Select-Object -First 10 -ExpandProperty Line"
+        },
+        {
+          "id": "grep-context",
+          "title": "Context around a hit",
+          "command": "grep -n -B2 -A4 'pattern' waf/access.log",
+          "explain": "`-B`/`-A` show lines before and after each match: what else happened around that moment?",
+          "powershell": "Select-String -Path waf\\access.log -Pattern 'pattern' -Context 2,4"
+        }
+      ]
+    },
+    {
+      "category": "awk for access logs",
+      "items": [
+        {
+          "id": "waf-fields",
+          "title": "Pull fields from WAF lines",
+          "command": "awk '{print $1, $4, $5, $7, $9}' waf/access.log | head",
+          "explain": "Split on spaces: `$1` client IP, `$4 $5` time and offset, `$7` URI, `$9` status, `$10` bytes. The user agent contains spaces, so for later fields use `grep -o 'upstream=[^ ]*'` instead of counting.",
+          "powershell": "Get-Content waf\\access.log -TotalCount 10 | ForEach-Object { $f = $_ -split ' '; \"$($f[0]) $($f[3]) $($f[4]) $($f[6]) $($f[8])\" }"
+        },
+        {
+          "id": "status-histogram",
+          "title": "Status code histogram",
+          "command": "awk '{print $9}' waf/access.log | sort | uniq -c | sort -rn",
+          "explain": "How many of each status. The classic first look at any access log.",
+          "powershell": "Select-String -Path waf\\access.log -Pattern '\" (\\d{3}) ' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "ip-histogram",
+          "title": "Top client IPs",
+          "command": "awk '{print $1}' waf/access.log | sort | uniq -c | sort -rn | head -20",
+          "explain": "Who talks to us the most? Attackers are often *not* at the top: they make few, precise requests.",
+          "powershell": "Select-String -Path waf\\access.log -Pattern '^(\\S+)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name"
+        },
+        {
+          "id": "field-filter",
+          "title": "Filter by field, then by text",
+          "command": "awk '$9 == 200' waf/access.log | grep -F '/proxy/fetch' | head",
+          "explain": "awk compares a field exactly (`200` won't match inside a byte count), then grep narrows by path.",
+          "powershell": "Select-String -Path waf\\access.log -Pattern '\" 200 ' | Where-Object { $_.Line -like '*/proxy/fetch*' } | Select-Object -First 10 -ExpandProperty Line"
+        },
+        {
+          "id": "waf-blocked",
+          "title": "What did the WAF block?",
+          "command": "grep -F 'waf=block' waf/access.log | grep -o 'rule=[0-9]*' | sort | uniq -c",
+          "explain": "Which custom rules fired, and how often. Then read those rules in `waf/edge-waf.conf`: what exactly do they match?",
+          "powershell": "Select-String -Path waf\\access.log -Pattern 'waf=block rule=(\\d+)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name"
+        },
+        {
+          "id": "first-last-match",
+          "title": "First and last occurrence",
+          "command": "grep -F 'pattern' waf/access.log | sed -n '1p;$p'",
+          "explain": "Start and end of a phenomenon in one go. The log is in time order.",
+          "powershell": "$hits = Select-String -Path waf\\access.log -Pattern 'pattern' -SimpleMatch\n$hits[0].Line\n$hits[-1].Line"
+        }
+      ]
+    },
+    {
+      "category": "jq for CloudTrail",
+      "items": [
+        {
+          "id": "ct-pretty",
+          "title": "Pretty-print one event",
+          "command": "head -n1 cloudtrail/*20261118.jsonl | jq .",
+          "explain": "See every field a CloudTrail record carries: `userIdentity`, `sourceIPAddress`, `userAgent`, `eventName`, `requestParameters`, `errorCode`...",
+          "powershell": "Get-Content cloudtrail\\*20261118.jsonl -TotalCount 1 | ConvertFrom-Json | ConvertTo-Json -Depth 10"
+        },
+        {
+          "id": "ct-event-names",
+          "title": "Which API calls happened?",
+          "command": "cat cloudtrail/*.jsonl | jq -r '.eventName' | sort | uniq -c | sort -rn",
+          "explain": "A histogram of `eventName`. Rare write calls stand out.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Group-Object eventName | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "ct-who",
+          "title": "Who signed the calls?",
+          "command": "cat cloudtrail/*.jsonl | jq -r '.userIdentity.arn // .userIdentity.type' | sort | uniq -c | sort -rn",
+          "explain": "Principals by volume. For an assumed role the ARN ends in the session name; for an EC2 instance role that is the instance id.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | ForEach-Object { if ($_.userIdentity.arn) { $_.userIdentity.arn } else { $_.userIdentity.type } } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "ct-where",
+          "title": "Who, from where, with which key",
+          "command": "cat cloudtrail/*.jsonl | jq -r '[.userIdentity.arn // \"-\", .sourceIPAddress, .userIdentity.accessKeyId // \"-\"] | @tsv' | sort | uniq -c | sort -rn",
+          "explain": "Groups events by principal, source IP and access key. One principal should normally come from a small, predictable set of places.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | ForEach-Object { '{0} {1} {2}' -f $_.userIdentity.arn, $_.sourceIPAddress, $_.userIdentity.accessKeyId } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "ct-useragent",
+          "title": "Which client made the call?",
+          "command": "cat cloudtrail/*.jsonl | jq -r '[.sourceIPAddress, .userAgent[0:40]] | @tsv' | sort | uniq -c | sort -rn | head -20",
+          "explain": "The `userAgent` tells you the SDK or tool. A service written in Go doesn't suddenly start using a Python CLI.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | ForEach-Object { '{0} {1}' -f $_.sourceIPAddress, $_.userAgent.Substring(0, [Math]::Min(40, $_.userAgent.Length)) } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name"
+        },
+        {
+          "id": "ct-select-role",
+          "title": "Only one role",
+          "command": "cat cloudtrail/*.jsonl | jq -c 'select(.userIdentity.sessionContext.sessionIssuer.userName == \"<role-name>\")' | head",
+          "explain": "`sessionIssuer.userName` is the role behind an assumed-role session, whatever the session is called.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.userIdentity.sessionContext.sessionIssuer.userName -eq '<role-name>' } | Select-Object -First 10 eventTime, eventName, sourceIPAddress"
+        },
+        {
+          "id": "ct-not-ip",
+          "title": "Exclude known sources",
+          "command": "cat cloudtrail/*.jsonl | jq -c 'select(.sourceIPAddress != \"<ip>\" and .sourceIPAddress != \"<other-ip>\")' | head",
+          "explain": "Drop the addresses you can explain and see what's left.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.sourceIPAddress -notin @('<ip>', '<other-ip>') } | Select-Object -First 10 eventTime, eventName, sourceIPAddress"
+        },
+        {
+          "id": "ct-errors",
+          "title": "Failed calls",
+          "command": "cat cloudtrail/*.jsonl | jq -r 'select(.errorCode) | [.eventTime, .eventName, .errorCode, .sourceIPAddress] | @tsv'",
+          "explain": "`errorCode` exists only when a call failed. A failure is an attempt, not an action, but attempts show intent.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.errorCode } | Format-Table eventTime, eventName, errorCode, sourceIPAddress"
+        },
+        {
+          "id": "ct-timeline",
+          "title": "One actor's timeline",
+          "command": "cat cloudtrail/*.jsonl | jq -r 'select(.sourceIPAddress == \"<ip>\") | [.eventTime, .eventName, .requestParameters.bucketName // \"-\", .errorCode // \"OK\", .readOnly] | @tsv'",
+          "explain": "Everything one source did, in order, with the target bucket and whether it worked. `readOnly` is false for calls that change something.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.sourceIPAddress -eq '<ip>' } | Format-Table eventTime, eventName, @{n='bucket'; e={$_.requestParameters.bucketName}}, errorCode, readOnly"
+        },
+        {
+          "id": "ct-unique-objects",
+          "title": "Distinct objects read",
+          "command": "cat cloudtrail/*.jsonl | jq -r 'select(.eventName == \"GetObject\" and (has(\"errorCode\") | not)) | \"\\(.requestParameters.bucketName)/\\(.requestParameters.key)\"' | sort -u | wc -l",
+          "explain": "Builds `bucket/key` for every successful `GetObject` and counts unique ones. Add your own `select()` conditions for *who*.",
+          "powershell": "(Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.eventName -eq 'GetObject' -and -not $_.errorCode } | ForEach-Object { $_.requestParameters.bucketName + '/' + $_.requestParameters.key } | Sort-Object -Unique | Measure-Object).Count"
+        }
+      ]
+    },
+    {
+      "category": "S3 server access logs",
+      "items": [
+        {
+          "id": "s3-fields",
+          "title": "S3 access log fields",
+          "command": "awk '{print $3, $5, $6, $8, $9}' s3-access-logs/*/*.log | head",
+          "explain": "`$2` bucket, `$3 $4` time (UTC), `$5` remote IP, `$6` requester (ARN, or a service), `$7` request id, `$8` operation, `$9` key. Status follows the quoted request line.",
+          "powershell": "Get-Content s3-access-logs\\*\\*.log -TotalCount 10 | ForEach-Object { $f = $_ -split ' '; \"$($f[2]) $($f[4]) $($f[5]) $($f[7]) $($f[8])\" }"
+        },
+        {
+          "id": "s3-ops",
+          "title": "Operations histogram",
+          "command": "awk '{print $8}' s3-access-logs/*/*.log | sort | uniq -c | sort -rn",
+          "explain": "`REST.GET.OBJECT`, `REST.PUT.OBJECT`, ... and operations S3 performs on its own. Which ones only appear on one day?",
+          "powershell": "Get-Content s3-access-logs\\*\\*.log | ForEach-Object { ($_ -split ' ')[7] } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "s3-requesters",
+          "title": "Who touched the bucket, from where",
+          "command": "awk '{print $5, $6}' s3-access-logs/*/*.log | sort | uniq -c | sort -rn",
+          "explain": "Remote IP and requester together. The same requester ARN from two very different networks is a red flag.",
+          "powershell": "Get-Content s3-access-logs\\*\\*.log | ForEach-Object { $f = $_ -split ' '; \"$($f[4]) $($f[5])\" } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "s3-by-ip",
+          "title": "One source's requests",
+          "command": "awk '$5 == \"<ip>\" {print $3, $8, $9}' s3-access-logs/*/*.log | head -30",
+          "explain": "Every request from one IP: time, operation and key.",
+          "powershell": "Get-Content s3-access-logs\\*\\*.log | Where-Object { ($_ -split ' ')[4] -eq '<ip>' } | ForEach-Object { $f = $_ -split ' '; \"$($f[2]) $($f[7]) $($f[8])\" } | Select-Object -First 30"
+        },
+        {
+          "id": "s3-bytes",
+          "title": "Bytes sent",
+          "command": "awk '$5 == \"<ip>\" && $8 == \"REST.GET.OBJECT\"' s3-access-logs/*/*.log | grep -oE 'HTTP/1.1\" 200 - [0-9]+' | awk '{s += $NF} END {print s}'",
+          "explain": "Sums the bytes S3 sent for successful object reads. Useful for the breach report.",
+          "powershell": "Get-Content s3-access-logs\\*\\*.log | Where-Object { ($_ -split ' ')[4] -eq '<ip>' } | Select-String 'REST.GET.OBJECT .*HTTP/1.1\" 200 - (\\d+)' | ForEach-Object { [long]$_.Matches[0].Groups[1].Value } | Measure-Object -Sum"
+        }
+      ]
+    },
+    {
+      "category": "VPC flow logs",
+      "items": [
+        {
+          "id": "flow-header",
+          "title": "Number the columns",
+          "command": "head -1 vpc-flow-logs/*.log | tr ' ' '\\n' | nl",
+          "explain": "Flow log v2: `$4` srcaddr, `$5` dstaddr, `$6` srcport, `$7` dstport, `$10` bytes, `$11`/`$12` start/end (epoch), `$13` action.",
+          "powershell": "$i = 0; (Get-Content vpc-flow-logs\\*.log -TotalCount 1) -split ' ' | ForEach-Object { $i++; \"$i $_\" }"
+        },
+        {
+          "id": "flow-by-ip",
+          "title": "All flows with one host",
+          "command": "awk '$4 == \"<ip>\" || $5 == \"<ip>\"' vpc-flow-logs/*.log",
+          "explain": "Both directions. Convert `start` with `date -u -d @<epoch>`.",
+          "powershell": "Get-Content vpc-flow-logs\\*.log | Where-Object { $f = $_ -split ' '; $f[3] -eq '<ip>' -or $f[4] -eq '<ip>' }"
+        },
+        {
+          "id": "flow-outbound",
+          "title": "Connections the instance started",
+          "command": "awk 'NR > 1 && $4 ~ /^10\\./ && $6 != 443 {print $5 \":\" $7}' vpc-flow-logs/*.log | sort | uniq -c | sort -rn",
+          "explain": "A WAF mostly *answers* on 443. Flows where it is the source and the source port is not 443 are connections it opened itself. Where to?",
+          "powershell": "Get-Content vpc-flow-logs\\*.log | Select-Object -Skip 1 | ForEach-Object { $f = $_ -split ' '; if ($f[3] -like '10.*' -and $f[5] -ne '443') { $f[4] + ':' + $f[6] } } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "flow-rejects",
+          "title": "Rejected probes",
+          "command": "awk '$13 == \"REJECT\" {print $4, $7}' vpc-flow-logs/*.log | sort | uniq -c | sort -rn | head",
+          "explain": "What the security group dropped. Port scans are loud, common and usually not the story.",
+          "powershell": "Get-Content vpc-flow-logs\\*.log | Where-Object { ($_ -split ' ')[12] -eq 'REJECT' } | ForEach-Object { $f = $_ -split ' '; \"$($f[3]) $($f[6])\" } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count, Name"
+        }
+      ]
+    },
+    {
+      "category": "Time zones & timestamps",
+      "items": [
+        {
+          "id": "nginx-time-to-utc",
+          "title": "nginx time to UTC",
+          "command": "echo '[17/Nov/2026:21:15:00 -0500]' | sed -E 's#\\[([0-9]+)/([A-Za-z]+)/([0-9]+):([0-9:]+) ([-+][0-9]+)\\]#\\1 \\2 \\3 \\4 \\5#' | xargs -I{} date -u -d '{}' +%FT%TZ",
+          "explain": "Turns `[dd/Mon/yyyy:HH:MM:SS -0500]` into an ISO UTC time. Watch the date: it may roll over.",
+          "powershell": "$s = '17/Nov/2026:21:15:00 -0500' -replace '(\\d\\d)(\\d\\d)$', '$1:$2'\n[DateTimeOffset]::ParseExact($s, 'dd/MMM/yyyy:HH:mm:ss zzz', [Globalization.CultureInfo]::InvariantCulture).UtcDateTime.ToString('u')"
+        },
+        {
+          "id": "est-to-utc",
+          "title": "EST to UTC",
+          "command": "date -u -d '17 Nov 2026 21:15:00 -0500' +%H:%M:%S",
+          "explain": "In November, New York is UTC-05:00. Add five hours.",
+          "powershell": "([DateTimeOffset]'2026-11-17T21:15:00-05:00').UtcDateTime.ToString('HH:mm:ss')"
+        },
+        {
+          "id": "utc-to-est",
+          "title": "UTC to EST",
+          "command": "TZ=America/New_York date -d '2026-11-18T03:00:00Z'",
+          "explain": "What a UTC instant was on the New York office clock.",
+          "powershell": "([DateTimeOffset]'2026-11-18T03:00:00Z').ToOffset([TimeSpan]'-05:00')"
+        },
+        {
+          "id": "epoch-to-utc",
+          "title": "Epoch to UTC",
+          "command": "date -u -d @1794952800",
+          "explain": "For flow logs and Slack. On macOS: `date -u -r 1794952800`.",
+          "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794952800).UtcDateTime.ToString('u')"
+        },
+        {
+          "id": "slack-timestamps",
+          "title": "Read the Slack channel",
+          "command": "jq -r '.[] | \"\\(.ts | tonumber | floor | todate) \\(.user): \\(.text)\"' slack/inc-prod-exports.json",
+          "explain": "Slack `ts` is an epoch string. `tonumber | floor | todate` gives ISO-8601 UTC.",
+          "powershell": "(Get-Content slack\\inc-prod-exports.json -Raw | ConvertFrom-Json) | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][Math]::Floor([double]$_.ts)).ToString('u'), $_.user, $_.text }"
+        }
+      ]
+    },
+    {
+      "category": "Decoding URLs and addresses",
+      "items": [
+        {
+          "id": "decimal-ip",
+          "title": "Decimal number to IPv4",
+          "command": "n=3232235777; echo $((n>>24&255)).$((n>>16&255)).$((n>>8&255)).$((n&255))",
+          "explain": "An IPv4 address is just a 32-bit number. `http://3232235777/` and `http://192.168.1.1/` go to the same place, and string blocklists rarely know that.",
+          "powershell": "[System.Net.IPAddress]::Parse('3232235777').ToString()"
+        },
+        {
+          "id": "url-decode",
+          "title": "URL-decode a parameter",
+          "command": "python3 -c 'import sys, urllib.parse; print(urllib.parse.unquote(sys.argv[1]))' 'http%3A%2F%2Fexample.com%2Fa%20b'",
+          "explain": "`%3A` is `:`, `%2F` is `/`. Decode before you decide what a request was really asking for.",
+          "powershell": "[uri]::UnescapeDataString('http%3A%2F%2Fexample.com%2Fa%20b')"
+        }
+      ]
+    },
+    {
+      "category": "IAM & EC2 config",
+      "items": [
+        {
+          "id": "ec2-metadata-options",
+          "title": "Instances, addresses, IMDS settings",
+          "command": "jq '.Reservations[].Instances[] | {InstanceId, PrivateIpAddress, PublicIpAddress, profile: .IamInstanceProfile.Arn, MetadataOptions}' ec2/describe-instances.json",
+          "explain": "Which instance profile each instance wears, its own IPs, and whether IMDSv2 is enforced (`HttpTokens: required`).",
+          "powershell": "(Get-Content ec2\\describe-instances.json -Raw | ConvertFrom-Json).Reservations.Instances | Select-Object InstanceId, PrivateIpAddress, PublicIpAddress, @{n='profile'; e={$_.IamInstanceProfile.Arn}}, @{n='HttpTokens'; e={$_.MetadataOptions.HttpTokens}}"
+        },
+        {
+          "id": "iam-statements",
+          "title": "Policy statements at a glance",
+          "command": "jq -r '.RolePolicies[].PolicyDocument.Statement[] | [.Sid, .Effect, (.Action | tostring), (.Resource | tostring)] | @tsv' iam/roles/<role-name>.json",
+          "explain": "One line per statement: Sid, Effect, Action and Resource. Wildcards (`*`) are where the surprises live.",
+          "powershell": "(Get-Content iam\\roles\\<role-name>.json -Raw | ConvertFrom-Json).RolePolicies.PolicyDocument.Statement | Format-Table Sid, Effect, @{n='Action'; e={$_.Action -join ','}}, @{n='Resource'; e={$_.Resource -join ','}} -Wrap"
+        },
+        {
+          "id": "iam-action-names",
+          "title": "API names vs IAM action names",
+          "command": "cat cloudtrail/*.jsonl | jq -r 'select(.eventSource == \"s3.amazonaws.com\") | .eventName' | sort -u",
+          "explain": "CloudTrail logs the **API operation**; IAM authorizes an **action**, and for S3 they don't always match. `ListObjects` (V2) needs `s3:ListBucket`; `ListBuckets` needs `s3:ListAllMyBuckets`; several bucket-configuration APIs have their own action names. Check each one in the AWS Service Authorization Reference for Amazon S3.",
+          "powershell": "Get-Content cloudtrail\\*.jsonl | ConvertFrom-Json | Where-Object { $_.eventSource -eq 's3.amazonaws.com' } | Select-Object -ExpandProperty eventName -Unique"
+        },
+        {
+          "id": "iam-glob-test",
+          "title": "Does a wildcard cover an action?",
+          "command": "[[ 's3:GetObject' == s3:Get* ]] && echo match || echo no-match",
+          "explain": "IAM `Action` and `Resource` patterns are globs: `*` matches any run of characters. Test the action and the resource ARN against every statement, and remember that an explicit `Deny` beats any `Allow`.",
+          "powershell": "'s3:GetObject' -like 's3:Get*'"
+        },
+        {
+          "id": "access-keys-table",
+          "title": "Long-lived keys",
+          "command": "column -s, -t < iam/access-keys.csv",
+          "explain": "IAM user keys (`AKIA...`) and their status. Temporary role credentials (`ASIA...`) never appear here.",
+          "powershell": "Import-Csv iam\\access-keys.csv | Format-Table"
+        }
+      ]
+    }
+  ],
+  "debrief": "_Sealed._ Finish all six stages to unlock the debrief."
+}

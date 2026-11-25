@@ -1,117 +1,158 @@
-import { featuredCase, teasers } from "../content/load";
+import type { CaseStats, TodayResponse } from "../../shared/contract";
+import { allCases, getCase, teasers } from "../content/load";
 import type { Case, Teaser } from "../content/schema";
+import { fetchMyStats } from "../lib/api";
 import { h, setChildren } from "../lib/dom";
-import { computeScore, loadProgress } from "../lib/progress";
+import { cachedAccount, loadAccount, loadToday } from "../lib/session";
+import { getLang } from "../i18n/i18n";
+import { TA } from "../i18n/strings-account";
+import { T } from "../i18n/strings-player";
 
-const STEPS: ReadonlyArray<{ n: string; title: string; body: string }> = [
-  { n: "01", title: "Download the evidence", body: "Logs, metrics, a Slack export and a real git repo, packed in one zip." },
-  { n: "02", title: "Investigate with real tools", body: "grep, awk, jq, git log, a terminal and your instincts. No simulator." },
-  { n: "03", title: "Submit flags", body: "Each question has one precise answer. Checked locally against a salted hash." },
-  { n: "04", title: "Hints cost points", body: "Stuck? Reveal hints one at a time, each one costs a few points." },
-  { n: "05", title: "Unseal the debrief", body: "The full RCA is encrypted with the six answers. Capture every flag to unlock it." },
+const steps = (): ReadonlyArray<{ title: string; body: string }> => [
+  { title: T().step1Title, body: T().step1Body },
+  { title: T().step2Title, body: T().step2Body },
+  { title: T().step3Title, body: T().step3Body },
 ];
 
-function featuredCard(c: Case): HTMLElement {
-  const p = loadProgressIfStarted(c);
-  const href = `#/case/${c.id}`;
+type HomeState = {
+  today: TodayResponse | null;
+  stats: ReadonlyMap<string, CaseStats>;
+  isSignedIn: boolean;
+};
+
+const formatDate = (isoDate: string): string => {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  if (y === undefined || m === undefined || d === undefined) return isoDate;
+  return new Intl.DateTimeFormat(getLang() === "he" ? "he-IL" : "en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }).format(
+    new Date(Date.UTC(y, m - 1, d)),
+  );
+};
+
+function statusLine(stats: CaseStats | undefined): string | null {
+  if (!stats || stats.status === "not-started") return null;
+  return stats.status === "completed" ? TA().caseStatusDone(stats.score, stats.maxScore) : TA().caseStatusProgress(stats.score, stats.maxScore);
+}
+
+/** Can this case be opened right now? (lock-to-today hides the button for other unstarted cases) */
+function isOpenToday(c: Case, state: HomeState): boolean {
+  const today = state.today;
+  if (!today?.lockToToday) return true;
+  const started = state.stats.get(c.id);
+  return today.caseId === c.id || (started !== undefined && started.status !== "not-started");
+}
+
+function caseCta(c: Case, state: HomeState, primary: boolean): HTMLElement {
+  if (!isOpenToday(c, state)) return h("span", { class: "chip chip-muted mono" }, TA().lockedToday);
+  const stats = state.stats.get(c.id);
+  const label = !state.isSignedIn
+    ? TA().signInToPlay
+    : stats && stats.status !== "not-started"
+      ? T().resumeInvestigation
+      : primary
+        ? T().startInvestigation
+        : TA().openCase;
+  return h("a", { class: `btn ${primary ? "btn-primary btn-lg" : "btn-sm"}`, href: `#/case/${c.id}` }, label);
+}
+
+function todayCard(c: Case, state: HomeState, date: string): HTMLElement {
+  const line = statusLine(state.stats.get(c.id));
   return h(
     "article",
-    { class: "featured-card", "aria-labelledby": "featured-title" },
-    h(
-      "div",
-      { class: "featured-top" },
-      h("span", { class: "pill pill-live" }, h("span", { class: "dot", "aria-hidden": "true" }), "INCIDENT ACTIVE"),
-      h("span", { class: `pill pill-diff diff-${c.difficulty}` }, c.difficulty),
-      h("span", { class: "pill pill-mono" }, `~${c.estMinutes} min`),
-    ),
-    h("h3", { id: "featured-title", class: "featured-title" }, c.title),
+    { class: "featured-card today-card", "aria-labelledby": "today-title" },
+    h("p", { class: "today-kicker mono" }, h("span", { class: "dot", "aria-hidden": "true" }), TA().todayKicker(formatDate(date))),
+    h("p", { class: "featured-meta mono" }, T().featuredMeta(c.difficulty, c.estMinutes, c.questions.length)),
+    h("h2", { id: "today-title", class: "featured-title" }, c.title),
     h("p", { class: "featured-sub" }, c.subtitle),
-    h("ul", { class: "tag-list", "aria-label": "Skills" }, c.tags.map((t) => h("li", { class: "tag" }, t))),
-    h(
-      "div",
-      { class: "featured-meta mono" },
-      h("span", {}, `${c.questions.length} flags`),
-      h("span", {}, `${c.questions.reduce((s, q) => s + q.points, 0)} pts`),
-      h("span", {}, `inspired by ${c.inspiredBy.title} (${c.inspiredBy.year})`),
-    ),
-    h(
-      "div",
-      { class: "featured-actions" },
-      h("a", { class: "btn btn-primary btn-lg", href }, p ? "Resume investigation" : "Start investigation", h("span", { "aria-hidden": "true" }, " →")),
-      p ? h("span", { class: "mono muted" }, `${p.solved}/${p.total} solved · ${p.points} pts`) : null,
-    ),
+    line ? h("p", { class: "case-status mono" }, line) : null,
+    caseCta(c, state, true),
   );
 }
 
-function loadProgressIfStarted(c: Case): ReturnType<typeof computeScore> | null {
-  let started = false;
-  try {
-    started = window.localStorage.getItem(`incidentlab:progress:${c.id}`) !== null;
-  } catch {
-    started = false;
-  }
-  return started ? computeScore(c, loadProgress(c.id)) : null;
+function caseCard(c: Case, state: HomeState): HTMLElement {
+  const line = statusLine(state.stats.get(c.id));
+  const isToday = state.today?.caseId === c.id;
+  return h(
+    "article",
+    { class: `case-card${isToday ? " is-today" : ""}` },
+    h("p", { class: "featured-meta mono" }, T().featuredMeta(c.difficulty, c.estMinutes, c.questions.length)),
+    h("h3", { class: "case-card-title" }, c.title),
+    h("p", { class: "muted case-card-sub" }, c.subtitle),
+    h("div", { class: "tag-row" }, c.tags.slice(0, 4).map((tag) => h("span", { class: "chip mono" }, tag))),
+    h("div", { class: "case-card-foot" }, line ? h("span", { class: "case-status mono" }, line) : h("span", { class: "muted small" }, TA().caseStatusNew), caseCta(c, state, false)),
+  );
 }
 
 function teaserCard(t: Teaser): HTMLElement {
-  return h(
-    "article",
-    { class: "teaser-card" },
-    h("div", { class: "teaser-head" }, h("span", { class: "pill pill-mono" }, "COMING SOON"), h("span", { class: "redacted", "aria-hidden": "true" })),
-    h("h3", { class: "teaser-title" }, t.title),
-    h("p", { class: "teaser-tagline" }, t.tagline),
-    h("ul", { class: "tag-list" }, t.skills.map((s) => h("li", { class: "tag tag-dim" }, s))),
-    h("p", { class: "teaser-inspired mono" }, `inspired by: ${t.inspiredBy}`),
-  );
+  return h("article", { class: "teaser-card" }, h("h3", { class: "teaser-title" }, t.title), h("p", { class: "muted" }, t.tagline));
 }
 
-export function renderHome(root: HTMLElement): void {
-  document.title = "IncidentLab: real incidents, real evidence, your RCA";
-  const featured = featuredCase();
+function draw(root: HTMLElement, state: HomeState): void {
+  const account = cachedAccount();
+  const released = state.today?.releasedCaseIds;
+  const playable = allCases().filter((c) => released === undefined || released.includes(c.id));
+  const todayCase = state.today?.caseId ? getCase(state.today.caseId) : undefined;
+
   setChildren(
     root,
     h(
       "section",
       { class: "hero" },
-      h("p", { class: "eyebrow mono" }, h("span", { class: "prompt-char" }, "$"), " incidentlab --mode=war-room"),
-      h(
-        "h1",
-        { class: "hero-title" },
-        h("span", { class: "brand" }, "IncidentLab"),
-        h("span", { class: "hero-colon" }, ": "),
-        h("span", { class: "hero-line" }, "real incidents, real evidence, ", h("em", {}, "your RCA")),
-      ),
-      h(
-        "p",
-        { class: "hero-sub" },
-        "CTF-style puzzles rebuilt from real-world outages. You get the logs, the repo and the pager. Find the root cause before the postmortem does.",
-      ),
+      h("h1", { class: "hero-title" }, T().heroA, h("span", { class: "accent" }, T().heroB)),
+      h("p", { class: "hero-sub" }, account && account.status === "approved" ? TA().welcomeBack(account.username) : T().heroSub),
     ),
     h(
       "section",
-      { class: "section", "aria-labelledby": "featured-h" },
-      h("h2", { id: "featured-h", class: "section-title" }, h("span", { class: "mono accent" }, "// "), "Featured case"),
-      featured ? featuredCard(featured) : h("p", { class: "muted" }, "No case content found."),
+      { class: "section", "aria-label": T().featuredCase },
+      todayCase && state.today
+        ? todayCard(todayCase, state, state.today.date)
+        : state.today
+          ? h("p", { class: "muted" }, TA().todayNone)
+          : null,
+    ),
+    h(
+      "section",
+      { class: "section", "aria-labelledby": "cases-h" },
+      h("h2", { id: "cases-h", class: "section-title" }, TA().allCases),
+      state.today?.lockToToday ? h("p", { class: "muted small" }, TA().casesLockedToday) : null,
+      playable.length > 0 ? h("div", { class: "case-grid" }, playable.map((c) => caseCard(c, state))) : h("p", { class: "muted" }, T().noCases),
     ),
     h(
       "section",
       { class: "section", "aria-labelledby": "how-h" },
-      h("h2", { id: "how-h", class: "section-title" }, h("span", { class: "mono accent" }, "// "), "How it works"),
-      h(
-        "ol",
-        { class: "steps" },
-        STEPS.map((s) =>
-          h("li", { class: "step" }, h("span", { class: "step-n mono" }, s.n), h("h3", { class: "step-title" }, s.title), h("p", {}, s.body)),
-        ),
-      ),
+      h("h2", { id: "how-h", class: "section-title" }, T().howItWorks),
+      h("ol", { class: "how" }, steps().map((s, i) => h("li", {}, h("span", { class: "how-n mono" }, String(i + 1)), h("div", {}, h("h3", {}, s.title), h("p", { class: "muted" }, s.body))))),
     ),
     teasers.length > 0
       ? h(
           "section",
           { class: "section", "aria-labelledby": "soon-h" },
-          h("h2", { id: "soon-h", class: "section-title" }, h("span", { class: "mono accent" }, "// "), "Coming soon"),
+          h("h2", { id: "soon-h", class: "section-title" }, T().comingSoon),
           h("div", { class: "teaser-grid" }, teasers.map(teaserCard)),
         )
       : null,
   );
 }
+
+export function renderHome(root: HTMLElement): void {
+  document.title = T().homeTitle;
+  const token = Symbol("home");
+  activeRender = token;
+  const state: HomeState = { today: null, stats: new Map(), isSignedIn: cachedAccount() !== null };
+  draw(root, state);
+
+  // Today's case and (when signed in and approved) per-case status fill in as they arrive.
+  const today = loadToday().then(
+    (value) => value,
+    () => null,
+  );
+  const stats = loadAccount().then(
+    (account) => (account?.status === "approved" ? fetchMyStats().then((s) => s.cases, () => []) : []),
+    () => [],
+  );
+  void Promise.all([today, stats]).then(([todayValue, caseStats]) => {
+    if (activeRender !== token) return; // user navigated away
+    draw(root, { today: todayValue, stats: new Map(caseStats.map((c) => [c.caseId, c])), isSignedIn: cachedAccount() !== null });
+  });
+}
+
+let activeRender: symbol | null = null;

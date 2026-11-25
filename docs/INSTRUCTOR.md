@@ -11,26 +11,31 @@ Session shape: **10 min orientation, 40 min solve (pairs), then debrief and lect
 
 **Build and deploy**
 
-- [ ] `./scripts/build-all.sh` finishes cleanly. The `make_flags` table prints all six answers.
-- [ ] `cat build/truth/answers.json` and keep it open on your own screen (not the projector). q2 and q6
+- [ ] `./scripts/build-all.sh` finishes cleanly: the `make_flags` table prints all six answers, the solver
+      step prints six `PASS` lines, and `npm run test:server` passes.
+- [ ] `cat build/truth/all-answers.json` (every case) and keep it open on your own screen (not the projector). q2 and q6
       change when the generators change, so always read them from this file, never from memory.
-- [ ] Deploy: `npx netlify-cli deploy --prod --dir=site/dist` (or drag `site/dist` onto app.netlify.com/drop).
+- [ ] Deploy: `./scripts/deploy.sh` (needs `NETLIFY_AUTH_TOKEN` or `~/.netlify-token`). Drag-and-drop no
+      longer works because answer checking runs in a Netlify Function.
 - [ ] On the **live URL**, in a private window:
   - [ ] download the evidence zip, unzip it, confirm it contains a `3am-outage/` folder with all the files;
-  - [ ] `git clone 3am-outage/repo/shipfast-checkout.bundle` works;
+  - [ ] `git clone 3am-outage/repo/shipfast-checkout.bundle` works, and `repo/git-log.txt` is in the zip;
+  - [ ] open the **Evidence Explorer** and load `nginx/access.log` (it is large; give it a few seconds);
   - [ ] submit every answer from `answers.json` and confirm each one is accepted (also try one with extra
         spaces or different case to confirm normalization);
-  - [ ] reveal one hint, then reset your progress.
+  - [ ] sign up a test account, approve it in `#/admin` → **Accounts**, reveal one hint, confirm it shows
+        up in **Live**, then delete the test account.
+- [ ] In `#/admin` → **Schedule**, set the session date to the case you're running (or turn on
+      **Lock to today's case** so nobody wanders into another case).
 - [ ] Solve it yourself end to end once with only the toolbox. Time yourself.
 
 **Players' machines** (send this out ahead of time)
 
-- A terminal with `grep`, `awk`, `sort`, `uniq`, `wc`, `jq`, `git`, `date`, `unzip`.
-- macOS: everything is there except `jq` (`brew install jq`). Note that macOS `date` is BSD `date`; the
-  toolbox shows both flavours.
-- Linux: `sudo apt install jq` (or equivalent).
-- **Windows: use WSL (recommended) or Git Bash.** PowerShell and `cmd` will cost them the whole session.
-  Git Bash lacks `jq` by default; WSL is easier.
+- **Nothing to install.** Every player picks one path (see "No-install path" below):
+  - **Browser only:** the in-site Evidence Explorer. Works on any OS.
+  - **Windows:** Windows PowerShell 5.1 (built in). Every Toolbox command has a PowerShell version.
+  - **macOS / Linux / WSL:** bash with `grep`, `awk`, `sort`, `date`. `jq` and `git` are nice to have
+    (`brew install jq` / `apt install jq`) but optional: `repo/git-log.txt` replaces the git bundle.
 - A browser, and a way to pair (one shares a screen, the other drives the terminal or the notes).
 
 **Room**
@@ -40,6 +45,65 @@ Session shape: **10 min orientation, 40 min solve (pairs), then debrief and lect
 - [ ] Have a timer visible for the 40-minute solve.
 
 ---
+
+## Accounts and approval
+
+- Players sign up at the site with a **unique username + password** (usernames are case-insensitive, so
+  `Dana` and `dana` are the same person). New accounts are **pending**: they see a "waiting for approval"
+  screen that refreshes itself.
+- In `#/admin` → **Accounts**, pending sign-ups are listed first. **Approve** your players; **Reject** strangers
+  (rejecting also signs them out). Approving during orientation takes a few seconds per player, so start
+  sign-ups during the intro.
+- Sessions are an HttpOnly cookie that lasts 30 days, so players stay signed in across reloads and come back
+  to the same progress on any device after signing in.
+- Forgotten password: there is no email reset. Delete the account (it frees the username) and have them sign
+  up again. Their progress goes with the account.
+
+## Incident of the day
+
+`#/admin` → **Schedule** is a calendar: pick a case per date, plus a default for unscheduled days. The home page
+shows that case as **Incident of the day** (dates are in the schedule's time zone, default Asia/Jerusalem).
+**Lock to today's case** lets players *start* only today's case; anything they already started stays playable,
+so nobody is cut off at midnight.
+
+## Admin dashboard
+
+- **URL:** `<site-url>/#/admin`. It asks for the admin key and keeps it only in that browser tab's
+  `sessionStorage` (close the tab to forget it).
+- **Where the key lives:** the `ADMIN_KEY` environment variable on the Netlify site (production context).
+  `scripts/deploy.sh` creates it on first deploy and saves a copy to `~/.incidentlab-admin-key` (mode 600)
+  on the machine that deployed. Lost it? `npx -y netlify-cli@17 env:get ADMIN_KEY`. To rotate, set a new
+  value with `env:set` and redeploy.
+- **What you see:** tabs for **Accounts** (approval, per-user stats and rank), **Live** (pick a case: every player's
+  current stage, score, hints, wrong attempts, last seen; refreshes live), **Schedule** and **Stats** (per case:
+  completion, average score and time, the hardest question; plus a leaderboard).
+- **"Stuck"** = minutes since the player's *current* stage became active (not since their last action).
+  The dashboard flags **8+ min** (amber) and **15+ min** (red). That's your cue to walk over and use the
+  nudges in the "If they're stuck on" table below.
+- **Reveal-answer policy:** a player can give up on the active stage. They get the answer, **0 points**
+  for that stage, and the next stage unlocks. Encourage hints first (they cost less), and suggest
+  "reveal" only to pairs that are 15+ min stuck and losing momentum. Revealed stages show as such on the
+  dashboard, so nobody wins on reveals.
+- **Reset between sessions:** in **Live**, reset the case (asks you to confirm) to wipe everyone's progress on
+  it while keeping their accounts, or restart a single player's case. Deleting an account removes the
+  account, its sessions and all its progress.
+
+## No-install path
+
+Nobody should lose the session to tooling. Point people at one of these during orientation:
+
+- **Evidence Explorer (browser):** open it from the case page. Pick a file, then stack filters
+  (*contains*, *regex*, *NOT*), filter JSON lines by field (`msg = checkout.start`), jump to the
+  **first/last match**, view a **histogram by minute**, and **Count unique** values with a capture-group
+  regex (e.g. `cid=(\S+)`). A **time converter** widget turns epoch / UTC / +02:00 into each other. Each
+  stage has an "In the Explorer" tip with concrete steps. Everything except the binary git bundle is
+  available; `repo/git-log.txt` holds the full history with diffs.
+- **Windows PowerShell 5.1:** download and `Expand-Archive` the zip; every Toolbox item has a PowerShell
+  tab (`Select-String`, `Group-Object`, `Sort-Object -Unique`, `ConvertFrom-Json`, `Import-Csv`,
+  `[DateTimeOffset]::FromUnixTimeSeconds`). Tip: prefilter with `Select-String` before `ConvertFrom-Json`;
+  converting the whole app log line by line is slow.
+- **Git is optional everywhere:** `repo/git-log.txt` is `git log -p --decorate --all`, so "find the release
+  tag, read its diff" works with any text search.
 
 ## Agenda
 
@@ -74,7 +138,7 @@ reachable without q1 and q2.
 | **q1** first 5xx | "Which field in the access log is the status code? How would you match only 500 to 599?" Then: "Which time zone is this file in? Which is the question in?" If they have a time near 03:13: "Is that UTC?" If they have 01:12:44: "Does nginx log when the request started or when it finished? What's `rt` on that line?" |
 | **q2** bad commit | "What was running when it broke? Which file tells you what was deployed and when?" Then: "There are two checkout deploys that night. Which one was live at the time of your q1 answer?" |
 | **q3** poison order | "The app log has the request IDs. Find the request behind your first 5xx. What did the app log for it?" Then: "Every checkout that starts normally also… ?" (finishes). "Find the one that starts and never finishes." |
-| **q4** function | "You have the bad commit. What did it change? `git show <sha> --stat`." Then: "Which input from the poison order reaches the new code? What's special about that order?" |
+| **q4** function | "You have the bad commit. What did it change? `git show <sha> --stat` (or find the tag in `repo/git-log.txt`)." Then: "Which input from the poison order reaches the new code? What's special about that order?" |
 | **q5** submissions | "How many times does that order ID appear in the app log, and with which message?" If they say 8: "The question says *in total*. Is the original submission a retry?" |
 | **q6** unique customers | "Which field identifies the customer? Are all of them real people?" Then: "Are you counting requests or customers? What does `sort -u` do to your count?" Also: "Did you filter by method and path, or just path?" |
 | Distracted by the backup | "When did the slow queries start, and when did the errors start? What happened to DB query volume during the outage?" |

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Full IncidentLab build: generators -> flags -> evidence zip -> site.
+# Full IncidentLab build: generators (3am-outage + generator/cases/*) -> server answer keys -> evidence zip + Explorer files -> solver test -> site -> server tests.
 # Usage: ./scripts/build-all.sh [--no-site]
 set -euo pipefail
 
@@ -34,14 +34,27 @@ banner "Generate nginx + app logs    (generator/gen_logs.py)"
 banner "Generate supporting evidence (generator/gen_support.py)"
 "$PYTHON" generator/gen_support.py
 
-banner "Hash flags                   (scripts/make_flags.py)"
+shopt -s nullglob
+CASE_BUILDERS=(generator/cases/*/build.py)
+shopt -u nullglob
+for builder in "${CASE_BUILDERS[@]}"; do
+  banner "Generate case $(basename "$(dirname "$builder")")"
+  "$PYTHON" "$builder"
+done
+
+banner "Answer keys -> server secrets (scripts/make_flags.py)"
 "$PYTHON" scripts/make_flags.py
 
-banner "Seal debrief                 (scripts/seal_debrief.mjs)"
-node scripts/seal_debrief.mjs
-
-banner "Package evidence zip         (scripts/package.sh)"
+banner "Package evidence + Explorer  (scripts/package.sh)"
 "$ROOT/scripts/package.sh"
+
+banner "Test: official solver        (solutions/solve.sh)"
+bash solutions/solve.sh
+for builder in "${CASE_BUILDERS[@]}"; do
+  case_id="$(basename "$(dirname "$builder")")"
+  banner "Test: solver $case_id"
+  bash "solutions/$case_id/solve.sh"
+done
 
 if [[ "$BUILD_SITE" -eq 1 ]]; then
   banner "Build site                   (site: npm ci && npm run build)"
@@ -50,8 +63,14 @@ if [[ "$BUILD_SITE" -eq 1 ]]; then
     npm ci || npm install
     npm run build
   )
+  if (cd site && node -e 'process.exit(require("./package.json").scripts?.["test:server"] ? 0 : 1)'); then
+    banner "Test: server                 (site: npm run test:server)"
+    (cd site && npm run test:server)
+  else
+    echo "[build-all] site has no test:server script; skipping server tests."
+  fi
   echo
-  echo "Done. Deploy with: npx netlify-cli deploy --prod --dir=site/dist"
+  echo "Done. Deploy with: ./scripts/deploy.sh"
 else
   echo
   echo "Done (site build skipped: --no-site)."

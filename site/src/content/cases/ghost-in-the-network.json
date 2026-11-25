@@ -1,0 +1,717 @@
+{
+  "setupChecklist": [
+    "Get the evidence: download and unzip the **evidence pack**, *or* open the **Evidence Explorer** to browse every text file in your browser (no installs). The `.pcap` files are in the zip only.",
+    "Read `README_FIRST.txt` end to end.",
+    "Note each source's clock: the client log is **local time (+02:00)**; captures, firewall, ingress, changes, zone audit and dig are **UTC**; the chat uses **epoch seconds**. The firewall log has **no year**.",
+    "Pick your path: **bash** (Linux, macOS or WSL), **Windows PowerShell** (every Toolbox command has a PowerShell version), or the **browser Explorer**.",
+    "Wireshark is optional: every capture has a `tcpdump -v` text twin."
+  ],
+  "id": "ghost-in-the-network",
+  "title": "Ghost in the Network",
+  "subtitle": "Small requests work. Big ones hang forever. Half the fleet resolves an IP that hasn't existed since Tuesday. Nothing is down, yet nothing quite works.",
+  "difficulty": "hard",
+  "estMinutes": 60,
+  "tags": [
+    "tcpdump",
+    "wireshark",
+    "mtu",
+    "pmtud",
+    "icmp",
+    "iptables",
+    "dns",
+    "dig",
+    "unbound",
+    "ttl",
+    "incident-response"
+  ],
+  "inspiredBy": {
+    "title": "Slack's DNSSEC outage, plus the classic PMTUD black hole",
+    "year": 2021,
+    "summary": "On 30 September 2021 Slack enabled DNSSEC on slack.com, hit a problem with how wildcard records were answered, and rolled the change back. The DS record had already been cached by validating resolvers with a 24-hour TTL, so for some users slack.com kept failing to resolve until those caches expired or were flushed. The other ghost is older: Path MTU Discovery black holes, where filtered ICMP \"fragmentation needed\" messages make large TCP segments vanish silently, have been documented since RFC 2923 (2000)."
+  },
+  "briefing": "**Thursday, 09:05. Kestrel Freight, dc1 ops room.**\n\nYesterday was a strange day. The **ledger** API had just moved from a VM in dc1 to the cloud, behind a brand-new tunnel. Then the eight `manifest-sync` workers started misbehaving: **small requests worked, big uploads hung until the client gave up**, and some hosts couldn't reach the ledger at all. Pings worked. The ledger was healthy. Nothing was down.\n\nBy early afternoon two emergency changes had made it all go away. Nobody is sure which change fixed what, or whether it was one problem or two.\n\nThe **evidence pack** has client and ingress logs, packet captures (as text and as real `.pcap`), host firewall logs and rules, interface dumps, `dig` outputs, resolver configs, the DNS zone audit, the change calendar and the incident channel. **Read `README_FIRST.txt` first**: the sources use different clocks.\n\nSix stages, two ghosts: **when** the uploads started hanging, **what changed**, **how big** a packet may be, then the **address** that wouldn't die, **how many** hosts it haunted, and **why** the cache outlived the migration. Each answer is a small, exact value.",
+  "evidenceZip": "/evidence/ghost-in-the-network-evidence.zip",
+  "evidence": [
+    {
+      "path": "README_FIRST.txt",
+      "format": "text",
+      "description": "On-call notes: what happened from their point of view, the file list and the time zone of every source. Start here."
+    },
+    {
+      "path": "app/manifest-sync.log",
+      "format": "JSON lines (local +02:00)",
+      "description": "Client log from all eight app hosts: one line per ledger request when it ends, plus periodic resolver lines. Local time."
+    },
+    {
+      "path": "ledger/ingress-access.log",
+      "format": "nginx log (UTC)",
+      "description": "The ledger's ingress in the cloud. Only requests that actually arrived. `rid` matches `req_id` in the client log."
+    },
+    {
+      "path": "pcap/app-03_small-request.txt",
+      "format": "tcpdump -v text (UTC)",
+      "description": "One small request from app-03 to the ledger, captured on app-03's eth0."
+    },
+    {
+      "path": "pcap/app-03_large-request.txt",
+      "format": "tcpdump -v text (UTC)",
+      "description": "One manifest upload from app-03, captured on app-03's eth0. Twin of the `.pcap` in the zip."
+    },
+    {
+      "path": "pcap/app-05_ledger-connect.txt",
+      "format": "tcpdump -v text (UTC)",
+      "description": "One request attempt from app-05, captured on app-05's eth0."
+    },
+    {
+      "path": "pcap/tunnel-validation_app-03.txt",
+      "format": "tcpdump -v text (UTC)",
+      "description": "The validation capture attached to the tunnel change on Tuesday night: an upload from app-03 right after the cutover."
+    },
+    {
+      "path": "firewall/kern-app-hosts.log",
+      "format": "syslog (UTC, no year)",
+      "description": "Kernel log lines written by the host firewall's LOG rules on all eight app hosts."
+    },
+    {
+      "path": "firewall/app-03_iptables-save_before.txt",
+      "format": "iptables-save",
+      "description": "app-03's host firewall from the nightly config backup (06:00 UTC)."
+    },
+    {
+      "path": "firewall/app-03_iptables-save_after.txt",
+      "format": "iptables-save",
+      "description": "app-03's host firewall as collected during the incident."
+    },
+    {
+      "path": "network/inventory.csv",
+      "format": "CSV",
+      "description": "Hosts, IPs, racks, DNS resolver role and last boot time."
+    },
+    {
+      "path": "network/ip-link.txt",
+      "format": "shell output",
+      "description": "`ip link` and `ip route get` from app-03, app-05, the dc1 gateway and the cloud load balancer."
+    },
+    {
+      "path": "changes/change-log.csv",
+      "format": "CSV (UTC)",
+      "description": "Change calendar from Monday to Thursday. Some summaries are vaguer than the changes were."
+    },
+    {
+      "path": "dns/zone-audit.log",
+      "format": "key=value (UTC)",
+      "description": "Audit trail of the internal DNS zone on ns1: adds, deletes and TTL changes."
+    },
+    {
+      "path": "dns/dig/app-02.txt",
+      "format": "dig output (UTC)",
+      "description": "dig and getent from app-02."
+    },
+    {
+      "path": "dns/dig/app-05.txt",
+      "format": "dig output (UTC)",
+      "description": "dig from app-05, against its local resolver and against ns1, plus getent."
+    },
+    {
+      "path": "dns/dig/app-07.txt",
+      "format": "dig output (UTC)",
+      "description": "dig from app-07, against its local resolver and against ns1, plus getent."
+    },
+    {
+      "path": "dns/dig/app-08.txt",
+      "format": "dig output (UTC)",
+      "description": "dig and getent from app-08."
+    },
+    {
+      "path": "dns/unbound/node-dns-v1.conf",
+      "format": "unbound.conf",
+      "description": "Local resolver config deployed by ansible role node-dns v1."
+    },
+    {
+      "path": "dns/unbound/node-dns-v2.conf",
+      "format": "unbound.conf",
+      "description": "Local resolver config deployed by ansible role node-dns v2."
+    },
+    {
+      "path": "chat/inc-3107.json",
+      "format": "Slack export (JSON, epoch)",
+      "description": "The incident channel. `ts` is epoch seconds as a string. Opinions are hypotheses, not facts."
+    }
+  ],
+  "rules": [
+    "Work only from the evidence pack. Don't read the generator source or the site's source code; that spoils the fun.",
+    "Answers are case-insensitive, and leading and trailing whitespace is ignored. Stick to the format shown under each question.",
+    "Each hint costs the points shown on it. Hints are revealed in order, from a gentle nudge to almost the full command.",
+    "Working in pairs is encouraged. Talk through your reasoning out loud, just like a real incident review.",
+    "Any tool is allowed: grep, awk, jq, Python, Wireshark, a spreadsheet, your favourite editor. The Toolbox tab lists commands that help.",
+    "Wrong answers cost nothing, so guess freely. Still, try to be able to explain *why* your answer is right.",
+    "Don't share flags with other teams until everyone is done. Sharing techniques is fine.",
+    "There are two problems in this pack. Before you blame one, check that the evidence you're using belongs to it."
+  ],
+  "questions": [
+    {
+      "stage": {
+        "name": "When did it start?",
+        "goal": "Find when the first request that reached the ledger hung until the client gave up.",
+        "lookFor": [
+          "`app/manifest-sync.log` is in **local** time (+02:00)",
+          "Failures carry a `phase`: they did not all fail the same way",
+          "A line is written when the request **ends**",
+          "Some hosts fail for a different reason all day: don't let them distract you"
+        ],
+        "tools": [
+          "json-pretty",
+          "json-unique-field",
+          "json-first-by-time",
+          "json-size-split",
+          "local-to-utc"
+        ],
+        "explorerTip": "Open `app/manifest-sync.log` and add a **contains** filter `\"phase\":\"response\"`. Use **First match** to jump to the earliest one, then convert its `ts` with the **time converter** (it's +02:00). A **histogram** by regex `\"phase\":\"(\\w+)\"` shows the two kinds of failure side by side."
+      },
+      "id": "q1",
+      "title": "When did big uploads start hanging?",
+      "prompt": "On Wednesday morning manifest uploads started hanging. Some requests failed **after** connecting to the ledger: the connection was fine, then nothing came back until the client timed out.\n\nFind the **first** such failure in `app/manifest-sync.log` and answer with the time **that line was logged**, converted to **UTC**, as `HH:MM:SS` (no date, no milliseconds).",
+      "answerFormat": "HH:MM:SS (UTC)",
+      "placeholder": "08:30:00",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Every failure line has a `phase` field. Requests that never reached the ledger fail in one phase; requests that reached it and then waited forever fail in another. You want the earliest of the second kind."
+        },
+        {
+          "cost": 20,
+          "text": "Filter for `\"phase\":\"response\"`. The file is sorted by time, so the first match is the earliest. Its `ts` ends in `+02:00`: subtract two hours. Answer with the logged time, not the time the request started."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\njq -r 'select(.phase == \"response\") | .ts' app/manifest-sync.log | sort | head -1\ndate -u -d '<paste that ts>' +%H:%M:%S\n```"
+        }
+      ],
+      "successNote": "Two details hide in that one line. First, it was logged 30 seconds **after** the request started (`duration_ms`), so the packet that vanished left app-03 half a minute earlier: you'll find the matching firewall drop at that start time. Second, it was not the first minute after any change. Linux caches a learned path MTU per destination for **10 minutes** (`net.ipv4.route.mtu_expires`), so each host kept working on its old knowledge until its cache entry expired, one by one. A black hole that appears minutes after a change is still caused by that change."
+    },
+    {
+      "stage": {
+        "name": "What changed?",
+        "goal": "Identify the change that turned working Path MTU Discovery into a black hole.",
+        "lookFor": [
+          "Small packets get through, big ones vanish: who is supposed to say \"too big\"?",
+          "`firewall/kern-app-hosts.log` and the two `iptables-save` files",
+          "A rule comment is a tag you can search for",
+          "The latest change before the symptom is a suspect, not a verdict"
+        ],
+        "tools": [
+          "fw-prefixes",
+          "fw-first-drop",
+          "iptables-diff",
+          "changes-window",
+          "changes-grep",
+          "tcpdump-icmp"
+        ],
+        "explorerTip": "Open `firewall/kern-app-hosts.log`, filter **contains** `TYPE=3 CODE=4` and use **First match** for the first drop. Open both `firewall/app-03_iptables-save_*.txt` files and compare the ICMP rules and their `--comment`. Then open `changes/change-log.csv` (CSV table) and filter **contains** that tag."
+      },
+      "id": "q2",
+      "title": "What changed?",
+      "prompt": "Between Tuesday night and Wednesday morning, several changes touched the network path between the app hosts and the ledger. The tunnel had worked all night, and the validation capture proves PMTUD worked through it.\n\nWhich change made large packets disappear **silently**? Answer with its change id, e.g. `CHG-1234`.",
+      "answerFormat": "Change id (CHG-NNNN)",
+      "placeholder": "CHG-1234",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "When a router can't forward a packet with DF set, it sends back ICMP \"fragmentation needed\" and the sender shrinks its segments. In `pcap/app-03_large-request.txt` that message does arrive, and the host ignores it anyway. What sits between the wire and the TCP stack?"
+        },
+        {
+          "cost": 20,
+          "text": "Find the first `TYPE=3 CODE=4` line in `firewall/kern-app-hosts.log`: when, and logged by which rule prefix? Diff the before and after `iptables-save`: which new rule drops it, and what tag is in its comment? Look for that tag in `changes/change-log.csv`."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngrep -m1 'TYPE=3 CODE=4' firewall/kern-app-hosts.log\ndiff firewall/app-03_iptables-save_before.txt firewall/app-03_iptables-save_after.txt\ngrep -i '<tag from the rule comment>' changes/change-log.csv\n```"
+        }
+      ],
+      "successNote": "Three lessons. **tcpdump sees packets before netfilter**: the capture shows the ICMP arriving, so \"I can see it, it isn't blocked\" was wrong. **Rule order matters**: the new rules were inserted *above* the `RELATED,ESTABLISHED` accept, which is the rule that normally lets ICMP errors for your own connections through. And **\"ping works\" proves nothing about PMTUD**: echo was allowed, destination-unreachable wasn't. The tunnel's smaller MTU was the precondition; the firewall change was the trigger. Hardening baselines should always allow ICMP type 3 (and ICMPv6 type 2, \"packet too big\", see RFC 4890)."
+    },
+    {
+      "stage": {
+        "name": "Size the pipe",
+        "goal": "Work out the TCP MSS that would make full-size segments fit through the tunnel.",
+        "lookFor": [
+          "The router that refuses a packet says how big it may be",
+          "`network/ip-link.txt`: which interface is the narrow one?",
+          "Compare the largest segments each side of the connection sends",
+          "eth1 jumbo frames and the cloud LB's 9001 are not on this path"
+        ],
+        "tools": [
+          "tcpdump-flow",
+          "tcpdump-lengths",
+          "tcpdump-mss",
+          "tcpdump-icmp",
+          "fw-field-values",
+          "wireshark-filters"
+        ],
+        "explorerTip": "Open `pcap/app-03_large-request.txt` and filter **contains** `need to frag`. Or open `firewall/kern-app-hosts.log` and run **Count unique** with the regex `MTU=(\\d+)`. Cross-check against the `wg0` line in `network/ip-link.txt`, then do the subtraction."
+      },
+      "id": "q3",
+      "title": "How big is too big?",
+      "prompt": "To stop depending on ICMP for this path at all, the network team will **clamp the TCP MSS** on the tunnel, so no host ever sends a segment that doesn't fit.\n\nWhat MSS fits? MSS = the largest IPv4 packet the path can carry, minus **20** bytes of IPv4 header, minus **20** bytes of TCP header. Answer with an **integer** (bytes).",
+      "answerFormat": "Integer (bytes)",
+      "placeholder": "1400",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Packets of the app host's full size don't fit, smaller ones do. The gateway names the limit inside the ICMP error it sends, and its own interface list agrees."
+        },
+        {
+          "cost": 20,
+          "text": "Look for `need to frag (mtu N)` in the large-request capture, or `MTU=` at the end of the firewall drop lines, or the `wg0` line in `network/ip-link.txt`. That N is the largest IP packet. Now take off the two 20-byte headers."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngrep -o 'MTU=[0-9]*' firewall/kern-app-hosts.log | sort | uniq -c\ngrep -A1 'wg0' network/ip-link.txt\n```\nThen MSS = MTU − 40."
+        }
+      ],
+      "successNote": "The number comes from stacked overhead: the dc1 internet circuit is PPPoE (1492 bytes), and WireGuard adds 80 bytes of its own, so `wg-quick` set the tunnel to 1412. Notice the asymmetry in the capture: the **ledger** sends 1360-byte segments (its PMTUD works, nothing filters ICMP on the cloud side), while app-03 keeps sending 1448. That's why downloads worked and uploads hung. The robust fix is to clamp on the gateway, e.g. `iptables -t mangle -A FORWARD -o wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu`, and to enable `net.ipv4.tcp_mtu_probing=1` (RFC 4821) on hosts as a fallback."
+    },
+    {
+      "stage": {
+        "name": "The second ghost",
+        "goal": "Find the address some hosts kept trying to reach although nothing lives there anymore.",
+        "lookFor": [
+          "The **other** failure `phase`",
+          "Which `peer` do those failures name?",
+          "`dns/zone-audit.log`: what used to be at that address?",
+          "`pcap/app-05_ledger-connect.txt`: does anyone answer?"
+        ],
+        "tools": [
+          "json-two-fields",
+          "json-filter-field",
+          "zone-audit-record",
+          "dig-answers",
+          "tcpdump-flow"
+        ],
+        "explorerTip": "Open `app/manifest-sync.log`, filter **contains** `\"phase\":\"connect\"`, then **Count unique** with the regex `\"peer\":\"([^\"]+)\"`. Confirm with `dns/zone-audit.log` filtered **contains** `name=ledger `."
+      },
+      "id": "q4",
+      "title": "The ghost address",
+      "prompt": "Not every failure was an upload hanging. Some hosts couldn't even **connect** to the ledger, for any request, small or big.\n\nWhich IPv4 address were those connection attempts going to? Answer as a dotted quad, e.g. `192.0.2.10`.",
+      "answerFormat": "IPv4 address",
+      "placeholder": "192.0.2.10",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "You've been ignoring one kind of failure so far. Look at it now, and at the `peer` field on those lines."
+        },
+        {
+          "cost": 20,
+          "text": "Count unique `peer` values among `phase` = `connect` lines. Then look the address up in `dns/zone-audit.log`: what was there, and when was it deleted?"
+        },
+        {
+          "cost": 40,
+          "text": "```sh\njq -r 'select(.phase == \"connect\") | .peer' app/manifest-sync.log | sort | uniq -c\ngrep 'name=ledger' dns/zone-audit.log\n```"
+        }
+      ],
+      "successNote": "The two ghosts are tangled. Before 09:12 these hosts failed fast with `EHOSTUNREACH`: the gateway answered for the vanished VM with ICMP \"host unreachable\". After the firewall baseline, that ICMP was dropped too, so the same DNS problem turned into slow 5-second **connect timeouts**. One change altered the symptom of an unrelated bug. Always split failures by *phase* and *destination* before you theorize: \"timeouts\" was hiding two different problems."
+    },
+    {
+      "stage": {
+        "name": "How many hosts?",
+        "goal": "Count the app hosts that were still sending ledger traffic to the ghost address.",
+        "lookFor": [
+          "The channel says \"rack B, half the fleet\": check it",
+          "Every client log line names its `host`",
+          "`network/inventory.csv` shows roles **and** last boot times",
+          "Same config doesn't mean same state"
+        ],
+        "tools": [
+          "json-two-fields",
+          "json-unique-field",
+          "csv-table",
+          "changes-grep",
+          "dig-answers"
+        ],
+        "explorerTip": "Open `app/manifest-sync.log`, filter **contains** the address from stage 4, then **Count unique** with the regex `\"host\":\"([^\"]+)\"`. Open `network/inventory.csv` as a **CSV table** to explain any host you expected but didn't find."
+      },
+      "id": "q5",
+      "title": "Blast radius",
+      "prompt": "How many **app hosts** sent requests to the ghost address at any point in `app/manifest-sync.log`?\n\nAnswer with an **integer**.",
+      "answerFormat": "Integer (hosts)",
+      "placeholder": "5",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "Don't count from the channel or from the inventory's role column. Count from the data: every client log line says which host sent it and where it went."
+        },
+        {
+          "cost": 20,
+          "text": "Keep lines whose `peer` is the address from stage 4 and count distinct `host` values. If a host you expected is missing, look at its `last_boot_utc` in `network/inventory.csv` and at the change log."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\njq -r --arg ip '<address from stage 4>' 'select(.peer == $ip) | .host' app/manifest-sync.log | sort | uniq -c\n```"
+        }
+      ],
+      "successNote": "Four hosts got the new resolver role, but only some of them were stuck. One was rebooted early Wednesday for a kernel update, which emptied its cache, so it asked again and got the new address. **Same config, different state.** A cache bug only bites hosts that happened to fill the cache at the wrong moment. Blast radius has to come from data, not from the inventory, and a \"fix\" by reboot can hide a bug on one host while it keeps hurting the others."
+    },
+    {
+      "stage": {
+        "name": "Root cause",
+        "goal": "Name the resolver option that made the stuck hosts ignore the record's TTL.",
+        "lookFor": [
+          "Compare the TTL from the local cache with the TTL from ns1 (`dns/dig/`)",
+          "`dns/zone-audit.log`: what TTL did the record have before the cutover?",
+          "Diff the two `unbound.conf` roles",
+          "A cap, a negative-cache knob and a floor are three different things"
+        ],
+        "tools": [
+          "dig-answers",
+          "dig-server-flags",
+          "unbound-diff",
+          "zone-audit-record",
+          "ttl-math"
+        ],
+        "explorerTip": "Open `dns/dig/app-05.txt`: compare the TTL in the first answer (local cache, no `aa`) with the second (ns1, `aa`). Open both `dns/unbound/node-dns-v*.conf` files side by side and filter **regex** `ttl` to see every TTL-related option."
+      },
+      "id": "q6",
+      "title": "Why did the cache outlive the migration?",
+      "prompt": "On Monday the ledger record's TTL was lowered to **60 seconds**, exactly as the migration runbook says. Yet the stuck hosts kept serving the old answer for many hours after Tuesday's cutover.\n\nWhich **unbound option** made them ignore the record's TTL? Answer with the option name exactly as written in `unbound.conf`, **without** the colon.",
+      "answerFormat": "unbound.conf option name (no colon)",
+      "placeholder": "msg-cache-size",
+      "points": 150,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "A cache that respects a 60-second TTL can't hand out an answer that still has hours to live. Compare the TTL a stuck host's local resolver returns with the TTL ns1 returns for the same name."
+        },
+        {
+          "cost": 20,
+          "text": "Diff `node-dns-v1.conf` and `node-dns-v2.conf`. Several lines changed and more than one mentions TTL. One option **caps** TTLs (it can only shorten them, and it's the same in both roles), one only affects **negative** answers (NXDOMAIN), and one raises every TTL to **at least** its value."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ndiff dns/unbound/node-dns-v1.conf dns/unbound/node-dns-v2.conf | grep -i ttl\ngrep -h -A1 'ANSWER SECTION' dns/dig/*.txt\n```\nWhich changed option's value is bigger than every stale TTL you see?"
+        }
+      ],
+      "successNote": "The DNS team did everything right: they lowered the TTL a day ahead so caches would follow the cutover within a minute. A **TTL floor** in the node-local resolver, added the same week to cut upstream query load, silently raised that 60 s to a full day. Every v2 host that filled its cache before the cutover kept the dead address for 24 hours. The unbound manual warns that values above an hour or so \"can lead to trouble\". Fixes: keep TTL floors to seconds or remove them, flush caches as an explicit migration step, keep the old address answering (or redirecting) for longer than the longest cache, and alert when a local resolver's answer differs from the authoritative one."
+    }
+  ],
+  "toolbox": [
+    {
+      "category": "Getting oriented",
+      "items": [
+        {
+          "id": "unzip-evidence",
+          "title": "Unpack the evidence",
+          "command": "unzip ghost-in-the-network-evidence.zip && cd ghost-in-the-network",
+          "explain": "Extracts the pack. Everything lives under one top-level folder. The `.pcap` files are only in the zip, not in the Explorer.",
+          "powershell": "Expand-Archive .\\ghost-in-the-network-evidence.zip -DestinationPath .\ncd .\\ghost-in-the-network"
+        },
+        {
+          "id": "list-files",
+          "title": "See what you've got",
+          "command": "find . -type f | sort | xargs ls -la",
+          "explain": "Every file with its size. Two logs are big; everything else is short enough to read end to end.",
+          "powershell": "Get-ChildItem -Recurse -File | Select-Object FullName, Length"
+        },
+        {
+          "id": "read-readme",
+          "title": "Read the README",
+          "command": "less README_FIRST.txt",
+          "explain": "The on-call notes: the file list and, most importantly, the time zone of every source.",
+          "powershell": "Get-Content README_FIRST.txt | Out-Host -Paging"
+        },
+        {
+          "id": "head-lines",
+          "title": "Peek at the first lines",
+          "command": "head -n 3 app/manifest-sync.log",
+          "explain": "Look at the format **before** you parse it. `tail -n 3` shows the end of the window.",
+          "powershell": "Get-Content app\\manifest-sync.log -TotalCount 3"
+        }
+      ]
+    },
+    {
+      "category": "grep & friends",
+      "items": [
+        {
+          "id": "grep-count",
+          "title": "Count matches",
+          "command": "grep -c '\"level\":\"error\"' app/manifest-sync.log",
+          "explain": "`-c` prints how many lines match instead of the lines. Quick sanity checks.",
+          "powershell": "(Select-String -Path app\\manifest-sync.log -Pattern '\"level\":\"error\"' -SimpleMatch).Count"
+        },
+        {
+          "id": "grep-first-match",
+          "title": "Stop at the first match",
+          "command": "grep -m1 'pattern' firewall/kern-app-hosts.log",
+          "explain": "`-m1` exits after the first hit. In a file sorted by time, that's the **earliest** occurrence.",
+          "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'pattern' | Select-Object -First 1"
+        },
+        {
+          "id": "grep-exclude",
+          "title": "Invert / exclude",
+          "command": "grep -v -e 'IN-DROP: ' firewall/kern-app-hosts.log | head",
+          "explain": "`-v` keeps lines that do **not** match. Good for removing scanner noise.",
+          "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'IN-DROP: ' -SimpleMatch -NotMatch | Select-Object -First 10"
+        },
+        {
+          "id": "grep-only-match",
+          "title": "Print only the match",
+          "command": "grep -o 'TYPE=[0-9]* CODE=[0-9]*' firewall/kern-app-hosts.log | sort | uniq -c",
+          "explain": "`-o` prints just the matched text. Pipe it to `sort | uniq -c` to get a histogram of values.",
+          "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'TYPE=\\d+ CODE=\\d+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name"
+        },
+        {
+          "id": "grep-context",
+          "title": "Context around a hit",
+          "command": "grep -n -B2 -A6 'need to frag' pcap/app-03_large-request.txt | head -40",
+          "explain": "`-B`/`-A` show lines before and after each match, so you see what led up to it and what followed.",
+          "powershell": "Select-String -Path pcap\\app-03_large-request.txt -Pattern 'need to frag' -Context 2,6 | Select-Object -First 5"
+        }
+      ]
+    },
+    {
+      "category": "jq for JSON logs",
+      "items": [
+        {
+          "id": "json-pretty",
+          "title": "Pretty-print one line",
+          "command": "head -n1 app/manifest-sync.log | jq .",
+          "explain": "See every field a line carries before you write filters. Failures carry `phase` and `error` instead of `status`.",
+          "powershell": "Get-Content app\\manifest-sync.log -TotalCount 1 | ConvertFrom-Json | Format-List"
+        },
+        {
+          "id": "json-unique-field",
+          "title": "Values of one field",
+          "command": "jq -r '.msg' app/manifest-sync.log | sort | uniq -c",
+          "explain": "Lists every distinct value of a field with counts. Swap `.msg` for `.phase`, `.host` or `.peer`.",
+          "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { ($_ | ConvertFrom-Json).msg } | Group-Object | Select-Object Count, Name"
+        },
+        {
+          "id": "json-filter-field",
+          "title": "Filter on a field",
+          "command": "jq -c 'select(.phase == \"connect\")' app/manifest-sync.log | head",
+          "explain": "`select()` keeps the objects that match. `-c` keeps one per line so you can still pipe to `head` and `wc`.",
+          "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object phase -eq 'connect' | Select-Object -First 10"
+        },
+        {
+          "id": "json-first-by-time",
+          "title": "Earliest matching line",
+          "command": "jq -r 'select(.phase == \"response\") | .ts' app/manifest-sync.log | sort | head -1",
+          "explain": "Extract the timestamp of matching lines and sort. Every `ts` here has the same offset, so a plain string sort is a time sort.",
+          "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object phase -eq 'response' | Sort-Object ts | Select-Object -First 1"
+        },
+        {
+          "id": "json-two-fields",
+          "title": "Group by several fields",
+          "command": "jq -r 'select(.level == \"error\") | \"\\(.host) \\(.phase) \\(.peer)\"' app/manifest-sync.log | sort | uniq -c",
+          "explain": "Counts each combination. One table that splits the failures by host, by phase and by destination.",
+          "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object level -eq 'error' | Group-Object host, phase, peer | Select-Object Count, Name"
+        },
+        {
+          "id": "json-size-split",
+          "title": "Outcome by request size",
+          "command": "jq -r 'select(.method == \"POST\") | \"\\(.path) \\(if .req_bytes > 1300 then \"big\" else \"small\" end) \\(.phase // .status)\"' app/manifest-sync.log | sort | uniq -c",
+          "explain": "Splits requests into small and big and shows how each ended. Change the size threshold and watch the boundary.",
+          "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object method -eq 'POST' | Group-Object path, { if ($_.req_bytes -gt 1300) { 'big' } else { 'small' } }, { if ($_.phase) { $_.phase } else { $_.status } } | Select-Object Count, Name"
+        }
+      ]
+    },
+    {
+      "category": "Time zones",
+      "items": [
+        {
+          "id": "local-to-utc",
+          "title": "Local to UTC",
+          "command": "date -u -d '2026-11-18T11:00:00.000+02:00' +%H:%M:%S",
+          "explain": "Normalizes an offset timestamp (like the app log's) to UTC. In November, Israel is **UTC+02:00**.",
+          "powershell": "([DateTimeOffset]'2026-11-18T11:00:00.000+02:00').UtcDateTime.ToString('HH:mm:ss')"
+        },
+        {
+          "id": "epoch-to-utc",
+          "title": "Epoch to UTC",
+          "command": "date -u -d @1795424400",
+          "explain": "Converts Unix epoch seconds to a human UTC time. On macOS: `date -u -r 1795424400`.",
+          "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1795424400).UtcDateTime.ToString('u')"
+        },
+        {
+          "id": "slack-timestamps",
+          "title": "Read the chat in UTC",
+          "command": "jq -r '.[] | \"\\(.ts | tonumber | todate) \\(.user): \\(.text)\"' chat/inc-3107.json",
+          "explain": "Turns every message's epoch `ts` into UTC so you can line it up with the other sources.",
+          "powershell": "Get-Content chat\\inc-3107.json -Raw | ConvertFrom-Json | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([int][double]$_.ts).UtcDateTime.ToString('HH:mm:ss'), $_.user, $_.text }"
+        },
+        {
+          "id": "syslog-no-year",
+          "title": "Syslog times have no year",
+          "command": "date -u -d 'Nov 18 09:30:00 2026 UTC' +%s",
+          "explain": "Syslog stamps like `Nov 18 09:30:00` carry no year and no zone. Add both yourself before converting.",
+          "powershell": "([DateTimeOffset]::ParseExact('Nov 18 09:30:00 2026', 'MMM dd HH:mm:ss yyyy', [Globalization.CultureInfo]::InvariantCulture, 'AssumeUniversal')).ToUnixTimeSeconds()"
+        }
+      ]
+    },
+    {
+      "category": "tcpdump & Wireshark",
+      "items": [
+        {
+          "id": "tcpdump-read",
+          "title": "Read a real pcap",
+          "command": "tcpdump -nn -tttt -v -r pcap/app-03_large-request.pcap",
+          "explain": "The `.txt` files are this command's output, so you don't need tcpdump. Use the `.pcap` twins if you prefer Wireshark.",
+          "powershell": "& 'C:\\Program Files\\Wireshark\\tshark.exe' -n -t ad -V -r pcap\\app-03_large-request.pcap | Out-Host -Paging"
+        },
+        {
+          "id": "tcpdump-flow",
+          "title": "One line per packet",
+          "command": "grep -E '^ {4}[0-9.]+ > ' pcap/app-03_small-request.txt | cut -c1-150",
+          "explain": "tcpdump `-v` prints two lines per packet (IP header, then TCP). Keep the second line to read the conversation as a flow: who sent what, with which flags.",
+          "powershell": "Select-String -Path pcap\\app-03_small-request.txt -Pattern '^ {4}[0-9.]+ > ' | ForEach-Object { $_.Line.Substring(0, [Math]::Min(150, $_.Line.Length)) }"
+        },
+        {
+          "id": "tcpdump-lengths",
+          "title": "Packet sizes",
+          "command": "grep -oE 'proto [A-Z]+ \\([0-9]+\\), length [0-9]+' pcap/app-03_large-request.txt | sort | uniq -c",
+          "explain": "The `length` on the IP line is the whole IP packet. Compare the biggest packets each side sends.",
+          "powershell": "Select-String -Path pcap\\app-03_large-request.txt -Pattern 'proto [A-Z]+ \\(\\d+\\), length \\d+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name"
+        },
+        {
+          "id": "tcpdump-mss",
+          "title": "MSS in the handshake",
+          "command": "grep -o 'mss [0-9]*' pcap/*.txt",
+          "explain": "Each side announces its MSS in its SYN. The sender uses the smaller of the two, and neither knows about a narrower link in the middle.",
+          "powershell": "Select-String -Path pcap\\*.txt -Pattern 'mss \\d+' | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Matches[0].Value }"
+        },
+        {
+          "id": "tcpdump-icmp",
+          "title": "ICMP errors and what they quote",
+          "command": "grep -n -A3 'ICMP' pcap/app-03_large-request.txt | head -20",
+          "explain": "An ICMP error quotes the header of the packet that caused it, so you can see exactly which packet a router refused and why.",
+          "powershell": "Select-String -Path pcap\\app-03_large-request.txt -Pattern 'ICMP' -Context 0,3 | Select-Object -First 5"
+        },
+        {
+          "id": "tcpdump-retrans",
+          "title": "Spot retransmissions",
+          "command": "grep -oE 'seq [0-9]+:[0-9]+' pcap/app-03_large-request.txt | sort | uniq -c | sort -rn | head",
+          "explain": "The same byte range sent more than once is a retransmission. Look at how far apart they are in time: exponential backoff.",
+          "powershell": "Select-String -Path pcap\\app-03_large-request.txt -Pattern 'seq \\d+:\\d+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count, Name"
+        },
+        {
+          "id": "wireshark-filters",
+          "title": "Wireshark display filters",
+          "command": "tshark -r pcap/app-03_large-request.pcap -Y 'icmp.type == 3 || tcp.analysis.retransmission'",
+          "explain": "The same filter works in the Wireshark GUI filter bar. Also try `tcp.len > 1300` and `icmp.code == 4`.",
+          "powershell": "& 'C:\\Program Files\\Wireshark\\tshark.exe' -r pcap\\app-03_large-request.pcap -Y 'icmp.type == 3 || tcp.analysis.retransmission'"
+        }
+      ]
+    },
+    {
+      "category": "Host firewall",
+      "items": [
+        {
+          "id": "fw-prefixes",
+          "title": "Which rule logged it?",
+          "command": "grep -oE 'IN-DROP[A-Z-]*:' firewall/kern-app-hosts.log | sort | uniq -c",
+          "explain": "The `--log-prefix` of the iptables rule starts every message. Each prefix maps to one rule in `iptables-save`.",
+          "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'IN-DROP[A-Z-]*:' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name"
+        },
+        {
+          "id": "fw-first-drop",
+          "title": "First drop of a kind",
+          "command": "grep 'TYPE=3 CODE=4' firewall/kern-app-hosts.log | head -3",
+          "explain": "ICMP type 3 is destination-unreachable; code 4 is fragmentation needed, code 1 host unreachable. Type 11 is time exceeded (traceroute).",
+          "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'TYPE=3 CODE=4' -SimpleMatch | Select-Object -First 3"
+        },
+        {
+          "id": "fw-field-values",
+          "title": "Values inside netfilter lines",
+          "command": "grep -oE '(MTU|SRC)=[0-9.]+' firewall/kern-app-hosts.log | sort | uniq -c | sort -rn | head",
+          "explain": "Netfilter logs `KEY=value` pairs. The part in `[...]` is the packet quoted inside the ICMP error.",
+          "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern '(MTU|SRC)=[\\d.]+' -AllMatches | ForEach-Object { $_.Matches.Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count, Name"
+        },
+        {
+          "id": "fw-per-host-minute",
+          "title": "Per host, per minute",
+          "command": "grep 'TYPE=3 CODE=4' firewall/kern-app-hosts.log | awk '{print $4, substr($3,1,5)}' | uniq -c | head -20",
+          "explain": "Shows when each host started logging a given drop. Field 4 is the host, field 3 the time.",
+          "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'TYPE=3 CODE=4' -SimpleMatch | ForEach-Object { $f = $_.Line -split '\\s+'; '{0} {1}' -f $f[3], $f[2].Substring(0,5) } | Group-Object | Select-Object -First 20 Count, Name"
+        },
+        {
+          "id": "iptables-diff",
+          "title": "What changed in the rules?",
+          "command": "diff firewall/app-03_iptables-save_before.txt firewall/app-03_iptables-save_after.txt",
+          "explain": "iptables evaluates INPUT **top to bottom** and stops at the first rule that matches. Order matters as much as content.",
+          "powershell": "Compare-Object (Get-Content firewall\\app-03_iptables-save_before.txt) (Get-Content firewall\\app-03_iptables-save_after.txt)"
+        }
+      ]
+    },
+    {
+      "category": "DNS",
+      "items": [
+        {
+          "id": "dig-answers",
+          "title": "Every answer at a glance",
+          "command": "grep -H -A1 'ANSWER SECTION' dns/dig/*.txt",
+          "explain": "One answer line per query: name, **remaining TTL**, class, type, address. Check which server answered (`;; SERVER:`).",
+          "powershell": "Select-String -Path dns\\dig\\*.txt -Pattern 'ANSWER SECTION' -Context 0,1 | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Context.PostContext[0] }"
+        },
+        {
+          "id": "dig-server-flags",
+          "title": "Who answered, and with authority?",
+          "command": "grep -H -E '^;; (flags|SERVER|WHEN)' dns/dig/*.txt",
+          "explain": "`aa` means an authoritative answer straight from the zone. No `aa` from `127.0.0.1` means a local cache answered.",
+          "powershell": "Select-String -Path dns\\dig\\*.txt -Pattern '^;; (flags|SERVER|WHEN)' | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Line }"
+        },
+        {
+          "id": "zone-audit-record",
+          "title": "History of one record",
+          "command": "grep 'name=ledger ' dns/zone-audit.log",
+          "explain": "Every change to a DNS name, in UTC: TTL changes, deletes, adds, and the change ticket behind each.",
+          "powershell": "Select-String -Path dns\\zone-audit.log -Pattern 'name=ledger ' -SimpleMatch"
+        },
+        {
+          "id": "unbound-diff",
+          "title": "Compare the resolver roles",
+          "command": "diff dns/unbound/node-dns-v1.conf dns/unbound/node-dns-v2.conf",
+          "explain": "Lines starting with `<` are only in v1, `>` only in v2. Read each changed option in the unbound.conf man page before you blame it.",
+          "powershell": "Compare-Object (Get-Content dns\\unbound\\node-dns-v1.conf) (Get-Content dns\\unbound\\node-dns-v2.conf)"
+        },
+        {
+          "id": "ttl-math",
+          "title": "When does a cached answer expire?",
+          "command": "echo $(( $(date -u -d 'Wed Nov 18 11:31:07 UTC 2026' +%s) + 10000 )) | xargs -I{} date -u -d @{}",
+          "explain": "Query time plus the remaining TTL is when the cache will drop the answer. Working backwards tells you when it was cached and for how long.",
+          "powershell": "([DateTimeOffset]'2026-11-18T11:31:07Z').AddSeconds(10000).ToString('u')"
+        }
+      ]
+    },
+    {
+      "category": "Changes & inventory (CSV)",
+      "items": [
+        {
+          "id": "csv-table",
+          "title": "Pretty table",
+          "command": "column -s, -t < network/inventory.csv",
+          "explain": "Aligns CSV columns. Works for `network/inventory.csv`. Quoted fields with commas confuse `column`, so use the next tool for the change log.",
+          "powershell": "Import-Csv network\\inventory.csv | Format-Table"
+        },
+        {
+          "id": "changes-window",
+          "title": "Changes in a time window",
+          "command": "awk -F, '$2 >= \"2026-11-18T08:00\" && $2 < \"2026-11-18T10:00\" {print $1, $2, $5}' changes/change-log.csv",
+          "explain": "ISO-8601 UTC strings sort like times, so a string comparison selects a window. Widen it: some causes are older than they look.",
+          "powershell": "Import-Csv changes\\change-log.csv | Where-Object { $_.start_utc -ge '2026-11-18T08:00' -and $_.start_utc -lt '2026-11-18T10:00' } | Format-Table change_id, start_utc, team, summary -Wrap"
+        },
+        {
+          "id": "changes-grep",
+          "title": "Find a change by keyword",
+          "command": "grep -i 'tunnel' changes/change-log.csv",
+          "explain": "Search summaries for a word or a tag you saw somewhere else, like a rule comment or a role name.",
+          "powershell": "Import-Csv changes\\change-log.csv | Where-Object summary -match 'tunnel' | Format-List"
+        }
+      ]
+    }
+  ],
+  "debrief": "_Sealed._ Finish all six stages to unlock the debrief."
+}

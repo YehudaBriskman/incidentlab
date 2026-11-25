@@ -1,542 +1,557 @@
-import { flags, sealedDebriefFor } from "../content/load";
-import { normalizeAnswer } from "../content/schema";
+import { QUESTION_ORDER, type ProgressView, type QuestionId, type StageProgress } from "../../shared/contract";
 import type { Case, Question } from "../content/schema";
-import { confirmButton, copyButton, h, html, setChildren } from "../lib/dom";
-import { checkAnswer } from "../lib/flags";
+import { ApiError, getDebrief, getProgress, revealAnswer, revealHint, setupDone, submitAnswer } from "../lib/api";
+import { loadAccount, setAccount, signOut } from "../lib/session";
+import { getLang } from "../i18n/i18n";
+import { TA } from "../i18n/strings-account";
+import { withApprovedAccount } from "./auth";
+import { confirmButton, copyButton, h, html, setChildren, type Child } from "../lib/dom";
 import { md, mdInline } from "../lib/markdown";
-import {
-  computeScore,
-  elapsedMs,
-  hintsUsedFor,
-  loadProgress,
-  potentialPoints,
-  resetProgress,
-  saveProgress,
-  solvedAnswers,
-  type Progress,
-} from "../lib/progress";
-import { unsealDebrief } from "../lib/seal";
-import { formatElapsed, formatMinutes } from "../lib/time";
+import { formatElapsed } from "../lib/time";
+import { commandCard } from "./toolbox";
+import { T } from "../i18n/strings-player";
 
-export const TABS = ["briefing", "evidence", "questions", "toolbox", "debrief"] as const;
-export type Tab = (typeof TABS)[number];
+type StageKey = "setup" | QuestionId | "debrief";
+type StepState = "locked" | "active" | "solved" | "revealed";
 
-export function isTab(value: string): value is Tab {
-  return (TABS as readonly string[]).includes(value);
-}
-
-const TAB_LABELS: Record<Tab, string> = {
-  briefing: "Briefing",
-  evidence: "Evidence",
-  questions: "Questions",
-  toolbox: "Toolbox",
-  debrief: "Debrief",
-};
-
-let timerHandle: number | undefined;
+const timers = new Set<number>();
+const drafts = new Map<QuestionId, string>();
 
 export function stopCaseTimers(): void {
-  if (timerHandle !== undefined) window.clearInterval(timerHandle);
-  timerHandle = undefined;
+  for (const t of timers) window.clearInterval(t);
+  timers.clear();
 }
 
-export function shareText(c: Case, p: Progress): string {
-  const s = computeScore(c, p);
-  const hints = `${s.hintsUsed} hint${s.hintsUsed === 1 ? "" : "s"}`;
-  const title = c.title.replace(/\s*\(DEV SAMPLE\)\s*$/, "");
-  return `IncidentLab · ${title} · ${s.points}/${s.maxPoints} · ${hints} · ${formatMinutes(elapsedMs(p))}`;
+function every(ms: number, fn: () => void): number {
+  const id = window.setInterval(fn, ms);
+  timers.add(id);
+  return id;
 }
 
-export function renderCase(root: HTMLElement, c: Case, tab: Tab): void {
+/* ---------- UI prefs (best effort, never required) ---------- */
+function readPref(key: string): string | null {
+  try {
+    return window.localStorage.getItem(`il.pref.${key}`);
+  } catch {
+    return null;
+  }
+}
+function writePref(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(`il.pref.${key}`, value);
+  } catch {
+    /* ignore */
+  }
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.code === "not-today") return TA().notToday;
+  if (err instanceof ApiError) return err.message;
+  return T().genericError;
+}
+
+/* ================= entry ================= */
+
+export function renderCase(root: HTMLElement, c: Case): void {
   stopCaseTimers();
   document.title = `${c.title} · IncidentLab`;
-  let progress = loadProgress(c.id); // first visit starts the clock
-
-  const persist = (): void => {
-    const s = computeScore(c, progress);
-    if (s.debriefUnlocked && progress.finishedAt === null) progress.finishedAt = Date.now();
-    saveProgress(c.id, progress);
-    updateScore();
-    updateTabs();
-  };
-
-  /* ---------- score panel ---------- */
-  const elPoints = h("span", { class: "stat-value" });
-  const elHints = h("span", { class: "stat-value" });
-  const elSolved = h("span", { class: "stat-value" });
-  const elTimer = h("span", { class: "stat-value", "aria-live": "off" });
-  const elBar = h("span", { class: "progress-fill" });
-  const elShare = h("code", { class: "share-text" });
-
-  const updateScore = (): void => {
-    const s = computeScore(c, progress);
-    elPoints.textContent = `${s.points}`;
-    elPoints.dataset["max"] = `/${s.maxPoints}`;
-    elHints.textContent = `${s.hintsUsed}`;
-    elSolved.textContent = `${s.solved}/${s.total}`;
-    elBar.style.width = `${(s.solved / Math.max(1, s.total)) * 100}%`;
-    elShare.textContent = shareText(c, progress);
-    tickTimer();
-  };
-  const tickTimer = (): void => {
-    elTimer.textContent = formatElapsed(elapsedMs(progress));
-  };
-
-  const scorePanel = h(
-    "aside",
-    { class: "score-panel", "aria-label": "Score" },
-    h("div", { class: "score-head mono" }, h("span", {}, "SCOREBOARD"), h("span", { class: "score-case" }, c.id)),
-    h(
-      "dl",
-      { class: "stats" },
-      h("div", { class: "stat stat-points" }, h("dt", {}, "Points"), h("dd", {}, elPoints)),
-      h("div", { class: "stat" }, h("dt", {}, "Solved"), h("dd", {}, elSolved)),
-      h("div", { class: "stat" }, h("dt", {}, "Hints used"), h("dd", {}, elHints)),
-      h("div", { class: "stat" }, h("dt", {}, "Elapsed"), h("dd", {}, elTimer)),
-    ),
-    h("div", { class: "progress-track", "aria-hidden": "true" }, elBar),
-    h(
-      "div",
-      { class: "share" },
-      h("span", { class: "share-label mono" }, "Share my result"),
-      elShare,
-      copyButton(() => shareText(c, progress), "Copy result"),
-    ),
-    h(
-      "div",
-      { class: "score-actions" },
-      confirmButton({
-        label: "Reset progress",
-        confirmLabel: "Yes, wipe it",
-        className: "btn btn-ghost btn-sm",
-        onConfirm: () => {
-          progress = resetProgress(c.id);
-          renderCase(root, c, tab);
-        },
-      }),
-    ),
-  );
-
-  /* ---------- tabs ---------- */
-  const tabLinks = new Map<Tab, HTMLAnchorElement>();
-  const tabNav = h(
-    "nav",
-    { class: "tabs", "aria-label": "Case sections" },
-    TABS.map((t) => {
-      const a = h("a", { class: "tab", href: `#/case/${c.id}/${t}` }, TAB_LABELS[t]);
-      if (t === tab) a.setAttribute("aria-current", "page");
-      tabLinks.set(t, a);
-      return a;
-    }),
-  );
-  const updateTabs = (): void => {
-    const s = computeScore(c, progress);
-    const q = tabLinks.get("questions");
-    if (q) q.dataset["badge"] = `${s.solved}/${s.total}`;
-    const d = tabLinks.get("debrief");
-    if (d) d.classList.toggle("is-locked", !s.debriefUnlocked);
-  };
-
-  /* ---------- panels ---------- */
-  const panel = h("section", { class: "panel", id: "panel", tabindex: "-1" });
-  switch (tab) {
-    case "briefing":
-      panel.append(renderBriefing(c));
-      break;
-    case "evidence":
-      panel.append(renderEvidence(c));
-      break;
-    case "questions":
-      panel.append(renderQuestions(c, () => progress, persist));
-      break;
-    case "toolbox":
-      panel.append(renderToolbox(c));
-      break;
-    case "debrief":
-      panel.append(renderDebrief(c, progress));
-      break;
-  }
-
-  const firstOpen = computeScore(c, progress).solved === 0;
-  root.replaceChildren(
-    h(
-      "div",
-      { class: "pager", role: "status" },
-      h("span", { class: "pager-icon mono", "aria-hidden": "true" }, "▲ PAGE"),
-      h(
-        "span",
-        { class: "pager-text mono" },
-        h("strong", {}, "SEV-1"),
-        ` · ${c.title.toUpperCase()} · triggered `,
-        h("span", { class: "pager-time" }, new Date(progress.startedAt).toISOString().slice(11, 19) + "Z"),
-        " · assigned to ",
-        h("strong", {}, "you"),
-      ),
-      h("span", { class: "pill pill-live" }, h("span", { class: "dot", "aria-hidden": "true" }), firstOpen ? "INCIDENT ACTIVE" : "INVESTIGATING"),
-    ),
-    h(
-      "header",
-      { class: "case-header" },
-      h("a", { class: "back-link mono", href: "#/" }, "← all cases"),
-      h("h1", { class: "case-title" }, c.title),
-      h("p", { class: "case-sub" }, c.subtitle),
-      h(
-        "div",
-        { class: "case-pills" },
-        h("span", { class: `pill pill-diff diff-${c.difficulty}` }, c.difficulty),
-        h("span", { class: "pill pill-mono" }, `~${c.estMinutes} min`),
-        c.tags.map((t) => h("span", { class: "tag" }, t)),
-      ),
-    ),
-    h("div", { class: "case-layout" }, h("div", { class: "case-main" }, tabNav, panel), scorePanel),
-  );
-
-  updateScore();
-  updateTabs();
-  timerHandle = window.setInterval(tickTimer, 1000);
+  withApprovedAccount(root, c.title, () => loadProgress(root, c));
 }
 
-/* ================= Briefing ================= */
-
-function renderBriefing(c: Case): HTMLElement {
-  return h(
-    "div",
-    { class: "briefing" },
-    html("div", { class: "prose" }, md(c.briefing)),
-    h(
-      "div",
-      { class: "inspired" },
-      h("span", { class: "inspired-label mono" }, "INSPIRED BY"),
-      h("h3", {}, `${c.inspiredBy.title} `, h("span", { class: "mono muted" }, `(${c.inspiredBy.year})`)),
-      html("div", { class: "prose" }, md(c.inspiredBy.summary)),
-    ),
-    h(
-      "div",
-      { class: "rules" },
-      h("h3", { class: "mono" }, "Rules of engagement"),
-      h("ol", {}, c.rules.map((r) => html("li", {}, mdInline(r)))),
-    ),
-    h(
-      "div",
-      { class: "next-step" },
-      h("a", { class: "btn btn-primary", href: `#/case/${c.id}/evidence` }, "Grab the evidence →"),
-    ),
-  );
-}
-
-/* ================= Evidence ================= */
-
-function renderEvidence(c: Case): HTMLElement {
-  const fileName = c.evidenceZip.split("/").pop() ?? "evidence.zip";
-  return h(
-    "div",
-    { class: "evidence" },
-    h(
-      "div",
-      { class: "download-box" },
-      h(
-        "div",
-        {},
-        h("p", { class: "mono accent download-label" }, "EVIDENCE PACK"),
-        h("p", { class: "download-name mono" }, fileName),
-        h("p", { class: "muted" }, `${c.evidence.length} artifacts. Unzip it anywhere and open a terminal in the folder.`),
-      ),
-      h("a", { class: "btn btn-primary btn-lg", href: c.evidenceZip, download: fileName }, "⇩ Download evidence"),
-    ),
-    h(
-      "pre",
-      { class: "code-block small" },
-      h("code", {}, `unzip ${fileName} -d ${c.id}\ncd ${c.id} && ls -R | head -50`),
-    ),
-    h(
-      "div",
-      { class: "table-wrap" },
-      h(
-        "table",
-        { class: "evidence-table" },
-        h("thead", {}, h("tr", {}, h("th", { scope: "col" }, "Path"), h("th", { scope: "col" }, "Format"), h("th", { scope: "col" }, "What it is"))),
+function loadProgress(root: HTMLElement, c: Case): void {
+  setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, T().loadingInvestigation)));
+  getProgress(c.id)
+    .then((progress) => renderStaged(root, c, progress))
+    .catch((err: unknown) => {
+      // Session expired or approval revoked since the page loaded: re-run the gate with fresh state.
+      if (err instanceof ApiError && (err.isUnauthorized || err.isNotApproved)) {
+        if (err.isUnauthorized) setAccount(null);
+        void loadAccount(true).finally(() => renderCase(root, c));
+        return;
+      }
+      setChildren(
+        root,
         h(
-          "tbody",
-          {},
-          c.evidence.map((e) =>
-            h(
-              "tr",
-              {},
-              h("td", { class: "mono path" }, e.path),
-              h("td", {}, h("span", { class: "format" }, e.format)),
-              html("td", {}, mdInline(e.description)),
-            ),
-          ),
+          "section",
+          { class: "center-card", role: "alert" },
+          h("h1", {}, T().cantLoadProgress),
+          h("p", { class: "muted" }, errorMessage(err)),
+          h("button", { type: "button", class: "btn btn-primary", onclick: () => renderCase(root, c) }, T().tryAgain),
         ),
-      ),
-    ),
-  );
-}
-
-/* ================= Questions ================= */
-
-function renderQuestions(c: Case, getProgress: () => Progress, persist: () => void): HTMLElement {
-  const list = h("ol", { class: "question-list" });
-  c.questions.forEach((q, i) => list.append(questionCard(q, i, getProgress, persist)));
-  return h(
-    "div",
-    { class: "questions" },
-    h(
-      "p",
-      { class: "suggested mono" },
-      "All questions are unlocked. Suggested order: ",
-      c.questions.map((q, i) => (i === 0 ? q.id : ` → ${q.id}`)),
-      ". Wrong answers are free, hints are not.",
-    ),
-    list,
-  );
-}
-
-function questionCard(q: Question, index: number, getProgress: () => Progress, persist: () => void): HTMLElement {
-  const li = h("li", { class: "q-card", id: `q-${q.id}` });
-
-  const render = (): void => {
-    const p = getProgress();
-    const solved = p.solved[q.id];
-    const used = hintsUsedFor(p, q);
-    const attempts = p.attempts[q.id] ?? 0;
-    li.className = `q-card${solved ? " is-solved" : ""}`;
-
-    const feedback = h("p", { class: "q-feedback", "aria-live": "polite", role: "status" });
-    const input = h("input", {
-      class: "q-input mono",
-      type: "text",
-      id: `in-${q.id}`,
-      name: q.id,
-      placeholder: q.placeholder,
-      autocomplete: "off",
-      autocapitalize: "off",
-      spellcheck: "false",
-      "aria-describedby": `fmt-${q.id}`,
-      required: true,
-    });
-    const submit = h("button", { class: "btn btn-primary", type: "submit" }, "Submit");
-    const attemptsEl = h("p", { class: "q-attempts mono muted" }, attempts > 0 ? `Attempts: ${attempts}` : "");
-
-    const form = h(
-      "form",
-      {
-        class: "q-form",
-        novalidate: true,
-        onsubmit: (ev: Event) => {
-          ev.preventDefault();
-          const value = input.value;
-          if (value.trim() === "") {
-            feedback.textContent = "Enter an answer first.";
-            input.focus();
-            return;
-          }
-          submit.disabled = true;
-          void checkAnswer(flags, q.id, value).then((ok) => {
-            const cur = getProgress();
-            if (ok) {
-              cur.solved[q.id] = { at: Date.now(), points: potentialPoints(cur, q), answer: normalizeAnswer(value) };
-              persist();
-              render();
-              const heading = li.querySelector<HTMLElement>(".q-title");
-              heading?.focus();
-            } else {
-              cur.attempts[q.id] = (cur.attempts[q.id] ?? 0) + 1;
-              persist();
-              submit.disabled = false;
-              feedback.textContent = `Not quite (attempt ${cur.attempts[q.id] ?? 0}). Check the answer format and try again.`;
-              attemptsEl.textContent = `Attempts: ${cur.attempts[q.id] ?? 0}`;
-              feedback.className = "q-feedback is-wrong";
-              li.classList.remove("shake");
-              void li.offsetWidth; // restart the animation
-              li.classList.add("shake");
-              input.select();
-            }
-          });
-        },
-      },
-      h("label", { class: "visually-hidden", for: `in-${q.id}` }, `Answer for ${q.title}`),
-      input,
-      submit,
-    );
-
-    const hintsBox = h("div", { class: "hints" });
-    q.hints.slice(0, used).forEach((hint, hi) =>
-      hintsBox.append(
-        h(
-          "div",
-          { class: "hint" },
-          h("span", { class: "hint-label mono" }, `HINT ${hi + 1} · −${hint.cost}`),
-          html("div", { class: "prose" }, md(hint.text)),
-        ),
-      ),
-    );
-    const nextHint = q.hints[used];
-    if (!solved && nextHint) {
-      hintsBox.append(
-        confirmButton({
-          label: `Reveal hint ${used + 1}/${q.hints.length} (−${nextHint.cost} pts)`,
-          confirmLabel: `Spend ${nextHint.cost} pts`,
-          className: "btn btn-hint",
-          onConfirm: () => {
-            const cur = getProgress();
-            cur.hintsRevealed[q.id] = used + 1;
-            persist();
-            render();
-            li.querySelector<HTMLElement>(".hint:last-of-type")?.focus();
-          },
-        }),
       );
-    }
-    hintsBox.querySelectorAll<HTMLElement>(".hint").forEach((el) => el.setAttribute("tabindex", "-1"));
+    });
+}
 
-    const potential = potentialPoints(p, q);
-    setChildren(
-      li,
+/* ================= staged view ================= */
+
+function questionFor(c: Case, id: QuestionId): Question | undefined {
+  return c.questions.find((q) => q.id === id);
+}
+
+function stageLabel(c: Case, id: QuestionId): string {
+  const q = questionFor(c, id);
+  return q?.stage?.name ?? q?.title ?? id.toUpperCase();
+}
+
+function stageProgress(player: ProgressView, id: QuestionId): StageProgress | undefined {
+  return player.stages[id];
+}
+
+function isDone(s: StageProgress | undefined): boolean {
+  return s !== undefined && (s.status === "solved" || s.status === "revealed");
+}
+
+function currentStage(player: ProgressView): StageKey {
+  if (player.setupDoneAt === null) return "setup";
+  for (const id of QUESTION_ORDER) {
+    if (!isDone(stageProgress(player, id))) return id;
+  }
+  return "debrief";
+}
+
+function stepState(player: ProgressView, key: StageKey): StepState {
+  if (key === "setup") return player.setupDoneAt === null ? "active" : "solved";
+  if (key === "debrief") return currentStage(player) === "debrief" ? "active" : "locked";
+  const s = stageProgress(player, key);
+  if (s === undefined) return "locked";
+  return s.status;
+}
+
+const STAGE_KEYS: readonly StageKey[] = ["setup", ...QUESTION_ORDER, "debrief"];
+
+function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): void {
+  stopCaseTimers();
+  let player = initialPlayer;
+  let viewing: StageKey = currentStage(player);
+  let justSolved: QuestionId | null = null;
+
+  const update = (next: ProgressView, view?: StageKey): void => {
+    player = next;
+    viewing = view ?? currentStage(player);
+    draw();
+  };
+
+  const switchPlayer = (): void => {
+    drafts.clear();
+    void signOut().finally(() => renderCase(root, c));
+  };
+
+  const elStats = h("span", { class: "progress-stats mono" });
+  const elFill = h("span", { class: "progress-fill" });
+  const tick = (): void => {
+    const solved = QUESTION_ORDER.filter((id) => isDone(stageProgress(player, id))).length;
+    const start = Date.parse(player.setupDoneAt ?? player.startedAt ?? new Date().toISOString());
+    const end = player.completedAt !== null ? Date.parse(player.completedAt) : Date.now();
+    elStats.textContent = T().progressStats(solved, QUESTION_ORDER.length, player.score, formatElapsed(end - start));
+    elFill.style.width = `${(solved / QUESTION_ORDER.length) * 100}%`;
+  };
+
+  const stepper = (): HTMLElement =>
+    h(
+      "ol",
+      { class: "stepper", "aria-label": T().stagesLabel },
+      STAGE_KEYS.map((key, i) => {
+        const state = stepState(player, key);
+        const label = key === "setup" ? T().setup : key === "debrief" ? T().debrief : stageLabel(c, key);
+        const num = key === "setup" ? "0" : key === "debrief" ? "★" : String(i);
+        const icon = state === "solved" ? "✓" : state === "revealed" ? "👁" : num;
+        const stateText = { locked: T().stLocked, active: T().stCurrent, solved: T().stSolved, revealed: T().stRevealed }[state];
+        const btn = h(
+          "button",
+          {
+            type: "button",
+            class: `step step-${state}${key === viewing ? " is-viewing" : ""}`,
+            disabled: state === "locked",
+            "aria-current": key === viewing ? "step" : null,
+            "aria-label": `${key === "setup" || key === "debrief" ? "" : T().stageN(i)}${label} (${stateText})`,
+            title: label,
+            onclick: () => {
+              viewing = key;
+              justSolved = null;
+              draw();
+              document.getElementById("stage")?.focus({ preventScroll: true });
+            },
+          },
+          h("span", { class: "step-icon", "aria-hidden": "true" }, icon),
+          h("span", { class: "step-label" }, label),
+        );
+        return h("li", {}, btn);
+      }),
+    );
+
+  const draw = (): void => {
+    stopCaseTimers();
+    const header = h(
+      "header",
+      { class: "case-head" },
       h(
         "div",
-        { class: "q-head" },
-        h("span", { class: "q-num mono", "aria-hidden": "true" }, String(index + 1).padStart(2, "0")),
-        h("h3", { class: "q-title", tabindex: "-1" }, q.title),
+        { class: "case-head-top" },
+        h("a", { class: "back-link", href: "#/" }, T().navCases),
         h(
           "span",
-          { class: "q-points mono" },
-          solved ? `+${solved.points} pts` : potential < q.points ? `${potential}/${q.points} pts` : `${q.points} pts`,
+          { class: "player-tag" },
+          T().playingAs,
+          h("strong", { dir: "auto" }, player.username), // textContent only
+          " · ",
+          h("button", { type: "button", class: "link-btn", onclick: switchPlayer }, T().switchPlayer),
         ),
-        solved ? h("span", { class: "pill pill-solved" }, "✓ SOLVED") : null,
       ),
-      html("div", { class: "prose q-prompt" }, md(q.prompt)),
-      h("p", { class: "q-format mono", id: `fmt-${q.id}` }, h("span", { class: "muted" }, "answer format: "), q.answerFormat),
-      solved
-        ? h("div", { class: "success-note" }, h("span", { class: "success-label mono" }, "WHY THIS MATTERS"), html("div", { class: "prose" }, md(q.successNote)))
-        : h("div", { class: "q-answer" }, form, h("div", { class: "q-status" }, feedback, attemptsEl)),
-      solved && used === 0 ? null : hintsBox.childElementCount > 0 ? hintsBox : null,
+      h(
+        "div",
+        { class: "case-head-title" },
+        h("h1", {}, c.title),
+        h("a", { class: "btn btn-ghost btn-sm", href: `#/case/${c.id}/toolbox` }, T().allCommands),
+      ),
+      stepper(),
+      h("div", { class: "progress" }, h("div", { class: "progress-track", "aria-hidden": "true" }, elFill), elStats),
     );
+
+    const main = h("section", { class: "stage-wrap", id: "stage", tabindex: "-1" });
+    if (viewing === "setup") main.append(renderSetup(c, player, update));
+    else if (viewing === "debrief") main.append(renderDebrief(c, player));
+    else main.append(renderQuestionStage(c, player, viewing, justSolved === viewing, (next, correct) => {
+      if (correct) justSolved = viewing === "setup" || viewing === "debrief" ? null : viewing;
+      update(next, viewing);
+    }, update));
+
+    setChildren(root, header, main);
+    tick();
+    if (player.completedAt === null) every(1000, tick);
   };
 
-  render();
-  return li;
+  draw();
+  window.scrollTo(0, 0);
 }
 
-/* ================= Toolbox ================= */
+/* ================= Stage 0: setup ================= */
 
-function renderToolbox(c: Case): HTMLElement {
+function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) => void): HTMLElement {
+  const done = player.setupDoneAt !== null;
+  const briefing = h(
+    "details",
+    { class: "briefing", open: readPref("briefingRead") === null },
+    h("summary", {}, T().briefing),
+    html("div", { class: "prose" }, md(c.briefing)),
+  );
+  briefing.addEventListener("toggle", () => {
+    if (!briefing.open) writePref("briefingRead", "1");
+  });
+
+  const checklist = c.setupChecklist ?? [];
+  const checks = checklist.map((item, i) => {
+    const key = `check.${c.id}.${i}`;
+    const box = h("input", { type: "checkbox", id: `chk-${i}`, checked: readPref(key) === "1" });
+    box.addEventListener("change", () => writePref(key, box.checked ? "1" : "0"));
+    return h("li", {}, h("label", { class: "check", for: `chk-${i}` }, box, html("span", {}, mdInline(item))));
+  });
+
+  const errorEl = h("p", { class: "form-error", role: "alert" });
+  const ready = h("button", { type: "button", class: "btn btn-primary btn-lg" }, T().readyStart);
+  ready.addEventListener("click", () => {
+    ready.disabled = true;
+    errorEl.textContent = "";
+    setupDone(c.id)
+      .then((p) => {
+        writePref("briefingRead", "1");
+        update(p);
+      })
+      .catch((err: unknown) => {
+        errorEl.textContent = errorMessage(err);
+        ready.disabled = false;
+      });
+  });
+
   return h(
     "div",
-    { class: "toolbox" },
+    { class: "stage" },
+    h("p", { class: "stage-kicker mono" }, T().setupKicker),
+    h("h2", { class: "stage-goal" }, T().setupGoal),
+    briefing,
     h(
       "div",
-      { class: "setup-note" },
-      h("span", { class: "setup-label mono" }, "SETUP"),
+      { class: "block" },
+      h("h3", {}, T().downloadHead),
+      h("a", { class: "btn btn-lg", href: c.evidenceZip, download: true }, T().downloadBtn),
       h(
-        "p",
-        {},
-        "Everything works on Linux, macOS or Windows via WSL. You need a POSIX shell with ",
-        ["grep", "awk", "sort", "uniq", "jq", "git"].map((t, i) => [i > 0 ? ", " : "", h("code", {}, t)]),
-        " and either ",
-        h("code", {}, "python3"),
-        " or ",
-        h("code", {}, "node"),
-        ". Run commands from the root of the unzipped evidence folder.",
-      ),
-      h(
-        "p",
-        { class: "muted small" },
-        "macOS ships BSD versions of some tools; the commands below stick to flags both flavours support unless noted. Install jq with ",
-        h("code", {}, "brew install jq"),
-        " or ",
-        h("code", {}, "apt install jq"),
-        ".",
+        "details",
+        { class: "quiet-details" },
+        h("summary", {}, T().whatsInside(c.evidence.length)),
+        h(
+          "ul",
+          { class: "file-list" },
+          c.evidence.map((f) => h("li", {}, h("code", {}, f.path), " ", h("span", { class: "muted" }, `· ${f.format}`), html("div", { class: "muted small" }, mdInline(f.description)))),
+        ),
       ),
     ),
-    c.toolbox.map((section) =>
+    checks.length > 0 ? h("div", { class: "block" }, h("h3", {}, T().checklistHead), h("ul", { class: "checklist" }, checks)) : null,
+    h(
+      "div",
+      { class: "block" },
+      h("h3", {}, T().choosePath(checks.length > 0 ? 3 : 2)),
       h(
-        "section",
-        { class: "tool-section" },
-        h("h2", { class: "tool-category mono" }, h("span", { class: "accent" }, "## "), section.category),
-        section.items.map((item) => {
-          const code = h("code", {}, item.command);
-          return h(
-            "article",
-            { class: "tool-item" },
-            h("h3", { class: "tool-title" }, item.title),
-            h(
-              "div",
-              { class: "code-wrap" },
-              h("pre", { class: "code-block" }, h("span", { class: "code-prompt", "aria-hidden": "true" }, "$ "), code),
-              copyButton(() => item.command),
-            ),
-            html("div", { class: "prose tool-explain" }, md(item.explain)),
-          );
-        }),
+        "div",
+        { class: "paths" },
+        h(
+          "div",
+          { class: "path-card" },
+          h("h4", {}, T().pathTerminal),
+          h("p", { class: "muted" }, T().pathTerminalBody),
+        ),
+        h(
+          "a",
+          { class: "path-card path-link", href: `#/case/${c.id}/explorer` },
+          h("h4", {}, T().pathExplorer),
+          h("p", { class: "muted" }, T().pathExplorerBody),
+        ),
       ),
     ),
+    done
+      ? h("p", { class: "done-note" }, T().setupComplete)
+      : h("div", { class: "primary-action" }, ready, errorEl),
+  );
+}
+
+/* ================= Question stages ================= */
+
+function renderQuestionStage(
+  c: Case,
+  player: ProgressView,
+  id: QuestionId,
+  justSolved: boolean,
+  onAnswer: (p: ProgressView, correct: boolean) => void,
+  update: (p: ProgressView, view?: StageKey) => void,
+): HTMLElement {
+  const q = questionFor(c, id);
+  const s = stageProgress(player, id);
+  const index = QUESTION_ORDER.indexOf(id) + 1;
+  const kicker = h("p", { class: "stage-kicker mono" }, T().stageOf(index, QUESTION_ORDER.length));
+  if (q === undefined || s === undefined) {
+    return h("div", { class: "stage" }, kicker, h("p", { class: "muted" }, T().stageUnavailable));
+  }
+  const stage = q.stage;
+  const nextKey: StageKey = QUESTION_ORDER[index] ?? "debrief";
+  const continueBtn = (): HTMLElement =>
+    h(
+      "button",
+      { type: "button", class: "btn btn-primary btn-lg", onclick: () => update(player, currentStage(player)) },
+      nextKey === "debrief" ? T().continueDebrief : T().continueStage(index + 1),
+    );
+
+  const head: Child[] = [
+    kicker,
+    h("h2", { class: "stage-goal" }, stage?.goal ?? q.title),
+    stage && stage.lookFor.length > 0
+      ? h("div", { class: "look-for" }, h("h3", {}, T().lookFor), h("ul", {}, stage.lookFor.map((l) => html("li", {}, mdInline(l)))))
+      : null,
+  ];
+
+  /* finished stage: read-only */
+  if (s.status === "solved" || s.status === "revealed") {
+    const solved = s.status === "solved";
+    return h(
+      "div",
+      { class: "stage" },
+      head,
+      html("div", { class: "prose prompt" }, md(q.prompt)),
+      h(
+        "div",
+        { class: `result-panel ${solved ? "is-solved" : "is-revealed"}${justSolved ? " pop" : ""}`, role: justSolved ? "status" : null },
+        h("p", { class: "result-title" }, solved ? T().solvedPts(s.points) : T().revealedPts),
+        !solved && s.revealedAnswer !== null ? h("p", {}, T().answerLabel, h("code", { class: "answer-code" }, s.revealedAnswer)) : null,
+        html("div", { class: "prose" }, md(q.successNote)),
+        currentStage(player) !== id ? continueBtn() : null,
+      ),
+    );
+  }
+
+  if (s.status === "locked") {
+    return h("div", { class: "stage" }, kicker, h("p", { class: "muted" }, T().finishPrevious));
+  }
+
+  /* active stage */
+  const input = h("input", {
+    id: `answer-${id}`,
+    class: "input input-lg mono",
+    type: "text",
+    autocomplete: "off",
+    spellcheck: "false",
+    maxlength: "200",
+    placeholder: q.placeholder,
+    "aria-describedby": `fmt-${id} feedback-${id}`,
+  });
+  input.value = drafts.get(id) ?? "";
+  input.addEventListener("input", () => drafts.set(id, input.value));
+  const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg" }, T().submit);
+  const feedback = h("p", { id: `feedback-${id}`, class: "feedback", role: "status" });
+  if (s.wrongAttempts > 0) feedback.textContent = T().wrongSoFar(s.wrongAttempts);
+
+  let cooldown: number | null = null;
+  const startCooldown = (seconds: number): void => {
+    let left = Math.ceil(seconds);
+    submit.disabled = true;
+    const show = (): void => {
+      feedback.className = "feedback is-wrong";
+      feedback.textContent = T().tooMany(left);
+    };
+    show();
+    if (cooldown !== null) window.clearInterval(cooldown);
+    cooldown = every(1000, () => {
+      left -= 1;
+      if (left <= 0) {
+        if (cooldown !== null) window.clearInterval(cooldown);
+        submit.disabled = false;
+        feedback.className = "feedback";
+        feedback.textContent = T().canTryAgain;
+        return;
+      }
+      show();
+    });
+  };
+
+  const form = h(
+    "form",
+    { class: "answer-form", novalidate: true },
+    h("label", { class: "answer-label", for: `answer-${id}` }, T().yourAnswer),
+    h("p", { id: `fmt-${id}`, class: "muted small" }, T().format, h("code", {}, q.answerFormat)),
+    h("div", { class: "answer-row" }, input, submit),
+    feedback,
+  );
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const answer = input.value.trim();
+    if (answer.length === 0) {
+      feedback.className = "feedback is-wrong";
+      feedback.textContent = T().typeFirst;
+      input.focus();
+      return;
+    }
+    submit.disabled = true;
+    submitAnswer(c.id, id, answer)
+      .then(({ correct, progress: next }) => {
+        if (correct) {
+          drafts.delete(id);
+          onAnswer(next, true);
+          return;
+        }
+        submit.disabled = false;
+        const attempts = next.stages[id]?.wrongAttempts ?? 0;
+        feedback.className = "feedback is-wrong";
+        feedback.textContent = T().notQuite(attempts);
+        form.classList.remove("shake");
+        void form.offsetWidth;
+        form.classList.add("shake");
+        input.select();
+      })
+      .catch((err: unknown) => {
+        if (err instanceof ApiError && err.isRateLimited) {
+          startCooldown(err.retryAfterSeconds ?? 60);
+          return;
+        }
+        submit.disabled = false;
+        feedback.className = "feedback is-wrong";
+        feedback.textContent = errorMessage(err);
+      });
+  });
+
+  /* useful commands */
+  const toolIds = stage?.tools ?? [];
+  const tools = c.toolbox.flatMap((sec) => sec.items).filter((it) => it.id !== undefined && toolIds.includes(it.id));
+
+  /* hints */
+  const hintList = q.hints.slice(0, s.hintsRevealed).map((hint, i) =>
+    h("li", { class: "hint" }, h("span", { class: "hint-label mono" }, T().hintLabel(i + 1, hint.cost)), html("div", { class: "prose" }, md(hint.text))),
+  );
+  const nextHint = q.hints[s.hintsRevealed];
+  const hintError = h("p", { class: "form-error", role: "alert" });
+  const hintBtn = nextHint
+    ? h("button", { type: "button", class: "btn btn-ghost" }, T().revealHint(s.hintsRevealed + 1, q.hints.length, nextHint.cost))
+    : null;
+  hintBtn?.addEventListener("click", () => {
+    hintBtn.disabled = true;
+    revealHint(c.id, id)
+      .then((p) => update(p, id))
+      .catch((err: unknown) => {
+        hintError.textContent = errorMessage(err);
+        hintBtn.disabled = false;
+      });
+  });
+
+  const revealError = h("p", { class: "form-error", role: "alert" });
+  const reveal = confirmButton({
+    label: T().revealAnswer,
+    confirmLabel: T().revealConfirm,
+    className: "link-btn muted",
+    onConfirm: () => {
+      for (const b of reveal.querySelectorAll("button")) b.disabled = true;
+      revealAnswer(c.id, id)
+        .then((p) => update(p, id))
+        .catch((err: unknown) => {
+          for (const b of reveal.querySelectorAll("button")) b.disabled = false;
+          revealError.textContent = errorMessage(err);
+        });
+    },
+  });
+
+  return h(
+    "div",
+    { class: "stage" },
+    head,
+    h("div", { class: "question-box" }, html("div", { class: "prose prompt" }, md(q.prompt)), form),
+    tools.length > 0
+      ? h("div", { class: "block" }, h("h3", {}, T().usefulCommands), h("div", { class: "tool-list" }, tools.map(commandCard)))
+      : h("p", { class: "muted small" }, T().needCommands, h("a", { href: `#/case/${c.id}/toolbox` }, T().browseCommands), "."),
+    stage?.explorerTip
+      ? h(
+          "div",
+          { class: "tip" },
+          h("h3", {}, T().inExplorer),
+          html("div", { class: "prose" }, md(stage.explorerTip)),
+          h("a", { href: `#/case/${c.id}/explorer` }, T().openExplorer),
+        )
+      : null,
+    h(
+      "div",
+      { class: "block hints" },
+      h("h3", {}, T().hints),
+      hintList.length > 0 ? h("ol", { class: "hint-list" }, hintList) : null,
+      hintBtn ?? h("p", { class: "muted small" }, T().noMoreHints),
+      hintError,
+    ),
+    h("div", { class: "reveal" }, reveal, revealError),
   );
 }
 
 /* ================= Debrief ================= */
 
-function renderDebrief(c: Case, p: Progress): HTMLElement {
-  const s = computeScore(c, p);
-  if (!s.debriefUnlocked) {
-    return h(
-      "div",
-      { class: "locked" },
-      h("div", { class: "lock-icon mono", "aria-hidden": "true" }, "[ SEALED ]"),
-      h("h2", {}, "Debrief sealed"),
-      h(
-        "p",
-        {},
-        `The debrief is encrypted with your answers, so there is no shortcut. You're at ${s.solved}/${s.total} flags.`,
-      ),
-      h("div", { class: "locked-actions" }, h("a", { class: "btn btn-primary", href: `#/case/${c.id}/questions` }, "Back to questions")),
-      h(
-        "p",
-        { class: "give-up muted small" },
-        `Stuck? Ask your instructor. The debrief unlocks when all ${s.total} flags are captured.`,
-      ),
-    );
-  }
+function shareText(c: Case, player: ProgressView): string {
+  const hints = QUESTION_ORDER.reduce((n, id) => n + (player.stages[id]?.hintsRevealed ?? 0), 0);
+  const end = player.completedAt !== null ? Date.parse(player.completedAt) : Date.now();
+  return T().shareText(c.title, player.score, player.maxScore, hints, formatElapsed(end - Date.parse(player.setupDoneAt ?? player.startedAt ?? new Date().toISOString())));
+}
 
-  const body = h("div", { class: "debrief-body", "aria-live": "polite", "aria-busy": "true" }, h("p", { class: "mono muted" }, "Decrypting debrief…"));
-  const sealed = sealedDebriefFor(c.id);
-  const fail = (detail: string): void => {
-    body.setAttribute("aria-busy", "false");
-    setChildren(
-      body,
-      h(
-        "div",
-        { class: "debrief-error" },
-        h("p", { class: "mono" }, "Could not unseal the debrief."),
-        h("p", { class: "muted small" }, detail),
-      ),
-    );
-  };
-  if (!sealed) {
-    fail("No sealed debrief is bundled for this case. Tell the organizer.");
-  } else {
-    unsealDebrief(sealed, solvedAnswers(p)).then(
-      (markdown) => {
-        body.setAttribute("aria-busy", "false");
-        setChildren(body, html("div", { class: "prose" }, md(markdown)));
-      },
-      (err: unknown) => {
-        console.error("[debrief] unseal failed", err);
-        fail(
-          "Your saved answers don't match the sealed debrief (the case may have been updated since you solved it). Try Reset progress and re-submitting your answers, or ask your instructor.",
-        );
-      },
-    );
-  }
-
+function renderDebrief(c: Case, player: ProgressView): HTMLElement {
+  const body = h("div", { class: "prose" }, h("p", { class: "muted" }, T().loadingDebrief));
+  getDebrief(c.id, getLang())
+    .then((markdown) => {
+      body.replaceChildren(html("div", {}, md(markdown)));
+    })
+    .catch((err: unknown) => {
+      body.replaceChildren(
+        h("p", { class: "muted" }, err instanceof ApiError && err.status === 403 ? T().finishAll : errorMessage(err)),
+      );
+    });
   return h(
     "div",
-    { class: "debrief" },
+    { class: "stage" },
+    h("p", { class: "stage-kicker mono" }, T().debrief),
+    h("h2", { class: "stage-goal" }, T().caseClosed),
     h(
       "div",
-      { class: "debrief-banner is-complete" },
-      h("span", { class: "mono" }, "INCIDENT RESOLVED"),
-      h("strong", { class: "mono" }, `${s.points}/${s.maxPoints} pts · ${s.hintsUsed} hints · ${formatMinutes(elapsedMs(p))}`),
+      { class: "score-card" },
+      h("p", { class: "score-big mono" }, `${player.score}`, h("span", { class: "muted" }, T().ptsOf(player.maxScore))),
+      h("code", { class: "share-text" }, shareText(c, player)),
+      copyButton(() => shareText(c, player), T().copyResult),
     ),
     body,
   );
