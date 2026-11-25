@@ -32,6 +32,8 @@ export const TO = defineStrings({
     rateLimitOver: "You can try again now.",
     offline: "Can't reach the server. Check your connection and try again.",
     signInForStats: "Sign in to see your stats",
+    skipToContent: "Skip to content",
+    countdownLong: (days: number, hours: number, minutes: number): string => `${formatNumber(days)}d ${formatNumber(hours)}h ${formatNumber(minutes)}m`,
 
     // pending / rejected
     pendingHi: "Hi ",
@@ -139,6 +141,9 @@ export const TO = defineStrings({
     rateLimitOver: "אפשר לנסות שוב עכשיו.",
     offline: "אין חיבור לשרת. בדקו את החיבור ונסו שוב.",
     signInForStats: "היכנסו כדי לראות את הסטטיסטיקות",
+    skipToContent: "דילוג לתוכן",
+    countdownLong: (days: number, hours: number, minutes: number): string =>
+      `${days === 1 ? "יום 1" : `${formatNumber(days)} ימים`} ${formatNumber(hours)} שע' ${formatNumber(minutes)} דק'`,
 
     pendingHi: "היי ",
     pendingBody: "המדריכים מאשרים חשבונות חדשים מלוח הבקרה שלהם. הדף מתעדכן לבד, אפשר להשאיר אותו פתוח.",
