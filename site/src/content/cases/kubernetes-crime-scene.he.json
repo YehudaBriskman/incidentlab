@@ -1,0 +1,742 @@
+{
+  "setupChecklist": [
+    "השיגו את הראיות: הורידו ופרסו את **חבילת הראיות**, *או* פתחו את ה-**Evidence Explorer** כדי לעבור על כל הקבצים בדפדפן (בלי התקנות).",
+    "קראו את `README_FIRST.txt` מההתחלה ועד הסוף, ובמיוחד את טבלת אזורי הזמן.",
+    "שימו לב לשעונים: ה-journals של ה-nodes, Flux, ה-JSON של ה-events והלוגים של ה-containers הם ב-**UTC**; `kubectl describe`, `helm history`, תאריכי git והצ'אט הם ב-**שעון מקומי (UTC+02:00)**; הגילים ב-`get pods` וב-`get events` הם **יחסיים** ל-`date -u` שמעל כל בלוק; המטריקות ב-**epoch seconds**.",
+    "בחרו מסלול: **bash** (Linux, macOS או WSL) עם `jq`, **Windows PowerShell** (לכל פקודה ב-Toolbox יש גרסת PowerShell), או ה-**Explorer בדפדפן**.",
+    "לא צריך קלאסטר: כל פקודות ה-`kubectl` כבר הורצו בשבילכם. התייחסו לפלט שלהן כטקסט רגיל."
+  ],
+  "id": "kubernetes-crime-scene",
+  "title": "Kubernetes Crime Scene",
+  "subtitle": "pods ב-CrashLoopBackOff, node תחת לחץ, Service בלי endpoints ו-HPA שלא מצליח להחליט. כל אחד מהם הוא עד, ורק אחד מהם מספר את האמת.",
+  "difficulty": "hard",
+  "estMinutes": 60,
+  "tags": [
+    "kubernetes",
+    "kubectl",
+    "oomkilled",
+    "probes",
+    "service-selectors",
+    "scheduling",
+    "helm",
+    "gitops",
+    "jq",
+    "time-zones"
+  ],
+  "inspiredBy": {
+    "title": "ההשבתה של Reddit ביום הפאי",
+    "year": 2023,
+    "summary": "ב-14 במרץ 2023 Reddit הייתה למטה כ-314 דקות אחרי ששודרג קלאסטר Kubernetes מגרסה 1.23 ל-1.24. השדרוג החליף את ה-label של תפקיד ה-node מ-`master` ל-`control-plane`, אבל הקונפיגורציה של ה-route reflectors ב-Calico עדיין בחרה nodes לפי ה-label הישן, ותקשורת ה-pods נשברה בכל הקלאסטר. בסוף המהנדסים שחזרו את הקלאסטר מגיבוי."
+  },
+  "briefing": "**יום שלישי, 11:30. צוות הפלטפורמה של Lumenmart.**\n\nב-09:55 שעון מקומי המחירים נעלמו מהאפליקציה ומהאתר של Lumenmart. במשך כ-**46 דקות** ערוץ האירוע רדף אחרי pods ב-CrashLoopBackOff, node תחת לחץ זיכרון, pod של צוות אחר שפונה (evicted), HPA שלא מצליח להחליט ו-Service בלי endpoints. ואז commit אחד ל-repo של ה-GitOps העלים את הכול.\n\nכל אחד מהסימפטומים האלה הוא עד. רק אחד מהם מספר את האמת על הסיבה.\n\n**חבילת הראיות** מכילה את מה שה-on-call שמר: פלט של `kubectl` (events, pods, describe), ה-journals של ה-nodes, היסטוריה של Flux ו-Helm, `git log -p` של ה-GitOps, לוגים של containers, הלוג של ה-ingress, מטריקות והצ'אט של האירוע. **קראו קודם את `README_FIRST.txt`**: המקורות האלה משתמשים לפחות בארבעה שעונים שונים.\n\nשישה שלבים בנויים כמו RCA אמיתי: **הקורבן הראשון**, **מה השתנה**, **המנגנון**, למה ה-traffic **לא הגיע** ל-pods שכן עבדו, **הנזק ההיקפי**, ולסיום ההפרדה בין **הסיבה לסימפטומים**. כל תשובה היא ערך קטן ומדויק. נתקעתם? השתמשו ב-Toolbox וברמזים.",
+  "evidenceZip": "/evidence/kubernetes-crime-scene-evidence.zip",
+  "evidence": [
+    {
+      "path": "README_FIRST.txt",
+      "format": "טקסט",
+      "description": "תדריך, רשימת קבצים וטבלת אזורי הזמן. מתחילים כאן."
+    },
+    {
+      "path": "chat/inc-4127-pricing-api.txt",
+      "format": "צ'אט (שעון מקומי)",
+      "description": "ייצוא של ערוץ האירוע. אנשים לחוצים, תיאוריות מתחרות."
+    },
+    {
+      "path": "flux/flux-controllers.log",
+      "format": "JSON lines (UTC)",
+      "description": "לוגים של source-, kustomize- ו-helm-controller: מה Flux משך, החיל ושדרג, עם ה-revisions ב-git."
+    },
+    {
+      "path": "gitops/apps/shop/pricing-api/service.yaml",
+      "format": "YAML",
+      "description": "ה-manifest של ה-Service של pricing-api. הוא יושב ליד ה-HelmRelease, לא בתוך ה-chart."
+    },
+    {
+      "path": "gitops/git-log-p.txt",
+      "format": "git log -p (+0200)",
+      "description": "ההיסטוריה האחרונה של ה-repo platform-gitops, עם diffs מלאים."
+    },
+    {
+      "path": "helm/history-pricing-api.txt",
+      "format": "helm (שעון מקומי, בלי אזור)",
+      "description": "`helm history` של ה-release של pricing-api, מהלפטופ של ה-on-call."
+    },
+    {
+      "path": "helm/values-rev13.yaml",
+      "format": "YAML",
+      "description": "`helm get values --revision 13`."
+    },
+    {
+      "path": "helm/values-rev14.yaml",
+      "format": "YAML",
+      "description": "`helm get values --revision 14`."
+    },
+    {
+      "path": "ingress/ingress-nginx-controller.log",
+      "format": "לוג nginx (UTC)",
+      "description": "הלוג של ה-ingress controller: שורות access ל-APIs של shop ועוד אזהרות של ה-controller."
+    },
+    {
+      "path": "kubectl/describe-hpa-pricing-api.txt",
+      "format": "kubectl",
+      "description": "ה-HorizontalPodAutoscaler של pricing-api: מטריקות, conditions ו-events של scaling."
+    },
+    {
+      "path": "kubectl/describe-nodes.txt",
+      "format": "kubectl (שעות +0200)",
+      "description": "שלושת ה-worker nodes במהלך האירוע: conditions, taints, pods, requests ו-events של ה-node."
+    },
+    {
+      "path": "kubectl/describe-pod-pricing-api-6d5b8c7f9-bq9tz.txt",
+      "format": "kubectl (שעות +0200)",
+      "description": "`kubectl describe pod pricing-api-6d5b8c7f9-bq9tz` במהלך האירוע."
+    },
+    {
+      "path": "kubectl/describe-pod-pricing-api-6d5b8c7f9-f2lsv.txt",
+      "format": "kubectl (שעות +0200)",
+      "description": "`kubectl describe pod pricing-api-6d5b8c7f9-f2lsv` במהלך האירוע."
+    },
+    {
+      "path": "kubectl/describe-svc-pricing-api.txt",
+      "format": "kubectl",
+      "description": "`describe svc pricing-api`, ועוד כל ה-Services ב-shop עם ה-selectors שלהם."
+    },
+    {
+      "path": "kubectl/get-endpoints-pricing-api.txt",
+      "format": "kubectl",
+      "description": "ה-Endpoints וה-EndpointSlices של ה-Service של pricing-api בשלושה רגעים."
+    },
+    {
+      "path": "kubectl/get-events-A-wide.txt",
+      "format": "kubectl (גילים יחסיים)",
+      "description": "`kubectl get events -A -o wide` בדיוק כמו שה-on-call הריץ: סדר ברירת מחדל, גילים יחסיים לזמן הצילום."
+    },
+    {
+      "path": "kubectl/get-events-A.json",
+      "format": "JSON (UTC)",
+      "description": "אותם events כ-`-o json`, עם timestamps מוחלטים של first/last ועם counts."
+    },
+    {
+      "path": "kubectl/get-pods-A.txt",
+      "format": "kubectl (גילים יחסיים)",
+      "description": "כל ה-pods בקלאסטר, קרוב לסוף האירוע."
+    },
+    {
+      "path": "kubectl/get-pods-shop-labels.txt",
+      "format": "kubectl",
+      "description": "ה-pods ב-shop עם ה-labels שלהם, ועוד ה-selector של ה-Deployment של pricing-api."
+    },
+    {
+      "path": "kubectl/get-pods-shop-snapshots.txt",
+      "format": "kubectl (גילים יחסיים)",
+      "description": "`kubectl -n shop get pods -o wide`, הורץ שבע פעמים, מרגע לפני הדיפלוי ועד אחרי התיקון."
+    },
+    {
+      "path": "logs/pricing-api-6d5b8c7f9-bq9tz.log",
+      "format": "לוג Spring Boot (UTC)",
+      "description": "`kubectl -n shop logs pricing-api-6d5b8c7f9-bq9tz`: ה-container הנוכחי."
+    },
+    {
+      "path": "logs/pricing-api-6d5b8c7f9-bq9tz.previous.log",
+      "format": "לוג Spring Boot (UTC)",
+      "description": "`kubectl -n shop logs pricing-api-6d5b8c7f9-bq9tz --previous`: ה-container הקודם (שהסתיים)."
+    },
+    {
+      "path": "logs/pricing-api-6d5b8c7f9-f2lsv.previous.log",
+      "format": "לוג Spring Boot (UTC)",
+      "description": "`kubectl -n shop logs pricing-api-6d5b8c7f9-f2lsv --previous`: ה-container הקודם (שהסתיים)."
+    },
+    {
+      "path": "metrics/hpa-pricing-api.csv",
+      "format": "CSV (epoch)",
+      "description": "מצב ה-HPA כל 15 שניות: replicas, pods מוכנים, ניצול CPU כאחוז מה-request."
+    },
+    {
+      "path": "metrics/node-memory.csv",
+      "format": "CSV (epoch)",
+      "description": "זיכרון working set וזיכרון פנוי לכל node כל 15 שניות, עם סף ה-eviction."
+    },
+    {
+      "path": "nodes/prod-eu1-general-6b4f-k2m9.journal.log",
+      "format": "syslog + klog (UTC)",
+      "description": "ה-journal של ה-kernel, ה-kubelet וה-containerd ב-node `prod-eu1-general-6b4f-k2m9`."
+    },
+    {
+      "path": "nodes/prod-eu1-general-6b4f-r7tq.journal.log",
+      "format": "syslog + klog (UTC)",
+      "description": "ה-journal של ה-kernel, ה-kubelet וה-containerd ב-node `prod-eu1-general-6b4f-r7tq`."
+    },
+    {
+      "path": "nodes/prod-eu1-general-6b4f-w3zx.journal.log",
+      "format": "syslog + klog (UTC)",
+      "description": "ה-journal של ה-kernel, ה-kubelet וה-containerd ב-node `prod-eu1-general-6b4f-w3zx`."
+    }
+  ],
+  "rules": [
+    "עובדים רק מחבילת הראיות. אל תקראו את קוד ה-generator או את קוד האתר; זה הורס את הכיף.",
+    "התשובות לא רגישות לאותיות גדולות/קטנות, ורווחים בהתחלה ובסוף מתעלמים מהם. הקפידו על הפורמט שמופיע מתחת לכל שאלה.",
+    "כל רמז עולה את הנקודות שמופיעות עליו. הרמזים נחשפים לפי הסדר, מדחיפה עדינה ועד כמעט הפקודה המלאה.",
+    "עבודה בזוגות מומלצת. דברו על ההיגיון שלכם בקול, בדיוק כמו ב-incident review אמיתי.",
+    "כל כלי מותר: grep, awk, jq, Python, גיליון אלקטרוני, העורך האהוב עליכם. בלשונית Toolbox יש פקודות שיעזרו.",
+    "תשובות שגויות לא עולות כלום, אז נחשו בחופשיות. ובכל זאת, נסו להיות מסוגלים להסביר *למה* התשובה שלכם נכונה.",
+    "אל תשתפו flags עם צוותים אחרים עד שכולם מסיימים. לשתף טכניקות זה בסדר.",
+    "אף פעם אל תריצו את פקודות ה-Toolbox מול קלאסטר אמיתי. כל מה שצריך כבר נמצא בחבילה."
+  ],
+  "questions": [
+    {
+      "stage": {
+        "name": "הראשון שנפל",
+        "goal": "מצאו את ה-pod של pricing-api שה-container שלו נהרג ראשון ב-OOM על ידי ה-kernel.",
+        "lookFor": [
+          "אין ב-Kubernetes event בשם `OOMKilled`: ה-kernel הורג, וה-kubelet רק מגלה את זה אחר כך",
+          "לכל node יש journal משלו (UTC): השוו את שלושתם",
+          "שורת `oom-kill:` של ה-kernel מציינת container ID, לא pod",
+          "`describe` שומר רק את ה-termination *האחרון*, והגילים ב-`get pods` הם יחסיים"
+        ],
+        "tools": [
+          "journal-oom",
+          "journal-oom-memcg",
+          "journal-pleg-died",
+          "journal-find-cid",
+          "pods-restarts",
+          "age-to-time"
+        ],
+        "explorerTip": "פתחו כל `nodes/*.journal.log`, הוסיפו פילטר **contains** `Killed process` והשתמשו ב-**First match** כדי למצוא את ה-OOM kill המוקדם ביותר ב-node הזה (דלגו על כל מה שהוא לא `java`). העתיקו את ה-container ID משורת ה-`oom-kill:` שממש מעליו (`cri-containerd-<id>.scope`) והחליפו את הפילטר ב-ID הזה: שורת `ContainerDied` של ה-kubelet נותנת את שם ה-pod. השוו את הזמנים בין שלושת ה-nodes."
+      },
+      "id": "q1",
+      "title": "הראשון שנפל",
+      "prompt": "הדבר הראשון שכולם ראו היה pods של pricing-api שעושים restart עם `OOMKilled`.\n\nאיזה **pod של pricing-api** היה **הראשון** שה-container שלו נהרג ב-OOM?\n\nענו עם **שם ה-pod המלא** (בלי ה-namespace).",
+      "answerFormat": "שם pod, למשל `pricing-api-<hash>-<suffix>`",
+      "placeholder": "pricing-api-0a1b2c3d4-xxxxx",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "אל תסמכו על הסדר של `kubectl get events`, וגם לא על עמודת STATUS ב-snapshot בודד: ה-pod ש*נראה* כמו זה שנהרג ב-OOM הוא לא בהכרח הראשון. מקור האמת ל-OOM kills הוא לוג ה-kernel ב-journal של כל node (ב-UTC)."
+        },
+        {
+          "cost": 20,
+          "text": "בכל journal, שורת ה-`oom-kill:` של ה-kernel מסיימת את נתיב ה-`task_memcg=` ב-`cri-containerd-<container id>.scope`. רגע אחר כך ה-kubelet כותב `\"SyncLoop (PLEG): event for pod\" pod=\"shop/...\"` עם `\"Type\":\"ContainerDied\",\"Data\":\"<container id>\"`. חברו את השתיים לפי ה-container ID, השאירו רק `shop/pricing-api-*`, וקחו את המוקדם ביותר מבין **שלושת** ה-nodes."
+        },
+        {
+          "cost": 40,
+          "text": "חיבור של ה-kills מה-kernel ל-pods, כל ה-nodes ביחד, מהמוקדם למאוחר:\n\n```sh\nawk '/\"ContainerDied\"/ { match($0, /pod=\"[^\"]+\"/); p = substr($0, RSTART+5, RLENGTH-6)\n                         match($0, /\"Data\":\"[0-9a-f]+\"/); owner[substr($0, RSTART+8, RLENGTH-9)] = p; next }\n     /kernel: oom-kill:/ { match($0, /cri-containerd-[0-9a-f]+/); n++; t[n] = $3; c[n] = substr($0, RSTART+15, RLENGTH-15) }\n     END { for (i = 1; i <= n; i++) print t[i], owner[c[i]] }' nodes/*.journal.log | sort | head\n```\n\nהצליבו עם ה-snapshot של 07:57:10 ב-`kubectl/get-pods-shop-snapshots.txt`: השוו את ה-`(… ago)` של ה-restart האחרון של כל pod."
+        }
+      ],
+      "successNote": "OOM kill הוא אירוע של ה-**kernel**. Kubernetes מגלה אותו רק אחר כך (exit code 137, reason `OOMKilled`), ושומר רק את ה-termination *האחרון* של כל container. ההיסטוריה המלאה נמצאת בלוג ה-kernel של ה-node, לפי container ID ולא לפי שם pod. וה-pod ש*נראה* אשם על המסך לא היה הראשון: סדרו אירועים לפי ראיות, לא לפי מה שבמקרה מופיע לכם בטרמינל."
+    },
+    {
+      "stage": {
+        "name": "מה השתנה?",
+        "goal": "זהו את ה-commit ב-GitOps שמאחורי ה-revision של Helm שרץ כשה-OOM kills התחילו.",
+        "lookFor": [
+          "`helm history` מדפיס את השעון המקומי של הלפטופ (UTC+02:00), בלי אזור זמן",
+          "איזה revision היה live בזמן שמצאתם בשלב 1?",
+          "הלוגים של Flux (UTC) קושרים כל apply ל-revision מסוג `main@sha1:`",
+          "ה-tag של ה-image לא השתנה. אז מה כן?"
+        ],
+        "tools": [
+          "helm-history",
+          "local-to-utc",
+          "flux-applies",
+          "flux-helm",
+          "git-commits",
+          "git-one-commit"
+        ],
+        "explorerTip": "פתחו את `helm/history-pricing-api.txt` והמירו כל זמן UPDATED ל-UTC (פחות שעתיים). אחר כך פתחו את `flux/flux-controllers.log` ב-**JSON pretty view** וסננו **contains** `HelmRelease/shop/pricing-api`: כל apply מראה את ה-`revision` שלו. קחו את זה שממש לפני ה-Helm upgrade הזה, ואז סננו את `gitops/git-log-p.txt` לפי **contains** של 7 התווים הראשונים כדי לקרוא את ה-diff."
+      },
+      "id": "q2",
+      "title": "מה השתנה?",
+      "prompt": "pods לא משנים לעצמם את ה-limits. משהו נפרס.\n\nמצאו את ה-**commit ב-repo `platform-gitops`** שיצר את ה-revision של Helm שרץ כשה-OOM kill הראשון קרה.\n\nענו עם ה-**short SHA** שלו (7 תווי ה-hex הראשונים).",
+      "answerFormat": "SHA של commit, 7 תווים (hex)",
+      "placeholder": "a1b2c3d",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "היו כמה releases של pricing-api באותו בוקר. `helm/history-pricing-api.txt` מפרט אותם, אבל ב-**שעון מקומי (UTC+02:00)**. המירו, ואז מצאו את ה-revision האחרון שהתחיל לפני הזמן שמצאתם בשלב 1."
+        },
+        {
+          "cost": 20,
+          "text": "Helm לא יודע כלום על git. Flux כן: ב-`flux/flux-controllers.log`, שורת ה-kustomize-controller `server-side apply completed` שה-`output` שלה מכיל `HelmRelease/shop/pricing-api` נושאת את ה-`revision` (`main@sha1:...`). האחרונה לפני ה-Helm upgrade הזה היא ה-commit שלכם. ודאו ב-`gitops/git-log-p.txt` שה-diff שלו יכול לגרום ל-OOM kills."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ncolumn -t -s $'\\t' helm/history-pricing-api.txt\njq -r 'select(.controller==\"kustomization\" and (.output | has(\"HelmRelease/shop/pricing-api\"))) | \"\\(.ts) \\(.revision)\"' flux/flux-controllers.log\ngrep -A6 '^commit <first-7-chars>' gitops/git-log-p.txt\n```"
+        }
+      ],
+      "successNote": "ב-GitOps הדיפלוי *הוא* commit, אבל בשרשרת יש כמה קפיצות: commit, source fetch, kustomize apply, Helm upgrade, rollout של ReplicaSet. לכל קפיצה יש לוג משלה ושעון משלה. ותקראו שוב את הודעת ה-commit: \"No functional change intended.\" refactor של values יחד עם קפיצת major ב-chart הוא שינוי פונקציונלי עד שהוכח אחרת. תעשו diff ל-manifests ה**מרונדרים** (`helm diff`, `flux diff`), לא רק לקובץ ה-values."
+    },
+    {
+      "stage": {
+        "name": "המנגנון",
+        "goal": "מצאו את ה-memory limit שאיתו רצו בפועל ה-containers שנהרגו ב-OOM.",
+        "lookFor": [
+          "Limits ו-Requests הם מספרים שונים, ורק אחד מהם יגרום לכם OOM kill",
+          "ה-kernel מדפיס את ה-usage וה-limit של ה-cgroup ב-kB בכל OOM kill",
+          "השוו את ה-`-Xmx` של ה-JVM ל-limit של ה-container"
+        ],
+        "tools": [
+          "describe-section",
+          "values-diff",
+          "journal-oom",
+          "units"
+        ],
+        "explorerTip": "פתחו קובץ `kubectl/describe-pod-pricing-api-*.txt` וקראו את בלוק ה-**Limits** של ה-container. הצליבו בכל journal של node: סננו **contains** `memory: usage` וחלקו את ערך ה-kB ב-1024 כדי לקבל MiB."
+      },
+      "id": "q3",
+      "title": "המנגנון",
+      "prompt": "exit code 137 עם reason `OOMKilled` אומר ש-container הגיע ל-**memory limit** שלו.\n\nעם איזה memory limit רצו ה-containers של pricing-api שקרסו?\n\nענו **בדיוק כמו שזה כתוב ב-pod spec** (ה-Limits ב-`kubectl describe pod`), למשל `2Gi` או `300Mi`.",
+      "answerFormat": "כמות ב-Kubernetes כמו ב-pod spec (למשל `2Gi`)",
+      "placeholder": "2Gi",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "`kubectl describe pod` מציג גם **Limits** וגם **Requests**. ל-OOM killer אכפת רק מאחד מהם."
+        },
+        {
+          "cost": 20,
+          "text": "שלושה מקורות מסכימים: בלוק ה-Limits ב-`kubectl/describe-pod-*.txt`, `resources.limits.memory` ב-`helm/values-rev14.yaml`, ושורת `memory: usage ...kB, limit ...kB` של ה-kernel בכל journal (kB כאן זה KiB: חלקו ב-1024 לקבלת MiB). השוו ל-`-Xmx1g` באותו פלט describe."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\nsed -n '/Limits:/,/Requests:/p' kubectl/describe-pod-pricing-api-*.txt\ndiff -u helm/values-rev13.yaml helm/values-rev14.yaml\n```"
+        }
+      ],
+      "successNote": "ה-JVM קיבל רשות ל-heap של 1 GiB (`-Xmx1g`) בתוך container שמותר לו להשתמש בהרבה פחות **בסך הכול** (heap + metaspace + threads + direct buffers). ה-JVM אף פעם לא מספיק לזרוק `OutOfMemoryError`: ה-kernel הורג אותו קודם, בלי stack trace ובלי שורת לוג אחרונה. גזרו את גודל ה-heap מה-limit (`-XX:MaxRAMPercentage`), קבעו limits לפי צריכה שנמדדה, ואף פעם אל תשנו אחד בלי השני."
+    },
+    {
+      "stage": {
+        "name": "Endpoints ריקים",
+        "goal": "מצאו את ה-label ב-selector של ה-Service שאף pod של pricing-api כבר לא נושא.",
+        "lookFor": [
+          "חלק מה-pods החדשים היו `Running 1/1` (Ready), ובכל זאת ל-Service לא היו endpoints",
+          "Service בוחר pods שנושאים את **כל** זוגות ה-`key=value` שלו",
+          "ה-Service הזה הוא manifest נפרד, הוא לא חלק מה-chart של Helm",
+          "השוו את ה-selector ל-labels שעל ה-pods החדשים"
+        ],
+        "tools": [
+          "svc-selector",
+          "labels-split",
+          "values-diff",
+          "git-one-commit"
+        ],
+        "explorerTip": "פתחו את `kubectl/describe-svc-pricing-api.txt` ורשמו כל `key=value` שב-**Selector**. אחר כך פתחו את `kubectl/get-pods-shop-labels.txt`, סננו **contains** `pricing-api-` ובדקו כל זוג מה-selector מול עמודת LABELS. גם `gitops/apps/shop/pricing-api/service.yaml` מראה את אותו selector ב-YAML."
+      },
+      "id": "q4",
+      "title": "Endpoints ריקים",
+      "prompt": "גם כשחלק מה-pods של pricing-api היו `Running` ו-`1/1` Ready, ל-Service `shop/pricing-api` **לא היו endpoints**, אז ה-ingress החזיר 503.\n\nאיזה **זוג `key=value`** מה-selector של ה-Service לא מתאים ל**אף אחד** מה-pods של pricing-api אחרי השינוי?",
+      "answerFormat": "זוג `key=value` אחד, בדיוק כמו ב-selector",
+      "placeholder": "tier=frontend",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "ה-readiness הוא לא הבעיה: הסתכלו על ה-endpoints ב-08:06 לצד רשימת ה-pods בערך באותו זמן. Service בוחר רק pods שנושאים את **כל** ה-labels שב-selector שלו."
+        },
+        {
+          "cost": 20,
+          "text": "`Selector:` בפלט ה-describe מפרט את הזוגות, ו-`--show-labels` מפרט מה באמת יש על ה-pods. זוג אחד נמצא על ה-pods החדשים, ואחד לא. ה-diff של ה-values (`extraPodLabels` מול `podLabels`) מראה איך הוא הלך לאיבוד."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngrep '^Selector:' kubectl/describe-svc-pricing-api.txt\nawk '$1 ~ /^pricing-api-/ {print $NF}' kubectl/get-pods-shop-labels.txt | tr ',' '\\n' | sort | uniq -c\n```"
+        }
+      ],
+      "successNote": "Labels הם API. ה-selector של ה-Deployment עצמו השתמש ב-labels החדשים של ה-chart (`app.kubernetes.io/*`), אז ה-rollout נראה מושלם, אבל Service שחי **מחוץ** ל-chart עדיין בחר לפי ה-label הישן. שום דבר לא זורק שגיאה כש-selector תופס אפס pods: פשוט מקבלים אובייקט Endpoints ריק. תגדירו alert על אפס endpoints מוכנים לכל Service שמקבל traffic, ותשחררו את ה-Service באותו release עם ה-pods שהוא בוחר."
+    },
+    {
+      "stage": {
+        "name": "נזק היקפי",
+        "goal": "תנו את שם ה-pod של צוות אחר שה-kubelet פינה (evicted) כשלאחד ה-nodes נגמר הזיכרון.",
+        "lookFor": [
+          "אחד ה-nodes דיווח על condition של `MemoryPressure`",
+          "ב-`kubectl get pods -A` יש יותר מ-pod אחד במצב `Evicted`: בדקו *למה* ו*איפה* כל אחד פונה",
+          "הודעת ה-eviction אומרת איזה משאב אזל",
+          "ה-scheduler משבץ pods לפי ה-requests, אבל לחץ זיכרון נוצר ממה שהם צורכים בפועל"
+        ],
+        "tools": [
+          "node-conditions",
+          "events-by-reason",
+          "journal-eviction",
+          "csv-threshold",
+          "epoch-to-utc"
+        ],
+        "explorerTip": "פתחו את `kubectl/describe-nodes.txt` וסננו **contains** `MemoryPressure` כדי למצוא את ה-node שבו זה `True`. אחר כך פתחו את `kubectl/get-events-A-wide.txt` וסננו **contains** `Evicted`: כל שורה מראה את ה-pod, את ה-node בעמודת SOURCE ואת ההודעה. ה-journal של אותו node (סננו **contains** `Eviction manager`) מראה את אותה החלטה מהצד של ה-kubelet."
+      },
+      "id": "q5",
+      "title": "נזק היקפי",
+      "prompt": "ה-pods של pricing-api העמיסו על node אחד, וה-kubelet פינה pod **שלא היה לו שום קשר ל-pricing** כדי להחזיר זיכרון.\n\nאיזה pod זה היה? ענו עם **שם ה-pod המלא** (בלי ה-namespace).",
+      "answerFormat": "שם pod",
+      "placeholder": "some-worker-5d8c7b9f4-xxxxx",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "קודם מצאו את ה-node: ב-`describe nodes` יש טבלת Conditions, ו-node אחד מראה `MemoryPressure True`. eviction בגלל **ephemeral-storage** הוא סיפור אחר."
+        },
+        {
+          "cost": 20,
+          "text": "Evictions מופיעים כ-events מסוג `Evicted` על ה-pod (`source.host` הוא ה-node), וכ-`Eviction manager: pod is evicted successfully` ב-journal של ה-kubelet באותו node. רק אחד מהם היה בגלל **זיכרון**."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngrep -E '^Name:|^  MemoryPressure' kubectl/describe-nodes.txt\njq -c '.items[] | select(.reason==\"Evicted\") | {t: .lastTimestamp, host: .source.host, pod: .involvedObject.name, msg: .message}' kubectl/get-events-A.json\ngrep -h 'Eviction manager' nodes/*.journal.log\n```"
+        }
+      ],
+      "successNote": "ה-pods החדשים של pricing ביקשו (requests) הרבה פחות זיכרון ממה שצרכו בפועל, וה-scheduler מסתכל רק על requests, אז הוא דחס אותם על node אחד. כשהצריכה האמיתית חצתה את סף ה-eviction, ה-kubelet פינה את ה-pod שהכי חרג מה-request שלו: job סנכרון של צוות אחר, לא ה-pods שיצרו את הבעיה. requests שלא תואמים לצריכה האמיתית הופכים באג של צוות אחד לאירוע של כולם. שמרו על requests קרובים לצריכה שנמדדה (או שווים ל-limits בשירותים קריטיים)."
+    },
+    {
+      "stage": {
+        "name": "סיבה מול סימפטומים",
+        "goal": "ספרו כמה פעמים containers של pricing-api נהרגו ב-OOM במהלך האירוע.",
+        "lookFor": [
+          "RESTARTS סופר כל restart: OOM kills **וגם** kills של liveness probe",
+          "לא כל OOM kill ב-journals שייך ל-pricing-api",
+          "הסתכלו על שלושת ה-nodes",
+          "כל kill הוא שורת `oom-kill:` אחת של ה-kernel עם container ID"
+        ],
+        "tools": [
+          "journal-oom",
+          "journal-process-hist",
+          "journal-per-node-count",
+          "journal-pleg-died",
+          "join-lists",
+          "unique-capture"
+        ],
+        "explorerTip": "בכל `nodes/*.journal.log` הוסיפו פילטר **regex** `Killed process \\d+ \\(java\\)` ורשמו את מספר ההתאמות. השתמשו ב-**Unique values** עם `Killed process \\d+ \\((\\S+)\\)` כדי לראות אילו processes נהרגו. אחר כך פסלו כל `java` שהוא לא pricing-api: העתיקו את ה-container ID שלו משורת ה-`oom-kill:` וסננו לפיו כדי לראות את ה-pod (או השוו את ה-`anon-rss` שלו ל-limit של pricing-api). חברו את שלושת ה-nodes."
+      },
+      "id": "q6",
+      "title": "סיבה מול סימפטומים",
+      "prompt": "ה-pods עשו restart עשרות פעמים, אבל לא כל restart היה OOM kill: חלק מה-containers נהרגו על ידי ה-**liveness probe** שלהם כשהם עוד היו ב-warmup.\n\nכמה פעמים בסך הכול ה-kernel **הרג ב-OOM container של pricing-api** במהלך האירוע (כל ה-pods, כל ה-nodes)?\n\nענו עם **מספר שלם**.",
+      "answerFormat": "מספר שלם",
+      "placeholder": "42",
+      "points": 150,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "אל תסכמו את RESTARTS: kill של liveness (exit 143, reason `Error`) הוא גם restart. ספרו OOM kills של ה-kernel במקום, וזכרו שיש שלושה nodes."
+        },
+        {
+          "cost": 20,
+          "text": "כל OOM kill הוא זוג שורות `oom-kill:` + `Killed process` ב-journal. חלקם שייכים ל-workloads אחרים (שם process אחר, או `java` מ-namespace אחר עם limit הרבה יותר גדול). מפו כל container ID ל-pod שלו דרך שורת ה-`ContainerDied` של ה-kubelet, והשאירו רק `shop/pricing-api-*`."
+        },
+        {
+          "cost": 40,
+          "text": "אותו חיבור כמו בשלב 1, עם ספירה לכל pod:\n\n```sh\nawk '/\"ContainerDied\"/ { match($0, /pod=\"[^\"]+\"/); p = substr($0, RSTART+5, RLENGTH-6)\n                         match($0, /\"Data\":\"[0-9a-f]+\"/); owner[substr($0, RSTART+8, RLENGTH-9)] = p; next }\n     /kernel: oom-kill:/ { match($0, /cri-containerd-[0-9a-f]+/); n++; t[n] = $3; c[n] = substr($0, RSTART+15, RLENGTH-15) }\n     END { for (i = 1; i <= n; i++) print t[i], owner[c[i]] }' nodes/*.journal.log \\\n  | awk '{print $2}' | sort | uniq -c\n```\n\nואז סכמו את השורות של `shop/pricing-api-*`."
+        }
+      ],
+      "successNote": "פעלו כאן שני רוצחים שונים: ה-kernel (memory limit נמוך מדי בשביל ה-heap) וה-liveness probe של ה-kubelet (ה-chart התעלם בשקט מהגדרות ה-probe הישנות, אז warmup איטי על node עמוס לא קיבל הזדמנות). שניהם נראים כמו \"restarts\", ורק אחד מהם מצביע על ה-root cause. לספור את הדבר הנכון זה מה שמפריד בין הסיבה לסימפטומים. ובדקו שהגדרות ה-probe שאתם *חושבים* שיש לכם הן אלה שבאמת ב-pod spec: מפתח values ששינה שם נכשל בשקט."
+    }
+  ],
+  "toolbox": [
+    {
+      "category": "התמצאות ראשונית",
+      "items": [
+        {
+          "id": "unzip-evidence",
+          "title": "פריסת הראיות",
+          "command": "unzip kubernetes-crime-scene-evidence.zip && cd kubernetes-crime-scene",
+          "explain": "פורס את החבילה. הכול נמצא תחת תיקייה עליונה אחת.",
+          "powershell": "Expand-Archive .\\kubernetes-crime-scene-evidence.zip -DestinationPath .\ncd .\\kubernetes-crime-scene"
+        },
+        {
+          "id": "read-readme",
+          "title": "קראו את ה-README",
+          "command": "cat README_FIRST.txt",
+          "explain": "ברצינות. יש בו את טבלת אזורי הזמן, ובתיק הזה יש לפחות ארבעה שעונים שונים.",
+          "powershell": "Get-Content README_FIRST.txt"
+        },
+        {
+          "id": "list-files",
+          "title": "מה יש לנו כאן",
+          "command": "find . -type f | sort | xargs ls -l",
+          "explain": "כל הקבצים עם הגודל שלהם. את הגדולים (journals, ingress, events) מחפשים, לא קוראים.",
+          "powershell": "Get-ChildItem -Recurse -File | Select-Object FullName, Length"
+        },
+        {
+          "id": "head-lines",
+          "title": "הצצה לשורות הראשונות",
+          "command": "head -n 20 nodes/prod-eu1-general-6b4f-r7tq.journal.log",
+          "explain": "הסתכלו על הפורמט **לפני** שאתם מפרסרים: מי כתב את השורה, באיזה שעון, אילו שדות.",
+          "powershell": "Get-Content nodes\\prod-eu1-general-6b4f-r7tq.journal.log -TotalCount 20"
+        },
+        {
+          "id": "snapshot-index",
+          "title": "מתי צולם כל snapshot?",
+          "command": "grep -n -A1 '^\\$ date -u' kubectl/get-pods-shop-snapshots.txt",
+          "explain": "כל בלוק של kubectl מתחיל ב-`date -u` שה-on-call הריץ קודם. זה העוגן שלכם להפוך גילים יחסיים (`3m8s`, `21s ago`) בחזרה לשעות.",
+          "powershell": "Select-String -Path kubectl\\get-pods-shop-snapshots.txt -Pattern '^\\$ date -u' -Context 0,1"
+        }
+      ]
+    },
+    {
+      "category": "לקרוא פלט של kubectl",
+      "items": [
+        {
+          "id": "pods-restarts",
+          "title": "ה-pods של pricing-api, snapshot אחרי snapshot",
+          "command": "awk '/^Tue Nov/ {print \"--\", $4} $1 ~ /^pricing-api/ {print $1, $2, $3, $4, $5, $6}' kubectl/get-pods-shop-snapshots.txt",
+          "explain": "שם, READY, STATUS ו-RESTARTS לכל pod של pricing-api בכל snapshot. `1 (21s ago)` אומר restart אחד, האחרון 21 שניות לפני ה-snapshot.",
+          "powershell": "Select-String -Path kubectl\\get-pods-shop-snapshots.txt -Pattern '^(Tue Nov|pricing-api)' | ForEach-Object Line"
+        },
+        {
+          "id": "describe-section",
+          "title": "קטע אחד מתוך describe",
+          "command": "sed -n '/Last State:/,/Requests:/p' kubectl/describe-pod-*.txt",
+          "explain": "`sed -n '/start/,/end/p'` מדפיס טווח שורות. כאן: ה-termination האחרון, readiness, מספר ה-restarts וה-limits.",
+          "powershell": "Select-String -Path kubectl\\describe-pod-*.txt -Pattern 'Last State:' -Context 0,12"
+        },
+        {
+          "id": "labels-split",
+          "title": "אילו labels יש על ה-pods?",
+          "command": "awk '$1 ~ /^pricing-api/ {print $NF}' kubectl/get-pods-shop-labels.txt | tr ',' '\\n' | sort | uniq -c",
+          "explain": "מפרק את עמודת LABELS ל-`key=value` אחד בכל שורה וסופר כמה pods נושאים כל אחד.",
+          "powershell": "Get-Content kubectl\\get-pods-shop-labels.txt | Where-Object { $_ -match '^pricing-api' } | ForEach-Object { (($_ -split '\\s+')[-1]) -split ',' } | Group-Object | Select-Object Count, Name"
+        },
+        {
+          "id": "svc-selector",
+          "title": "מה ה-Service בוחר?",
+          "command": "grep -E '^(Selector|Endpoints|TargetPort):' kubectl/describe-svc-pricing-api.txt",
+          "explain": "Service מנתב רק ל-pods במצב Ready שנושאים את **כל** זוגות ה-`key=value` שב-selector שלו. `Endpoints:` ריק אומר שאף pod לא התאים.",
+          "powershell": "Select-String -Path kubectl\\describe-svc-pricing-api.txt -Pattern '^(Selector|Endpoints|TargetPort):'"
+        },
+        {
+          "id": "node-conditions",
+          "title": "מצב ה-nodes במבט אחד",
+          "command": "grep -E '^Name:|^Taints:|^  (MemoryPressure|DiskPressure|Ready) ' kubectl/describe-nodes.txt",
+          "explain": "ה-conditions וה-taints של כל node. `LastTransitionTime` אומר מתי condition התהפך (בשעון +0200 של הלפטופ).",
+          "powershell": "Select-String -Path kubectl\\describe-nodes.txt -Pattern '^Name:|^Taints:|^  (MemoryPressure|DiskPressure|Ready) '"
+        }
+      ]
+    },
+    {
+      "category": "Events של Kubernetes (jq)",
+      "items": [
+        {
+          "id": "events-sorted",
+          "title": "Events לפי סדר זמן",
+          "command": "jq -r '.items | sort_by(.firstTimestamp)[] | [.firstTimestamp, .count, .involvedObject.name, .reason, .message] | @tsv' kubectl/get-events-A.json | less -S",
+          "explain": "`kubectl get events` **לא** ממוין לפי זמן כברירת מחדל. ב-JSON יש timestamps מוחלטים ב-UTC, אז מיינו בעצמכם.",
+          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Sort-Object firstTimestamp | Format-Table firstTimestamp, count, @{n='object'; e={$_.involvedObject.name}}, reason, message | Out-Host -Paging"
+        },
+        {
+          "id": "events-reasons",
+          "title": "אילו סוגי events יש?",
+          "command": "jq -r '.items[] | .reason' kubectl/get-events-A.json | sort | uniq -c | sort -rn",
+          "explain": "היסטוגרמה של ה-reasons. שימו לב למה ש**חסר**: אין event בשם `OOMKilled`.",
+          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Group-Object reason | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "events-by-reason",
+          "title": "סינון events לפי reason",
+          "command": "jq -c '.items[] | select(.reason==\"Killing\") | {t: .lastTimestamp, n: .count, host: .source.host, obj: .involvedObject.name, msg: .message}' kubectl/get-events-A.json",
+          "explain": "החליפו את `Killing` בכל reason מההיסטוגרמה. `source.host` הוא ה-node שדיווח.",
+          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Where-Object reason -eq 'Killing' | Format-Table lastTimestamp, count, @{n='host'; e={$_.source.host}}, @{n='object'; e={$_.involvedObject.name}}, message"
+        },
+        {
+          "id": "events-count-sum",
+          "title": "Events מאוגדים",
+          "command": "jq '[.items[] | select(.reason==\"BackOff\") | .count] | add' kubectl/get-events-A.json",
+          "explain": "events שחוזרים על עצמם מתמזגים לאובייקט אחד עם `count`. לספור אובייקטים זה לא לספור מופעים.",
+          "powershell": "((Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Where-Object reason -eq 'BackOff' | Measure-Object count -Sum).Sum"
+        }
+      ]
+    },
+    {
+      "category": "ה-journals של ה-nodes",
+      "items": [
+        {
+          "id": "journal-oom",
+          "title": "כל ה-OOM kills, מכל ה-nodes",
+          "command": "grep -h 'Killed process' nodes/*.journal.log | sort",
+          "explain": "ה-kernel כותב שורת `Killed process <pid> (<name>)` אחת לכל OOM kill. ה-timestamps בפורמט syslog (UTC) ממוינים יפה בתוך אותו יום.",
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process' | ForEach-Object Line | Sort-Object"
+        },
+        {
+          "id": "journal-oom-memcg",
+          "title": "איזה cgroup נהרג?",
+          "command": "grep -h -B1 'Killed process' nodes/*.journal.log | grep -o 'task_memcg=[^,]*' | head",
+          "explain": "שורת ה-`oom-kill:` שלפני כל kill מכילה את נתיב ה-cgroup: ה-UID של ה-pod ו-`cri-containerd-<container id>.scope`.",
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'oom-kill:' | ForEach-Object { [regex]::Match($_.Line, 'task_memcg=[^,]*').Value } | Select-Object -First 10"
+        },
+        {
+          "id": "journal-pleg-died",
+          "title": "מוות של containers, לפי pod",
+          "command": "grep -h '\"ContainerDied\"' nodes/*.journal.log | grep -o 'pod=\"[^\"]*\".*' | head",
+          "explain": "ה-PLEG של ה-kubelet כותב `ContainerDied` עם שם ה-pod, וב-`Data` את ה-container ID. זה הגשר בין שורות ה-kernel לשמות ה-pods.",
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern '\"ContainerDied\"' | ForEach-Object { [regex]::Match($_.Line, 'pod=\"[^\"]*\".*').Value } | Select-Object -First 10"
+        },
+        {
+          "id": "journal-find-cid",
+          "title": "לעקוב אחרי container ID אחד",
+          "command": "grep -h '<container-id>' nodes/*.journal.log",
+          "explain": "כל מה שכל רכיב אמר על container אחד: נוצר, עלה, נהרג, מת.",
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern '<container-id>' -SimpleMatch | ForEach-Object Line"
+        },
+        {
+          "id": "journal-eviction",
+          "title": "Evictions של ה-kubelet",
+          "command": "grep -h -E 'Eviction manager|NodeHas' nodes/*.journal.log",
+          "explain": "ה-eviction manager כותב איזה משאב אזל, איך הוא דירג את ה-pods ואת מי הוא פינה.",
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Eviction manager|NodeHas' | ForEach-Object Line"
+        },
+        {
+          "id": "journal-per-node-count",
+          "title": "ספירה לכל node",
+          "command": "grep -c 'Killed process' nodes/*.journal.log",
+          "explain": "`grep -c` עם כמה קבצים מדפיס ספירה נפרדת לכל קובץ.",
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process' | Group-Object Filename | Select-Object Count, Name"
+        },
+        {
+          "id": "journal-process-hist",
+          "title": "אילו processes נהרגו?",
+          "command": "grep -ho 'Killed process [0-9]* ([^)]*)' nodes/*.journal.log | awk '{print $4}' | sort | uniq -c",
+          "explain": "מקבץ את ה-OOM kills לפי שם ה-process. זהירות: אותו שם process יכול להיות שייך ליותר מ-workload אחד.",
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process \\d+ \\(([^)]+)\\)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name"
+        }
+      ]
+    },
+    {
+      "category": "GitOps, Flux ו-Helm",
+      "items": [
+        {
+          "id": "helm-history",
+          "title": "היסטוריית ה-release ב-Helm",
+          "command": "column -t -s $'\\t' helm/history-pricing-api.txt",
+          "explain": "שורה לכל revision. UPDATED הוא הרגע שבו ה-upgrade **התחיל**, מודפס בשעון המקומי של הלפטופ, בלי אזור זמן.",
+          "powershell": "Get-Content helm\\history-pricing-api.txt | ForEach-Object { $_ -replace \"`t\", ' | ' }"
+        },
+        {
+          "id": "values-diff",
+          "title": "diff בין ה-values של שני revisions",
+          "command": "diff -u helm/values-rev13.yaml helm/values-rev14.yaml",
+          "explain": "`helm get values` מדפיס את ה-values של המשתמש עם מפתחות ממוינים, אז diff רגיל עובד. שורות `-` קיימות רק בישן, `+` רק בחדש.",
+          "powershell": "Compare-Object (Get-Content helm\\values-rev13.yaml) (Get-Content helm\\values-rev14.yaml)"
+        },
+        {
+          "id": "git-commits",
+          "title": "היסטוריית ה-GitOps במבט אחד",
+          "command": "grep -A5 '^commit ' gitops/git-log-p.txt",
+          "explain": "SHA, author, תאריך (עם ה-offset שלו) ו-subject של כל commit.",
+          "powershell": "Select-String -Path gitops\\git-log-p.txt -Pattern '^commit ' -Context 0,5"
+        },
+        {
+          "id": "git-one-commit",
+          "title": "לקרוא diff של commit אחד",
+          "command": "sed -n '/^commit abc1234/,/^commit /p' gitops/git-log-p.txt",
+          "explain": "מדפיס מהכותרת של ה-commit ועד ה-commit הבא. החליפו את `abc1234` בתחילת SHA אמיתי.",
+          "powershell": "$l = Get-Content gitops\\git-log-p.txt; $i = ($l | Select-String '^commit abc1234').LineNumber; $l[($i - 1)..($i + 80)]"
+        },
+        {
+          "id": "flux-applies",
+          "title": "מה Flux החיל, ומאיזה commit?",
+          "command": "jq -c 'select(.controller==\"kustomization\" and (.output | length > 0)) | {ts, name, output, revision}' flux/flux-controllers.log",
+          "explain": "ה-kustomize-controller כותב כל אובייקט ששינה ואת ה-`revision` ב-git שממנו הגיע.",
+          "powershell": "Get-Content flux\\flux-controllers.log | ConvertFrom-Json | Where-Object { $_.controller -eq 'kustomization' -and @($_.output.PSObject.Properties).Count -gt 0 } | Format-List ts, name, output, revision"
+        },
+        {
+          "id": "flux-helm",
+          "title": "מה ה-helm-controller עשה?",
+          "command": "jq -r 'select(.controller==\"helmrelease\") | \"\\(.ts) \\(.namespace)/\\(.name) \\(.msg)\"' flux/flux-controllers.log",
+          "explain": "כל Helm upgrade ש-Flux הריץ: למה (סיבת ה-out-of-sync), מתי התחיל ואיך נגמר.",
+          "powershell": "Get-Content flux\\flux-controllers.log | ConvertFrom-Json | Where-Object controller -eq 'helmrelease' | ForEach-Object { \"$($_.ts) $($_.namespace)/$($_.name) $($_.msg)\" }"
+        }
+      ]
+    },
+    {
+      "category": "אזורי זמן ו-timestamps",
+      "items": [
+        {
+          "id": "local-to-utc",
+          "title": "מקומי (+02:00) ל-UTC",
+          "command": "date -u -d '2026-11-17 09:30:00 +0200' '+%F %T'",
+          "explain": "בשביל `helm history`, `kubectl describe`, תאריכי git והצ'אט. להוריד שעתיים בראש גם עובד, אם נזהרים.",
+          "powershell": "([DateTimeOffset]'2026-11-17T09:30:00+02:00').UtcDateTime.ToString('yyyy-MM-dd HH:mm:ss')"
+        },
+        {
+          "id": "age-to-time",
+          "title": "גיל יחסי לשעה",
+          "command": "date -u -d '2026-11-17 08:44:12 UTC - 47 minutes' +%T",
+          "explain": "זמן ה-snapshot (מה-`date -u` שמעל הבלוק) פחות הגיל. גילים מעל 10 דקות מעוגלים לדקות שלמות.",
+          "powershell": "([DateTimeOffset]'2026-11-17T08:44:12Z').AddMinutes(-47).UtcDateTime.ToString('HH:mm:ss')"
+        },
+        {
+          "id": "epoch-to-utc",
+          "title": "Epoch ל-UTC",
+          "command": "date -u -d @1794902400",
+          "explain": "בשביל קובצי ה-CSV של המטריקות. ב-macOS: `date -u -r 1794902400`.",
+          "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794902400).UtcDateTime.ToString('u')"
+        },
+        {
+          "id": "utc-to-epoch",
+          "title": "UTC ל-epoch",
+          "command": "date -u -d '2026-11-17 08:00:00' +%s",
+          "explain": "כדי למצוא את השורות המתאימות ב-CSV שממופתח לפי epoch.",
+          "powershell": "([DateTimeOffset]'2026-11-17T08:00:00Z').ToUnixTimeSeconds()"
+        },
+        {
+          "id": "csv-epoch-column",
+          "title": "שעות קריאות לכל ה-CSV",
+          "command": "awk -F, 'NR>1 {cmd=\"date -u -d @\"$1\" +%T\"; cmd | getline t; close(cmd); print t, $0}' metrics/hpa-pricing-api.csv | head",
+          "explain": "מוסיף לכל שורה את שעת ה-UTC שלה. קצת איטי (`date` אחד לכל שורה), בסדר לכמה מאות שורות.",
+          "powershell": "Import-Csv metrics\\hpa-pricing-api.csv | Select-Object -First 10 @{n='utc'; e={ [DateTimeOffset]::FromUnixTimeSeconds([long]$_.ts_epoch).ToString('HH:mm:ss') }}, *"
+        }
+      ]
+    },
+    {
+      "category": "מטריקות ב-CSV",
+      "items": [
+        {
+          "id": "csv-table",
+          "title": "טבלה קריאה",
+          "command": "column -s, -t < metrics/hpa-pricing-api.csv | less -S",
+          "explain": "מיישר את עמודות ה-CSV כדי שאפשר יהיה לקרוא אותן.",
+          "powershell": "Import-Csv metrics\\hpa-pricing-api.csv | Format-Table | Out-Host -Paging"
+        },
+        {
+          "id": "csv-changes",
+          "title": "רק השורות שבהן ערך השתנה",
+          "command": "awk -F, 'NR>1 && $2 != prev {print; prev = $2}' metrics/hpa-pricing-api.csv",
+          "explain": "מדפיס שורה בכל פעם שעמודה 2 משתנה: כל אירוע scale של ה-HPA.",
+          "powershell": "$p = ''; Import-Csv metrics\\hpa-pricing-api.csv | ForEach-Object { if ($_.spec_replicas -ne $p) { $_; $p = $_.spec_replicas } }"
+        },
+        {
+          "id": "csv-threshold",
+          "title": "שורות מתחת לסף",
+          "command": "awk -F, 'NR>1 && $4 < $5' metrics/node-memory.csv",
+          "explain": "זיכרון פנוי ב-node מתחת לסף ה-eviction הקשיח של ה-kubelet. המירו את ה-epoch כדי לראות מתי.",
+          "powershell": "Import-Csv metrics\\node-memory.csv | Where-Object { [int]$_.memory_available_mib -lt [int]$_.eviction_threshold_mib }"
+        }
+      ]
+    },
+    {
+      "category": "ספירה וחיבור בין מקורות",
+      "items": [
+        {
+          "id": "unique-capture",
+          "title": "ספירה לפי ערך שחולץ",
+          "command": "grep -ho 'pod=\"shop/[^\"]*\"' nodes/*.journal.log | sort | uniq -c | sort -rn | head -20",
+          "explain": "`grep -o` שולף שדה אחד משורות מבולגנות; `sort | uniq -c` סופר כל ערך.",
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'pod=\"(shop/[^\"]*)\"' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name"
+        },
+        {
+          "id": "join-lists",
+          "title": "חיבור בין שתי רשימות",
+          "command": "awk 'NR==FNR {want[$1]; next} $1 in want' ids.txt other.txt",
+          "explain": "awk קלאסי על שני קבצים: הראשון בונה טבלת חיפוש, והשני מסונן (או מועשר) בעזרתה. אותו רעיון עובד גם בתוך קובץ אחד עם בלוק `END`.",
+          "powershell": "$want = Get-Content ids.txt; Get-Content other.txt | Where-Object { $want -contains (($_ -split ' ')[0]) }"
+        },
+        {
+          "id": "units",
+          "title": "kB ל-MiB",
+          "command": "echo $(( 1572864 / 1024 )) MiB",
+          "explain": "מספרי הזיכרון של ה-kernel הם ב-kB (בפועל KiB). חלקו ב-1024 לקבלת MiB, ושוב לקבלת GiB. `Mi` ו-`Gi` ב-Kubernetes הם אותן יחידות בינאריות.",
+          "powershell": "1572864 / 1024"
+        }
+      ]
+    }
+  ],
+  "debrief": "_חתום._ סיימו את כל ששת השלבים כדי לפתוח את ה-debrief."
+}
