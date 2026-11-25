@@ -25,7 +25,7 @@
     "קראו את `README_FIRST.txt` מההתחלה ועד הסוף, כולל מילון המונחים.",
     "רשמו את אזור הזמן של כל מקור: לוג ה-dpkg של הצי ב-**CET (UTC+01:00)**, ה-CSV של התזמונים והצ'אט ב-**epoch seconds**, כותרות perf/binary ולוגי ההפצה ב-**UTC**, ול-mail ול-git יש **offset משלהם**.",
     "בחרו מסלול: **bash** (Linux, macOS או WSL), **Windows PowerShell** (לכל פקודה ב-Toolbox יש גרסת PowerShell), או ה-**Explorer בדפדפן**.",
-    "git הוא אופציונלי: `repo/git-log.txt` מכיל את כל ההיסטוריה של ה-upstream כטקסט; `repo/zfold.bundle` הוא אותו דבר כ-bundle שאפשר לעשות לו clone."
+    "אין מה להתקין: כל פקודה ב-Toolbox משתמשת בכלים שמגיעים עם Linux/WSL, macOS, Git Bash או Windows PowerShell 5.1. `repo/git-log.txt` מכיל את כל ההיסטוריה של ה-upstream כטקסט; `repo/zfold.bundle` מיועד רק למי ש-git כבר מותקן אצלו."
   ],
   "evidenceZip": "/evidence/the-insider-commit-evidence.zip",
   "evidence": [
@@ -135,7 +135,7 @@
     "התשובות לא תלויות באותיות גדולות/קטנות, ורווחים בהתחלה ובסוף מתעלמים מהם. הקפידו על הפורמט שמופיע מתחת לכל שאלה.",
     "כל רמז עולה את הנקודות שמופיעות עליו, והרמזים נחשפים לפי הסדר, מדחיפה עדינה ועד כמעט הפקודה המלאה. בלשונית Toolbox התחביר של כל פקודה חינמי; הצגת הפקודה המלאה והמוכנה להרצה עולה 5 נקודות. אחרי שמסיימים את התיק, כל הפקודות חינמיות.",
     "עבודה בזוגות מומלצת. דברו את ההיגיון שלכם בקול, בדיוק כמו בתחקיר אמיתי.",
-    "כל כלי מותר: grep, awk, jq, git, Python, גיליון אלקטרוני, העורך האהוב עליכם. בלשונית Toolbox יש פקודות שעוזרות.",
+    "אין צורך להתקין כלום: ה-Toolbox נשאר עם grep, sed, awk, sort, date וחבריהם (או הכלים המובנים של Windows PowerShell). כל כלי אחר שכבר יש לכם מותר גם הוא: git, jq, Python, גיליון אלקטרוני, העורך האהוב עליכם.",
     "כל תשובה שגויה עולה 2 נקודות (עד 20 לכל שלב), אז חשבו לפני שאתם מנחשים, ונסו להיות מסוגלים להסביר *למה* התשובה שלכם נכונה.",
     "בונוסים: פתרון מהיר מזכה בבונוס זמן של עד 30 נקודות לכל שלב, שהולך וקטן אחרי זמן היעד של השלב. פתרון נקי, בלי רמזים, פקודות או תשובות שגויות, מזכה ב-10 נקודות נוספות. מי שפותר ראשון שלב מקבל 15 נקודות first blood. וסיום של כל ששת השלבים בלי לחשוף תשובה מזכה ב-50 נקודות נוספות.",
     "אל תשתפו flags עם צוותים אחרים עד שכולם מסיימים. לשתף טכניקות זה בסדר.",
@@ -182,7 +182,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\n# first probe of a sustained run of slow logins on bench-01\nawk -F, '$2==\"bench-01\" && $4==\"ok\" { if ($6>300) { if (++r==1) f=$1; if (r==6) {print f; exit} } else r=0 }' perf/sshd-auth-timing.csv\ndate -u -d @<that_epoch>\n# what finished installing on bench-01 (CET!)\ngrep '^bench-01 ' fleet/dpkg-all-hosts.log | grep 'status installed'\n```\nהוסיפו שעה לזמן הקפיצה ב-UTC כדי להשוות ב-CET. ענו עם הגרסה של ספריית zfold בלי `-1`."
+          "text": "```sh\n# first probe of a sustained run of slow logins on bench-01\nt=$(awk -F, '$2==\"bench-01\" && $4==\"ok\" { if ($6>300) { if (++r==1) f=$1; if (r==6) {print f; exit} } else r=0 }' perf/sshd-auth-timing.csv)\ndate -u -d \"@$t\"      # macOS: date -u -r \"$t\"\n# what finished installing on bench-01 (CET!)\ngrep '^bench-01 ' fleet/dpkg-all-hosts.log | grep 'status installed'\n```\nהוסיפו שעה לזמן הקפיצה ב-UTC כדי להשוות ב-CET. ענו עם הגרסה של ספריית zfold בלי `-1`."
         }
       ],
       "successNote": "לפני/אחרי נקי דורש שינוי **מתמשך** וקבוצת **ביקורת**: bench-03 קיבל את אותם עדכוני openssh ומערכת ונשאר מהיר. המרה של כל המקורות לאזור זמן אחד היא מה שמפריד בין הסיבה האמיתית לבין השינוי שפשוט קרה באותו יום. כאן, החלקה בין CET ל-UTC גורמת לאשמה להיראות כאילו הגיעה *אחרי* הסימפטום."
@@ -309,7 +309,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\ngrep libzfold perf/gdb-got-audit.txt      # start and end of libzfold's code\nlo=<start>; hi=<end>\nawk '$1 ~ /^0x/ && NF==3' perf/gdb-got-audit.txt | while read s name t; do\n  (( t >= lo && t < hi )) && echo \"$name $t\"; done\n```"
+          "text": "```sh\ngrep libzfold perf/gdb-got-audit.txt      # start and end of libzfold's code\n# zero-padded lowercase hex of equal width compares correctly as text\nawk '/libzfold/ && $1 ~ /^0x/ {lo = $1; hi = $2}\n     $1 ~ /^0x/ && NF == 3 && $3\"\" >= lo\"\" && $3\"\" < hi\"\" {print $2, $3}' perf/gdb-got-audit.txt\n```"
         }
       ],
       "successNote": "ההאטה וה-hook הם שני דברים שונים: חצי השנייה היא ה-**ifunc resolver** המחליף שסורק טבלאות סימבולים בתוך ld.so בזמן ש-sshd עולה, לפני כל התחברות. ה-hook הוא רשומת GOT אחת שנכתבת מחדש במהלך הסריקה הזו. CRC64 עדיין עובד וכל הבדיקות עוברות. פרופיילרים תופסים את מה שבדיקות לא תופסות: לספריית דחיסה לא היה שום עניין לצרוך 90% מה-CPU של sshd, ומהנדסת אחת סירבה להתעלם מזה."
@@ -352,7 +352,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\ngit clone repo/zfold.bundle zfold && cd zfold\ngit log --all --diff-filter=A --format='%h %ad %an %s' --date=iso -- 'tests/files/<file>'\n```\nבלי git? `grep -n -B12 'Binary files /dev/null and b/tests/files/<file>' repo/git-log.txt | grep commit`"
+          "text": "```sh\n# every file ever added, with the commit that added it (newest first)\nawk '/^commit / {sha = substr($2, 1, 7)} /^Date: / {d = $2 \" \" $3}\n     /^diff --git / {p = substr($4, 3)} /^new file mode/ {print sha, d, p}' repo/git-log.txt | grep 'tests/files/'\n```\nבחרו את השורה עם הקובץ שלכם משלב 3. רק אם git כבר מותקן אצלכם: `git log --all --diff-filter=A -- 'tests/files/<file>'` ב-clone של ה-bundle אומר את אותו הדבר."
         }
       ],
       "successNote": "הודעת ה-commit הייתה רגילה, ה-author היה co-maintainer אמין, והשינוי היה \"רק בדיקות\". עכשיו קראו את `mail/zfold-devel.mbox`: שני חשבונות שמעולם לא תרמו קוד הפעילו לחץ במשך חודשים על מתנדב עייף, עד שהמצטרף החדש קיבל את המפתחות. אמון בשרשרת האספקה הוא חברתי לפני שהוא טכני. מימון ותמיכה ב-maintainers, review של שני אנשים ל-releases ומעקב אחרי קמפייני לחץ הם בקרות אבטחה."
@@ -394,7 +394,7 @@
         },
         {
           "cost": 40,
-          "text": "```sh\nawk -v v='<X.Y.Z>-1' '$4==\"status\" && $5==\"installed\" && $6==\"libzfold5:amd64\" && $7==v {print $1}' \\\n  fleet/dpkg-all-hosts.log | sort -u | wc -l\n```\nהשוו לספירה נאיבית של `grep <X.Y.Z>` כדי לראות כמה רחוק הייתם."
+          "text": "```sh\n# distinct hosts per libzfold5 version that reached \"status installed\"\nawk '$4==\"status\" && $5==\"installed\" && $6==\"libzfold5:amd64\" {print $7, $1}' fleet/dpkg-all-hosts.log \\\n  | sort -u | cut -d' ' -f1 | uniq -c\n```\nקראו את הספירה שליד הגרסה הרעה המלאה (`<X.Y.Z>-1`), לא את ה-rollback עם `+really`. השוו לספירה נאיבית של `grep <X.Y.Z>` כדי לראות כמה רחוק הייתם."
         }
       ],
       "successNote": "\"יש לו עכשיו את התיקון\" זה לא \"מעולם לא נחשף\". כל שרת שהריץ את ה-build הרע צריך להיחשב כאילו נפרץ: להחליף host keys ו-credentials ש-sshd נגע בהם, לעבור על לוגי גישה מחלון החשיפה, ולבנות מחדש במקום לתקן. שרת ה-bastion שברשימה הוא המקום להתחיל בו."
@@ -425,11 +425,11 @@
         {
           "id": "read-readme",
           "title": "קריאת ה-README",
-          "syntax": "less <readme-file>",
-          "command": "less README_FIRST.txt",
-          "syntaxPowershell": "Get-Content .\\<readme-file> | more",
-          "powershell": "Get-Content .\\README_FIRST.txt | more",
-          "explain": "אזורי זמן, פורמטים של קבצים ומילון מונחים קצר (tarball, m4, ifunc, GOT). קראו אותו קודם."
+          "syntax": "cat <readme-file>",
+          "command": "cat README_FIRST.txt",
+          "syntaxPowershell": "Get-Content .\\<readme-file>",
+          "powershell": "Get-Content .\\README_FIRST.txt",
+          "explain": "אזורי זמן, פורמטים של קבצים ומילון מונחים קצר (tarball, m4, ifunc, GOT). קראו אותו קודם. העבירו אותו ל-`more` כדי לדפדף."
         },
         {
           "id": "head-lines",
@@ -466,8 +466,8 @@
         {
           "id": "grep-context",
           "title": "הקשר סביב התאמה",
-          "syntax": "grep -n -B<before> -A<after> '<marker-text>' <git-log-export> | less",
-          "command": "grep -n -B10 -A3 'new file mode' repo/git-log.txt | less",
+          "syntax": "grep -n -B<before> -A<after> '<marker-text>' <git-log-export> | head -n <count>",
+          "command": "grep -n -B10 -A3 'new file mode' repo/git-log.txt | head -n 60",
           "syntaxPowershell": "Select-String -Path .\\<git-log-export> -Pattern '<marker-text>' -Context <before>,<after>",
           "powershell": "Select-String -Path .\\repo\\git-log.txt -Pattern 'new file mode' -Context 10,3",
           "explain": "`-B` שורות לפני, `-A` שורות אחרי. ב-export של `git log -p` כותרת ה-commit נמצאת כמה שורות מעל כל diff."
@@ -525,20 +525,20 @@
         {
           "id": "csv-epoch-column",
           "title": "ציר זמן קריא מה-CSV",
-          "syntax": "grep ',<host>,' <csv-file> | while IFS=<sep> read <col-vars...>; do\n  echo \"$(date -u -d @$<ts-var> '<format>') <fields-to-show>\"\ndone | less",
-          "command": "grep ',bench-02,' perf/sshd-auth-timing.csv | while IFS=, read ts h u r c a t; do\n  echo \"$(date -u -d @$ts '+%F %T') $h $r auth=$a\"\ndone | less",
+          "syntax": "grep ',<host>,' <csv-file> | awk 'NR % <every-nth> == 1' | while IFS=<sep> read <col-vars...>; do\n  echo \"$(date -u -d @$<ts-var> '<format>') <fields-to-show>\"\ndone",
+          "command": "grep ',bench-02,' perf/sshd-auth-timing.csv | awk 'NR % 36 == 1' | while IFS=, read ts h u r c a t; do\n  echo \"$(date -u -d @$ts '+%F %T') $h $r auth=$a\"\ndone",
           "syntaxPowershell": "Import-Csv .\\<csv-file> | Where-Object <host-column> -eq '<host>' |\n  Select-Object @{n='utc';e={[DateTimeOffset]::FromUnixTimeSeconds([long]$_.<epoch-column>).UtcDateTime}}, <columns...>",
           "powershell": "Import-Csv .\\perf\\sshd-auth-timing.csv | Where-Object host -eq 'bench-02' |\n  Select-Object @{n='utc';e={[DateTimeOffset]::FromUnixTimeSeconds([long]$_.ts_epoch).UtcDateTime}}, result, auth_ms",
-          "explain": "ממיר כל probe של שרת אחד ל-UTC, כדי שתראו בעין איפה המספרים משתנים."
+          "explain": "ממיר ל-UTC probe אחד כל 6 שעות (`NR % 36`, probe כל 10 דקות) של שרת אחד, כדי שתראו בעין איפה המספרים משתנים; הסירו את ה-`awk` כדי לראות כל probe. `date -d @` הוא GNU date; ב-macOS כתבו `date -u -r $ts '+%F %T'`."
         },
         {
           "id": "chat-timestamps",
           "title": "צ'אט עם שעות קריאות",
-          "syntax": "jq -r '.[] | \"\\(.<ts-field> | tonumber | floor | todate) \\(.<user-field>): \\(.<text-field>)\"' <chat-json>",
-          "command": "jq -r '.[] | \"\\(.ts | tonumber | floor | todate) \\(.user): \\(.text)\"' chat/incident-channel.json",
+          "syntax": "awk -F'\"' '/\"<ts-field>\":/ {t = $<n>} /\"<user-field>\":/ {u = $<n>} /\"<text-field>\":/ {print t, u \": \" $<n>}' <chat-json> |\n  while read -r ts msg; do echo \"$(date -u -d \"@${ts%.*}\" '<format>') $msg\"; done",
+          "command": "awk -F'\"' '/\"ts\":/ {t = $4} /\"user\":/ {u = $4} /\"text\":/ {print t, u \": \" $4}' chat/incident-channel.json |\n  while read -r ts msg; do echo \"$(date -u -d \"@${ts%.*}\" '+%F %T') $msg\"; done",
           "syntaxPowershell": "(Get-Content .\\<chat-json> -Raw | ConvertFrom-Json) | ForEach-Object {\n  '{0:u} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][double]$_.<ts-field>).UtcDateTime, $_.<user-field>, $_.<text-field> }",
           "powershell": "(Get-Content .\\chat\\incident-channel.json -Raw | ConvertFrom-Json) | ForEach-Object {\n  '{0:u} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][double]$_.ts).UtcDateTime, $_.user, $_.text }",
-          "explain": "ה-`ts` בסגנון Slack הוא epoch seconds כמחרוזת. `todate` נותן UTC."
+          "explain": "כל מפתח JSON בשורה משלו, אז פיצול לפי `\"` שם כל ערך ב-`$4`. ה-`ts` בסגנון Slack הוא epoch seconds כמחרוזת: חתכו את השבר ותנו ל-`date` להדפיס UTC (ב-macOS: `date -u -r \"${ts%.*}\" '+%F %T'`)."
         }
       ]
     },
@@ -598,8 +598,8 @@
         {
           "id": "dpkg-pkg-history",
           "title": "חבילה אחת לאורך כל הצי",
-          "syntax": "awk '$<f1> == \"<word1>\" && $<f2> == \"<word2>\" && $<pkg-field> ~ /^<package>/' <dpkg-log> | less",
-          "command": "awk '$4 == \"status\" && $5 == \"installed\" && $6 ~ /^libzfold5/' fleet/dpkg-all-hosts.log | less",
+          "syntax": "awk '$<f1> == \"<word1>\" && $<f2> == \"<word2>\" && $<pkg-field> ~ /^<package>/' <dpkg-log>",
+          "command": "awk '$4 == \"status\" && $5 == \"installed\" && $6 ~ /^libzfold5/' fleet/dpkg-all-hosts.log",
           "syntaxPowershell": "Get-Content .\\<dpkg-log> | Where-Object { $f = $_ -split ' '; $f[<i1>] -eq '<word1>' -and $f[<i2>] -eq '<word2>' -and $f[<pkg-index>] -like '<package>*' }",
           "powershell": "Get-Content .\\fleet\\dpkg-all-hosts.log | Where-Object { $f = $_ -split ' '; $f[3] -eq 'status' -and $f[4] -eq 'installed' -and $f[5] -like 'libzfold5*' }",
           "explain": "כל התקנה שהושלמה של ספריית zfold, בכל השרתים, לפי סדר זמן."
@@ -639,8 +639,8 @@
         {
           "id": "diff-file-list",
           "title": "כל הקבצים ב-diff",
-          "syntax": "grep -nE '^(<section-marker>|<file-header>|<binary-marker>)' <diff-file> | less",
-          "command": "grep -nE '^(######## |diff -ruN |Binary files )' release/tarball-vs-git-tag.diff | less",
+          "syntax": "grep -nE '^(<section-marker>|<file-header>|<binary-marker>)' <diff-file>",
+          "command": "grep -nE '^(######## |diff -ruN |Binary files )' release/tarball-vs-git-tag.diff",
           "syntaxPowershell": "Select-String -Path .\\<diff-file> -Pattern '^(<section-marker>|<file-header>|<binary-marker>)'",
           "powershell": "Select-String -Path .\\release\\tarball-vs-git-tag.diff -Pattern '^(######## |diff -ruN |Binary files )'",
           "explain": "כותרות הסקשנים (`######## zfold ...`) מפרידות בין שני ה-releases. כל שורת `diff -ruN` היא קובץ אחד ששונה בין ה-tag ב-git לבין ה-tarball."
@@ -684,8 +684,8 @@
         {
           "id": "buildlog-compare",
           "title": "השוואה בין שני builds של החבילה",
-          "syntax": "grep -nE '<configure-hook-marker>|<tool>: (<step-a>|<step-b>)' <build-log> | less",
-          "command": "grep -nE 'config.status: executing|libtool: (compile|link)' distro/buildd-logs.txt | less",
+          "syntax": "grep -nE '<configure-hook-marker>|<tool>: (<step-a>|<step-b>)' <build-log>",
+          "command": "grep -nE 'config.status: executing|libtool: (compile|link)' distro/buildd-logs.txt",
           "syntaxPowershell": "Select-String -Path .\\<build-log> -Pattern '<configure-hook-marker>|<tool>: (<step-a>|<step-b>)'",
           "powershell": "Select-String -Path .\\distro\\buildd-logs.txt -Pattern 'config.status: executing|libtool: (compile|link)'",
           "explain": "כל hook של configure וכל אובייקט שקומפל וקושר, בשני ה-builds. אובייקט שמקושר אבל אף פעם לא קומפל הגיע ממקום אחר."
@@ -697,54 +697,54 @@
       "items": [
         {
           "id": "git-clone",
-          "title": "Clone ל-bundle",
-          "syntax": "git clone <bundle-file> <dir> && cd <dir>",
-          "command": "git clone repo/zfold.bundle zfold && cd zfold",
-          "syntaxPowershell": "git clone <bundle-file> <dir>; cd <dir>",
-          "powershell": "git clone repo\\zfold.bundle zfold; cd zfold",
-          "explain": "אופציונלי: `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט."
+          "title": "ההיסטוריה כטקסט (בלי git)",
+          "syntax": "head -n <count> <git-log-export>",
+          "command": "head -n 30 repo/git-log.txt",
+          "syntaxPowershell": "Get-Content .\\<git-log-export> -TotalCount <count>",
+          "powershell": "Get-Content .\\repo\\git-log.txt -TotalCount 30",
+          "explain": "`repo/git-log.txt` הוא `git log -p --decorate --all`: כותרת commit, הודעה ואז ה-diff. אין מה להתקין. רק אם git כבר מותקן אצלכם: `git clone repo/zfold.bundle zfold` נותן את אותה היסטוריה."
         },
         {
           "id": "git-log-oneline",
           "title": "ההיסטוריה במבט אחד",
-          "syntax": "git log --oneline --decorate --all | head -<n>",
-          "command": "git log --oneline --decorate --all | head -40",
-          "syntaxPowershell": "git log --oneline --decorate --all | Select-Object -First <n>",
-          "powershell": "git log --oneline --decorate --all | Select-Object -First 40",
-          "explain": "תגיות מופיעות כ-`(tag: ...)`."
+          "syntax": "awk '/^<commit-marker>/ {sha = substr($<field>, 1, <len>); dec = $0; sub(/<sha-prefix-regex>/, \"\", dec); want = 1; next}\n     want && /^<indent>/ {sub(/^<indent>/, \"\"); print sha, dec, $0; want = 0}' <git-log-export> | head -n <n>",
+          "command": "awk '/^commit / {sha = substr($2, 1, 7); dec = $0; sub(/^commit [0-9a-f]+ ?/, \"\", dec); want = 1; next}\n     want && /^    / {sub(/^    /, \"\"); print sha, dec, $0; want = 0}' repo/git-log.txt | head -n 40",
+          "syntaxPowershell": "$sha = $null\n$(foreach ($l in Get-Content .\\<git-log-export>) {\n  if ($l -match '<commit-line-regex>') { $sha = $matches[1] + $matches[2] }\n  elseif ($sha -and $l -match '<subject-line-regex>') { \"$sha $($matches[1])\"; $sha = $null } }) | Select-Object -First <n>",
+          "powershell": "$sha = $null\n$(foreach ($l in Get-Content .\\repo\\git-log.txt) {\n  if ($l -match '^commit ([0-9a-f]{7})[0-9a-f]*(.*)$') { $sha = $matches[1] + $matches[2] }\n  elseif ($sha -and $l -match '^    (.+)$') { \"$sha $($matches[1])\"; $sha = $null } }) | Select-Object -First 40",
+          "explain": "שורה אחת לכל commit מתוך ה-export הטקסטואלי: SHA מקוצר, קישוטים ונושא. תגיות מופיעות כ-`(tag: ...)`."
         },
         {
           "id": "git-shortlog",
           "title": "מי עושה commit?",
-          "syntax": "git shortlog -<flags> --all",
-          "command": "git shortlog -sne --all",
-          "syntaxPowershell": "git shortlog -<flags> --all",
-          "powershell": "git shortlog -sne --all",
-          "explain": "מספר commits לכל author ו-email."
+          "syntax": "grep '^<author-marker>' <git-log-export> | sort | uniq -c | sort -<flags>",
+          "command": "grep '^Author: ' repo/git-log.txt | sort | uniq -c | sort -rn",
+          "syntaxPowershell": "Select-String -Path .\\<git-log-export> -Pattern '^<author-marker>(.*)' | ForEach-Object { $_.Matches[0].Groups[1].Value } |\n  Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
+          "powershell": "Select-String -Path .\\repo\\git-log.txt -Pattern '^Author: (.*)' | ForEach-Object { $_.Matches[0].Groups[1].Value } |\n  Group-Object | Sort-Object Count -Descending | Select-Object Count, Name",
+          "explain": "מספר commits לכל author ו-email, משורות ה-`Author:`."
         },
         {
           "id": "git-file-history",
           "title": "היסטוריה של תיקייה",
-          "syntax": "git log --format='<format>' --date=<date-style> --stat -- <dir>",
-          "command": "git log --format='%h %ad %an %s' --date=iso --stat -- tests/files/",
-          "syntaxPowershell": "git log --format='<format>' --date=<date-style> --stat -- <dir>",
-          "powershell": "git log --format='%h %ad %an %s' --date=iso --stat -- tests/files/",
-          "explain": "כל commit שנגע בקבצי הבדיקה, עם הקבצים ששונו."
+          "syntax": "awk '/^<commit-marker>/ {sha = substr($<field>, 1, <len>)} /^<date-marker>/ {d = $<field> \" \" $<field>}\n     /^<file-header> a\\/<dir>\\// {print sha, d, substr($<field>, <start>)}' <git-log-export>",
+          "command": "awk '/^commit / {sha = substr($2, 1, 7)} /^Date: / {d = $2 \" \" $3}\n     /^diff --git a\\/tests\\/files\\// {print sha, d, substr($4, 3)}' repo/git-log.txt",
+          "syntaxPowershell": "$sha = ''; $d = ''\nforeach ($l in Get-Content .\\<git-log-export>) {\n  if ($l -match '<commit-line-regex>') { $sha = $matches[1] }\n  elseif ($l -match '<date-line-regex>') { $d = $matches[1] }\n  elseif ($l -match '<file-header-regex>') { \"$sha $d $($matches[1])\" } }",
+          "powershell": "$sha = ''; $d = ''\nforeach ($l in Get-Content .\\repo\\git-log.txt) {\n  if ($l -match '^commit ([0-9a-f]{7})') { $sha = $matches[1] }\n  elseif ($l -match '^Date:\\s+(\\S+ \\S+)') { $d = $matches[1] }\n  elseif ($l -match '^diff --git a/tests/files/\\S+ b/(\\S+)') { \"$sha $d $($matches[1])\" } }",
+          "explain": "כל commit שנגע בקבצי הבדיקה, עם התאריך והקובץ ששונה. הלוג מסודר מהחדש לישן."
         },
         {
           "id": "git-added",
           "title": "מתי קובץ נוסף לראשונה?",
-          "syntax": "git log --all --diff-filter=<filter> --format='<format>' --date=<date-style> -- '<path>'",
-          "command": "git log --all --diff-filter=A --format='%h %ad %an %s' --date=iso -- 'tests/files/<file>'",
-          "syntaxPowershell": "git log --all --diff-filter=<filter> --format='<format>' --date=<date-style> -- '<path>'",
-          "powershell": "git log --all --diff-filter=A --format='%h %ad %an %s' --date=iso -- 'tests/files/<file>'",
-          "explain": "`--diff-filter=A` משאיר רק commits שבהם הקובץ **נוסף**, לא שונה."
+          "syntax": "awk -v f='<path>' '/^<commit-marker>/ {sha = substr($<field>, 1, <len>)} /^<date-marker>/ {d = $<field> \" \" $<field>}\n     /^<file-header>/ {p = substr($<field>, <start>)} /^<added-marker>/ && p == f {print sha, d, p}' <git-log-export>",
+          "command": "awk -v f='tests/files/<file>' '/^commit / {sha = substr($2, 1, 7)} /^Date: / {d = $2 \" \" $3}\n     /^diff --git / {p = substr($4, 3)} /^new file mode/ && p == f {print sha, d, p}' repo/git-log.txt",
+          "syntaxPowershell": "$f = '<path>'; $sha = ''; $d = ''; $p = ''\nforeach ($l in Get-Content .\\<git-log-export>) {\n  if ($l -match '<commit-line-regex>') { $sha = $matches[1] }\n  elseif ($l -match '<date-line-regex>') { $d = $matches[1] }\n  elseif ($l -match '<file-header-regex>') { $p = $matches[1] }\n  elseif ($l -like '<added-marker>*' -and $p -eq $f) { \"$sha $d $p\" } }",
+          "powershell": "$f = 'tests/files/<file>'; $sha = ''; $d = ''; $p = ''\nforeach ($l in Get-Content .\\repo\\git-log.txt) {\n  if ($l -match '^commit ([0-9a-f]{7})') { $sha = $matches[1] }\n  elseif ($l -match '^Date:\\s+(\\S+ \\S+)') { $d = $matches[1] }\n  elseif ($l -match '^diff --git \\S+ b/(\\S+)') { $p = $matches[1] }\n  elseif ($l -like 'new file mode*' -and $p -eq $f) { \"$sha $d $p\" } }",
+          "explain": "קובץ שנוסף מציג `new file mode` מיד אחרי שורת ה-`diff --git` שלו. כש-awk זוכר את ה-commit והנתיב האחרונים, הוא מדפיס את ה-commit ש**הוסיף** את הקובץ, לא את אלה ששינו אותו."
         },
         {
           "id": "gitlog-text-headers",
-          "title": "אותו דבר בלי git",
-          "syntax": "grep -nE '^<commit-marker>|^<date-marker>|^<file-header>|^<added-marker>' <git-log-export> | less",
-          "command": "grep -nE '^commit |^Date: |^diff --git |^new file mode' repo/git-log.txt | less",
+          "title": "כותרות commit וקבצים",
+          "syntax": "grep -nE '^<commit-marker>|^<date-marker>|^<file-header>|^<added-marker>' <git-log-export>",
+          "command": "grep -nE '^commit |^Date: |^diff --git |^new file mode' repo/git-log.txt",
           "syntaxPowershell": "Select-String -Path .\\<git-log-export> -Pattern '^<commit-marker>|^<date-marker>|^<file-header>|^<added-marker>'",
           "powershell": "Select-String -Path .\\repo\\git-log.txt -Pattern '^commit |^Date: |^diff --git |^new file mode'",
           "explain": "כותרות commit, כותרות קבצים וסימוני `new file mode` מתוך ה-export הטקסטואלי, עם מספרי שורות. קובץ שנוסף מציג `new file mode` מיד אחרי שורת ה-`diff --git` שלו."
@@ -784,11 +784,11 @@
         {
           "id": "got-in-range",
           "title": "GOT slots שמצביעים לתוך טווח",
-          "syntax": "lo=<start>; hi=<end>   # one library's range\nawk '$1 ~ /<hex-regex>/ && NF == <n-fields>' <gdb-audit-file> | while read slot name target; do\n  (( target <cmp> lo && target <cmp> hi )) && echo \"$name -> $target\"\ndone",
-          "command": "lo=0x7f0000000000; hi=0x7f0000010000   # paste one library's Start and End\nawk '$1 ~ /^0x/ && NF == 3' perf/gdb-got-audit.txt | while read slot name target; do\n  (( target >= lo && target < hi )) && echo \"$name -> $target\"\ndone",
+          "syntax": "awk -v lo=<start> -v hi=<end> '$1 ~ /<slot-regex>/ && NF == <n-fields> && $<target-field>\"\" <cmp> lo\"\" && $<target-field>\"\" <cmp> hi\"\" {print $<name-field>, \"->\", $<target-field>}' <gdb-audit-file>",
+          "command": "# example range: libsdnotify. Paste another library's Start and End.\nawk -v lo=0x00007f3a9c100000 -v hi=0x00007f3a9c10c000 '$1 ~ /^0x/ && NF == 3 && $3\"\" >= lo\"\" && $3\"\" < hi\"\" {print $2, \"->\", $3}' perf/gdb-got-audit.txt",
           "syntaxPowershell": "$lo = [Convert]::ToInt64('<start>', 16); $hi = [Convert]::ToInt64('<end>', 16)\nGet-Content .\\<gdb-audit-file> | Where-Object { $_ -match '<slot-line-regex>' } | ForEach-Object {\n  $f = $_ -split '\\s+'; $t = [Convert]::ToInt64($f[<index>], 16); if ($t <cmp> $lo -and $t <cmp> $hi) { \"$($f[<index>]) -> $($f[<index>])\" } }",
-          "powershell": "$lo = [Convert]::ToInt64('0x7f0000000000', 16); $hi = [Convert]::ToInt64('0x7f0000010000', 16)\nGet-Content .\\perf\\gdb-got-audit.txt | Where-Object { $_ -match '^0x[0-9a-f]+\\s+\\S+\\s+0x' } | ForEach-Object {\n  $f = $_ -split '\\s+'; $t = [Convert]::ToInt64($f[2], 16); if ($t -ge $lo -and $t -lt $hi) { \"$($f[1]) -> $($f[2])\" } }",
-          "explain": "הדביקו התחלה וסוף של ספרייה, והפקודה תדפיס כל פונקציה מיובאת שה-GOT slot שלה מצביע לתוכה. האריתמטיקה של bash מבינה hex עם `0x`."
+          "powershell": "# example range: libsdnotify. Paste another library's Start and End.\n$lo = [Convert]::ToInt64('0x00007f3a9c100000', 16); $hi = [Convert]::ToInt64('0x00007f3a9c10c000', 16)\nGet-Content .\\perf\\gdb-got-audit.txt | Where-Object { $_ -match '^0x[0-9a-f]+\\s+\\S+\\s+0x' } | ForEach-Object {\n  $f = $_ -split '\\s+'; $t = [Convert]::ToInt64($f[2], 16); if ($t -ge $lo -and $t -lt $hi) { \"$($f[1]) -> $($f[2])\" } }",
+          "explain": "הדביקו התחלה וסוף של ספרייה, והפקודה תדפיס כל פונקציה מיובאת שה-GOT slot שלה מצביע לתוכה. הכתובות הן hex באותיות קטנות, 16 ספרות עם אפסים מובילים, ולכן אפשר להשוות אותן כטקסט (ה-`\"\"` מכריח השוואת מחרוזות). ב-PowerShell ממירים עם `[Convert]::ToInt64`."
         },
         {
           "id": "hex-math",

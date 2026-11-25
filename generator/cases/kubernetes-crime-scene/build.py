@@ -99,7 +99,9 @@ TIME ZONES AND FORMATS (read this)
 
 TIPS
 ----
-- kubectl output is just text: grep, awk, sort and jq work fine on it.
+- kubectl output is just text: grep, awk, sed and sort work fine on it, and
+  nothing needs installing. The events JSON has a plain-text twin
+  (get-events-A-wide.txt) if you would rather not parse JSON.
 - A pod's RESTARTS count includes every kind of restart, not only OOM kills.
 - The people in the chat were busy and some of them were wrong.
 

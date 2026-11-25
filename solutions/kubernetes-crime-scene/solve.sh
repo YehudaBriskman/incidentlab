@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Official solver for IncidentLab case "kubernetes-crime-scene".
-# Derives every answer from the evidence files only (grep/awk/sed/sort/jq/date).
+# Derives every answer from the evidence files only, with stock tools (grep/awk/sed/sort/wc):
+# no jq, no GNU-only date flags, POSIX awk, so it runs on Linux, Git Bash and macOS alike.
 # Usage: solutions/kubernetes-crime-scene/solve.sh [evidence_dir]
 #        (default: build/evidence/kubernetes-crime-scene)
 # If build/truth/kubernetes-crime-scene.answers.json exists, compares and exits 1 on any FAIL.
@@ -51,26 +52,31 @@ grep -E ' shop/pricing-api-' "$WORK/ooms.txt" > "$WORK/pricing-ooms.txt" || true
 first_line="$(head -n1 "$WORK/pricing-ooms.txt")"
 Q1="$(awk '{print $2}' <<<"$first_line" | sed 's#^shop/##')"
 q1_time="$(awk '{print $1}' <<<"$first_line")"                 # HH:MM:SS UTC on 2026-11-17
-q1_epoch="$(date -u -d "2026-11-17 $q1_time" +%s)"
+# Epoch seconds from "Y M D h m s" in POSIX awk (no `date -d`, which is GNU-only).
+EPOCH_AWK='function epoch(y, mo, d, h, mi, s) {
+  if (mo <= 2) { y--; mo += 12 }
+  return (365 * y + int(y / 4) - int(y / 100) + int(y / 400) + int((153 * (mo - 3) + 2) / 5) + d - 719469) * 86400 + h * 3600 + mi * 60 + s
+}'
+q1_epoch="$(awk "$EPOCH_AWK"' { split($1, t, ":"); print epoch(2026, 11, 17, t[1], t[2], t[3]) }' <<<"$q1_time")"
 
 # ---------- q2: GitOps commit behind the Helm revision that was live at the first OOM ----------
-# helm history UPDATED is laptop local time (UTC+02:00). Find the last revision before the first OOM.
-# "Tue Nov 17 09:52:29 2026" -> "2026-11-17 09:52:29"
-rev_line="$(awk -F'\t' 'NR > 2 {
-    split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", mn, " "); for (i in mn) mon[mn[i]] = i
-    gsub(/^ +| +$/, "", $1); split($2, d, " +")
-    printf "%s\t%s-%02d-%02d %s\n", $1, d[5], mon[d[2]], d[3], d[4]
-  }' "$HELM_HIST" \
-  | while IFS=$'\t' read -r rev upd; do
-      e="$(date -u -d "$upd +0200" +%s)"
-      if (( e <= q1_epoch )); then printf "%s %s\n" "$e" "$rev"; fi
-    done | sort -n | tail -n1)"
+# helm history UPDATED is laptop local time (UTC+02:00): subtract 7200 s, keep the last revision that started
+# before the first OOM.  "Tue Nov 17 09:52:29 2026" -> "<epoch UTC> <rev>"
+rev_line="$(awk -F'\t' -v limit="$q1_epoch" "$EPOCH_AWK"'
+  NR > 2 {
+    split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", mn, " "); for (i in mn) mon[mn[i]] = i + 0
+    rev = $1; gsub(/ /, "", rev)
+    split($2, d, " +"); split(d[4], t, ":")
+    e = epoch(d[5], mon[d[2]], d[3], t[1], t[2], t[3]) - 7200
+    if (e <= limit) print e, rev
+  }' "$HELM_HIST" | sort -n | tail -n1)"
 rev_epoch="${rev_line%% *}"
-rev_iso="$(date -u -d "@$rev_epoch" +%Y-%m-%dT%H:%M:%S)"
 # The kustomize-controller apply that changed HelmRelease/shop/pricing-api just before that helm upgrade.
-Q2="$(jq -r --arg t "$rev_iso" '
-  select(.controller == "kustomization" and ((.output // {}) | has("HelmRelease/shop/pricing-api")))
-  | select(.ts[0:19] <= $t) | .revision' "$FLUX" | tail -n1 | sed -E 's/.*sha1:([0-9a-f]{7}).*/\1/')"
+# Flux logs are JSON lines: pull ts and revision out with sed, convert ts to epoch in awk.
+Q2="$(grep '"controller":"kustomization"' "$FLUX" | grep '"HelmRelease/shop/pricing-api"' \
+  | sed -E 's/.*"ts":"([0-9]+)-([0-9]+)-([0-9]+)T([0-9]+):([0-9]+):([0-9]+)[^"]*".*"revision":"([^"]*)".*/\1 \2 \3 \4 \5 \6 \7/' \
+  | awk -v t="$rev_epoch" "$EPOCH_AWK"' epoch($1, $2, $3, $4, $5, $6) <= t { r = $7 } END { print r }' \
+  | sed -E 's/.*sha1:([0-9a-f]{7}).*/\1/')"
 
 # ---------- q3: memory limit of the OOM-killed containers ----------
 desc="$(grep -l 'Reason:       OOMKilled' "$EV"/kubectl/describe-pod-pricing-api-*.txt | head -n1)"
@@ -87,14 +93,23 @@ done
 
 # ---------- q5: pod evicted by the node that reported MemoryPressure ----------
 pressure_node="$(awk '/^Name:/ {n = $2} /^  MemoryPressure +True/ {print n; exit}' "$NODES")"
-Q5="$(jq -r --arg n "$pressure_node" '.items[]
-  | select(.reason == "Evicted" and .source.host == $n and (.message | test("low on resource: memory")))
-  | .involvedObject.name' "$EVENTS" | head -n1)"
+# The events JSON is pretty-printed, one key per line, keys sorted: flatten each item with awk.
+# Item-level "type" is the last key of every event, so that is where one item ends.
+Q5="$(awk -v node="$pressure_node" '
+  { k = $1; gsub(/[":]/, "", k); v = $0; sub(/^[^:]*: /, "", v); sub(/,$/, "", v); gsub(/^"|"$/, "", v) }
+  k == "name" && obj == "" { obj = v }          # involvedObject.name comes before metadata.name
+  k == "message" { msg = v }
+  k == "reason"  { reason = v }
+  k == "host"    { host = v }
+  k == "type" {
+    if (reason == "Evicted" && host == node && index(msg, "low on resource: memory")) print obj
+    obj = ""; host = ""
+  }' "$EVENTS" | head -n1)"
 
 # ---------- q6: total OOM kills of pricing-api containers ----------
 Q6="$(wc -l < "$WORK/pricing-ooms.txt" | tr -d ' ')"
 
-echo "# first OOM at $q1_time UTC; helm revision live then: $(awk '{print $2}' <<<"$rev_line") ($rev_iso UTC)"
+echo "# first OOM at $q1_time UTC (epoch $q1_epoch); helm revision live then: ${rev_line#* } (epoch $rev_epoch)"
 echo "# all OOM kills in the journals: $(wc -l < "$WORK/ooms.txt"), MemoryPressure node: $pressure_node"
 echo "q1=$Q1"
 echo "q2=$Q2"
@@ -107,7 +122,7 @@ if [[ -f "$TRUTH" ]]; then
   norm() { tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g; s/[[:space:]]+/ /g'; }
   fail=0
   for q in q1 q2 q3 q4 q5 q6; do
-    want="$(jq -r --arg q "$q" '.answers[$q] // empty' "$TRUTH")"
+    want="$(sed -n -E "s/^ *\"$q\": *\"(.*)\",?\$/\1/p" "$TRUTH" | head -n1)"
     got_var="Q${q#q}"; got="${!got_var}"
     if [[ "$(norm <<<"$got")" == "$(norm <<<"$want")" ]]; then
       echo "$q PASS ($got)"

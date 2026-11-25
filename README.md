@@ -9,7 +9,7 @@ Every correct answer is a flag. Each case is inspired by a real, publicly docume
 
 It is built for a live session with colleagues: about 10 minutes of orientation, 40 minutes of
 solving in pairs, then a debrief and a short lecture. Players need **no installs**: they can work in a
-bash terminal (`grep`, `awk`, `jq`, `date`), in Windows PowerShell 5.1 (every Toolbox command has a
+bash terminal with only the built-in tools (`grep`, `sed`, `awk`, `sort`, `date`; no `jq`, no `git`), in Windows PowerShell 5.1 (every Toolbox command has a
 PowerShell version), or entirely in the browser with the built-in **Evidence Explorer**.
 
 ## Cases
