@@ -17,10 +17,37 @@ export function applyLang(lang: Lang = getLang()): void {
   document.documentElement.dir = lang === "he" ? "rtl" : "ltr";
 }
 
+/** The hash that was re-rendered for a language switch (not a navigation), while the user stays on it. */
+let relabelHash: string | null = null;
+
+/**
+ * True while the current route is being re-rendered because the language changed. Views use it to keep
+ * what the user was looking at (e.g. the stage being viewed) instead of resetting to their defaults.
+ */
+export function isRelabel(): boolean {
+  return relabelHash !== null && relabelHash === window.location.hash;
+}
+
+/** Called by the router on every route: a real navigation ends the language re-render. */
+export function noteRoute(): void {
+  if (relabelHash !== window.location.hash) relabelHash = null;
+}
+
 export function setLang(lang: Lang): void {
   try { localStorage.setItem(KEY, lang); } catch { /* storage blocked */ }
   applyLang(lang);
-  window.dispatchEvent(new HashChangeEvent("hashchange")); // re-render current route
+  relabelHash = window.location.hash;
+  window.dispatchEvent(new HashChangeEvent("hashchange")); // re-render current route in the new language
+}
+
+/** BCP 47 locale for Intl formatters in the current language. */
+export function locale(lang: Lang = getLang()): string {
+  return lang === "he" ? "he-IL" : "en-US";
+}
+
+/** Whole numbers with the locale's thousands separator ("1,030"). */
+export function formatNumber(n: number): string {
+  return new Intl.NumberFormat(locale(), { maximumFractionDigits: 0 }).format(n);
 }
 
 export function defineStrings<S extends Record<string, string | ((...args: never[]) => string)>>(

@@ -2,13 +2,16 @@ import { QUESTION_ORDER, SCORING, type ProgressView, type QuestionId, type Score
 import type { Case, Question } from "../content/schema";
 import { ApiError, getDebrief, getProgress, revealAnswer, revealHint, setupDone, submitAnswer } from "../lib/api";
 import { playErrorText } from "../lib/errors";
-import { loadAccount, setAccount, signOut } from "../lib/session";
+import { loadAccount, loadToday, setAccount, signOut } from "../lib/session";
+import { getCase } from "../content/load";
+import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { withApprovedAccount } from "./auth";
 import { confirmButton, copyButton, h, html, setChildren, type Child } from "../lib/dom";
 import { md, mdInline } from "../lib/markdown";
 import { formatElapsed } from "../lib/time";
-import { commandCard, type CommandContext } from "./toolbox";
+import { formatNumber, isRelabel, locale } from "../i18n/i18n";
+import { commandCard, lockedToday, type CommandContext, type LockedToday } from "./toolbox";
 import { T } from "../i18n/strings-player";
 
 type StageKey = "setup" | QuestionId | "debrief";
@@ -16,6 +19,10 @@ type StepState = "locked" | "active" | "solved" | "revealed";
 
 const timers = new Set<number>();
 const drafts = new Map<QuestionId, string>();
+/** Answer cooldown end (epoch ms) per "caseId:questionId": survives redraws (hint, reveal, language). */
+const cooldowns = new Map<string, number>();
+/** The stage last shown, so a language switch (which re-renders the route) keeps the player where they were. */
+let lastView: { caseId: string; stage: StageKey } | null = null;
 
 export function stopCaseTimers(): void {
   for (const t of timers) window.clearInterval(t);
@@ -75,10 +82,11 @@ export function renderCase(root: HTMLElement, c: Case): void {
   withApprovedAccount(root, c.title, () => loadProgress(root, c));
 }
 
-function loadProgress(root: HTMLElement, c: Case): void {
+function loadProgress(root: HTMLElement, c: Case, refreshToday = false): void {
   setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, T().loadingInvestigation)));
+  const today = loadToday(refreshToday).catch(() => null);
   getProgress(c.id)
-    .then((progress) => renderStaged(root, c, progress))
+    .then(async (progress) => renderStaged(root, c, progress, lockedToday(progress, await today, c.id)))
     .catch((err: unknown) => {
       // Session expired or approval revoked since the page loaded: re-run the gate with fresh state.
       if (err instanceof ApiError && (err.isUnauthorized || err.isNotApproved || err.needsGate)) {
@@ -136,10 +144,11 @@ function stepState(player: ProgressView, key: StageKey): StepState {
 
 const STAGE_KEYS: readonly StageKey[] = ["setup", ...QUESTION_ORDER, "debrief"];
 
-function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): void {
+function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, locked: LockedToday | null): void {
   stopCaseTimers();
   let player = initialPlayer;
-  let viewing: StageKey = currentStage(player);
+  const kept = isRelabel() && lastView !== null && lastView.caseId === c.id ? lastView.stage : null;
+  let viewing: StageKey = kept !== null && stepState(player, kept) !== "locked" ? kept : currentStage(player);
   let justSolved: QuestionId | null = null;
 
   const update = (next: ProgressView, view?: StageKey): void => {
@@ -159,7 +168,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
     const solved = QUESTION_ORDER.filter((id) => isDone(stageProgress(player, id))).length;
     const start = Date.parse(player.setupDoneAt ?? player.startedAt ?? new Date().toISOString());
     const end = player.completedAt !== null ? Date.parse(player.completedAt) : Date.now();
-    elStats.textContent = T().progressStats(solved, QUESTION_ORDER.length, player.score, player.maxScore, formatElapsed(end - start));
+    elStats.textContent = T().progressStats(solved, QUESTION_ORDER.length, TG().scorePar(player.score, player.maxScore), formatElapsed(end - start));
     elFill.style.width = `${(solved / QUESTION_ORDER.length) * 100}%`;
   };
 
@@ -198,6 +207,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
 
   const draw = (): void => {
     stopCaseTimers();
+    lastView = { caseId: c.id, stage: viewing };
     const header = h(
       "header",
       { class: "case-head" },
@@ -225,7 +235,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
     );
 
     const main = h("section", { class: "stage-wrap", id: "stage", tabindex: "-1" });
-    if (viewing === "setup") main.append(renderSetup(c, player, update));
+    if (viewing === "setup") main.append(renderSetup(c, player, update, locked, () => loadProgress(root, c, true)));
     else if (viewing === "debrief") main.append(renderDebrief(c, player));
     else main.append(renderQuestionStage(c, player, viewing, justSolved === viewing, (next, correct) => {
       if (correct) justSolved = viewing === "setup" || viewing === "debrief" ? null : viewing;
@@ -238,12 +248,35 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
   };
 
   draw();
-  window.scrollTo(0, 0);
+  if (!isRelabel()) window.scrollTo(0, 0);
 }
 
 /* ================= Stage 0: setup ================= */
 
-function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) => void): HTMLElement {
+/** "Go to today's incident" + "Back to all cases": the way out of a case that can't be started today. */
+function lockedActions(locked: LockedToday): HTMLElement {
+  const todayCase = locked.todayCaseId !== null ? getCase(locked.todayCaseId) : undefined;
+  return h(
+    "div",
+    { class: "row-actions" },
+    todayCase ? h("a", { class: "btn btn-primary", href: `#/case/${todayCase.id}` }, TA().lockedGoToday) : null,
+    h("a", { class: "btn", href: "#/" }, T().backToCases),
+  );
+}
+
+function lockedCard(c: Case, locked: LockedToday): HTMLElement {
+  const todayCase = locked.todayCaseId !== null ? getCase(locked.todayCaseId) : undefined;
+  return h(
+    "div",
+    { class: "notice locked-card", role: "status" },
+    h("p", { class: "stage-kicker mono" }, TA().lockedKicker),
+    h("p", { class: "notice-title" }, TA().lockedTitle(c.title)),
+    h("p", { class: "muted" }, TA().lockedBody, todayCase ? ` ${TA().lockedTodayIs(todayCase.title)}` : null),
+    lockedActions(locked),
+  );
+}
+
+function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) => void, locked: LockedToday | null, recheck: () => void): HTMLElement {
   const done = player.setupDoneAt !== null;
   const briefing = h(
     "details",
@@ -274,6 +307,11 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
         update(p);
       })
       .catch((err: unknown) => {
+        // The day rolled over (or the schedule changed) while reading: show the locked state with its link.
+        if (err instanceof ApiError && err.code === "not-today") {
+          recheck();
+          return;
+        }
         errorEl.textContent = errorMessage(err);
         ready.disabled = false;
       });
@@ -283,7 +321,7 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
     "div",
     { class: "stage" },
     h("p", { class: "stage-kicker mono" }, T().setupKicker),
-    h("h2", { class: "stage-goal" }, T().setupGoal),
+    locked ? lockedCard(c, locked) : h("h2", { class: "stage-goal" }, T().setupGoal),
     briefing,
     h(
       "div",
@@ -325,7 +363,9 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
     ),
     done
       ? h("p", { class: "done-note" }, T().setupComplete)
-      : h("div", { class: "primary-action" }, ready, errorEl),
+      : locked
+        ? h("div", { class: "primary-action" }, lockedActions(locked))
+        : h("div", { class: "primary-action" }, ready, errorEl),
   );
 }
 
@@ -404,28 +444,39 @@ function renderQuestionStage(
   const feedback = h("p", { id: `feedback-${id}`, class: "feedback", role: "status" });
   if (s.wrongAttempts > 0) feedback.textContent = TG().wrongSoFarCost(s.wrongAttempts, wrongPenalty(s.wrongAttempts));
 
+  // Rate-limit cooldown. The end time lives in `cooldowns`, so a redraw (hint, reveal, language) keeps
+  // Submit disabled. The live region gets one message with an absolute time; the ticking countdown is on
+  // the (non-live) button only, so screen readers aren't told the time every second.
+  const cooldownKey = `${c.id}:${id}`;
   let cooldown: number | null = null;
-  const startCooldown = (seconds: number): void => {
-    let left = Math.ceil(seconds);
+  const startCooldown = (until: number): void => {
+    cooldowns.set(cooldownKey, until);
     submit.disabled = true;
-    const show = (): void => {
-      feedback.className = "feedback is-wrong";
-      feedback.textContent = T().tooMany(left);
-    };
-    show();
-    if (cooldown !== null) window.clearInterval(cooldown);
-    cooldown = every(1000, () => {
-      left -= 1;
-      if (left <= 0) {
-        if (cooldown !== null) window.clearInterval(cooldown);
-        submit.disabled = false;
-        feedback.className = "feedback";
-        feedback.textContent = T().canTryAgain;
-        return;
+    const at = new Intl.DateTimeFormat(locale(), { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(until));
+    feedback.className = "feedback is-wrong";
+    if (feedback.textContent !== T().tooManyUntil(at)) feedback.textContent = T().tooManyUntil(at);
+    const show = (): boolean => {
+      const left = Math.ceil((until - Date.now()) / 1000);
+      if (left > 0) {
+        submit.textContent = T().waitBtn(formatElapsed(left * 1000));
+        return true;
       }
-      show();
-    });
+      if (cooldown !== null) window.clearInterval(cooldown);
+      cooldowns.delete(cooldownKey);
+      submit.disabled = false;
+      submit.textContent = T().submit;
+      feedback.className = "feedback";
+      feedback.textContent = T().canTryAgain;
+      return false;
+    };
+    if (cooldown !== null) window.clearInterval(cooldown);
+    if (show()) cooldown = every(1000, show);
   };
+  const pendingCooldown = cooldowns.get(cooldownKey);
+  if (pendingCooldown !== undefined) {
+    if (pendingCooldown > Date.now()) startCooldown(pendingCooldown);
+    else cooldowns.delete(cooldownKey);
+  }
 
   const form = h(
     "form",
@@ -467,7 +518,7 @@ function renderQuestionStage(
       })
       .catch((err: unknown) => {
         if (err instanceof ApiError && err.isRateLimited) {
-          startCooldown(err.retryAfterSeconds ?? 60);
+          startCooldown(Date.now() + (err.retryAfterSeconds ?? 60) * 1000);
           return;
         }
         submit.disabled = false;
@@ -567,7 +618,7 @@ function renderQuestionStage(
 function shareText(c: Case, player: ProgressView): string {
   const hints = QUESTION_ORDER.reduce((n, id) => n + (player.stages[id]?.hintsRevealed ?? 0), 0);
   const end = player.completedAt !== null ? Date.parse(player.completedAt) : Date.now();
-  return T().shareText(c.title, player.score, player.maxScore, hints, formatElapsed(end - Date.parse(player.setupDoneAt ?? player.startedAt ?? new Date().toISOString())));
+  return T().shareText(c.title, TG().scorePar(player.score, player.maxScore), hints, formatElapsed(end - Date.parse(player.setupDoneAt ?? player.startedAt ?? new Date().toISOString())));
 }
 
 function renderDebrief(c: Case, player: ProgressView): HTMLElement {
@@ -589,7 +640,13 @@ function renderDebrief(c: Case, player: ProgressView): HTMLElement {
     h(
       "div",
       { class: "score-card" },
-      h("p", { class: "score-big mono" }, `${player.score}`, h("span", { class: "muted" }, T().ptsOf(player.maxScore))),
+      h(
+        "p",
+        { class: "score-big mono" },
+        formatNumber(player.score),
+        h("span", { class: "muted" }, ` ${TG().ptsUnit} · ${TG().parOf(player.maxScore)}`),
+        player.score > player.maxScore ? h("span", { class: "chip chip-completed above-par" }, `▲ ${TG().abovePar}`) : null,
+      ),
       stageTotals(c, player),
       h("code", { class: "share-text" }, shareText(c, player)),
       copyButton(() => shareText(c, player), T().copyResult),
@@ -625,7 +682,7 @@ function breakdownTable(b: ScoreBreakdown): HTMLElement {
       row(TG().bdClean, b.clean),
       row(TG().bdFirstBlood, b.firstBlood),
     ),
-    h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().bdTotal), h("td", { class: "num mono" }, String(b.total)))),
+    h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().bdTotal), h("td", { class: "num mono" }, formatNumber(b.total)))),
   );
 }
 
@@ -707,6 +764,6 @@ function stageTotals(c: Case, player: ProgressView): HTMLElement {
         h("td", { class: "num mono" }, TG().pts(player.completionBonus)),
       ),
     ),
-    h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().totalLabel), h("td", { class: "num mono" }, String(player.score)))),
+    h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().totalLabel), h("td", { class: "num mono" }, formatNumber(player.score)))),
   );
 }

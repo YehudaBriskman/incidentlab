@@ -4,7 +4,7 @@ import { getCase } from "../content/load";
 import { ApiError, fetchMyStats } from "../lib/api";
 import { h, setChildren } from "../lib/dom";
 import { formatElapsed } from "../lib/time";
-import { getLang } from "../i18n/i18n";
+import { formatNumber, getLang } from "../i18n/i18n";
 import { setAccount } from "../lib/session";
 import { TA } from "../i18n/strings-account";
 import { TG, achievementInfo } from "../i18n/strings-game";
@@ -23,7 +23,9 @@ function statusText(c: CaseStats): string {
 
 function caseRow(c: CaseStats): HTMLElement {
   const title = getCase(c.caseId)?.title ?? c.caseId;
-  const pct = c.maxScore > 0 ? Math.round((c.score / c.maxScore) * 100) : 0;
+  // maxScore is par, not a ceiling: bonuses (first blood, time, clean) can beat it. Cap the bar and say so.
+  const pct = c.maxScore > 0 ? Math.min(100, Math.round((c.score / c.maxScore) * 100)) : 0;
+  const abovePar = c.maxScore > 0 && c.score > c.maxScore;
   return h(
     "tr",
     { class: `status-${c.status}` },
@@ -32,8 +34,9 @@ function caseRow(c: CaseStats): HTMLElement {
     h(
       "td",
       { class: "num" },
-      h("span", { class: "mono" }, `${c.score}/${c.maxScore}`),
-      h("span", { class: "bar", "aria-hidden": "true" }, h("span", { class: "bar-fill", style: `width:${pct}%` })),
+      h("span", { class: "score-val", dir: "auto" }, TG().scorePts(c.score)), // not .mono: RTL forces mono LTR and splits "נק'"
+      h("span", { class: `bar${abovePar ? " is-above-par" : ""}`, "aria-hidden": "true" }, h("span", { class: "bar-fill", style: `width:${pct}%` })),
+      h("span", { class: "score-par muted small" }, TG().parOf(c.maxScore), abovePar ? h("span", { class: "above-par" }, ` · ▲ ${TG().abovePar}`) : null),
     ),
     h("td", { class: "num mono" }, c.durationSeconds === null ? "—" : formatElapsed(c.durationSeconds * 1000)),
     h("td", { class: "num mono" }, String(c.hintsUsed)),
@@ -90,7 +93,7 @@ function draw(root: HTMLElement, stats: UserStats): void {
       h(
         "div",
         { class: "stat-grid" },
-        tile(TA().statTotal, String(stats.totalScore)),
+        tile(TA().statTotal, formatNumber(stats.totalScore)),
         tile(TA().statRank, stats.rank === null ? TA().noRank : TA().rankOf(stats.rank)),
         tile(TA().statCompleted, `${stats.casesCompleted}/${released}`),
         tile(TA().statSolved, String(stats.stagesSolved)),

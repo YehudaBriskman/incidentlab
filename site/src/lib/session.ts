@@ -6,6 +6,8 @@ import { fetchMe, fetchToday, logout } from "./api";
 type Listener = (account: AccountView | null) => void;
 
 let current: AccountView | null = null;
+/** False until the server has said who is signed in (a null `current` before that means "unknown"). */
+let known = false;
 let loaded: Promise<AccountView | null> | null = null;
 const listeners = new Set<Listener>();
 
@@ -15,12 +17,18 @@ export function onAccountChange(fn: Listener): void {
 
 export function setAccount(account: AccountView | null): void {
   current = account;
+  known = true;
   loaded = Promise.resolve(account);
   for (const fn of listeners) fn(account);
 }
 
 export function cachedAccount(): AccountView | null {
   return current;
+}
+
+/** True once the signed-in account is known (so `cachedAccount() === null` really means signed out). */
+export function isAccountKnown(): boolean {
+  return known;
 }
 
 /** True for the instructor's session (username "admin" signed in with the ADMIN_KEY). */
@@ -39,6 +47,7 @@ export function loadAccount(refresh = false): Promise<AccountView | null> {
     loaded = fetchMe().then(
       (account) => {
         if (!sameAccount(account, current)) setAccount(account);
+        known = true;
         return account;
       },
       (err: unknown) => {

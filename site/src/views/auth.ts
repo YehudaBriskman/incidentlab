@@ -18,6 +18,19 @@ export function stopAuthTimers(): void {
 
 type Mode = "sign-in" | "sign-up";
 
+export type GateOptions = {
+  /** What the instructor's session sees (default: the "sign in as a player" card). */
+  onAdmin?: () => void;
+  /** The form shown when signed out (default: sign in). */
+  signedOutMode?: Mode;
+  /** Class code from a `?code=` link: prefills the sign-up form's class-code field. */
+  inviteCode?: string;
+  /** Set `document.title` for the auth screens (the #/login and #/signup routes). */
+  titled?: boolean;
+};
+
+const pageTitle = (title: string): string => `${title} · IncidentLab`;
+
 /** Send the instructor's session to the admin panel (re-renders when already there). */
 export function goToAdmin(): void {
   if (window.location.hash === "#/admin") window.dispatchEvent(new HashChangeEvent("hashchange"));
@@ -33,14 +46,16 @@ export function withApprovedAccount(
   root: HTMLElement,
   context: string,
   onReady: (account: AccountView) => void,
-  options: { onAdmin?: () => void } = {},
+  options: GateOptions = {},
 ): void {
   stopAuthTimers();
   const again = (): void => withApprovedAccount(root, context, onReady, options);
   setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, T().loading)));
   loadAccount()
     .then((account) => {
-      if (account === null) renderAuthForm(root, { context, mode: "sign-in", onSignedIn: again });
+      if (account === null) {
+        renderAuthForm(root, { context, mode: options.signedOutMode ?? "sign-in", onSignedIn: again, inviteCode: options.inviteCode, titled: options.titled });
+      }
       else if (isAdmin(account)) (options.onAdmin ?? (() => renderAdminCard(root, again)))();
       else if (account.status === "pending") renderPending(root, account, again);
       else if (account.status === "rejected") renderRejected(root);
@@ -102,9 +117,13 @@ function passwordField(opts: { id: string; label: string; autocomplete: string; 
   };
 }
 
-export function renderAuthForm(root: HTMLElement, opts: { context: string; mode: Mode; onSignedIn: () => void }): void {
+export function renderAuthForm(
+  root: HTMLElement,
+  opts: { context: string; mode: Mode; onSignedIn: () => void; inviteCode?: string; titled?: boolean },
+): void {
   stopAuthTimers();
   const isSignUp = opts.mode === "sign-up";
+  if (opts.titled) document.title = pageTitle(isSignUp ? TA().signUpBtn : TA().signIn);
   const username = h("input", {
     id: "auth-username",
     class: "input input-lg",
@@ -139,11 +158,12 @@ export function renderAuthForm(root: HTMLElement, opts: { context: string; mode:
         "aria-describedby": "auth-invite-help",
       })
     : null;
+  if (invite !== null && opts.inviteCode !== undefined) invite.value = opts.inviteCode;
   const errorEl = h("p", { id: "auth-error", class: "form-error", role: "alert" });
   const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg btn-block" }, isSignUp ? TA().signUpBtn : TA().signInBtn);
   const switchMode = h(
     "button",
-    { type: "button", class: "link-btn", onclick: () => renderAuthForm(root, { ...opts, mode: isSignUp ? "sign-in" : "sign-up" }) },
+    { type: "button", class: "link-btn", onclick: () => renderAuthForm(root, { ...opts, mode: isSignUp ? "sign-in" : "sign-up", inviteCode: invite?.value.trim() || opts.inviteCode }) },
     isSignUp ? TA().toSignIn : TA().toSignUp,
   );
 
@@ -272,6 +292,7 @@ export function passwordChangeForm(opts: { forced: boolean; onChanged: (account:
 }
 
 function renderForcedPasswordChange(root: HTMLElement, context: string, onDone: () => void): void {
+  document.title = pageTitle(TG().pwTitleForced);
   const form = passwordChangeForm({
     forced: true,
     idPrefix: "forced-pw",
@@ -318,6 +339,7 @@ function renderAdminCard(root: HTMLElement, onSignedOut: () => void): void {
 
 function renderPending(root: HTMLElement, account: AccountView, onApproved: () => void): void {
   stopAuthTimers();
+  document.title = pageTitle(TA().pendingTitle);
   const status = h("p", { class: "muted small", "aria-live": "polite" });
   const check = (): void => {
     status.textContent = TA().pendingChecking;
@@ -354,6 +376,7 @@ function renderPending(root: HTMLElement, account: AccountView, onApproved: () =
 }
 
 function renderRejected(root: HTMLElement): void {
+  document.title = pageTitle(TA().rejectedTitle);
   setChildren(
     root,
     h(

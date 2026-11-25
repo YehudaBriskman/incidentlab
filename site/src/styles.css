@@ -63,6 +63,10 @@ a { color: var(--accent); text-underline-offset: 3px; }
 h1, h2, h3, h4 { line-height: 1.25; letter-spacing: -0.01em; margin: 0 0 0.5em; }
 h1 { font-size: clamp(1.7rem, 4.5vw, 2.4rem); }
 code, pre, .mono { font-family: var(--mono); }
+/* Ligatures would turn != into ≠ and -> into an arrow: players copy and retype these, so show every char. */
+code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-code, .input.mono {
+  font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0;
+}
 .muted { color: var(--muted); }
 .accent { color: var(--accent); }
 .small { font-size: 0.9rem; }
@@ -218,9 +222,11 @@ code, pre, .mono { font-family: var(--mono); }
 .shell-tabs { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .shell-tab { background: none; border: 0; padding: 4px 12px; font: inherit; font-size: 0.8rem; color: var(--muted); cursor: pointer; }
 .shell-tab[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.code-wrap { position: relative; margin: 8px 0; }
-.code-block { margin: 0; background: var(--code-bg); color: var(--code-text); border-radius: 10px; padding: 14px 80px 14px 16px; overflow-x: auto; font-size: 0.86rem; line-height: 1.55; }
-.code-wrap .btn-copy { position: absolute; top: 8px; right: 8px; }
+/* Copy sits beside the code, never on top of it: long revealed commands scroll under nothing. */
+.code-wrap { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; margin: 8px 0; }
+.code-wrap > :only-child { grid-column: 1 / -1; }
+.code-block { margin: 0; background: var(--code-bg); color: var(--code-text); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: 0.86rem; line-height: 1.55; }
+.code-wrap .btn-copy { margin-top: 6px; }
 
 .tip { border-left: 3px solid var(--accent); padding: 4px 0 4px 18px; }
 .tip .prose { margin-bottom: 8px; }
@@ -307,7 +313,7 @@ code, pre, .mono { font-family: var(--mono); }
 [dir=rtl] .look-for ul, [dir=rtl] .prose ul, [dir=rtl] .prose ol { padding-left: 0; padding-inline-start: 1.2em; }
 [dir=rtl] .tip { border-left: 0; border-inline-start: 3px solid var(--accent); padding: 4px 18px 4px 0; }
 [dir=rtl] .prose blockquote { border-left: 0; padding-left: 0; border-inline-start: 3px solid var(--border); padding-inline-start: 16px; }
-[dir=rtl] .code-wrap .btn-copy { right: 8px; left: auto; } /* code block itself is LTR, so the button stays on its right */
+[dir=rtl] .code-wrap { direction: ltr; } /* code block itself is LTR, so Copy stays on its right */
 
 /* Code, commands, answers and logs stay LTR in every language. */
 [dir=rtl] pre, [dir=rtl] code, [dir=rtl] .mono, [dir=rtl] .code-block,
@@ -344,6 +350,20 @@ code, pre, .mono { font-family: var(--mono); }
 @keyframes pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .today-kicker .dot { animation: none; } }
 .case-status { color: var(--ok); font-size: 0.82rem; margin: 0 0 16px; }
+/* Loading placeholders for the home cards: same footprint as the real cards (no layout shift). */
+.skeleton-card { display: flex; flex-direction: column; gap: 12px; box-shadow: none; border-color: var(--border); }
+.featured-card.skeleton-card { min-block-size: 340px; }
+.case-card.skeleton-card { min-block-size: 320px; }
+.skeleton-line, .skeleton-btn { display: block; height: 0.9rem; border-radius: 6px; background: var(--surface-2); }
+.skeleton-title { height: 1.8rem; }
+.skeleton-btn { height: 46px; width: 200px; margin-top: auto; border-radius: 10px; }
+.w-30 { width: 30%; } .w-40 { width: 40%; } .w-60 { width: 60%; } .w-70 { width: 70%; } .w-90 { width: 90%; }
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton-line, .skeleton-btn { animation: skeleton-pulse 1.4s ease-in-out infinite; }
+}
+@keyframes skeleton-pulse { 50% { opacity: 0.55; } }
+.hero-sub.is-pending { visibility: hidden; }
+@media (max-width: 640px) { .featured-card.skeleton-card { min-block-size: 380px; } }
 .case-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
 .case-card { display: flex; flex-direction: column; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
 .case-card.is-today { border-color: var(--accent); }
@@ -373,6 +393,12 @@ code, pre, .mono { font-family: var(--mono); }
 .stats-table tr.status-not-started th { color: var(--muted); font-weight: 400; }
 .bar { display: inline-block; width: 60px; height: 6px; margin-inline-start: 8px; border-radius: 3px; background: var(--surface-2); vertical-align: middle; overflow: hidden; }
 .bar-fill { display: block; height: 100%; background: var(--ok); }
+/* Score vs par: par is a target, so a full bar plus a marker means "beat par" (never > 100%). */
+.bar.is-above-par { box-shadow: 0 0 0 1px var(--ok); }
+.score-val { font-weight: 600; font-variant-numeric: tabular-nums; }
+.score-par { display: block; margin-top: 2px; font-family: var(--sans); }
+.score-par .above-par { color: var(--ok); font-weight: 600; }
+.score-big .above-par { margin-inline-start: 10px; font-size: 0.8rem; font-weight: 600; vertical-align: middle; }
 [dir=rtl] .stat-value, [dir=rtl] .case-status, [dir=rtl] .today-kicker { direction: rtl; }
 
 /* ============ round 2: commands (syntax vs revealed) ============ */
@@ -392,6 +418,9 @@ code, pre, .mono { font-family: var(--mono); }
 .notice { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 18px; margin: 16px 0 8px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .notice p { margin: 0; }
 .notice-title { font-weight: 700; color: var(--text); }
+.locked-card { border-color: var(--accent); margin: 0 0 16px; }
+.locked-card .stage-kicker { margin: 0; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .notice-ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); background: var(--ok-soft); }
 p.notice.form-error { display: block; }
 
@@ -441,7 +470,15 @@ p.notice.form-error { display: block; }
 .ach.is-locked .ach-icon { filter: grayscale(1); opacity: 0.6; }
 
 /* ============ round 2: header event clock + announcement ============ */
-.event-clock { font-size: 0.8rem; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-soft); padding: 3px 10px; border-radius: 999px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 32ch; margin-inline-start: auto; font-variant-numeric: tabular-nums; }
+.event-clock { font-size: 0.8rem; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-soft); padding: 3px 10px; border-radius: 999px; white-space: nowrap; max-width: 44ch; min-width: 0; margin-inline-start: auto; font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; gap: 6px; }
+.event-clock[hidden] { display: none; }
+.event-clock .dot { flex: none; background: var(--accent); }
+.event-clock-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event-clock-time { flex: none; white-space: nowrap; }
+.event-clock-name:not([hidden]) + .event-clock-time:not([hidden])::before { content: "· "; }
+.event-clock.is-over, .event-clock.is-before { color: var(--text-2); border-color: var(--border); background: var(--surface); }
+.event-strip.is-over, .event-strip.is-before { border-color: var(--border); }
+.event-strip.is-over .event-strip-when, .event-strip.is-over .today-kicker { color: var(--text-2); }
 .topbar.has-event .topbar-status { display: none; }
 .announce { display: flex; align-items: flex-start; gap: 12px; max-width: 1080px; width: calc(100% - 32px); margin: 0 auto 16px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); }
 .announce-inner { flex: 1; display: flex; gap: 6px; align-items: baseline; min-width: 0; }
