@@ -1045,6 +1045,20 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
 .center-card h1[tabindex="-1"]:focus { outline: none; }
 .center-card h1[tabindex="-1"]:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); }
 
+/* --- toasts: bottom-end, never over the whole width; errors stay until closed --- */
+.toast-host { inset-inline: auto var(--space-4); inset-block-end: calc(var(--space-4) + env(safe-area-inset-bottom, 0px)); align-items: stretch; max-width: min(360px, calc(100vw - 2 * var(--space-4))); }
+.toast { pointer-events: auto; display: flex; align-items: flex-start; gap: var(--space-2); padding-block: var(--space-2); padding-inline: var(--space-4) var(--space-1); }
+.toast-error { border-inline-start: 4px solid var(--danger-fg); }
+.toast-text { margin: 0; flex: 1; padding-block: var(--space-1); }
+.toast-count { color: var(--text-muted); font-variant-numeric: tabular-nums; font-weight: 600; }
+.toast-count[hidden] { display: none; }
+.toast-close { flex: none; min-width: var(--control-xs); min-height: var(--control-xs); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-muted); font: inherit; font-size: var(--step-1); line-height: 1; cursor: pointer; }
+.toast-close:hover { background: var(--hover); color: var(--text); }
+@media (prefers-reduced-motion: no-preference) {
+  .toast { transition: opacity var(--motion-dur-medium) var(--motion-ease-enter); }
+  @starting-style { .toast { opacity: 0; } }
+}
+
 @media (forced-colors: active) {
   .error-summary, .lb-frozen-banner, .toast { border-color: CanvasText; }
   .resume-seg.is-done { forced-color-adjust: none; background: Highlight; }
