@@ -396,7 +396,7 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 .btn-copy { min-height: var(--control-xs); padding: 2px var(--space-3); font-size: var(--step--2); }
 .btn-copy.is-copied { color: var(--success-fg); border-color: var(--success-fg); }
 .link-btn {
-  display: inline-flex; align-items: center; min-block-size: var(--target-min);
+  display: inline-flex; align-items: center; justify-content: center; min-block-size: var(--target-min); min-inline-size: var(--target-min);
   background: none; border: 0; padding: 0; font: inherit; color: var(--accent);
   text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
 }
@@ -592,7 +592,7 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 
 /* toolbox page */
 .toc { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin: var(--space-2) 0 var(--space-6); font-size: var(--step--1); }
-.toc a { display: inline-flex; align-items: center; min-block-size: var(--target-min); }
+.toc a { display: inline-flex; align-items: center; justify-content: center; min-block-size: var(--target-min); min-inline-size: var(--target-min); }
 .stage-wrap > .block { margin-top: var(--space-7); }
 
 /* ============ prose (our own markdown) ============ */
@@ -698,6 +698,7 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 .stats-table { width: 100%; border-collapse: collapse; font-size: var(--step--1); }
 .stats-table th, .stats-table td { padding: var(--space-3) var(--space-3); text-align: start; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .stats-table tbody tr:last-child > * { border-bottom: 0; }
+.stats-table th a { display: inline-flex; align-items: center; min-block-size: var(--target-min); }
 .stats-table .num { text-align: end; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .stats-table tr.status-not-started th { color: var(--text-muted); font-weight: 400; }
 .bar { display: inline-block; width: 60px; height: 6px; margin-inline-start: var(--space-2); border-radius: 3px; background: var(--surface-3); vertical-align: middle; overflow: hidden; }

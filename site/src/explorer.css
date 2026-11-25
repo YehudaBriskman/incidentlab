@@ -54,7 +54,7 @@
 .ex-step-err::before { content: "⚠ "; }
 .ex-pipe { color: var(--text-muted); }
 .ex-ci { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--control-sm); padding: 0 var(--space-1); font-size: var(--step--1); color: var(--text-2); cursor: pointer; }
-.ex-ci input, .ex-toggle input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.ex-ci input, .ex-toggle input { width: 24px; height: 24px; margin: 0; accent-color: var(--accent); }
 .ex-remove { min-width: var(--control-sm); }
 .ex-input, .ex-select { background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: var(--space-1) var(--space-3); font: inherit; font-size: var(--step--1); min-height: var(--control-sm); }
 .ex-input::placeholder { color: var(--text-muted); }
@@ -134,7 +134,7 @@
 /* aggregations */
 .ex-aggs { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .ex-agg { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-3); min-width: 0; }
-.ex-agg summary { cursor: pointer; font-weight: 600; }
+.ex-agg summary { cursor: pointer; font-weight: 600; min-block-size: var(--target-min); padding-block: max(0px, (var(--target-min) - 1lh) / 2); }
 .ex-agg-strip { margin: var(--space-2) 0; padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); font-size: var(--step--2); background: var(--accent-soft); color: var(--text); }
 .ex-agg-strip[hidden] { display: none; }
 .ex-agg-out.is-stale { opacity: 0.5; }
