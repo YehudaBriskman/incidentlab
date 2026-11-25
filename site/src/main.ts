@@ -5,7 +5,7 @@ import { getCase } from "./content/load";
 import { onConnectivity } from "./lib/api";
 import { h, restoreFields, setChildren, snapshotFields, type FieldSnapshot } from "./lib/dom";
 import { cachedAccount, isAdmin, loadAccount, onAccountChange, signOut } from "./lib/session";
-import { onEventChange, startEventPolling } from "./lib/event";
+import { cachedEvent, onEventChange, startEventPolling } from "./lib/event";
 import { TA } from "./i18n/strings-account";
 import { TG } from "./i18n/strings-game";
 import { stopAuthTimers, withApprovedAccount } from "./views/auth";
@@ -13,7 +13,7 @@ import { renderStats } from "./views/stats";
 import { renderCase, stopCaseTimers } from "./views/case";
 import { renderHome } from "./views/home";
 import { renderToolbox } from "./views/toolbox";
-import { eventLine, renderLeaderboard, stopLeaderboard } from "./views/leaderboard";
+import { eventDisplayPhase, eventLine, eventWhen, renderLeaderboard, stopLeaderboard } from "./views/leaderboard";
 
 applyLang();
 
@@ -132,13 +132,26 @@ function writeDismissed(text: string): void {
 function mountEvent(): void {
   const bar = document.querySelector(".topbar");
   if (!(bar instanceof HTMLElement)) return;
-  const clock = h("span", { class: "event-clock mono", hidden: true });
+  // The event name truncates; the countdown never does (it is the part that matters). Full text in `title`.
+  const clockDot = h("span", { class: "dot", "aria-hidden": "true" });
+  const clockName = h("span", { class: "event-clock-name", dir: "auto" });
+  const clockTime = h("span", { class: "event-clock-time" });
+  const clock = h("span", { class: "event-clock mono", hidden: true }, clockDot, clockName, clockTime);
   bar.querySelector(".account-menu")?.before(clock);
   const drawClock = (): void => {
     const line = eventLine();
-    clock.textContent = line;
+    const event = cachedEvent();
+    const phase = eventDisplayPhase();
     clock.hidden = line.length === 0;
     bar.classList.toggle("has-event", line.length > 0);
+    if (line.length === 0 || event === null) return;
+    clock.className = `event-clock mono is-${phase}`;
+    clock.title = line;
+    clockDot.hidden = phase !== "live";
+    if (clockName.textContent !== event.name) clockName.textContent = event.name; // textContent only: admin-authored
+    clockName.hidden = event.name.length === 0;
+    clockTime.textContent = eventWhen();
+    clockTime.hidden = clockTime.textContent.length === 0;
   };
 
   let dismissedText = readDismissed();

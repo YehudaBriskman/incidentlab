@@ -8,7 +8,7 @@ import { getLang } from "../i18n/i18n";
 import { cachedEvent, isEventActive, onEventChange } from "../lib/event";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
-import { eventWhen } from "./leaderboard";
+import { eventDisplayPhase, eventWhen } from "./leaderboard";
 import { T } from "../i18n/strings-player";
 
 const steps = (): ReadonlyArray<{ title: string; body: string }> => [
@@ -86,14 +86,19 @@ function caseCard(c: Case, state: HomeState): HTMLElement {
   );
 }
 
-/** "Live event" strip: name + countdown, ticking every second; it removes its own timers once detached. */
+/**
+ * Event strip: phase-aware kicker ("Upcoming event" / "● Live event" / "Event ended"), name and countdown,
+ * ticking every second; it removes its own timers once detached. Only a running event gets the live dot.
+ */
 function eventStrip(): HTMLElement {
   const name = h("p", { class: "event-strip-name" });
   const when = h("p", { class: "event-strip-when mono" });
+  const dot = h("span", { class: "dot", "aria-hidden": "true" });
+  const kickerText = h("span", {});
   const strip = h(
     "section",
-    { class: "event-strip", "aria-label": TG().eventKicker, hidden: true },
-    h("p", { class: "today-kicker mono" }, h("span", { class: "dot", "aria-hidden": "true" }), TG().eventKicker),
+    { class: "event-strip", hidden: true },
+    h("p", { class: "today-kicker mono" }, dot, kickerText),
     name,
     when,
     h("a", { class: "btn btn-sm", href: "#/leaderboard" }, TG().homeLeaderboard),
@@ -104,10 +109,17 @@ function eventStrip(): HTMLElement {
       strip.hidden = true;
       return;
     }
+    const phase = eventDisplayPhase();
+    const kicker = phase === "before" ? TG().eventKickerBefore : phase === "over" ? TG().eventKickerOver : TG().eventKicker;
     strip.hidden = false;
+    strip.className = `event-strip is-${phase}`;
+    strip.setAttribute("aria-label", kicker);
+    kickerText.textContent = kicker;
+    dot.hidden = phase !== "live";
     name.textContent = event.name;
     name.hidden = event.name.length === 0;
-    when.textContent = eventWhen();
+    when.textContent = phase === "over" ? TG().eventFinal : eventWhen();
+    when.classList.toggle("mono", phase !== "over"); // a sentence, not a clock
     when.hidden = when.textContent.length === 0;
   };
   const unsubscribe = onEventChange(draw);

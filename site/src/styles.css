@@ -450,7 +450,15 @@ p.notice.form-error { display: block; }
 .ach.is-locked .ach-icon { filter: grayscale(1); opacity: 0.6; }
 
 /* ============ round 2: header event clock + announcement ============ */
-.event-clock { font-size: 0.8rem; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-soft); padding: 3px 10px; border-radius: 999px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 32ch; margin-inline-start: auto; font-variant-numeric: tabular-nums; }
+.event-clock { font-size: 0.8rem; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-soft); padding: 3px 10px; border-radius: 999px; white-space: nowrap; max-width: 44ch; min-width: 0; margin-inline-start: auto; font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; gap: 6px; }
+.event-clock[hidden] { display: none; }
+.event-clock .dot { flex: none; background: var(--accent); }
+.event-clock-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event-clock-time { flex: none; white-space: nowrap; }
+.event-clock-name:not([hidden]) + .event-clock-time:not([hidden])::before { content: "· "; }
+.event-clock.is-over, .event-clock.is-before { color: var(--text-2); border-color: var(--border); background: var(--surface); }
+.event-strip.is-over, .event-strip.is-before { border-color: var(--border); }
+.event-strip.is-over .event-strip-when, .event-strip.is-over .today-kicker { color: var(--text-2); }
 .topbar.has-event .topbar-status { display: none; }
 .announce { display: flex; align-items: flex-start; gap: 12px; max-width: 1080px; width: calc(100% - 32px); margin: 0 auto 16px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); }
 .announce-inner { flex: 1; display: flex; gap: 6px; align-items: baseline; min-width: 0; }

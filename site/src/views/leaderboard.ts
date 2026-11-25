@@ -47,6 +47,12 @@ export function eventWhen(): string {
   return "";
 }
 
+/** Where the event stands for display: live (running or no window), upcoming, or over. */
+export function eventDisplayPhase(): "live" | "before" | "over" {
+  const kind = eventPhase(cachedEvent()).kind;
+  return kind === "before" ? "before" : kind === "over" ? "over" : "live";
+}
+
 /** Countdown line for the event ("Event name · ends in 12:03"), or "" when no event is set. */
 export function eventLine(): string {
   const event = cachedEvent();

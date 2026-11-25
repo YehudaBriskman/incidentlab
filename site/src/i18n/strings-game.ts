@@ -141,6 +141,9 @@ export const TG = defineStrings({
     // home
     homeLeaderboard: "See the leaderboard →",
     eventKicker: "Live event",
+    eventKickerBefore: "Upcoming event",
+    eventKickerOver: "Event ended",
+    eventFinal: "Final results are on the leaderboard.",
   },
   he: {
     leaderboard: "טבלת מובילים",
@@ -269,6 +272,9 @@ export const TG = defineStrings({
 
     homeLeaderboard: "← לטבלת המובילים",
     eventKicker: "אירוע חי",
+    eventKickerBefore: "אירוע קרוב",
+    eventKickerOver: "האירוע הסתיים",
+    eventFinal: "התוצאות הסופיות בטבלת המובילים.",
   },
 });
 
