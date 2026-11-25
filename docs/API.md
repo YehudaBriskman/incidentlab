@@ -10,7 +10,7 @@ both the browser and the function import it.
 - Request and response bodies are JSON. POST/PUT bodies must send `content-type: application/json` (otherwise 415) and be at most 4 KB (64 KB for the schedule; otherwise 413).
 - Every response carries `cache-control: no-store`.
 - Errors are non-2xx with body `{ "error": string, "code"?: string, "retryAfterSeconds"?: number }`. Status codes: 400 validation, 401 signed out, 403 forbidden (see codes), 404, 405, 409 conflict (username taken, already finished, no more hints, concurrent update: retry), 413, 415, 429 rate limit (also sends `Retry-After`), 500 `{"error":"internal"}`, 503 admin disabled.
-- Error codes the UI acts on: `signed-out`, `bad-credentials`, `username-taken`, `pending`, `rejected`, `not-today`, `locked`, `unknown-case`, `rate-limited`.
+- Error codes the UI acts on: `signed-out`, `bad-credentials`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `not-today`, `event-closed`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`.
 
 ## Accounts and sessions
 
@@ -19,6 +19,26 @@ both the browser and the function import it.
 - New accounts are `pending`. They can sign in and see `/api/me`, but every `/api/cases/*` route returns 403 `pending` until the instructor approves them. `rejected` accounts can't sign in.
 - The session is an opaque random token in the cookie `il_session` (`HttpOnly; SameSite=Lax; Path=/api; Secure`; 30 days, renewed when under 15 days remain). The store keeps `sha256(token)` only. Logout deletes the session; rejecting or deleting an account kills all of its sessions.
 - CSRF: SameSite=Lax plus JSON-only bodies (a cross-site form can't send `application/json`).
+- **Admin sign-in:** username `admin` with the `ADMIN_KEY` as password creates an admin session (12 h, ended
+  when the key rotates). It works on every admin route instead of the `X-Admin-Key` header, and it can't
+  play. Reserved usernames: `admin`, `administrator`, `root`, `instructor`, `system`.
+- **Class code:** when the admin sets an invite code, sign-ups that send it are approved immediately.
+- **Password reset:** the admin gets a one-time temporary password; the account is signed out and must
+  set a new password (`POST /api/me/password`) before playing.
+
+## Paid content and scoring
+
+Hint texts and full toolbox commands are stripped from the site bundle at build time
+(`site/vite.config.ts`, verified by `scripts/check-bundle.mjs`). The browser only has each command's
+`syntax`. The server returns paid content in `progress.unlocked` only after charging for it, and
+everything once the case is completed.
+
+Per stage: `max(0, base − hints − 5×commands − min(20, 2×wrong))` + time bonus (+30 within the stage's
+target time, fading linearly to 0 at 3× the target) + 10 for a clean solve (no hints, commands or wrong
+answers) + 15 first blood (first solver of that stage; reset with the case). Per case: +50 when all six
+stages are solved without revealing an answer. A revealed stage scores 0. `maxScore` is par (every stage
+at base + 30 + 10, plus 50); first blood can push a score above par. Each solved stage stores its
+`breakdown`. Constants: `SCORING` in `site/shared/contract.ts`.
 
 ## Endpoints
 
@@ -37,9 +57,13 @@ both the browser and the function import it.
 | POST | `/api/cases/:caseId/answer` | approved | `{questionId, answer}` | `{correct, progress}` |
 | POST | `/api/cases/:caseId/hint` | approved | `{questionId}` | `{progress}` (`hintsRevealed` +1) |
 | POST | `/api/cases/:caseId/reveal` | approved | `{questionId}` | `{progress}` (0 points, `revealedAnswer` set, next stage active) |
+| POST | `/api/cases/:caseId/reveal-command` | approved | `{toolId}` | `{progress}` (−5 on the active stage; free if already paid or the case is done) |
 | GET | `/api/cases/:caseId/debrief?lang=en\|he` | approved | | `{markdown}`, 403 until every stage is finished |
+| POST | `/api/me/password` | cookie | `{currentPassword, newPassword}` | `{account}` + fresh cookie (other sessions end) |
+| GET | `/api/event` | none | | `{event, serverTime}` |
+| GET | `/api/leaderboard?caseId=` | none | | `{caseId, frozen, frozenAt, generatedAt, entries}` (approved players; overall without caseId) |
 
-### Admin (`X-Admin-Key: <ADMIN_KEY>`)
+### Admin (`X-Admin-Key: <ADMIN_KEY>` or the `admin` session cookie)
 
 | Method | Path | Body | Response |
 |---|---|---|---|
@@ -53,6 +77,12 @@ both the browser and the function import it.
 | GET | `/api/admin/schedule` | | `{schedule}` |
 | PUT | `/api/admin/schedule` | `Schedule` | `{schedule}` (case ids must be released; time zone must be valid) |
 | GET | `/api/admin/stats` | | `{generatedAt, cases: CaseSummary[]}` |
+| POST | `/api/admin/accounts/:id/reset-password` | `{}` | `{temporaryPassword}` |
+| POST | `/api/admin/accounts/approve-all` | `{}` | `{approved}` |
+| GET/PUT | `/api/admin/settings` | `{inviteCode}` | `{settings}` |
+| GET/PUT | `/api/admin/event` | `LiveEvent` | `{event, serverTime}` (window, freeze, announcement; `enforceWindow` refuses answers, hints and reveals outside it) |
+| GET | `/api/admin/export.csv` | | CSV, one row per account per opened case |
+| GET | `/api/admin/audit?limit=` | | `{entries}` newest first (every admin mutation is recorded) |
 
 ## Schedule ("incident of the day")
 
@@ -71,7 +101,9 @@ so nobody is cut off at midnight.
 ## Storage
 
 One Netlify Blobs store, `incidentlab-v2`, with key prefixes: `account:`, `username:` (index),
-`session:`, `progress:<caseId>:<accountId>`, `config:schedule`, `ratelimit:`. The pre-accounts store
+`session:`, `progress:<caseId>:<accountId>`, `config:schedule`, `config:settings`, `config:event`,
+`firstblood:<caseId>:<questionId>`, `audit:<iso>:<rand>`, `ratelimit:`. Records written before scoring v2
+still parse (new fields have defaults); stages solved before it keep their points. The pre-accounts store
 `incidentlab-players` is no longer read.
 
 ## Environment

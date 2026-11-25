@@ -21,19 +21,59 @@ export const UsernameSchema = z
 
 export const PasswordSchema = z.string().min(8, "Password must be at least 8 characters").max(128, "Password is too long");
 
+/** Usernames nobody can register. Signing in as `admin` with the ADMIN_KEY opens the instructor dashboard. */
+export const ADMIN_USERNAME = "admin";
+export const RESERVED_USERNAMES: readonly string[] = ["admin", "administrator", "root", "instructor", "system"];
+
 /** Canonical form used for uniqueness and login lookup. */
 export const usernameKey = (username: string): string => username.trim().normalize("NFKC").toLowerCase();
 
 export const AccountStatusSchema = z.enum(["pending", "approved", "rejected"]);
 export type AccountStatus = z.infer<typeof AccountStatusSchema>;
 
+export const AccountRoleSchema = z.enum(["player", "admin"]);
+export type AccountRole = z.infer<typeof AccountRoleSchema>;
+
 export const AccountViewSchema = z.object({
   id: z.string(),
   username: z.string(),
   status: AccountStatusSchema,
   createdAt: z.string(),
+  role: AccountRoleSchema,
+  /** true after an admin password reset: the player must set a new password before playing */
+  mustChangePassword: z.boolean(),
 });
 export type AccountView = z.infer<typeof AccountViewSchema>;
+
+// ---- scoring --------------------------------------------------------------
+// Per stage:  max(0, base − hints − COMMAND_COST×commands − min(WRONG_CAP, WRONG_COST×wrong))
+//             + time bonus (TIME_BONUS_MAX when solved within the target time, fading to 0 at 3× target)
+//             + CLEAN_BONUS (no hints, commands or wrong answers) + FIRST_BLOOD_BONUS (first solver of the stage).
+// Per case:   + COMPLETION_BONUS when all six stages are solved without revealing an answer.
+// A revealed stage scores 0.
+export const SCORING = {
+  COMMAND_COST: 5,
+  WRONG_COST: 2,
+  WRONG_CAP: 20,
+  TIME_BONUS_MAX: 30,
+  CLEAN_BONUS: 10,
+  FIRST_BLOOD_BONUS: 15,
+  COMPLETION_BONUS: 50,
+} as const;
+
+export const ScoreBreakdownSchema = z.object({
+  base: z.number().int(),
+  hints: z.number().int(),      // negative or 0
+  commands: z.number().int(),   // negative or 0
+  wrong: z.number().int(),      // negative or 0
+  time: z.number().int(),       // 0..TIME_BONUS_MAX
+  clean: z.number().int(),
+  firstBlood: z.number().int(),
+  total: z.number().int(),
+  solveSeconds: z.number().int().min(0),
+  targetSeconds: z.number().int().min(1),
+});
+export type ScoreBreakdown = z.infer<typeof ScoreBreakdownSchema>;
 
 // ---- progress -------------------------------------------------------------
 
@@ -48,8 +88,10 @@ export const StageProgressSchema = z.object({
   finishedAt: z.string().nullable(),  // ISO, when solved/revealed
   hintsRevealed: z.number().int().min(0),
   wrongAttempts: z.number().int().min(0),
-  points: z.number().int().min(0),    // awarded points (0 until solved)
+  points: z.number().int().min(0),    // awarded points (0 until solved) = breakdown.total
   revealedAnswer: z.string().nullable(), // only set when status === "revealed"
+  commandsRevealed: z.number().int().min(0).default(0), // full commands paid for while this stage was active
+  breakdown: ScoreBreakdownSchema.nullable().default(null), // set when solved (null for stages scored before v2)
 });
 export type StageProgress = z.infer<typeof StageProgressSchema>;
 
@@ -61,9 +103,17 @@ export const ProgressViewSchema = z.object({
   startedAt: z.string().nullable(),   // first time the account opened the case (null = never)
   setupDoneAt: z.string().nullable(),
   completedAt: z.string().nullable(),
-  score: z.number().int().min(0),
-  maxScore: z.number().int().min(0),
+  score: z.number().int().min(0),     // sum of stage points + completionBonus
+  maxScore: z.number().int().min(0),  // par: every stage at base + full time bonus + clean, plus completion (first blood is extra)
+  completionBonus: z.number().int().min(0),
   stages: z.record(QuestionIdSchema, StageProgressSchema),
+  /** toolId -> the stage it was paid for on */
+  commandsRevealed: z.record(z.string(), QuestionIdSchema),
+  /** Paid-for content in the requested language. Everything is unlocked once the case is completed. */
+  unlocked: z.object({
+    hints: z.partialRecord(QuestionIdSchema, z.array(z.string())),
+    commands: z.record(z.string(), z.object({ command: z.string(), powershell: z.string().nullable() })),
+  }),
 });
 export type ProgressView = z.infer<typeof ProgressViewSchema>;
 
@@ -86,13 +136,18 @@ export const CaseStatsSchema = z.object({
   solved: z.number().int().min(0),
   revealed: z.number().int().min(0),
   hintsUsed: z.number().int().min(0),
+  commandsRevealed: z.number().int().min(0),
   wrongAttempts: z.number().int().min(0),
+  firstBloods: z.number().int().min(0),
   startedAt: z.string().nullable(),
   completedAt: z.string().nullable(),
   /** setup-done -> completed (or -> now while in progress); null before setup. */
   durationSeconds: z.number().int().min(0).nullable(),
 });
 export type CaseStats = z.infer<typeof CaseStatsSchema>;
+
+/** Achievement ids (labels live in the client). */
+export const ACHIEVEMENT_IDS = ["first-blood", "clean-case", "speedrun", "no-hints-5", "all-cases", "streak-3", "streak-7"] as const;
 
 export const UserStatsSchema = z.object({
   accountId: z.string(),
@@ -110,6 +165,10 @@ export const UserStatsSchema = z.object({
   /** solved / (solved + wrong attempts), 0..1; null when nothing was attempted. */
   accuracy: z.number().min(0).max(1).nullable(),
   rank: z.number().int().min(1).nullable(), // among approved accounts by totalScore (ties share a rank)
+  commandsRevealed: z.number().int().min(0),
+  achievements: z.array(z.object({ id: z.string(), earnedAt: z.string() })),
+  /** consecutive incident-of-the-day dates completed on that date */
+  streak: z.object({ current: z.number().int().min(0), best: z.number().int().min(0) }),
   cases: z.array(CaseStatsSchema),
 });
 export type UserStats = z.infer<typeof UserStatsSchema>;
@@ -146,6 +205,65 @@ export const ScheduleSchema = z.object({
 });
 export type Schedule = z.infer<typeof ScheduleSchema>;
 
+// ---- live event -------------------------------------------------------------
+
+export const AnnouncementSchema = z.object({ text: z.string().trim().min(1).max(280), level: z.enum(["info", "warning"]) });
+
+export const EventSchema = z.object({
+  name: z.string().trim().max(80),
+  startsAt: z.string().datetime().nullable(),
+  endsAt: z.string().datetime().nullable(),
+  /** after this moment the public leaderboard shows the standings as of freezeAt */
+  freezeAt: z.string().datetime().nullable(),
+  /** true: answers, hints and command reveals are refused outside [startsAt, endsAt] */
+  enforceWindow: z.boolean(),
+  announcement: AnnouncementSchema.nullable(),
+});
+export type LiveEvent = z.infer<typeof EventSchema>;
+
+// GET /api/event (public)
+export const EventResponseSchema = z.object({ event: EventSchema, serverTime: z.string() });
+
+// ---- settings ---------------------------------------------------------------
+
+export const SettingsSchema = z.object({
+  /** sign-ups with this code are approved immediately (null = off). Compared case-insensitively. */
+  inviteCode: z.string().trim().min(4).max(40).nullable(),
+});
+export type Settings = z.infer<typeof SettingsSchema>;
+
+// ---- leaderboard -----------------------------------------------------------
+
+export const LeaderboardEntrySchema = z.object({
+  rank: z.number().int().min(1),
+  username: z.string(),
+  score: z.number().int().min(0),
+  stagesSolved: z.number().int().min(0),
+  casesCompleted: z.number().int().min(0),
+  firstBloods: z.number().int().min(0),
+  lastSolveAt: z.string().nullable(),
+});
+// GET /api/leaderboard?caseId=<id>   (public; omit caseId for overall)
+export const LeaderboardResponseSchema = z.object({
+  caseId: z.string().nullable(),
+  frozen: z.boolean(),
+  frozenAt: z.string().nullable(),
+  generatedAt: z.string(),
+  entries: z.array(LeaderboardEntrySchema),
+});
+export type LeaderboardResponse = z.infer<typeof LeaderboardResponseSchema>;
+
+// ---- audit -----------------------------------------------------------------
+
+export const AuditEntrySchema = z.object({
+  at: z.string(),
+  action: z.string(),
+  target: z.string().nullable(),
+  detail: z.string().nullable(),
+  via: z.enum(["key", "session"]),
+});
+export type AuditEntry = z.infer<typeof AuditEntrySchema>;
+
 // ---- requests / responses -------------------------------------------------
 // Player auth: HttpOnly session cookie `il_session` (set by register/login, cleared by logout).
 // Admin auth: header X-Admin-Key: <ADMIN_KEY env var>.
@@ -153,9 +271,14 @@ export type Schedule = z.infer<typeof ScheduleSchema>;
 
 export const ErrorBodySchema = z.object({ error: z.string(), code: z.string().optional(), retryAfterSeconds: z.number().optional() });
 
-// POST /api/auth/register  -> 201 {account} + cookie (status "pending" until the admin approves)
-// POST /api/auth/login     -> 200 {account} + cookie (403 code "rejected" for rejected accounts)
+// POST /api/auth/register  -> 201 {account} + cookie (status "pending" until the admin approves,
+//                             "approved" right away with a valid inviteCode). 409 code "reserved" / "username-taken".
+// POST /api/auth/login     -> 200 {account} + cookie (403 code "rejected" for rejected accounts).
+//                             username "admin" + the ADMIN_KEY -> an admin session (account.role "admin", 12 h).
 export const CredentialsSchema = z.object({ username: UsernameSchema, password: PasswordSchema });
+export const RegisterRequestSchema = CredentialsSchema.extend({ inviteCode: z.string().trim().max(40).optional() });
+// POST /api/me/password {currentPassword, newPassword} -> {account}  (also clears mustChangePassword)
+export const ChangePasswordRequestSchema = z.object({ currentPassword: z.string().min(1).max(128), newPassword: PasswordSchema });
 export const LoginRequestSchema = z.object({ username: z.string().trim().min(1).max(64), password: z.string().min(1).max(128) });
 export const AccountResponseSchema = z.object({ account: AccountViewSchema });
 // POST /api/auth/logout (body {}) -> 204, clears the cookie
@@ -172,17 +295,22 @@ export const TodayResponseSchema = z.object({
 });
 export type TodayResponse = z.infer<typeof TodayResponseSchema>;
 
-// Every /api/cases/:caseId/* route needs an APPROVED account (403 code "pending" / "rejected" otherwise).
+// Every /api/cases/:caseId/* route needs an APPROVED player account (403 code "pending" / "rejected" /
+// "admin" / "password-change-required" otherwise). Every route accepts ?lang=en|he for `unlocked` content.
+// During an event with enforceWindow, mutations outside the window get 403 code "event-closed".
 // GET  /api/cases/:caseId/progress           -> {progress}
 // POST /api/cases/:caseId/setup-done  {}     -> {progress}  (q1 becomes active)
 // POST /api/cases/:caseId/answer             -> {correct, progress}
 // POST /api/cases/:caseId/hint               -> {progress}
 // POST /api/cases/:caseId/reveal             -> {progress}
+// POST /api/cases/:caseId/reveal-command {toolId} -> {progress}  (−5 on the active stage; free if already
+//                                             revealed or the case is completed; 403 "locked" before setup)
 // GET  /api/cases/:caseId/debrief?lang=en|he -> {markdown}  (403 until every stage is finished)
 export const ProgressResponseSchema = z.object({ progress: ProgressViewSchema });
 export const AnswerRequestSchema = z.object({ questionId: QuestionIdSchema, answer: z.string().max(200) });
 export const AnswerResponseSchema = z.object({ correct: z.boolean(), progress: ProgressViewSchema });
 export const QuestionRequestSchema = z.object({ questionId: QuestionIdSchema });
+export const RevealCommandRequestSchema = z.object({ toolId: z.string().min(1).max(80) });
 export const DebriefResponseSchema = z.object({ markdown: z.string() });
 
 // GET /api/me/stats -> UserStats
@@ -199,11 +327,24 @@ export const UserStatsResponseSchema = z.object({ stats: UserStatsSchema });
 // GET    /api/admin/schedule                    -> {schedule}
 // PUT    /api/admin/schedule  Schedule          -> {schedule}
 // GET    /api/admin/stats                       -> {generatedAt, cases: CaseSummary[]}
+// POST   /api/admin/accounts/:id/reset-password {} -> {temporaryPassword}  (signs the player out; forces a change)
+// POST   /api/admin/accounts/approve-all  {}    -> {approved: number}
+// GET    /api/admin/settings                    -> {settings}
+// PUT    /api/admin/settings   Settings         -> {settings}
+// GET    /api/admin/event                       -> {event, serverTime}
+// PUT    /api/admin/event      LiveEvent        -> {event, serverTime}
+// GET    /api/admin/export.csv                  -> text/csv (one row per account per case)
+// GET    /api/admin/audit?limit=100             -> {entries: AuditEntry[]}  (newest first)
+// Admin auth: header X-Admin-Key, OR the session cookie of `admin` signed in with the ADMIN_KEY.
 export const AdminAccountsResponseSchema = z.object({ generatedAt: z.string(), accounts: z.array(UserStatsSchema) });
 export const AdminProgressResponseSchema = z.object({ generatedAt: z.string(), caseId: z.string(), players: z.array(AdminProgressSchema) });
 export const AdminResetRequestSchema = z.object({ confirm: z.literal("RESET"), caseId: CaseIdSchema.optional() });
 export const ScheduleResponseSchema = z.object({ schedule: ScheduleSchema });
 export const AdminStatsResponseSchema = z.object({ generatedAt: z.string(), cases: z.array(CaseSummarySchema) });
+export const ResetPasswordResponseSchema = z.object({ temporaryPassword: z.string() });
+export const ApproveAllResponseSchema = z.object({ approved: z.number().int().min(0) });
+export const SettingsResponseSchema = z.object({ settings: SettingsSchema });
+export const AuditResponseSchema = z.object({ entries: z.array(AuditEntrySchema) });
 
 // Scoring: solved points = max(0, question.points - sum(cost of the first `hintsRevealed` hints)).
 // Rate limit: max 5 wrong answers per account per question per 60s -> 429 with retryAfterSeconds.

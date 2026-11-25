@@ -49,13 +49,20 @@ check("login 200", (await player.call("POST", "/api/auth/login", { body: { usern
 // Gameplay
 check("progress 200", (await player.call("GET", cases("/progress"))).status === 200);
 check("answer before setup -> 403", (await player.call("POST", cases("/answer"), { body: { questionId: "q1", answer: "x" } })).status === 403);
+check("reveal-command unknown tool -> 404", (await player.call("POST", cases("/reveal-command"), { body: { toolId: "no-such-tool" } })).status === 404);
 check("setup-done 200", (await player.call("POST", cases("/setup-done"), { body: {} })).status === 200);
+const progressNow = (await player.call("GET", cases("/progress"))).json?.progress;
+check("paid content hidden before payment", progressNow && Object.keys(progressNow.unlocked.commands).length === 0 && !progressNow.unlocked.hints.q1);
 check("answer q2 out of order -> 403", (await player.call("POST", cases("/answer"), { body: { questionId: "q2", answer: answers.q2 } })).status === 403);
 const wrong = await player.call("POST", cases("/answer"), { body: { questionId: "q1", answer: "definitely-wrong" } });
 check("wrong answer rejected", wrong.status === 200 && wrong.json?.correct === false);
-check("hint q1", (await player.call("POST", cases("/hint"), { body: { questionId: "q1" } })).status === 200);
+const hinted = await player.call("POST", cases("/hint"), { body: { questionId: "q1" } });
+check("hint q1 returns its text", hinted.status === 200 && (hinted.json?.progress?.unlocked?.hints?.q1?.[0] ?? "").length > 10);
+
 const q1 = await player.call("POST", cases("/answer"), { body: { questionId: "q1", answer: `  ${answers.q1} ` } });
 check("q1 correct (whitespace-normalized)", q1.json?.correct === true);
+const bd = q1.json?.progress?.stages?.q1?.breakdown;
+check("q1 has a score breakdown (hint −cost, wrong −2)", bd && bd.hints < 0 && bd.wrong === -2 && bd.total === q1.json.progress.stages.q1.points, JSON.stringify(bd));
 const rev = await player.call("POST", cases("/reveal"), { body: { questionId: "q2" } });
 check("reveal q2 gives answer, 0 pts", rev.json?.progress?.stages?.q2?.revealedAnswer?.toLowerCase() === answers.q2.toLowerCase() && rev.json?.progress?.stages?.q2?.points === 0);
 check("debrief locked before finish -> 403", (await player.call("GET", cases("/debrief"))).status === 403);
@@ -67,17 +74,34 @@ const deb = await player.call("GET", cases("/debrief"));
 check("debrief unlocked", deb.status === 200 && (deb.json?.markdown ?? "").length > 500);
 const stats = await player.call("GET", "/api/me/stats");
 check("my stats count the completed case", stats.json?.stats?.cases?.find((c) => c.caseId === caseId)?.status === "completed");
+const done = (await player.call("GET", cases("/progress"))).json?.progress;
+check("every command free after completion", done && Object.keys(done.unlocked.commands).length > 5, String(Object.keys(done?.unlocked?.commands ?? {}).length));
 
-// Rate limit on a second account
+// Paid command on a fresh case run (second account)
+
 const second = createSession(base);
 const reg2 = await second.call("POST", "/api/auth/register", { body: { username: `smoke2_${suffix}`, password: "password1" } });
 await adminCall("POST", `/api/admin/accounts/${reg2.json?.account?.id}/approve`, {});
 await second.call("POST", cases("/setup-done"), { body: {} });
+const anyTool = Object.keys(done?.unlocked?.commands ?? {})[0];
+const paid = await second.call("POST", cases("/reveal-command"), { body: { toolId: anyTool } });
+check("reveal-command charges the active stage", paid.status === 200 && paid.json?.progress?.stages?.q1?.commandsRevealed === 1 && Boolean(paid.json?.progress?.unlocked?.commands?.[anyTool]));
+check("re-reveal is free", (await second.call("POST", cases("/reveal-command"), { body: { toolId: anyTool } })).json?.progress?.stages?.q1?.commandsRevealed === 1);
 let last = 0;
 for (let i = 0; i < 6; i++) last = (await second.call("POST", cases("/answer"), { body: { questionId: "q1", answer: `wrong-${i}` } })).status;
 check("6th wrong answer -> 429", last === 429, String(last));
 
+// Public endpoints
+check("leaderboard public", (await createSession(base).call("GET", `/api/leaderboard?caseId=${caseId}`)).status === 200);
+check("event public", (await createSession(base).call("GET", "/api/event")).status === 200);
+check("reserved username -> 409", (await createSession(base).call("POST", "/api/auth/register", { body: { username: "admin", password: "password1" } })).status === 409);
+
 // Admin
+const adminBrowser = createSession(base);
+check("admin sign-in with the key", (await adminBrowser.call("POST", "/api/auth/login", { body: { username: "admin", password: adminKey } })).status === 200);
+check("admin cookie opens admin routes", (await adminBrowser.call("GET", "/api/admin/audit?limit=5")).status === 200);
+check("admin can't play", (await adminBrowser.call("GET", cases("/progress"))).status === 403);
+await adminBrowser.call("POST", "/api/auth/logout", { body: {} });
 check("admin no key -> 401", (await admin.call("GET", "/api/admin/accounts", { admin: "" })).status === 401);
 check("admin wrong key -> 401", (await admin.call("GET", "/api/admin/accounts", { admin: "x".repeat(48) })).status === 401);
 const live = await adminCall("GET", `/api/admin/progress?caseId=${caseId}`);

@@ -1,26 +1,30 @@
 import { z } from "zod";
-import { CredentialsSchema, LoginRequestSchema } from "../../shared/contract.ts";
+import { CaseIdSchema, ChangePasswordRequestSchema, LoginRequestSchema, RegisterRequestSchema } from "../../shared/contract.ts";
+import { AppError } from "../domain/types.ts";
 import type { AuthService } from "../services/AuthService.ts";
+import type { EventService } from "../services/EventService.ts";
 import type { ScheduleService } from "../services/ScheduleService.ts";
 import type { StatsService } from "../services/StatsService.ts";
-import { toAccountView } from "../services/AuthService.ts";
 import { json, noContent, parseBody, sessionCookie, sessionToken, withCookie } from "./http.ts";
 
 const EmptyBodySchema = z.object({}).strict();
 
+/** Accounts, sessions and the public read-only endpoints (today, event, leaderboard). */
 export class AuthController {
   private readonly auth: AuthService;
   private readonly schedule: ScheduleService;
   private readonly stats: StatsService;
+  private readonly events: EventService;
 
-  constructor(deps: { auth: AuthService; schedule: ScheduleService; stats: StatsService }) {
+  constructor(deps: { auth: AuthService; schedule: ScheduleService; stats: StatsService; events: EventService }) {
     this.auth = deps.auth;
     this.schedule = deps.schedule;
     this.stats = deps.stats;
+    this.events = deps.events;
   }
 
   async register(req: Request, ip: string): Promise<Response> {
-    const body = await parseBody(req, CredentialsSchema);
+    const body = await parseBody(req, RegisterRequestSchema);
     const { account, session } = await this.auth.register({ ...body, ip });
     return withCookie(json(201, { account }), sessionCookie(req, session));
   }
@@ -38,17 +42,35 @@ export class AuthController {
   }
 
   async me(req: Request): Promise<Response> {
-    const { account, renewed } = await this.auth.authenticate(sessionToken(req));
-    const res = json(200, { account: toAccountView(account) });
+    const { view, renewed } = await this.auth.authenticate(sessionToken(req));
+    const res = json(200, { account: view });
     return renewed ? withCookie(res, sessionCookie(req, renewed)) : res;
   }
 
+  async changePassword(req: Request): Promise<Response> {
+    const body = await parseBody(req, ChangePasswordRequestSchema);
+    const { account, session } = await this.auth.changePassword(sessionToken(req), body);
+    return withCookie(json(200, { account }), sessionCookie(req, session));
+  }
+
   async myStats(req: Request): Promise<Response> {
-    const { account } = await this.auth.authenticate(sessionToken(req));
-    return json(200, { stats: await this.stats.forAccount(account) });
+    const { principal } = await this.auth.authenticate(sessionToken(req));
+    if (principal.kind === "admin") throw new AppError(403, "the admin account has no player stats", { code: "admin" });
+    return json(200, { stats: await this.stats.forAccount(principal.account) });
   }
 
   async today(): Promise<Response> {
     return json(200, await this.schedule.today());
+  }
+
+  async event(): Promise<Response> {
+    return json(200, await this.events.get());
+  }
+
+  async leaderboard(req: Request): Promise<Response> {
+    const raw = new URL(req.url).searchParams.get("caseId");
+    const parsed = raw === null || raw === "" ? null : CaseIdSchema.safeParse(raw);
+    if (parsed && !parsed.success) throw new AppError(400, "invalid caseId");
+    return json(200, await this.stats.leaderboard({ caseId: parsed ? parsed.data : null, frozenAt: await this.events.freezeMoment() }));
   }
 }

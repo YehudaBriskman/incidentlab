@@ -141,10 +141,11 @@
   "rules": [
     "Work only from the evidence pack. Don't read the generator source or the site's source code; that spoils the fun.",
     "Answers are case-insensitive, and leading and trailing whitespace is ignored. Stick to the format shown under each question.",
-    "Each hint costs the points shown on it. Hints are revealed in order, from a gentle nudge to almost the full command.",
+    "Each hint costs the points shown on it. Hints are revealed in order, from a gentle nudge to almost the full command. In the Toolbox, a command's syntax is free; seeing the full command costs 5 points. Once you finish the case, every command is free.",
     "Working in pairs is encouraged. Talk through your reasoning out loud, just like a real incident review.",
     "Any tool is allowed: grep, awk, jq, Python, Wireshark, a spreadsheet, your favourite editor. The Toolbox tab lists commands that help.",
-    "Wrong answers cost nothing, so guess freely. Still, try to be able to explain *why* your answer is right.",
+    "Each wrong answer costs 2 points, capped at 20 per stage. Guess when you can back it up, and try to be able to explain *why* your answer is right.",
+    "Speed and care pay off: a fast solve earns a time bonus of up to +30 per stage, fading after the stage's target time. A clean solve (no hints, commands or wrong answers) earns +10, the first player to solve a stage gets +15 first blood, and finishing all six stages without revealing an answer earns +50.",
     "Don't share flags with other teams until everyone is done. Sharing techniques is fine.",
     "There are two problems in this pack. Before you blame one, check that the evidence you're using belongs to it."
   ],
@@ -174,6 +175,7 @@
       "answerFormat": "HH:MM:SS (UTC)",
       "placeholder": "08:30:00",
       "points": 100,
+      "targetMinutes": 8,
       "hints": [
         {
           "cost": 10,
@@ -216,6 +218,7 @@
       "answerFormat": "Change id (CHG-NNNN)",
       "placeholder": "CHG-1234",
       "points": 100,
+      "targetMinutes": 8,
       "hints": [
         {
           "cost": 10,
@@ -258,6 +261,7 @@
       "answerFormat": "Integer (bytes)",
       "placeholder": "1400",
       "points": 100,
+      "targetMinutes": 10,
       "hints": [
         {
           "cost": 10,
@@ -299,6 +303,7 @@
       "answerFormat": "IPv4 address",
       "placeholder": "192.0.2.10",
       "points": 100,
+      "targetMinutes": 11,
       "hints": [
         {
           "cost": 10,
@@ -340,6 +345,7 @@
       "answerFormat": "Integer (hosts)",
       "placeholder": "5",
       "points": 100,
+      "targetMinutes": 9,
       "hints": [
         {
           "cost": 10,
@@ -381,6 +387,7 @@
       "answerFormat": "unbound.conf option name (no colon)",
       "placeholder": "msg-cache-size",
       "points": 150,
+      "targetMinutes": 14,
       "hints": [
         {
           "cost": 10,
@@ -405,6 +412,8 @@
         {
           "id": "unzip-evidence",
           "title": "Unpack the evidence",
+          "syntax": "unzip <evidence-zip> && cd <case-folder>",
+          "syntaxPowershell": "Expand-Archive .\\<evidence-zip> -DestinationPath <dest>\ncd .\\<case-folder>",
           "command": "unzip ghost-in-the-network-evidence.zip && cd ghost-in-the-network",
           "explain": "Extracts the pack. Everything lives under one top-level folder. The `.pcap` files are only in the zip, not in the Explorer.",
           "powershell": "Expand-Archive .\\ghost-in-the-network-evidence.zip -DestinationPath .\ncd .\\ghost-in-the-network"
@@ -412,6 +421,8 @@
         {
           "id": "list-files",
           "title": "See what you've got",
+          "syntax": "find <dir> -type f | sort | xargs ls -la",
+          "syntaxPowershell": "Get-ChildItem <dir> -Recurse -File | Select-Object <properties>",
           "command": "find . -type f | sort | xargs ls -la",
           "explain": "Every file with its size. Two logs are big; everything else is short enough to read end to end.",
           "powershell": "Get-ChildItem -Recurse -File | Select-Object FullName, Length"
@@ -419,6 +430,8 @@
         {
           "id": "read-readme",
           "title": "Read the README",
+          "syntax": "less <file>",
+          "syntaxPowershell": "Get-Content <file> | Out-Host -Paging",
           "command": "less README_FIRST.txt",
           "explain": "The on-call notes: the file list and, most importantly, the time zone of every source.",
           "powershell": "Get-Content README_FIRST.txt | Out-Host -Paging"
@@ -426,6 +439,8 @@
         {
           "id": "head-lines",
           "title": "Peek at the first lines",
+          "syntax": "head -n <count> <file>",
+          "syntaxPowershell": "Get-Content <file> -TotalCount <count>",
           "command": "head -n 3 app/manifest-sync.log",
           "explain": "Look at the format **before** you parse it. `tail -n 3` shows the end of the window.",
           "powershell": "Get-Content app\\manifest-sync.log -TotalCount 3"
@@ -438,6 +453,8 @@
         {
           "id": "grep-count",
           "title": "Count matches",
+          "syntax": "grep -c '<pattern>' <file>",
+          "syntaxPowershell": "(Select-String -Path <file> -Pattern '<pattern>' -SimpleMatch).Count",
           "command": "grep -c '\"level\":\"error\"' app/manifest-sync.log",
           "explain": "`-c` prints how many lines match instead of the lines. Quick sanity checks.",
           "powershell": "(Select-String -Path app\\manifest-sync.log -Pattern '\"level\":\"error\"' -SimpleMatch).Count"
@@ -445,6 +462,8 @@
         {
           "id": "grep-first-match",
           "title": "Stop at the first match",
+          "syntax": "grep -m1 '<pattern>' <file>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<pattern>' | Select-Object -First 1",
           "command": "grep -m1 'pattern' firewall/kern-app-hosts.log",
           "explain": "`-m1` exits after the first hit. In a file sorted by time, that's the **earliest** occurrence.",
           "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'pattern' | Select-Object -First 1"
@@ -452,6 +471,8 @@
         {
           "id": "grep-exclude",
           "title": "Invert / exclude",
+          "syntax": "grep -v -e '<pattern>' <file> | head",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<pattern>' -SimpleMatch -NotMatch | Select-Object -First <count>",
           "command": "grep -v -e 'IN-DROP: ' firewall/kern-app-hosts.log | head",
           "explain": "`-v` keeps lines that do **not** match. Good for removing scanner noise.",
           "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'IN-DROP: ' -SimpleMatch -NotMatch | Select-Object -First 10"
@@ -459,6 +480,8 @@
         {
           "id": "grep-only-match",
           "title": "Print only the match",
+          "syntax": "grep -o '<regex>' <file> | sort | uniq -c",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<regex>' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name",
           "command": "grep -o 'TYPE=[0-9]* CODE=[0-9]*' firewall/kern-app-hosts.log | sort | uniq -c",
           "explain": "`-o` prints just the matched text. Pipe it to `sort | uniq -c` to get a histogram of values.",
           "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'TYPE=\\d+ CODE=\\d+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name"
@@ -466,6 +489,8 @@
         {
           "id": "grep-context",
           "title": "Context around a hit",
+          "syntax": "grep -n -B<before> -A<after> '<pattern>' <file> | head -<count>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<pattern>' -Context <before>,<after> | Select-Object -First <count>",
           "command": "grep -n -B2 -A6 'need to frag' pcap/app-03_large-request.txt | head -40",
           "explain": "`-B`/`-A` show lines before and after each match, so you see what led up to it and what followed.",
           "powershell": "Select-String -Path pcap\\app-03_large-request.txt -Pattern 'need to frag' -Context 2,6 | Select-Object -First 5"
@@ -478,6 +503,8 @@
         {
           "id": "json-pretty",
           "title": "Pretty-print one line",
+          "syntax": "head -n1 <json-lines-file> | jq .",
+          "syntaxPowershell": "Get-Content <json-lines-file> -TotalCount 1 | ConvertFrom-Json | Format-List",
           "command": "head -n1 app/manifest-sync.log | jq .",
           "explain": "See every field a line carries before you write filters. Failures carry `phase` and `error` instead of `status`.",
           "powershell": "Get-Content app\\manifest-sync.log -TotalCount 1 | ConvertFrom-Json | Format-List"
@@ -485,6 +512,8 @@
         {
           "id": "json-unique-field",
           "title": "Values of one field",
+          "syntax": "jq -r '.<field>' <json-lines-file> | sort | uniq -c",
+          "syntaxPowershell": "Get-Content <json-lines-file> | ForEach-Object { ($_ | ConvertFrom-Json).<field> } | Group-Object | Select-Object Count, Name",
           "command": "jq -r '.msg' app/manifest-sync.log | sort | uniq -c",
           "explain": "Lists every distinct value of a field with counts. Swap `.msg` for `.phase`, `.host` or `.peer`.",
           "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { ($_ | ConvertFrom-Json).msg } | Group-Object | Select-Object Count, Name"
@@ -492,6 +521,8 @@
         {
           "id": "json-filter-field",
           "title": "Filter on a field",
+          "syntax": "jq -c 'select(.<field> == \"<value>\")' <json-lines-file> | head",
+          "syntaxPowershell": "Get-Content <json-lines-file> | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object <field> -eq '<value>' | Select-Object -First <count>",
           "command": "jq -c 'select(.phase == \"connect\")' app/manifest-sync.log | head",
           "explain": "`select()` keeps the objects that match. `-c` keeps one per line so you can still pipe to `head` and `wc`.",
           "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object phase -eq 'connect' | Select-Object -First 10"
@@ -499,6 +530,8 @@
         {
           "id": "json-first-by-time",
           "title": "Earliest matching line",
+          "syntax": "jq -r 'select(.<field> == \"<value>\") | .<time-field>' <json-lines-file> | sort | head -1",
+          "syntaxPowershell": "Get-Content <json-lines-file> | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object <field> -eq '<value>' | Sort-Object <time-field> | Select-Object -First 1",
           "command": "jq -r 'select(.phase == \"response\") | .ts' app/manifest-sync.log | sort | head -1",
           "explain": "Extract the timestamp of matching lines and sort. Every `ts` here has the same offset, so a plain string sort is a time sort.",
           "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object phase -eq 'response' | Sort-Object ts | Select-Object -First 1"
@@ -506,6 +539,8 @@
         {
           "id": "json-two-fields",
           "title": "Group by several fields",
+          "syntax": "jq -r 'select(.<field> == \"<value>\") | \"\\(.<key-a>) \\(.<key-b>) \\(.<key-c>)\"' <json-lines-file> | sort | uniq -c",
+          "syntaxPowershell": "Get-Content <json-lines-file> | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object <field> -eq '<value>' | Group-Object <key-a>, <key-b>, <key-c> | Select-Object Count, Name",
           "command": "jq -r 'select(.level == \"error\") | \"\\(.host) \\(.phase) \\(.peer)\"' app/manifest-sync.log | sort | uniq -c",
           "explain": "Counts each combination. One table that splits the failures by host, by phase and by destination.",
           "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object level -eq 'error' | Group-Object host, phase, peer | Select-Object Count, Name"
@@ -513,6 +548,8 @@
         {
           "id": "json-size-split",
           "title": "Outcome by request size",
+          "syntax": "jq -r 'select(.<field> == \"<value>\") | \"\\(.<key>) \\(if .<size-field> > <threshold> then \"big\" else \"small\" end) \\(.<outcome-a> // .<outcome-b>)\"' <json-lines-file> | sort | uniq -c",
+          "syntaxPowershell": "Get-Content <json-lines-file> | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object <field> -eq '<value>' | Group-Object <key>, { if ($_.<size-field> -gt <threshold>) { 'big' } else { 'small' } }, { if ($_.<outcome-a>) { $_.<outcome-a> } else { $_.<outcome-b> } } | Select-Object Count, Name",
           "command": "jq -r 'select(.method == \"POST\") | \"\\(.path) \\(if .req_bytes > 1300 then \"big\" else \"small\" end) \\(.phase // .status)\"' app/manifest-sync.log | sort | uniq -c",
           "explain": "Splits requests into small and big and shows how each ended. Change the size threshold and watch the boundary.",
           "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object method -eq 'POST' | Group-Object path, { if ($_.req_bytes -gt 1300) { 'big' } else { 'small' } }, { if ($_.phase) { $_.phase } else { $_.status } } | Select-Object Count, Name"
@@ -525,6 +562,8 @@
         {
           "id": "local-to-utc",
           "title": "Local to UTC",
+          "syntax": "date -u -d '<local-timestamp-with-offset>' +<format>",
+          "syntaxPowershell": "([DateTimeOffset]'<local-timestamp-with-offset>').UtcDateTime.ToString('<format>')",
           "command": "date -u -d '2026-11-18T11:00:00.000+02:00' +%H:%M:%S",
           "explain": "Normalizes an offset timestamp (like the app log's) to UTC. In November, Israel is **UTC+02:00**.",
           "powershell": "([DateTimeOffset]'2026-11-18T11:00:00.000+02:00').UtcDateTime.ToString('HH:mm:ss')"
@@ -532,6 +571,8 @@
         {
           "id": "epoch-to-utc",
           "title": "Epoch to UTC",
+          "syntax": "date -u -d @<epoch-seconds>",
+          "syntaxPowershell": "[DateTimeOffset]::FromUnixTimeSeconds(<epoch-seconds>).UtcDateTime.ToString('<format>')",
           "command": "date -u -d @1795424400",
           "explain": "Converts Unix epoch seconds to a human UTC time. On macOS: `date -u -r 1795424400`.",
           "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1795424400).UtcDateTime.ToString('u')"
@@ -539,6 +580,8 @@
         {
           "id": "slack-timestamps",
           "title": "Read the chat in UTC",
+          "syntax": "jq -r '.[] | \"\\(.<time-field> | tonumber | todate) \\(.<user-field>): \\(.<text-field>)\"' <chat-export>",
+          "syntaxPowershell": "Get-Content <chat-export> -Raw | ConvertFrom-Json | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([int][double]$_.<time-field>).UtcDateTime.ToString('<format>'), $_.<user-field>, $_.<text-field> }",
           "command": "jq -r '.[] | \"\\(.ts | tonumber | todate) \\(.user): \\(.text)\"' chat/inc-3107.json",
           "explain": "Turns every message's epoch `ts` into UTC so you can line it up with the other sources.",
           "powershell": "Get-Content chat\\inc-3107.json -Raw | ConvertFrom-Json | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([int][double]$_.ts).UtcDateTime.ToString('HH:mm:ss'), $_.user, $_.text }"
@@ -546,6 +589,8 @@
         {
           "id": "syslog-no-year",
           "title": "Syslog times have no year",
+          "syntax": "date -u -d '<syslog-time> <year> UTC' +%s",
+          "syntaxPowershell": "([DateTimeOffset]::ParseExact('<syslog-time> <year>', '<format>', [Globalization.CultureInfo]::InvariantCulture, 'AssumeUniversal')).ToUnixTimeSeconds()",
           "command": "date -u -d 'Nov 18 09:30:00 2026 UTC' +%s",
           "explain": "Syslog stamps like `Nov 18 09:30:00` carry no year and no zone. Add both yourself before converting.",
           "powershell": "([DateTimeOffset]::ParseExact('Nov 18 09:30:00 2026', 'MMM dd HH:mm:ss yyyy', [Globalization.CultureInfo]::InvariantCulture, 'AssumeUniversal')).ToUnixTimeSeconds()"
@@ -558,6 +603,8 @@
         {
           "id": "tcpdump-read",
           "title": "Read a real pcap",
+          "syntax": "tcpdump -nn -tttt -v -r <pcap-file>",
+          "syntaxPowershell": "& '<path-to-tshark.exe>' -n -t ad -V -r <pcap-file> | Out-Host -Paging",
           "command": "tcpdump -nn -tttt -v -r pcap/app-03_large-request.pcap",
           "explain": "The `.txt` files are this command's output, so you don't need tcpdump. Use the `.pcap` twins if you prefer Wireshark.",
           "powershell": "& 'C:\\Program Files\\Wireshark\\tshark.exe' -n -t ad -V -r pcap\\app-03_large-request.pcap | Out-Host -Paging"
@@ -565,6 +612,8 @@
         {
           "id": "tcpdump-flow",
           "title": "One line per packet",
+          "syntax": "grep -E '<packet-line-regex>' <capture-text> | cut -c1-<width>",
+          "syntaxPowershell": "Select-String -Path <capture-text> -Pattern '<packet-line-regex>' | ForEach-Object { $_.Line.Substring(0, [Math]::Min(<width>, $_.Line.Length)) }",
           "command": "grep -E '^ {4}[0-9.]+ > ' pcap/app-03_small-request.txt | cut -c1-150",
           "explain": "tcpdump `-v` prints two lines per packet (IP header, then TCP). Keep the second line to read the conversation as a flow: who sent what, with which flags.",
           "powershell": "Select-String -Path pcap\\app-03_small-request.txt -Pattern '^ {4}[0-9.]+ > ' | ForEach-Object { $_.Line.Substring(0, [Math]::Min(150, $_.Line.Length)) }"
@@ -572,6 +621,8 @@
         {
           "id": "tcpdump-lengths",
           "title": "Packet sizes",
+          "syntax": "grep -oE '<length-regex>' <capture-text> | sort | uniq -c",
+          "syntaxPowershell": "Select-String -Path <capture-text> -Pattern '<length-regex>' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name",
           "command": "grep -oE 'proto [A-Z]+ \\([0-9]+\\), length [0-9]+' pcap/app-03_large-request.txt | sort | uniq -c",
           "explain": "The `length` on the IP line is the whole IP packet. Compare the biggest packets each side sends.",
           "powershell": "Select-String -Path pcap\\app-03_large-request.txt -Pattern 'proto [A-Z]+ \\(\\d+\\), length \\d+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name"
@@ -579,6 +630,8 @@
         {
           "id": "tcpdump-mss",
           "title": "MSS in the handshake",
+          "syntax": "grep -o '<option-regex>' <capture-files>",
+          "syntaxPowershell": "Select-String -Path <capture-files> -Pattern '<option-regex>' | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Matches[0].Value }",
           "command": "grep -o 'mss [0-9]*' pcap/*.txt",
           "explain": "Each side announces its MSS in its SYN. The sender uses the smaller of the two, and neither knows about a narrower link in the middle.",
           "powershell": "Select-String -Path pcap\\*.txt -Pattern 'mss \\d+' | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Matches[0].Value }"
@@ -586,6 +639,8 @@
         {
           "id": "tcpdump-icmp",
           "title": "ICMP errors and what they quote",
+          "syntax": "grep -n -A<after> '<protocol>' <capture-text> | head -<count>",
+          "syntaxPowershell": "Select-String -Path <capture-text> -Pattern '<protocol>' -Context 0,<after> | Select-Object -First <count>",
           "command": "grep -n -A3 'ICMP' pcap/app-03_large-request.txt | head -20",
           "explain": "An ICMP error quotes the header of the packet that caused it, so you can see exactly which packet a router refused and why.",
           "powershell": "Select-String -Path pcap\\app-03_large-request.txt -Pattern 'ICMP' -Context 0,3 | Select-Object -First 5"
@@ -593,6 +648,8 @@
         {
           "id": "tcpdump-retrans",
           "title": "Spot retransmissions",
+          "syntax": "grep -oE '<seq-range-regex>' <capture-text> | sort | uniq -c | sort -rn | head",
+          "syntaxPowershell": "Select-String -Path <capture-text> -Pattern '<seq-range-regex>' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First <count> Count, Name",
           "command": "grep -oE 'seq [0-9]+:[0-9]+' pcap/app-03_large-request.txt | sort | uniq -c | sort -rn | head",
           "explain": "The same byte range sent more than once is a retransmission. Look at how far apart they are in time: exponential backoff.",
           "powershell": "Select-String -Path pcap\\app-03_large-request.txt -Pattern 'seq \\d+:\\d+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count, Name"
@@ -600,6 +657,8 @@
         {
           "id": "wireshark-filters",
           "title": "Wireshark display filters",
+          "syntax": "tshark -r <pcap-file> -Y '<display-filter> || <display-filter>'",
+          "syntaxPowershell": "& '<path-to-tshark.exe>' -r <pcap-file> -Y '<display-filter> || <display-filter>'",
           "command": "tshark -r pcap/app-03_large-request.pcap -Y 'icmp.type == 3 || tcp.analysis.retransmission'",
           "explain": "The same filter works in the Wireshark GUI filter bar. Also try `tcp.len > 1300` and `icmp.code == 4`.",
           "powershell": "& 'C:\\Program Files\\Wireshark\\tshark.exe' -r pcap\\app-03_large-request.pcap -Y 'icmp.type == 3 || tcp.analysis.retransmission'"
@@ -612,6 +671,8 @@
         {
           "id": "fw-prefixes",
           "title": "Which rule logged it?",
+          "syntax": "grep -oE '<log-prefix-regex>' <firewall-log> | sort | uniq -c",
+          "syntaxPowershell": "Select-String -Path <firewall-log> -Pattern '<log-prefix-regex>' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name",
           "command": "grep -oE 'IN-DROP[A-Z-]*:' firewall/kern-app-hosts.log | sort | uniq -c",
           "explain": "The `--log-prefix` of the iptables rule starts every message. Each prefix maps to one rule in `iptables-save`.",
           "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'IN-DROP[A-Z-]*:' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name"
@@ -619,6 +680,8 @@
         {
           "id": "fw-first-drop",
           "title": "First drop of a kind",
+          "syntax": "grep '<pattern>' <firewall-log> | head -<count>",
+          "syntaxPowershell": "Select-String -Path <firewall-log> -Pattern '<pattern>' -SimpleMatch | Select-Object -First <count>",
           "command": "grep 'TYPE=3 CODE=4' firewall/kern-app-hosts.log | head -3",
           "explain": "ICMP type 3 is destination-unreachable; code 4 is fragmentation needed, code 1 host unreachable. Type 11 is time exceeded (traceroute).",
           "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'TYPE=3 CODE=4' -SimpleMatch | Select-Object -First 3"
@@ -626,6 +689,8 @@
         {
           "id": "fw-field-values",
           "title": "Values inside netfilter lines",
+          "syntax": "grep -oE '(<KEY-A>|<KEY-B>)=<value-regex>' <firewall-log> | sort | uniq -c | sort -rn | head",
+          "syntaxPowershell": "Select-String -Path <firewall-log> -Pattern '(<KEY-A>|<KEY-B>)=<value-regex>' -AllMatches | ForEach-Object { $_.Matches.Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First <count> Count, Name",
           "command": "grep -oE '(MTU|SRC)=[0-9.]+' firewall/kern-app-hosts.log | sort | uniq -c | sort -rn | head",
           "explain": "Netfilter logs `KEY=value` pairs. The part in `[...]` is the packet quoted inside the ICMP error.",
           "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern '(MTU|SRC)=[\\d.]+' -AllMatches | ForEach-Object { $_.Matches.Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count, Name"
@@ -633,6 +698,8 @@
         {
           "id": "fw-per-host-minute",
           "title": "Per host, per minute",
+          "syntax": "grep '<pattern>' <firewall-log> | awk '{print $<host-field>, substr($<time-field>,1,<len>)}' | uniq -c | head -<count>",
+          "syntaxPowershell": "Select-String -Path <firewall-log> -Pattern '<pattern>' -SimpleMatch | ForEach-Object { $f = $_.Line -split '\\s+'; '{0} {1}' -f $f[<host-index>], $f[<time-index>].Substring(0,<len>) } | Group-Object | Select-Object -First <count> Count, Name",
           "command": "grep 'TYPE=3 CODE=4' firewall/kern-app-hosts.log | awk '{print $4, substr($3,1,5)}' | uniq -c | head -20",
           "explain": "Shows when each host started logging a given drop. Field 4 is the host, field 3 the time.",
           "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'TYPE=3 CODE=4' -SimpleMatch | ForEach-Object { $f = $_.Line -split '\\s+'; '{0} {1}' -f $f[3], $f[2].Substring(0,5) } | Group-Object | Select-Object -First 20 Count, Name"
@@ -640,6 +707,8 @@
         {
           "id": "iptables-diff",
           "title": "What changed in the rules?",
+          "syntax": "diff <rules-before> <rules-after>",
+          "syntaxPowershell": "Compare-Object (Get-Content <rules-before>) (Get-Content <rules-after>)",
           "command": "diff firewall/app-03_iptables-save_before.txt firewall/app-03_iptables-save_after.txt",
           "explain": "iptables evaluates INPUT **top to bottom** and stops at the first rule that matches. Order matters as much as content.",
           "powershell": "Compare-Object (Get-Content firewall\\app-03_iptables-save_before.txt) (Get-Content firewall\\app-03_iptables-save_after.txt)"
@@ -652,6 +721,8 @@
         {
           "id": "dig-answers",
           "title": "Every answer at a glance",
+          "syntax": "grep -H -A<after> '<section-header>' <dig-files>",
+          "syntaxPowershell": "Select-String -Path <dig-files> -Pattern '<section-header>' -Context 0,<after> | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Context.PostContext[0] }",
           "command": "grep -H -A1 'ANSWER SECTION' dns/dig/*.txt",
           "explain": "One answer line per query: name, **remaining TTL**, class, type, address. Check which server answered (`;; SERVER:`).",
           "powershell": "Select-String -Path dns\\dig\\*.txt -Pattern 'ANSWER SECTION' -Context 0,1 | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Context.PostContext[0] }"
@@ -659,6 +730,8 @@
         {
           "id": "dig-server-flags",
           "title": "Who answered, and with authority?",
+          "syntax": "grep -H -E '<header-lines-regex>' <dig-files>",
+          "syntaxPowershell": "Select-String -Path <dig-files> -Pattern '<header-lines-regex>' | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Line }",
           "command": "grep -H -E '^;; (flags|SERVER|WHEN)' dns/dig/*.txt",
           "explain": "`aa` means an authoritative answer straight from the zone. No `aa` from `127.0.0.1` means a local cache answered.",
           "powershell": "Select-String -Path dns\\dig\\*.txt -Pattern '^;; (flags|SERVER|WHEN)' | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Line }"
@@ -666,6 +739,8 @@
         {
           "id": "zone-audit-record",
           "title": "History of one record",
+          "syntax": "grep '<record-pattern>' <audit-log>",
+          "syntaxPowershell": "Select-String -Path <audit-log> -Pattern '<record-pattern>' -SimpleMatch",
           "command": "grep 'name=ledger ' dns/zone-audit.log",
           "explain": "Every change to a DNS name, in UTC: TTL changes, deletes, adds, and the change ticket behind each.",
           "powershell": "Select-String -Path dns\\zone-audit.log -Pattern 'name=ledger ' -SimpleMatch"
@@ -673,6 +748,8 @@
         {
           "id": "unbound-diff",
           "title": "Compare the resolver roles",
+          "syntax": "diff <config-a> <config-b>",
+          "syntaxPowershell": "Compare-Object (Get-Content <config-a>) (Get-Content <config-b>)",
           "command": "diff dns/unbound/node-dns-v1.conf dns/unbound/node-dns-v2.conf",
           "explain": "Lines starting with `<` are only in v1, `>` only in v2. Read each changed option in the unbound.conf man page before you blame it.",
           "powershell": "Compare-Object (Get-Content dns\\unbound\\node-dns-v1.conf) (Get-Content dns\\unbound\\node-dns-v2.conf)"
@@ -680,6 +757,8 @@
         {
           "id": "ttl-math",
           "title": "When does a cached answer expire?",
+          "syntax": "echo $(( $(date -u -d '<cached-at>' +%s) + <ttl-seconds> )) | xargs -I{} date -u -d @{}",
+          "syntaxPowershell": "([DateTimeOffset]'<cached-at>').AddSeconds(<ttl-seconds>).ToString('<format>')",
           "command": "echo $(( $(date -u -d 'Wed Nov 18 11:31:07 UTC 2026' +%s) + 10000 )) | xargs -I{} date -u -d @{}",
           "explain": "Query time plus the remaining TTL is when the cache will drop the answer. Working backwards tells you when it was cached and for how long.",
           "powershell": "([DateTimeOffset]'2026-11-18T11:31:07Z').AddSeconds(10000).ToString('u')"
@@ -692,6 +771,8 @@
         {
           "id": "csv-table",
           "title": "Pretty table",
+          "syntax": "column -s, -t < <csv-file>",
+          "syntaxPowershell": "Import-Csv <csv-file> | Format-Table",
           "command": "column -s, -t < network/inventory.csv",
           "explain": "Aligns CSV columns. Works for `network/inventory.csv`. Quoted fields with commas confuse `column`, so use the next tool for the change log.",
           "powershell": "Import-Csv network\\inventory.csv | Format-Table"
@@ -699,6 +780,8 @@
         {
           "id": "changes-window",
           "title": "Changes in a time window",
+          "syntax": "awk -F, '$<time-field> >= \"<window-start>\" && $<time-field> < \"<window-end>\" {print <fields>}' <csv-file>",
+          "syntaxPowershell": "Import-Csv <csv-file> | Where-Object { $_.<time-column> -ge '<window-start>' -and $_.<time-column> -lt '<window-end>' } | Format-Table <columns> -Wrap",
           "command": "awk -F, '$2 >= \"2026-11-18T08:00\" && $2 < \"2026-11-18T10:00\" {print $1, $2, $5}' changes/change-log.csv",
           "explain": "ISO-8601 UTC strings sort like times, so a string comparison selects a window. Widen it: some causes are older than they look.",
           "powershell": "Import-Csv changes\\change-log.csv | Where-Object { $_.start_utc -ge '2026-11-18T08:00' -and $_.start_utc -lt '2026-11-18T10:00' } | Format-Table change_id, start_utc, team, summary -Wrap"
@@ -706,6 +789,8 @@
         {
           "id": "changes-grep",
           "title": "Find a change by keyword",
+          "syntax": "grep -i '<keyword>' <csv-file>",
+          "syntaxPowershell": "Import-Csv <csv-file> | Where-Object <column> -match '<keyword>' | Format-List",
           "command": "grep -i 'tunnel' changes/change-log.csv",
           "explain": "Search summaries for a word or a tag you saw somewhere else, like a rule comment or a role name.",
           "powershell": "Import-Csv changes\\change-log.csv | Where-Object summary -match 'tunnel' | Format-List"

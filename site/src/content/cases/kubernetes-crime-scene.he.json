@@ -175,10 +175,11 @@
   "rules": [
     "עובדים רק מחבילת הראיות. אל תקראו את קוד ה-generator או את קוד האתר; זה הורס את הכיף.",
     "התשובות לא רגישות לאותיות גדולות/קטנות, ורווחים בהתחלה ובסוף מתעלמים מהם. הקפידו על הפורמט שמופיע מתחת לכל שאלה.",
-    "כל רמז עולה את הנקודות שמופיעות עליו. הרמזים נחשפים לפי הסדר, מדחיפה עדינה ועד כמעט הפקודה המלאה.",
+    "כל רמז עולה את הנקודות שמופיעות עליו. הרמזים נחשפים לפי הסדר, מדחיפה עדינה ועד כמעט הפקודה המלאה. התחביר של פקודות ה-Toolbox גלוי בחינם; חשיפת פקודה מלאה עולה 5 נקודות. אחרי שמסיימים את התיק, כל הפקודות בחינם.",
     "עבודה בזוגות מומלצת. דברו על ההיגיון שלכם בקול, בדיוק כמו ב-incident review אמיתי.",
     "כל כלי מותר: grep, awk, jq, Python, גיליון אלקטרוני, העורך האהוב עליכם. בלשונית Toolbox יש פקודות שיעזרו.",
-    "תשובות שגויות לא עולות כלום, אז נחשו בחופשיות. ובכל זאת, נסו להיות מסוגלים להסביר *למה* התשובה שלכם נכונה.",
+    "כל תשובה שגויה עולה 2 נקודות, ועד 20 נקודות לכל שלב. חשבו לפני שאתם שולחים, ותהיו מוכנים להסביר *למה* התשובה שלכם נכונה.",
+    "מהירות ודיוק משתלמים: פתרון מהיר מזכה בבונוס זמן של עד +30 לכל שלב (הבונוס דועך אחרי שעוברים את זמן היעד של השלב), פתרון נקי בלי רמזים, פקודות או תשובות שגויות מזכה ב-+10, מי שפותר שלב ראשון מקבל +15 first blood, וסיום כל ששת השלבים בלי לחשוף תשובה מזכה ב-+50.",
     "אל תשתפו flags עם צוותים אחרים עד שכולם מסיימים. לשתף טכניקות זה בסדר.",
     "אף פעם אל תריצו את פקודות ה-Toolbox מול קלאסטר אמיתי. כל מה שצריך כבר נמצא בחבילה."
   ],
@@ -223,7 +224,8 @@
           "text": "חיבור של ה-kills מה-kernel ל-pods, כל ה-nodes ביחד, מהמוקדם למאוחר:\n\n```sh\nawk '/\"ContainerDied\"/ { match($0, /pod=\"[^\"]+\"/); p = substr($0, RSTART+5, RLENGTH-6)\n                         match($0, /\"Data\":\"[0-9a-f]+\"/); owner[substr($0, RSTART+8, RLENGTH-9)] = p; next }\n     /kernel: oom-kill:/ { match($0, /cri-containerd-[0-9a-f]+/); n++; t[n] = $3; c[n] = substr($0, RSTART+15, RLENGTH-15) }\n     END { for (i = 1; i <= n; i++) print t[i], owner[c[i]] }' nodes/*.journal.log | sort | head\n```\n\nהצליבו עם ה-snapshot של 07:57:10 ב-`kubectl/get-pods-shop-snapshots.txt`: השוו את ה-`(… ago)` של ה-restart האחרון של כל pod."
         }
       ],
-      "successNote": "OOM kill הוא אירוע של ה-**kernel**. Kubernetes מגלה אותו רק אחר כך (exit code 137, reason `OOMKilled`), ושומר רק את ה-termination *האחרון* של כל container. ההיסטוריה המלאה נמצאת בלוג ה-kernel של ה-node, לפי container ID ולא לפי שם pod. וה-pod ש*נראה* אשם על המסך לא היה הראשון: סדרו אירועים לפי ראיות, לא לפי מה שבמקרה מופיע לכם בטרמינל."
+      "successNote": "OOM kill הוא אירוע של ה-**kernel**. Kubernetes מגלה אותו רק אחר כך (exit code 137, reason `OOMKilled`), ושומר רק את ה-termination *האחרון* של כל container. ההיסטוריה המלאה נמצאת בלוג ה-kernel של ה-node, לפי container ID ולא לפי שם pod. וה-pod ש*נראה* אשם על המסך לא היה הראשון: סדרו אירועים לפי ראיות, לא לפי מה שבמקרה מופיע לכם בטרמינל.",
+      "targetMinutes": 7
     },
     {
       "stage": {
@@ -265,7 +267,8 @@
           "text": "```sh\ncolumn -t -s $'\\t' helm/history-pricing-api.txt\njq -r 'select(.controller==\"kustomization\" and (.output | has(\"HelmRelease/shop/pricing-api\"))) | \"\\(.ts) \\(.revision)\"' flux/flux-controllers.log\ngrep -A6 '^commit <first-7-chars>' gitops/git-log-p.txt\n```"
         }
       ],
-      "successNote": "ב-GitOps הדיפלוי *הוא* commit, אבל בשרשרת יש כמה קפיצות: commit, source fetch, kustomize apply, Helm upgrade, rollout של ReplicaSet. לכל קפיצה יש לוג משלה ושעון משלה. ותקראו שוב את הודעת ה-commit: \"No functional change intended.\" refactor של values יחד עם קפיצת major ב-chart הוא שינוי פונקציונלי עד שהוכח אחרת. תעשו diff ל-manifests ה**מרונדרים** (`helm diff`, `flux diff`), לא רק לקובץ ה-values."
+      "successNote": "ב-GitOps הדיפלוי *הוא* commit, אבל בשרשרת יש כמה קפיצות: commit, source fetch, kustomize apply, Helm upgrade, rollout של ReplicaSet. לכל קפיצה יש לוג משלה ושעון משלה. ותקראו שוב את הודעת ה-commit: \"No functional change intended.\" refactor של values יחד עם קפיצת major ב-chart הוא שינוי פונקציונלי עד שהוכח אחרת. תעשו diff ל-manifests ה**מרונדרים** (`helm diff`, `flux diff`), לא רק לקובץ ה-values.",
+      "targetMinutes": 10
     },
     {
       "stage": {
@@ -304,7 +307,8 @@
           "text": "```sh\nsed -n '/Limits:/,/Requests:/p' kubectl/describe-pod-pricing-api-*.txt\ndiff -u helm/values-rev13.yaml helm/values-rev14.yaml\n```"
         }
       ],
-      "successNote": "ה-JVM קיבל רשות ל-heap של 1 GiB (`-Xmx1g`) בתוך container שמותר לו להשתמש בהרבה פחות **בסך הכול** (heap + metaspace + threads + direct buffers). ה-JVM אף פעם לא מספיק לזרוק `OutOfMemoryError`: ה-kernel הורג אותו קודם, בלי stack trace ובלי שורת לוג אחרונה. גזרו את גודל ה-heap מה-limit (`-XX:MaxRAMPercentage`), קבעו limits לפי צריכה שנמדדה, ואף פעם אל תשנו אחד בלי השני."
+      "successNote": "ה-JVM קיבל רשות ל-heap של 1 GiB (`-Xmx1g`) בתוך container שמותר לו להשתמש בהרבה פחות **בסך הכול** (heap + metaspace + threads + direct buffers). ה-JVM אף פעם לא מספיק לזרוק `OutOfMemoryError`: ה-kernel הורג אותו קודם, בלי stack trace ובלי שורת לוג אחרונה. גזרו את גודל ה-heap מה-limit (`-XX:MaxRAMPercentage`), קבעו limits לפי צריכה שנמדדה, ואף פעם אל תשנו אחד בלי השני.",
+      "targetMinutes": 9
     },
     {
       "stage": {
@@ -344,7 +348,8 @@
           "text": "```sh\ngrep '^Selector:' kubectl/describe-svc-pricing-api.txt\nawk '$1 ~ /^pricing-api-/ {print $NF}' kubectl/get-pods-shop-labels.txt | tr ',' '\\n' | sort | uniq -c\n```"
         }
       ],
-      "successNote": "Labels הם API. ה-selector של ה-Deployment עצמו השתמש ב-labels החדשים של ה-chart (`app.kubernetes.io/*`), אז ה-rollout נראה מושלם, אבל Service שחי **מחוץ** ל-chart עדיין בחר לפי ה-label הישן. שום דבר לא זורק שגיאה כש-selector תופס אפס pods: פשוט מקבלים אובייקט Endpoints ריק. תגדירו alert על אפס endpoints מוכנים לכל Service שמקבל traffic, ותשחררו את ה-Service באותו release עם ה-pods שהוא בוחר."
+      "successNote": "Labels הם API. ה-selector של ה-Deployment עצמו השתמש ב-labels החדשים של ה-chart (`app.kubernetes.io/*`), אז ה-rollout נראה מושלם, אבל Service שחי **מחוץ** ל-chart עדיין בחר לפי ה-label הישן. שום דבר לא זורק שגיאה כש-selector תופס אפס pods: פשוט מקבלים אובייקט Endpoints ריק. תגדירו alert על אפס endpoints מוכנים לכל Service שמקבל traffic, ותשחררו את ה-Service באותו release עם ה-pods שהוא בוחר.",
+      "targetMinutes": 10
     },
     {
       "stage": {
@@ -385,7 +390,8 @@
           "text": "```sh\ngrep -E '^Name:|^  MemoryPressure' kubectl/describe-nodes.txt\njq -c '.items[] | select(.reason==\"Evicted\") | {t: .lastTimestamp, host: .source.host, pod: .involvedObject.name, msg: .message}' kubectl/get-events-A.json\ngrep -h 'Eviction manager' nodes/*.journal.log\n```"
         }
       ],
-      "successNote": "ה-pods החדשים של pricing ביקשו (requests) הרבה פחות זיכרון ממה שצרכו בפועל, וה-scheduler מסתכל רק על requests, אז הוא דחס אותם על node אחד. כשהצריכה האמיתית חצתה את סף ה-eviction, ה-kubelet פינה את ה-pod שהכי חרג מה-request שלו: job סנכרון של צוות אחר, לא ה-pods שיצרו את הבעיה. requests שלא תואמים לצריכה האמיתית הופכים באג של צוות אחד לאירוע של כולם. שמרו על requests קרובים לצריכה שנמדדה (או שווים ל-limits בשירותים קריטיים)."
+      "successNote": "ה-pods החדשים של pricing ביקשו (requests) הרבה פחות זיכרון ממה שצרכו בפועל, וה-scheduler מסתכל רק על requests, אז הוא דחס אותם על node אחד. כשהצריכה האמיתית חצתה את סף ה-eviction, ה-kubelet פינה את ה-pod שהכי חרג מה-request שלו: job סנכרון של צוות אחר, לא ה-pods שיצרו את הבעיה. requests שלא תואמים לצריכה האמיתית הופכים באג של צוות אחד לאירוע של כולם. שמרו על requests קרובים לצריכה שנמדדה (או שווים ל-limits בשירותים קריטיים).",
+      "targetMinutes": 11
     },
     {
       "stage": {
@@ -427,7 +433,8 @@
           "text": "אותו חיבור כמו בשלב 1, עם ספירה לכל pod:\n\n```sh\nawk '/\"ContainerDied\"/ { match($0, /pod=\"[^\"]+\"/); p = substr($0, RSTART+5, RLENGTH-6)\n                         match($0, /\"Data\":\"[0-9a-f]+\"/); owner[substr($0, RSTART+8, RLENGTH-9)] = p; next }\n     /kernel: oom-kill:/ { match($0, /cri-containerd-[0-9a-f]+/); n++; t[n] = $3; c[n] = substr($0, RSTART+15, RLENGTH-15) }\n     END { for (i = 1; i <= n; i++) print t[i], owner[c[i]] }' nodes/*.journal.log \\\n  | awk '{print $2}' | sort | uniq -c\n```\n\nואז סכמו את השורות של `shop/pricing-api-*`."
         }
       ],
-      "successNote": "פעלו כאן שני רוצחים שונים: ה-kernel (memory limit נמוך מדי בשביל ה-heap) וה-liveness probe של ה-kubelet (ה-chart התעלם בשקט מהגדרות ה-probe הישנות, אז warmup איטי על node עמוס לא קיבל הזדמנות). שניהם נראים כמו \"restarts\", ורק אחד מהם מצביע על ה-root cause. לספור את הדבר הנכון זה מה שמפריד בין הסיבה לסימפטומים. ובדקו שהגדרות ה-probe שאתם *חושבים* שיש לכם הן אלה שבאמת ב-pod spec: מפתח values ששינה שם נכשל בשקט."
+      "successNote": "פעלו כאן שני רוצחים שונים: ה-kernel (memory limit נמוך מדי בשביל ה-heap) וה-liveness probe של ה-kubelet (ה-chart התעלם בשקט מהגדרות ה-probe הישנות, אז warmup איטי על node עמוס לא קיבל הזדמנות). שניהם נראים כמו \"restarts\", ורק אחד מהם מצביע על ה-root cause. לספור את הדבר הנכון זה מה שמפריד בין הסיבה לסימפטומים. ובדקו שהגדרות ה-probe שאתם *חושבים* שיש לכם הן אלה שבאמת ב-pod spec: מפתח values ששינה שם נכשל בשקט.",
+      "targetMinutes": 13
     }
   ],
   "toolbox": [
@@ -438,36 +445,46 @@
           "id": "unzip-evidence",
           "title": "פריסת הראיות",
           "command": "unzip kubernetes-crime-scene-evidence.zip && cd kubernetes-crime-scene",
+          "syntax": "unzip <evidence-zip> && cd <case-folder>",
           "explain": "פורס את החבילה. הכול נמצא תחת תיקייה עליונה אחת.",
-          "powershell": "Expand-Archive .\\kubernetes-crime-scene-evidence.zip -DestinationPath .\ncd .\\kubernetes-crime-scene"
+          "powershell": "Expand-Archive .\\kubernetes-crime-scene-evidence.zip -DestinationPath .\ncd .\\kubernetes-crime-scene",
+          "syntaxPowershell": "Expand-Archive .\\<evidence-zip> -DestinationPath .\ncd .\\<case-folder>"
         },
         {
           "id": "read-readme",
           "title": "קראו את ה-README",
           "command": "cat README_FIRST.txt",
+          "syntax": "cat <readme-file>",
           "explain": "ברצינות. יש בו את טבלת אזורי הזמן, ובתיק הזה יש לפחות ארבעה שעונים שונים.",
-          "powershell": "Get-Content README_FIRST.txt"
+          "powershell": "Get-Content README_FIRST.txt",
+          "syntaxPowershell": "Get-Content <readme-file>"
         },
         {
           "id": "list-files",
           "title": "מה יש לנו כאן",
           "command": "find . -type f | sort | xargs ls -l",
+          "syntax": "find <dir> -type f | sort | xargs ls -l",
           "explain": "כל הקבצים עם הגודל שלהם. את הגדולים (journals, ingress, events) מחפשים, לא קוראים.",
-          "powershell": "Get-ChildItem -Recurse -File | Select-Object FullName, Length"
+          "powershell": "Get-ChildItem -Recurse -File | Select-Object FullName, Length",
+          "syntaxPowershell": "Get-ChildItem -Path <dir> -Recurse -File | Select-Object <properties>"
         },
         {
           "id": "head-lines",
           "title": "הצצה לשורות הראשונות",
           "command": "head -n 20 nodes/prod-eu1-general-6b4f-r7tq.journal.log",
+          "syntax": "head -n <count> <journal-file>",
           "explain": "הסתכלו על הפורמט **לפני** שאתם מפרסרים: מי כתב את השורה, באיזה שעון, אילו שדות.",
-          "powershell": "Get-Content nodes\\prod-eu1-general-6b4f-r7tq.journal.log -TotalCount 20"
+          "powershell": "Get-Content nodes\\prod-eu1-general-6b4f-r7tq.journal.log -TotalCount 20",
+          "syntaxPowershell": "Get-Content <journal-file> -TotalCount <count>"
         },
         {
           "id": "snapshot-index",
           "title": "מתי צולם כל snapshot?",
           "command": "grep -n -A1 '^\\$ date -u' kubectl/get-pods-shop-snapshots.txt",
+          "syntax": "grep -n -A<n> '<block-marker>' <snapshot-file>",
           "explain": "כל בלוק של kubectl מתחיל ב-`date -u` שה-on-call הריץ קודם. זה העוגן שלכם להפוך גילים יחסיים (`3m8s`, `21s ago`) בחזרה לשעות.",
-          "powershell": "Select-String -Path kubectl\\get-pods-shop-snapshots.txt -Pattern '^\\$ date -u' -Context 0,1"
+          "powershell": "Select-String -Path kubectl\\get-pods-shop-snapshots.txt -Pattern '^\\$ date -u' -Context 0,1",
+          "syntaxPowershell": "Select-String -Path <snapshot-file> -Pattern '<block-marker>' -Context 0,<n>"
         }
       ]
     },
@@ -478,36 +495,46 @@
           "id": "pods-restarts",
           "title": "ה-pods של pricing-api, snapshot אחרי snapshot",
           "command": "awk '/^Tue Nov/ {print \"--\", $4} $1 ~ /^pricing-api/ {print $1, $2, $3, $4, $5, $6}' kubectl/get-pods-shop-snapshots.txt",
+          "syntax": "awk '/<header-pattern>/ {print \"--\", $<time-field>} $1 ~ /<pod-prefix>/ {print $<fields>}' <snapshot-file>",
           "explain": "שם, READY, STATUS ו-RESTARTS לכל pod של pricing-api בכל snapshot. `1 (21s ago)` אומר restart אחד, האחרון 21 שניות לפני ה-snapshot.",
-          "powershell": "Select-String -Path kubectl\\get-pods-shop-snapshots.txt -Pattern '^(Tue Nov|pricing-api)' | ForEach-Object Line"
+          "powershell": "Select-String -Path kubectl\\get-pods-shop-snapshots.txt -Pattern '^(Tue Nov|pricing-api)' | ForEach-Object Line",
+          "syntaxPowershell": "Select-String -Path <snapshot-file> -Pattern '^(<header-pattern>|<pod-prefix>)' | ForEach-Object Line"
         },
         {
           "id": "describe-section",
           "title": "קטע אחד מתוך describe",
           "command": "sed -n '/Last State:/,/Requests:/p' kubectl/describe-pod-*.txt",
+          "syntax": "sed -n '/<start-pattern>/,/<end-pattern>/p' <describe-files>",
           "explain": "`sed -n '/start/,/end/p'` מדפיס טווח שורות. כאן: ה-termination האחרון, readiness, מספר ה-restarts וה-limits.",
-          "powershell": "Select-String -Path kubectl\\describe-pod-*.txt -Pattern 'Last State:' -Context 0,12"
+          "powershell": "Select-String -Path kubectl\\describe-pod-*.txt -Pattern 'Last State:' -Context 0,12",
+          "syntaxPowershell": "Select-String -Path <describe-files> -Pattern '<start-pattern>' -Context 0,<n>"
         },
         {
           "id": "labels-split",
           "title": "אילו labels יש על ה-pods?",
           "command": "awk '$1 ~ /^pricing-api/ {print $NF}' kubectl/get-pods-shop-labels.txt | tr ',' '\\n' | sort | uniq -c",
+          "syntax": "awk '$1 ~ /<pod-prefix>/ {print $NF}' <labels-file> | tr '<separator>' '\\n' | sort | uniq -c",
           "explain": "מפרק את עמודת LABELS ל-`key=value` אחד בכל שורה וסופר כמה pods נושאים כל אחד.",
-          "powershell": "Get-Content kubectl\\get-pods-shop-labels.txt | Where-Object { $_ -match '^pricing-api' } | ForEach-Object { (($_ -split '\\s+')[-1]) -split ',' } | Group-Object | Select-Object Count, Name"
+          "powershell": "Get-Content kubectl\\get-pods-shop-labels.txt | Where-Object { $_ -match '^pricing-api' } | ForEach-Object { (($_ -split '\\s+')[-1]) -split ',' } | Group-Object | Select-Object Count, Name",
+          "syntaxPowershell": "Get-Content <labels-file> | Where-Object { $_ -match '<pod-prefix>' } | ForEach-Object { (($_ -split '\\s+')[-1]) -split '<separator>' } | Group-Object | Select-Object Count, Name"
         },
         {
           "id": "svc-selector",
           "title": "מה ה-Service בוחר?",
           "command": "grep -E '^(Selector|Endpoints|TargetPort):' kubectl/describe-svc-pricing-api.txt",
+          "syntax": "grep -E '^(<field>|<field>|<field>):' <svc-describe-file>",
           "explain": "Service מנתב רק ל-pods במצב Ready שנושאים את **כל** זוגות ה-`key=value` שב-selector שלו. `Endpoints:` ריק אומר שאף pod לא התאים.",
-          "powershell": "Select-String -Path kubectl\\describe-svc-pricing-api.txt -Pattern '^(Selector|Endpoints|TargetPort):'"
+          "powershell": "Select-String -Path kubectl\\describe-svc-pricing-api.txt -Pattern '^(Selector|Endpoints|TargetPort):'",
+          "syntaxPowershell": "Select-String -Path <svc-describe-file> -Pattern '^(<field>|<field>|<field>):'"
         },
         {
           "id": "node-conditions",
           "title": "מצב ה-nodes במבט אחד",
           "command": "grep -E '^Name:|^Taints:|^  (MemoryPressure|DiskPressure|Ready) ' kubectl/describe-nodes.txt",
+          "syntax": "grep -E '^<header>:|^<header>:|^  (<condition>|<condition>|<condition>) ' <nodes-describe-file>",
           "explain": "ה-conditions וה-taints של כל node. `LastTransitionTime` אומר מתי condition התהפך (בשעון +0200 של הלפטופ).",
-          "powershell": "Select-String -Path kubectl\\describe-nodes.txt -Pattern '^Name:|^Taints:|^  (MemoryPressure|DiskPressure|Ready) '"
+          "powershell": "Select-String -Path kubectl\\describe-nodes.txt -Pattern '^Name:|^Taints:|^  (MemoryPressure|DiskPressure|Ready) '",
+          "syntaxPowershell": "Select-String -Path <nodes-describe-file> -Pattern '^<header>:|^<header>:|^  (<condition>|<condition>|<condition>) '"
         }
       ]
     },
@@ -518,29 +545,37 @@
           "id": "events-sorted",
           "title": "Events לפי סדר זמן",
           "command": "jq -r '.items | sort_by(.firstTimestamp)[] | [.firstTimestamp, .count, .involvedObject.name, .reason, .message] | @tsv' kubectl/get-events-A.json | less -S",
+          "syntax": "jq -r '.items | sort_by(.<time-field>)[] | [.<field>, .<field>, .<path>, .<field>, .<field>] | @tsv' <events-json> | less -S",
           "explain": "`kubectl get events` **לא** ממוין לפי זמן כברירת מחדל. ב-JSON יש timestamps מוחלטים ב-UTC, אז מיינו בעצמכם.",
-          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Sort-Object firstTimestamp | Format-Table firstTimestamp, count, @{n='object'; e={$_.involvedObject.name}}, reason, message | Out-Host -Paging"
+          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Sort-Object firstTimestamp | Format-Table firstTimestamp, count, @{n='object'; e={$_.involvedObject.name}}, reason, message | Out-Host -Paging",
+          "syntaxPowershell": "(Get-Content <events-json> -Raw | ConvertFrom-Json).items | Sort-Object <time-field> | Format-Table <columns> | Out-Host -Paging"
         },
         {
           "id": "events-reasons",
           "title": "אילו סוגי events יש?",
           "command": "jq -r '.items[] | .reason' kubectl/get-events-A.json | sort | uniq -c | sort -rn",
+          "syntax": "jq -r '.items[] | .<field>' <events-json> | sort | uniq -c | sort -rn",
           "explain": "היסטוגרמה של ה-reasons. שימו לב למה ש**חסר**: אין event בשם `OOMKilled`.",
-          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Group-Object reason | Sort-Object Count -Descending | Select-Object Count, Name"
+          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Group-Object reason | Sort-Object Count -Descending | Select-Object Count, Name",
+          "syntaxPowershell": "(Get-Content <events-json> -Raw | ConvertFrom-Json).items | Group-Object <field> | Sort-Object Count -Descending | Select-Object Count, Name"
         },
         {
           "id": "events-by-reason",
           "title": "סינון events לפי reason",
           "command": "jq -c '.items[] | select(.reason==\"Killing\") | {t: .lastTimestamp, n: .count, host: .source.host, obj: .involvedObject.name, msg: .message}' kubectl/get-events-A.json",
+          "syntax": "jq -c '.items[] | select(.<field> == \"<value>\") | {t: .<path>, n: .<path>, host: .<path>, obj: .<path>, msg: .<path>}' <events-json>",
           "explain": "החליפו את `Killing` בכל reason מההיסטוגרמה. `source.host` הוא ה-node שדיווח.",
-          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Where-Object reason -eq 'Killing' | Format-Table lastTimestamp, count, @{n='host'; e={$_.source.host}}, @{n='object'; e={$_.involvedObject.name}}, message"
+          "powershell": "(Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Where-Object reason -eq 'Killing' | Format-Table lastTimestamp, count, @{n='host'; e={$_.source.host}}, @{n='object'; e={$_.involvedObject.name}}, message",
+          "syntaxPowershell": "(Get-Content <events-json> -Raw | ConvertFrom-Json).items | Where-Object <field> -eq '<value>' | Format-Table <columns>"
         },
         {
           "id": "events-count-sum",
           "title": "Events מאוגדים",
           "command": "jq '[.items[] | select(.reason==\"BackOff\") | .count] | add' kubectl/get-events-A.json",
+          "syntax": "jq '[.items[] | select(.<field> == \"<value>\") | .<count-field>] | add' <events-json>",
           "explain": "events שחוזרים על עצמם מתמזגים לאובייקט אחד עם `count`. לספור אובייקטים זה לא לספור מופעים.",
-          "powershell": "((Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Where-Object reason -eq 'BackOff' | Measure-Object count -Sum).Sum"
+          "powershell": "((Get-Content kubectl\\get-events-A.json -Raw | ConvertFrom-Json).items | Where-Object reason -eq 'BackOff' | Measure-Object count -Sum).Sum",
+          "syntaxPowershell": "((Get-Content <events-json> -Raw | ConvertFrom-Json).items | Where-Object <field> -eq '<value>' | Measure-Object <count-field> -Sum).Sum"
         }
       ]
     },
@@ -551,50 +586,64 @@
           "id": "journal-oom",
           "title": "כל ה-OOM kills, מכל ה-nodes",
           "command": "grep -h 'Killed process' nodes/*.journal.log | sort",
+          "syntax": "grep -h '<kernel-message>' <journal-files> | sort",
           "explain": "ה-kernel כותב שורת `Killed process <pid> (<name>)` אחת לכל OOM kill. ה-timestamps בפורמט syslog (UTC) ממוינים יפה בתוך אותו יום.",
-          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process' | ForEach-Object Line | Sort-Object"
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process' | ForEach-Object Line | Sort-Object",
+          "syntaxPowershell": "Select-String -Path <journal-files> -Pattern '<kernel-message>' | ForEach-Object Line | Sort-Object"
         },
         {
           "id": "journal-oom-memcg",
           "title": "איזה cgroup נהרג?",
           "command": "grep -h -B1 'Killed process' nodes/*.journal.log | grep -o 'task_memcg=[^,]*' | head",
+          "syntax": "grep -h -B<n> '<kernel-message>' <journal-files> | grep -o '<key>=[^,]*' | head",
           "explain": "שורת ה-`oom-kill:` שלפני כל kill מכילה את נתיב ה-cgroup: ה-UID של ה-pod ו-`cri-containerd-<container id>.scope`.",
-          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'oom-kill:' | ForEach-Object { [regex]::Match($_.Line, 'task_memcg=[^,]*').Value } | Select-Object -First 10"
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'oom-kill:' | ForEach-Object { [regex]::Match($_.Line, 'task_memcg=[^,]*').Value } | Select-Object -First 10",
+          "syntaxPowershell": "Select-String -Path <journal-files> -Pattern '<kernel-marker>' | ForEach-Object { [regex]::Match($_.Line, '<key>=[^,]*').Value } | Select-Object -First <n>"
         },
         {
           "id": "journal-pleg-died",
           "title": "מוות של containers, לפי pod",
           "command": "grep -h '\"ContainerDied\"' nodes/*.journal.log | grep -o 'pod=\"[^\"]*\".*' | head",
+          "syntax": "grep -h '<event-type>' <journal-files> | grep -o '<key>=\"[^\"]*\".*' | head",
           "explain": "ה-PLEG של ה-kubelet כותב `ContainerDied` עם שם ה-pod, וב-`Data` את ה-container ID. זה הגשר בין שורות ה-kernel לשמות ה-pods.",
-          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern '\"ContainerDied\"' | ForEach-Object { [regex]::Match($_.Line, 'pod=\"[^\"]*\".*').Value } | Select-Object -First 10"
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern '\"ContainerDied\"' | ForEach-Object { [regex]::Match($_.Line, 'pod=\"[^\"]*\".*').Value } | Select-Object -First 10",
+          "syntaxPowershell": "Select-String -Path <journal-files> -Pattern '<event-type>' | ForEach-Object { [regex]::Match($_.Line, '<key>=\"[^\"]*\".*').Value } | Select-Object -First <n>"
         },
         {
           "id": "journal-find-cid",
           "title": "לעקוב אחרי container ID אחד",
           "command": "grep -h '<container-id>' nodes/*.journal.log",
+          "syntax": "grep -h '<container-id>' <journal-files>",
           "explain": "כל מה שכל רכיב אמר על container אחד: נוצר, עלה, נהרג, מת.",
-          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern '<container-id>' -SimpleMatch | ForEach-Object Line"
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern '<container-id>' -SimpleMatch | ForEach-Object Line",
+          "syntaxPowershell": "Select-String -Path <journal-files> -Pattern '<container-id>' -SimpleMatch | ForEach-Object Line"
         },
         {
           "id": "journal-eviction",
           "title": "Evictions של ה-kubelet",
           "command": "grep -h -E 'Eviction manager|NodeHas' nodes/*.journal.log",
+          "syntax": "grep -h -E '<pattern>|<pattern>' <journal-files>",
           "explain": "ה-eviction manager כותב איזה משאב אזל, איך הוא דירג את ה-pods ואת מי הוא פינה.",
-          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Eviction manager|NodeHas' | ForEach-Object Line"
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Eviction manager|NodeHas' | ForEach-Object Line",
+          "syntaxPowershell": "Select-String -Path <journal-files> -Pattern '<pattern>|<pattern>' | ForEach-Object Line"
         },
         {
           "id": "journal-per-node-count",
           "title": "ספירה לכל node",
           "command": "grep -c 'Killed process' nodes/*.journal.log",
+          "syntax": "grep -c '<kernel-message>' <journal-files>",
           "explain": "`grep -c` עם כמה קבצים מדפיס ספירה נפרדת לכל קובץ.",
-          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process' | Group-Object Filename | Select-Object Count, Name"
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process' | Group-Object Filename | Select-Object Count, Name",
+          "syntaxPowershell": "Select-String -Path <journal-files> -Pattern '<kernel-message>' | Group-Object Filename | Select-Object Count, Name"
         },
         {
           "id": "journal-process-hist",
           "title": "אילו processes נהרגו?",
           "command": "grep -ho 'Killed process [0-9]* ([^)]*)' nodes/*.journal.log | awk '{print $4}' | sort | uniq -c",
+          "syntax": "grep -ho '<kernel-message> [0-9]* ([^)]*)' <journal-files> | awk '{print $<field>}' | sort | uniq -c",
           "explain": "מקבץ את ה-OOM kills לפי שם ה-process. זהירות: אותו שם process יכול להיות שייך ליותר מ-workload אחד.",
-          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process \\d+ \\(([^)]+)\\)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name"
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'Killed process \\d+ \\(([^)]+)\\)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name",
+          "syntaxPowershell": "Select-String -Path <journal-files> -Pattern '<kernel-message> \\d+ \\(([^)]+)\\)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name"
         }
       ]
     },
@@ -605,43 +654,55 @@
           "id": "helm-history",
           "title": "היסטוריית ה-release ב-Helm",
           "command": "column -t -s $'\\t' helm/history-pricing-api.txt",
+          "syntax": "column -t -s $'<separator>' <history-file>",
           "explain": "שורה לכל revision. UPDATED הוא הרגע שבו ה-upgrade **התחיל**, מודפס בשעון המקומי של הלפטופ, בלי אזור זמן.",
-          "powershell": "Get-Content helm\\history-pricing-api.txt | ForEach-Object { $_ -replace \"`t\", ' | ' }"
+          "powershell": "Get-Content helm\\history-pricing-api.txt | ForEach-Object { $_ -replace \"`t\", ' | ' }",
+          "syntaxPowershell": "Get-Content <history-file> | ForEach-Object { $_ -replace \"<separator>\", ' | ' }"
         },
         {
           "id": "values-diff",
           "title": "diff בין ה-values של שני revisions",
           "command": "diff -u helm/values-rev13.yaml helm/values-rev14.yaml",
+          "syntax": "diff -u <old-values-file> <new-values-file>",
           "explain": "`helm get values` מדפיס את ה-values של המשתמש עם מפתחות ממוינים, אז diff רגיל עובד. שורות `-` קיימות רק בישן, `+` רק בחדש.",
-          "powershell": "Compare-Object (Get-Content helm\\values-rev13.yaml) (Get-Content helm\\values-rev14.yaml)"
+          "powershell": "Compare-Object (Get-Content helm\\values-rev13.yaml) (Get-Content helm\\values-rev14.yaml)",
+          "syntaxPowershell": "Compare-Object (Get-Content <old-values-file>) (Get-Content <new-values-file>)"
         },
         {
           "id": "git-commits",
           "title": "היסטוריית ה-GitOps במבט אחד",
           "command": "grep -A5 '^commit ' gitops/git-log-p.txt",
+          "syntax": "grep -A<n> '<commit-header>' <git-log-file>",
           "explain": "SHA, author, תאריך (עם ה-offset שלו) ו-subject של כל commit.",
-          "powershell": "Select-String -Path gitops\\git-log-p.txt -Pattern '^commit ' -Context 0,5"
+          "powershell": "Select-String -Path gitops\\git-log-p.txt -Pattern '^commit ' -Context 0,5",
+          "syntaxPowershell": "Select-String -Path <git-log-file> -Pattern '<commit-header>' -Context 0,<n>"
         },
         {
           "id": "git-one-commit",
           "title": "לקרוא diff של commit אחד",
           "command": "sed -n '/^commit abc1234/,/^commit /p' gitops/git-log-p.txt",
+          "syntax": "sed -n '/^commit <sha-prefix>/,/^commit /p' <git-log-file>",
           "explain": "מדפיס מהכותרת של ה-commit ועד ה-commit הבא. החליפו את `abc1234` בתחילת SHA אמיתי.",
-          "powershell": "$l = Get-Content gitops\\git-log-p.txt; $i = ($l | Select-String '^commit abc1234').LineNumber; $l[($i - 1)..($i + 80)]"
+          "powershell": "$l = Get-Content gitops\\git-log-p.txt; $i = ($l | Select-String '^commit abc1234').LineNumber; $l[($i - 1)..($i + 80)]",
+          "syntaxPowershell": "$l = Get-Content <git-log-file>; $i = ($l | Select-String '^commit <sha-prefix>').LineNumber; $l[($i - 1)..($i + <n>)]"
         },
         {
           "id": "flux-applies",
           "title": "מה Flux החיל, ומאיזה commit?",
           "command": "jq -c 'select(.controller==\"kustomization\" and (.output | length > 0)) | {ts, name, output, revision}' flux/flux-controllers.log",
+          "syntax": "jq -c 'select(.<field> == \"<value>\" and (.<field> | length > 0)) | {<fields>}' <flux-log>",
           "explain": "ה-kustomize-controller כותב כל אובייקט ששינה ואת ה-`revision` ב-git שממנו הגיע.",
-          "powershell": "Get-Content flux\\flux-controllers.log | ConvertFrom-Json | Where-Object { $_.controller -eq 'kustomization' -and @($_.output.PSObject.Properties).Count -gt 0 } | Format-List ts, name, output, revision"
+          "powershell": "Get-Content flux\\flux-controllers.log | ConvertFrom-Json | Where-Object { $_.controller -eq 'kustomization' -and @($_.output.PSObject.Properties).Count -gt 0 } | Format-List ts, name, output, revision",
+          "syntaxPowershell": "Get-Content <flux-log> | ConvertFrom-Json | Where-Object { $_.<field> -eq '<value>' -and @($_.<field>.PSObject.Properties).Count -gt 0 } | Format-List <fields>"
         },
         {
           "id": "flux-helm",
           "title": "מה ה-helm-controller עשה?",
           "command": "jq -r 'select(.controller==\"helmrelease\") | \"\\(.ts) \\(.namespace)/\\(.name) \\(.msg)\"' flux/flux-controllers.log",
+          "syntax": "jq -r 'select(.<field> == \"<value>\") | \"\\(.<field>) \\(.<field>)/\\(.<field>) \\(.<field>)\"' <flux-log>",
           "explain": "כל Helm upgrade ש-Flux הריץ: למה (סיבת ה-out-of-sync), מתי התחיל ואיך נגמר.",
-          "powershell": "Get-Content flux\\flux-controllers.log | ConvertFrom-Json | Where-Object controller -eq 'helmrelease' | ForEach-Object { \"$($_.ts) $($_.namespace)/$($_.name) $($_.msg)\" }"
+          "powershell": "Get-Content flux\\flux-controllers.log | ConvertFrom-Json | Where-Object controller -eq 'helmrelease' | ForEach-Object { \"$($_.ts) $($_.namespace)/$($_.name) $($_.msg)\" }",
+          "syntaxPowershell": "Get-Content <flux-log> | ConvertFrom-Json | Where-Object <field> -eq '<value>' | ForEach-Object { \"$($_.<field>) $($_.<field>)/$($_.<field>) $($_.<field>)\" }"
         }
       ]
     },
@@ -652,36 +713,46 @@
           "id": "local-to-utc",
           "title": "מקומי (+02:00) ל-UTC",
           "command": "date -u -d '2026-11-17 09:30:00 +0200' '+%F %T'",
+          "syntax": "date -u -d '<local-datetime> <offset>' '+%F %T'",
           "explain": "בשביל `helm history`, `kubectl describe`, תאריכי git והצ'אט. להוריד שעתיים בראש גם עובד, אם נזהרים.",
-          "powershell": "([DateTimeOffset]'2026-11-17T09:30:00+02:00').UtcDateTime.ToString('yyyy-MM-dd HH:mm:ss')"
+          "powershell": "([DateTimeOffset]'2026-11-17T09:30:00+02:00').UtcDateTime.ToString('yyyy-MM-dd HH:mm:ss')",
+          "syntaxPowershell": "([DateTimeOffset]'<local-datetime><offset>').UtcDateTime.ToString('yyyy-MM-dd HH:mm:ss')"
         },
         {
           "id": "age-to-time",
           "title": "גיל יחסי לשעה",
           "command": "date -u -d '2026-11-17 08:44:12 UTC - 47 minutes' +%T",
+          "syntax": "date -u -d '<snapshot-time> UTC - <age>' +%T",
           "explain": "זמן ה-snapshot (מה-`date -u` שמעל הבלוק) פחות הגיל. גילים מעל 10 דקות מעוגלים לדקות שלמות.",
-          "powershell": "([DateTimeOffset]'2026-11-17T08:44:12Z').AddMinutes(-47).UtcDateTime.ToString('HH:mm:ss')"
+          "powershell": "([DateTimeOffset]'2026-11-17T08:44:12Z').AddMinutes(-47).UtcDateTime.ToString('HH:mm:ss')",
+          "syntaxPowershell": "([DateTimeOffset]'<snapshot-time>Z').AddMinutes(-<minutes>).UtcDateTime.ToString('HH:mm:ss')"
         },
         {
           "id": "epoch-to-utc",
           "title": "Epoch ל-UTC",
           "command": "date -u -d @1794902400",
+          "syntax": "date -u -d @<epoch>",
           "explain": "בשביל קובצי ה-CSV של המטריקות. ב-macOS: `date -u -r 1794902400`.",
-          "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794902400).UtcDateTime.ToString('u')"
+          "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794902400).UtcDateTime.ToString('u')",
+          "syntaxPowershell": "[DateTimeOffset]::FromUnixTimeSeconds(<epoch>).UtcDateTime.ToString('u')"
         },
         {
           "id": "utc-to-epoch",
           "title": "UTC ל-epoch",
           "command": "date -u -d '2026-11-17 08:00:00' +%s",
+          "syntax": "date -u -d '<utc-datetime>' +%s",
           "explain": "כדי למצוא את השורות המתאימות ב-CSV שממופתח לפי epoch.",
-          "powershell": "([DateTimeOffset]'2026-11-17T08:00:00Z').ToUnixTimeSeconds()"
+          "powershell": "([DateTimeOffset]'2026-11-17T08:00:00Z').ToUnixTimeSeconds()",
+          "syntaxPowershell": "([DateTimeOffset]'<utc-datetime>Z').ToUnixTimeSeconds()"
         },
         {
           "id": "csv-epoch-column",
           "title": "שעות קריאות לכל ה-CSV",
           "command": "awk -F, 'NR>1 {cmd=\"date -u -d @\"$1\" +%T\"; cmd | getline t; close(cmd); print t, $0}' metrics/hpa-pricing-api.csv | head",
+          "syntax": "awk -F, 'NR>1 {cmd=\"date -u -d @\"$<epoch-column>\" +%T\"; cmd | getline t; close(cmd); print t, $0}' <metrics-csv> | head",
           "explain": "מוסיף לכל שורה את שעת ה-UTC שלה. קצת איטי (`date` אחד לכל שורה), בסדר לכמה מאות שורות.",
-          "powershell": "Import-Csv metrics\\hpa-pricing-api.csv | Select-Object -First 10 @{n='utc'; e={ [DateTimeOffset]::FromUnixTimeSeconds([long]$_.ts_epoch).ToString('HH:mm:ss') }}, *"
+          "powershell": "Import-Csv metrics\\hpa-pricing-api.csv | Select-Object -First 10 @{n='utc'; e={ [DateTimeOffset]::FromUnixTimeSeconds([long]$_.ts_epoch).ToString('HH:mm:ss') }}, *",
+          "syntaxPowershell": "Import-Csv <metrics-csv> | Select-Object -First <n> @{n='utc'; e={ [DateTimeOffset]::FromUnixTimeSeconds([long]$_.<epoch-column>).ToString('HH:mm:ss') }}, *"
         }
       ]
     },
@@ -692,22 +763,28 @@
           "id": "csv-table",
           "title": "טבלה קריאה",
           "command": "column -s, -t < metrics/hpa-pricing-api.csv | less -S",
+          "syntax": "column -s, -t < <metrics-csv> | less -S",
           "explain": "מיישר את עמודות ה-CSV כדי שאפשר יהיה לקרוא אותן.",
-          "powershell": "Import-Csv metrics\\hpa-pricing-api.csv | Format-Table | Out-Host -Paging"
+          "powershell": "Import-Csv metrics\\hpa-pricing-api.csv | Format-Table | Out-Host -Paging",
+          "syntaxPowershell": "Import-Csv <metrics-csv> | Format-Table | Out-Host -Paging"
         },
         {
           "id": "csv-changes",
           "title": "רק השורות שבהן ערך השתנה",
           "command": "awk -F, 'NR>1 && $2 != prev {print; prev = $2}' metrics/hpa-pricing-api.csv",
+          "syntax": "awk -F, 'NR>1 && $<column> != prev {print; prev = $<column>}' <metrics-csv>",
           "explain": "מדפיס שורה בכל פעם שעמודה 2 משתנה: כל אירוע scale של ה-HPA.",
-          "powershell": "$p = ''; Import-Csv metrics\\hpa-pricing-api.csv | ForEach-Object { if ($_.spec_replicas -ne $p) { $_; $p = $_.spec_replicas } }"
+          "powershell": "$p = ''; Import-Csv metrics\\hpa-pricing-api.csv | ForEach-Object { if ($_.spec_replicas -ne $p) { $_; $p = $_.spec_replicas } }",
+          "syntaxPowershell": "$p = ''; Import-Csv <metrics-csv> | ForEach-Object { if ($_.<column> -ne $p) { $_; $p = $_.<column> } }"
         },
         {
           "id": "csv-threshold",
           "title": "שורות מתחת לסף",
           "command": "awk -F, 'NR>1 && $4 < $5' metrics/node-memory.csv",
+          "syntax": "awk -F, 'NR>1 && $<column> < $<column>' <metrics-csv>",
           "explain": "זיכרון פנוי ב-node מתחת לסף ה-eviction הקשיח של ה-kubelet. המירו את ה-epoch כדי לראות מתי.",
-          "powershell": "Import-Csv metrics\\node-memory.csv | Where-Object { [int]$_.memory_available_mib -lt [int]$_.eviction_threshold_mib }"
+          "powershell": "Import-Csv metrics\\node-memory.csv | Where-Object { [int]$_.memory_available_mib -lt [int]$_.eviction_threshold_mib }",
+          "syntaxPowershell": "Import-Csv <metrics-csv> | Where-Object { [int]$_.<column> -lt [int]$_.<column> }"
         }
       ]
     },
@@ -718,22 +795,28 @@
           "id": "unique-capture",
           "title": "ספירה לפי ערך שחולץ",
           "command": "grep -ho 'pod=\"shop/[^\"]*\"' nodes/*.journal.log | sort | uniq -c | sort -rn | head -20",
+          "syntax": "grep -ho '<key>=\"<namespace>/[^\"]*\"' <journal-files> | sort | uniq -c | sort -rn | head -<n>",
           "explain": "`grep -o` שולף שדה אחד משורות מבולגנות; `sort | uniq -c` סופר כל ערך.",
-          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'pod=\"(shop/[^\"]*)\"' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name"
+          "powershell": "Select-String -Path nodes\\*.journal.log -Pattern 'pod=\"(shop/[^\"]*)\"' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name",
+          "syntaxPowershell": "Select-String -Path <journal-files> -Pattern '<key>=\"(<namespace>/[^\"]*)\"' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First <n> Count, Name"
         },
         {
           "id": "join-lists",
           "title": "חיבור בין שתי רשימות",
           "command": "awk 'NR==FNR {want[$1]; next} $1 in want' ids.txt other.txt",
+          "syntax": "awk 'NR==FNR {want[$<key-column>]; next} $<key-column> in want' <lookup-file> <data-file>",
           "explain": "awk קלאסי על שני קבצים: הראשון בונה טבלת חיפוש, והשני מסונן (או מועשר) בעזרתה. אותו רעיון עובד גם בתוך קובץ אחד עם בלוק `END`.",
-          "powershell": "$want = Get-Content ids.txt; Get-Content other.txt | Where-Object { $want -contains (($_ -split ' ')[0]) }"
+          "powershell": "$want = Get-Content ids.txt; Get-Content other.txt | Where-Object { $want -contains (($_ -split ' ')[0]) }",
+          "syntaxPowershell": "$want = Get-Content <lookup-file>; Get-Content <data-file> | Where-Object { $want -contains (($_ -split ' ')[<index>]) }"
         },
         {
           "id": "units",
           "title": "kB ל-MiB",
           "command": "echo $(( 1572864 / 1024 )) MiB",
+          "syntax": "echo $(( <kilobytes> / 1024 )) MiB",
           "explain": "מספרי הזיכרון של ה-kernel הם ב-kB (בפועל KiB). חלקו ב-1024 לקבלת MiB, ושוב לקבלת GiB. `Mi` ו-`Gi` ב-Kubernetes הם אותן יחידות בינאריות.",
-          "powershell": "1572864 / 1024"
+          "powershell": "1572864 / 1024",
+          "syntaxPowershell": "<kilobytes> / 1024"
         }
       ]
     }

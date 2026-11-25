@@ -23,12 +23,22 @@ export function cachedAccount(): AccountView | null {
   return current;
 }
 
+/** True for the instructor's session (username "admin" signed in with the ADMIN_KEY). */
+export function isAdmin(account: AccountView | null = current): boolean {
+  return account?.role === "admin";
+}
+
+function sameAccount(a: AccountView | null, b: AccountView | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.id === b.id && a.status === b.status && a.role === b.role && a.mustChangePassword === b.mustChangePassword;
+}
+
 /** Asks the server once per page load (or after `refresh`). */
 export function loadAccount(refresh = false): Promise<AccountView | null> {
   if (!loaded || refresh) {
     loaded = fetchMe().then(
       (account) => {
-        if (account?.id !== current?.id || account?.status !== current?.status) setAccount(account);
+        if (!sameAccount(account, current)) setAccount(account);
         return account;
       },
       (err: unknown) => {

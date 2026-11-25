@@ -133,10 +133,11 @@
   "rules": [
     "Work only from the evidence pack. Don't read the generator source or the site's source code; that spoils the fun.",
     "Answers are case-insensitive, and leading and trailing whitespace is ignored. Stick to the format shown under each question.",
-    "Each hint costs the points shown on it. Hints are revealed in order, from a gentle nudge to almost the full command.",
+    "Hints cost the points shown on them and are revealed in order, from a gentle nudge to almost the full command. In the Toolbox, each command's syntax is free; seeing the full runnable command costs 5 points. Once you finish the case, every command is free.",
     "Working in pairs is encouraged. Talk through your reasoning out loud, just like a real incident review.",
     "Any tool is allowed: grep, awk, jq, git, Python, a spreadsheet, your favourite editor. The Toolbox tab lists commands that help.",
-    "Wrong answers cost nothing, so guess freely. Still, try to be able to explain *why* your answer is right.",
+    "Each wrong answer costs 2 points (at most 20 per stage), so think before you guess, and try to be able to explain *why* your answer is right.",
+    "Bonuses: a faster solve earns a time bonus (up to +30 per stage, fading once you pass the stage's target time); a clean solve with no hints, commands or wrong answers earns +10; the first player to solve a stage gets +15 first blood; finishing all six stages without revealing an answer earns +50.",
     "Don't share flags with other teams until everyone is done. Sharing techniques is fine.",
     "Nothing in the pack is executable malware: test files are random bytes and scripts are defanged. Still, don't pipe anything from the evidence into a shell."
   ],
@@ -169,6 +170,7 @@
       "answerFormat": "Upstream version X.Y.Z (no distro revision)",
       "placeholder": "1.2.3",
       "points": 100,
+      "targetMinutes": 9,
       "hints": [
         {
           "cost": 10,
@@ -211,6 +213,7 @@
       "answerFormat": "Path relative to the tarball root, e.g. dir/file.ext",
       "placeholder": "src/check/crc32.c",
       "points": 100,
+      "targetMinutes": 9,
       "hints": [
         {
           "cost": 10,
@@ -251,6 +254,7 @@
       "answerFormat": "File name only, e.g. name.zf",
       "placeholder": "good-1-empty.zf",
       "points": 100,
+      "targetMinutes": 12,
       "hints": [
         {
           "cost": 10,
@@ -293,6 +297,7 @@
       "answerFormat": "Exact symbol name as in the GOT audit",
       "placeholder": "EVP_Example_fn",
       "points": 100,
+      "targetMinutes": 12,
       "hints": [
         {
           "cost": 10,
@@ -335,6 +340,7 @@
       "answerFormat": "7-char short SHA (hex)",
       "placeholder": "a1b2c3d",
       "points": 100,
+      "targetMinutes": 7,
       "hints": [
         {
           "cost": 10,
@@ -376,6 +382,7 @@
       "answerFormat": "Integer (distinct hosts)",
       "placeholder": "7",
       "points": 150,
+      "targetMinutes": 11,
       "hints": [
         {
           "cost": 10,
@@ -400,28 +407,36 @@
         {
           "id": "unzip-evidence",
           "title": "Unpack the evidence",
+          "syntax": "unzip <evidence-zip> && cd <case-folder>",
           "command": "unzip the-insider-commit-evidence.zip && cd the-insider-commit",
+          "syntaxPowershell": "Expand-Archive .\\<evidence-zip> -DestinationPath .\ncd .\\<case-folder>",
           "powershell": "Expand-Archive .\\the-insider-commit-evidence.zip -DestinationPath .\ncd .\\the-insider-commit",
           "explain": "Everything lives under one top-level folder, `the-insider-commit/`."
         },
         {
           "id": "list-files",
           "title": "See what you've got",
+          "syntax": "find <dir> -type f | sort | xargs wc -c",
           "command": "find . -type f | sort | xargs wc -c",
+          "syntaxPowershell": "Get-ChildItem -Recurse -File | Select-Object <size-property>, <path-property>",
           "powershell": "Get-ChildItem -Recurse -File | Select-Object Length, FullName",
           "explain": "Every file with its size. The big ones are the fleet dpkg log and the timing CSV."
         },
         {
           "id": "read-readme",
           "title": "Read the README",
+          "syntax": "less <readme-file>",
           "command": "less README_FIRST.txt",
+          "syntaxPowershell": "Get-Content .\\<readme-file> | more",
           "powershell": "Get-Content .\\README_FIRST.txt | more",
           "explain": "Time zones, file formats and a short glossary (tarball, m4, ifunc, GOT). Read it first."
         },
         {
           "id": "head-lines",
           "title": "Peek at the first lines",
+          "syntax": "head -n <count> <log-file>",
           "command": "head -n 20 fleet/dpkg-all-hosts.log",
+          "syntaxPowershell": "Get-Content .\\<log-file> -TotalCount <count>",
           "powershell": "Get-Content .\\fleet\\dpkg-all-hosts.log -TotalCount 20",
           "explain": "Learn a file's layout before you write a filter for it."
         }
@@ -433,35 +448,45 @@
         {
           "id": "grep-regex",
           "title": "Extended regex",
+          "syntax": "grep -E '<log-phrase> (<pkg-a>|<pkg-b>|<pkg-c>)' <log-file>",
           "command": "grep -E 'status installed (openssh-server|libssl3t64|libzfold5)' fleet/dpkg-all-hosts.log",
+          "syntaxPowershell": "Select-String -Path .\\<log-file> -Pattern '<log-phrase> (<pkg-a>|<pkg-b>|<pkg-c>)'",
           "powershell": "Select-String -Path .\\fleet\\dpkg-all-hosts.log -Pattern 'status installed (openssh-server|libssl3t64|libzfold5)'",
           "explain": "`-E` enables `|`, `+`, `{n}` and groups. Here: every completed install of three suspect packages, on every host."
         },
         {
           "id": "grep-exclude",
           "title": "Invert / exclude",
+          "syntax": "grep '<package>' <log-file> | grep -v -e '<noise-1>' -e '<noise-2>'",
           "command": "grep 'libzfold5' fleet/dpkg-all-hosts.log | grep -v -e ' half-' -e ' unpacked '",
+          "syntaxPowershell": "Select-String -Path .\\<log-file> -Pattern '<package>' | Where-Object { $_.Line -notmatch '<noise-1>|<noise-2>' }",
           "powershell": "Select-String -Path .\\fleet\\dpkg-all-hosts.log -Pattern 'libzfold5' | Where-Object { $_.Line -notmatch ' half-| unpacked ' }",
           "explain": "`-v` drops lines. Chain several `-e` patterns to drop several kinds of noise at once."
         },
         {
           "id": "grep-context",
           "title": "Context around a hit",
+          "syntax": "grep -n -B<before> -A<after> '<marker-text>' <git-log-export> | less",
           "command": "grep -n -B10 -A3 'new file mode' repo/git-log.txt | less",
+          "syntaxPowershell": "Select-String -Path .\\<git-log-export> -Pattern '<marker-text>' -Context <before>,<after>",
           "powershell": "Select-String -Path .\\repo\\git-log.txt -Pattern 'new file mode' -Context 10,3",
           "explain": "`-B` lines before, `-A` lines after. In a `git log -p` export the commit header sits a few lines above each diff."
         },
         {
           "id": "grep-only-match",
           "title": "Print only the match",
+          "syntax": "grep -oE '<diff-header-regex>' <diff-file> | sort | uniq -c",
           "command": "grep -oE '^diff -ruN [^ ]+' release/tarball-vs-git-tag.diff | sort | uniq -c",
+          "syntaxPowershell": "Select-String -Path .\\<diff-file> -Pattern '<diff-header-regex>' | ForEach-Object { $_.Matches.Value } | Group-Object | Select-Object Count, Name",
           "powershell": "Select-String -Path .\\release\\tarball-vs-git-tag.diff -Pattern '^diff -ruN [^ ]+' | ForEach-Object { $_.Matches.Value } | Group-Object | Select-Object Count, Name",
           "explain": "`-o` prints just the matching part. Piped into `sort | uniq -c` it turns a long diff into a file list with counts."
         },
         {
           "id": "grep-fixed",
           "title": "Fixed string search",
+          "syntax": "grep -F -- '<literal-string>' <strings-file>",
           "command": "grep -F -- '####' release/fixture-strings.txt",
+          "syntaxPowershell": "Select-String -Path .\\<strings-file> -SimpleMatch '<literal-string>'",
           "powershell": "Select-String -Path .\\release\\fixture-strings.txt -SimpleMatch '####'",
           "explain": "`-F` treats the pattern literally: no regex surprises with `#`, `.` or `$`."
         }
@@ -473,35 +498,45 @@
         {
           "id": "epoch-to-utc",
           "title": "Epoch to UTC",
+          "syntax": "date -u -d @<epoch> '<format>'",
           "command": "date -u -d @1794300000 '+%F %T UTC'",
+          "syntaxPowershell": "[DateTimeOffset]::FromUnixTimeSeconds(<epoch>).UtcDateTime",
           "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794300000).UtcDateTime",
           "explain": "The timing CSV and the chat use Unix epoch seconds. `-u` keeps the output in UTC."
         },
         {
           "id": "cet-to-utc",
           "title": "CET to UTC",
+          "syntax": "date -u -d '<local-time> <utc-offset>' '<format>'",
           "command": "date -u -d '2026-11-10 09:00:00 +0100' '+%F %T UTC'",
+          "syntaxPowershell": "[DateTimeOffset]::Parse('<local-time-iso><utc-offset>').UtcDateTime",
           "powershell": "[DateTimeOffset]::Parse('2026-11-10T09:00:00+01:00').UtcDateTime",
           "explain": "The fleet dpkg log is host local time, CET = UTC+01:00. Put the offset in the string and let `date` do the math."
         },
         {
           "id": "utc-to-epoch",
           "title": "UTC to epoch",
+          "syntax": "date -u -d '<utc-time> UTC' +%s",
           "command": "date -u -d '2026-11-10 08:00:00 UTC' +%s",
+          "syntaxPowershell": "[DateTimeOffset]::Parse('<utc-time-iso>Z').ToUnixTimeSeconds()",
           "powershell": "[DateTimeOffset]::Parse('2026-11-10T08:00:00Z').ToUnixTimeSeconds()",
           "explain": "Handy for comparing a log time with CSV rows numerically."
         },
         {
           "id": "csv-epoch-column",
           "title": "Readable CSV timeline",
+          "syntax": "grep ',<host>,' <csv-file> | while IFS=<sep> read <col-vars...>; do\n  echo \"$(date -u -d @$<ts-var> '<format>') <fields-to-show>\"\ndone | less",
           "command": "grep ',bench-02,' perf/sshd-auth-timing.csv | while IFS=, read ts h u r c a t; do\n  echo \"$(date -u -d @$ts '+%F %T') $h $r auth=$a\"\ndone | less",
+          "syntaxPowershell": "Import-Csv .\\<csv-file> | Where-Object <host-column> -eq '<host>' |\n  Select-Object @{n='utc';e={[DateTimeOffset]::FromUnixTimeSeconds([long]$_.<epoch-column>).UtcDateTime}}, <columns...>",
           "powershell": "Import-Csv .\\perf\\sshd-auth-timing.csv | Where-Object host -eq 'bench-02' |\n  Select-Object @{n='utc';e={[DateTimeOffset]::FromUnixTimeSeconds([long]$_.ts_epoch).UtcDateTime}}, result, auth_ms",
           "explain": "Converts every probe of one host to UTC so you can eyeball where the numbers change."
         },
         {
           "id": "chat-timestamps",
           "title": "Chat with readable times",
+          "syntax": "jq -r '.[] | \"\\(.<ts-field> | tonumber | floor | todate) \\(.<user-field>): \\(.<text-field>)\"' <chat-json>",
           "command": "jq -r '.[] | \"\\(.ts | tonumber | floor | todate) \\(.user): \\(.text)\"' chat/incident-channel.json",
+          "syntaxPowershell": "(Get-Content .\\<chat-json> -Raw | ConvertFrom-Json) | ForEach-Object {\n  '{0:u} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][double]$_.<ts-field>).UtcDateTime, $_.<user-field>, $_.<text-field> }",
           "powershell": "(Get-Content .\\chat\\incident-channel.json -Raw | ConvertFrom-Json) | ForEach-Object {\n  '{0:u} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][double]$_.ts).UtcDateTime, $_.user, $_.text }",
           "explain": "Slack-style `ts` is epoch seconds as a string. `todate` gives UTC."
         }
@@ -513,28 +548,36 @@
         {
           "id": "csv-header",
           "title": "Header with column numbers",
+          "syntax": "head -1 <csv-file> | tr <sep> '\\n' | cat -n",
           "command": "head -1 perf/sshd-auth-timing.csv | tr , '\\n' | cat -n",
+          "syntaxPowershell": "(Get-Content .\\<csv-file> -TotalCount 1).Split('<sep>') | ForEach-Object -Begin { $i = 1 } -Process { \"$i $_\"; $i++ }",
           "powershell": "(Get-Content .\\perf\\sshd-auth-timing.csv -TotalCount 1).Split(',') | ForEach-Object -Begin { $i = 1 } -Process { \"$i $_\"; $i++ }",
           "explain": "Know which `$N` is `auth_ms` before you write awk."
         },
         {
           "id": "csv-over",
           "title": "Rows over a threshold",
+          "syntax": "awk -F<sep> '$<host-field>==\"<host>\" && $<value-field> > <threshold>' <csv-file> | head",
           "command": "awk -F, '$2==\"bench-02\" && $6 > 300' perf/sshd-auth-timing.csv | head",
+          "syntaxPowershell": "Import-Csv .\\<csv-file> | Where-Object { $_.<host-column> -eq '<host>' -and [int]$_.<value-column> -gt <threshold> } | Select-Object -First <n>",
           "powershell": "Import-Csv .\\perf\\sshd-auth-timing.csv | Where-Object { $_.host -eq 'bench-02' -and [int]$_.auth_ms -gt 300 } | Select-Object -First 10",
           "explain": "Every probe on one host with an auth time over 300 ms. Expect a few one-off network blips."
         },
         {
           "id": "csv-sustained",
           "title": "First sustained shift",
+          "syntax": "awk -F<sep> '$<host-field>==\"<host>\" && $<result-field>==\"<result>\" {\n  if ($<value-field> > <threshold>) { if (++run == 1) first = $<ts-field>; if (run == <run-length>) { print first; exit } } else run = 0\n}' <csv-file>",
           "command": "awk -F, '$2==\"bench-02\" && $4==\"ok\" {\n  if ($6 > 300) { if (++run == 1) first = $1; if (run == 6) { print first; exit } } else run = 0\n}' perf/sshd-auth-timing.csv",
+          "syntaxPowershell": "$run = 0; $first = $null\nforeach ($r in Import-Csv .\\<csv-file> | Where-Object { $_.<host-column> -eq '<host>' -and $_.<result-column> -eq '<result>' }) {\n  if ([int]$r.<value-column> -gt <threshold>) { $run++; if ($run -eq 1) { $first = $r.<epoch-column> }; if ($run -eq <run-length>) { $first; break } } else { $run = 0 } }",
           "powershell": "$run = 0; $first = $null\nforeach ($r in Import-Csv .\\perf\\sshd-auth-timing.csv | Where-Object { $_.host -eq 'bench-02' -and $_.result -eq 'ok' }) {\n  if ([int]$r.auth_ms -gt 300) { $run++; if ($run -eq 1) { $first = $r.ts_epoch }; if ($run -eq 6) { $first; break } } else { $run = 0 } }",
           "explain": "Prints the epoch of the first probe that starts a run of 6 slow logins in a row: a real change, not a blip. Swap in the host you care about."
         },
         {
           "id": "csv-daily-avg",
           "title": "Daily average per host",
+          "syntax": "awk -F<sep> 'NR > 1 && $<result-field> == \"<result>\" { k = $<host-field> \" \" int($<ts-field> / <seconds-per-day>); s[k] += $<value-field>; n[k]++ }\n  END { for (k in s) print k, int(s[k] / n[k]) }' <csv-file> | sort -k<key1> -k<key2>",
           "command": "awk -F, 'NR > 1 && $4 == \"ok\" { k = $2 \" \" int($1 / 86400); s[k] += $6; n[k]++ }\n  END { for (k in s) print k, int(s[k] / n[k]) }' perf/sshd-auth-timing.csv | sort -k1,1 -k2,2n",
+          "syntaxPowershell": "Import-Csv .\\<csv-file> | Where-Object <result-column> -eq '<result>' |\n  Group-Object <host-column>, { [math]::Floor([long]$_.<epoch-column> / <seconds-per-day>) } |\n  ForEach-Object { '{0} avg={1:N0}' -f $_.Name, ($_.Group | Measure-Object <value-column> -Average).Average }",
           "powershell": "Import-Csv .\\perf\\sshd-auth-timing.csv | Where-Object result -eq 'ok' |\n  Group-Object host, { [math]::Floor([long]$_.ts_epoch / 86400) } |\n  ForEach-Object { '{0} avg={1:N0}' -f $_.Name, ($_.Group | Measure-Object auth_ms -Average).Average }",
           "explain": "Average `auth_ms` per host per UTC day (day number = epoch / 86400). Compare hosts side by side; one of them is a control."
         }
@@ -546,35 +589,45 @@
         {
           "id": "dpkg-one-host",
           "title": "What changed on one host",
+          "syntax": "grep '^<host> ' <dpkg-log> | grep '<status-phrase>'",
           "command": "grep '^bench-02 ' fleet/dpkg-all-hosts.log | grep 'status installed'",
+          "syntaxPowershell": "Select-String -Path .\\<dpkg-log> -Pattern '^<host> .*<status-phrase>'",
           "powershell": "Select-String -Path .\\fleet\\dpkg-all-hosts.log -Pattern '^bench-02 .*status installed'",
           "explain": "Only `status installed` lines: one line per package version that finished installing. Times are CET."
         },
         {
           "id": "dpkg-pkg-history",
           "title": "One package across the fleet",
+          "syntax": "awk '$<f1> == \"<word1>\" && $<f2> == \"<word2>\" && $<pkg-field> ~ /^<package>/' <dpkg-log> | less",
           "command": "awk '$4 == \"status\" && $5 == \"installed\" && $6 ~ /^libzfold5/' fleet/dpkg-all-hosts.log | less",
+          "syntaxPowershell": "Get-Content .\\<dpkg-log> | Where-Object { $f = $_ -split ' '; $f[<i1>] -eq '<word1>' -and $f[<i2>] -eq '<word2>' -and $f[<pkg-index>] -like '<package>*' }",
           "powershell": "Get-Content .\\fleet\\dpkg-all-hosts.log | Where-Object { $f = $_ -split ' '; $f[3] -eq 'status' -and $f[4] -eq 'installed' -and $f[5] -like 'libzfold5*' }",
           "explain": "Every completed install of the zfold library, all hosts, in time order."
         },
         {
           "id": "dpkg-versions",
           "title": "Version histogram",
+          "syntax": "awk '$<f1> == \"<word1>\" && $<f2> == \"<word2>\" && $<pkg-field> == \"<package:arch>\" {print $<version-field>}' <dpkg-log> | sort | uniq -c",
           "command": "awk '$4 == \"status\" && $5 == \"installed\" && $6 == \"libzfold5:amd64\" {print $7}' fleet/dpkg-all-hosts.log | sort | uniq -c",
+          "syntaxPowershell": "Get-Content .\\<dpkg-log> | ForEach-Object { $f = $_ -split ' '; if ($f[<i1>] -eq '<word1>' -and $f[<i2>] -eq '<word2>' -and $f[<pkg-index>] -eq '<package:arch>') { $f[<version-index>] } } | Group-Object | Select-Object Count, Name",
           "powershell": "Get-Content .\\fleet\\dpkg-all-hosts.log | ForEach-Object { $f = $_ -split ' '; if ($f[3] -eq 'status' -and $f[4] -eq 'installed' -and $f[5] -eq 'libzfold5:amd64') { $f[6] } } | Group-Object | Select-Object Count, Name",
           "explain": "How many completed installs of each library version. Look closely at version strings that look alike."
         },
         {
           "id": "dpkg-upgrade-lines",
           "title": "Attempts, not results",
+          "syntax": "grep ' <action> <package>' <dpkg-log>",
           "command": "grep ' upgrade libzfold5' fleet/dpkg-all-hosts.log",
+          "syntaxPowershell": "Select-String -Path .\\<dpkg-log> -Pattern ' <action> <package>'",
           "powershell": "Select-String -Path .\\fleet\\dpkg-all-hosts.log -Pattern ' upgrade libzfold5'",
           "explain": "An `upgrade` line means dpkg *started* an upgrade. It does not mean it finished. Compare with the `status installed` lines that follow."
         },
         {
           "id": "dpkg-distinct-hosts",
           "title": "Count distinct hosts",
+          "syntax": "awk -v v='<version>' '$<f1> == \"<word1>\" && $<f2> == \"<word2>\" && $<pkg-field> == \"<package:arch>\" && $<version-field> == v {print $<host-field>}' \\\n  <dpkg-log> | sort -u | wc -l",
           "command": "awk -v v='<version>' '$4 == \"status\" && $5 == \"installed\" && $6 == \"libzfold5:amd64\" && $7 == v {print $1}' \\\n  fleet/dpkg-all-hosts.log | sort -u | wc -l",
+          "syntaxPowershell": "$v = '<version>'\nGet-Content .\\<dpkg-log> | ForEach-Object { $f = $_ -split ' '; if ($f[<i1>] -eq '<word1>' -and $f[<i2>] -eq '<word2>' -and $f[<pkg-index>] -eq '<package:arch>' -and $f[<version-index>] -eq $v) { $f[<host-index>] } } |\n  Sort-Object -Unique | Measure-Object",
           "powershell": "$v = '<version>'\nGet-Content .\\fleet\\dpkg-all-hosts.log | ForEach-Object { $f = $_ -split ' '; if ($f[3] -eq 'status' -and $f[4] -eq 'installed' -and $f[5] -eq 'libzfold5:amd64' -and $f[6] -eq $v) { $f[0] } } |\n  Sort-Object -Unique | Measure-Object",
           "explain": "Exact field match on package and version, then unique host names. Replace `<version>` with the full distro version."
         }
@@ -586,42 +639,54 @@
         {
           "id": "diff-file-list",
           "title": "List every file in the diff",
+          "syntax": "grep -nE '^(<section-marker>|<file-header>|<binary-marker>)' <diff-file> | less",
           "command": "grep -nE '^(######## |diff -ruN |Binary files )' release/tarball-vs-git-tag.diff | less",
+          "syntaxPowershell": "Select-String -Path .\\<diff-file> -Pattern '^(<section-marker>|<file-header>|<binary-marker>)'",
           "powershell": "Select-String -Path .\\release\\tarball-vs-git-tag.diff -Pattern '^(######## |diff -ruN |Binary files )'",
           "explain": "Section headers (`######## zfold ...`) separate the two releases. Each `diff -ruN` line is one file that differs between the git tag and the tarball."
         },
         {
           "id": "diff-only-right",
           "title": "Files only in the tarball",
+          "syntax": "awk '/<section-regex>/ {rel = $<field>}\n     /<old-header-regex>/ && /<empty-side-date>/ {getline; p = $<field>; sub(/<prefix-regex>/, \"\", p); print rel, p}' <diff-file>",
           "command": "awk '/^######## / {rel = $3}\n     /^--- / && /1970-01-01/ {getline; p = $2; sub(/^[^\\/]*\\//, \"\", p); print rel, p}' release/tarball-vs-git-tag.diff",
+          "syntaxPowershell": "$rel = ''; $prev = ''\nforeach ($l in Get-Content .\\<diff-file>) {\n  if ($l -like '<section-pattern>') { $rel = ($l -split ' ')[<index>] }\n  elseif ($l -like '<new-header-pattern>' -and $prev -like '<old-header-pattern>') { \"$rel \" + (($l -split '\\s+')[<index>] -replace '<prefix-regex>', '') }\n  $prev = $l }",
           "powershell": "$rel = ''; $prev = ''\nforeach ($l in Get-Content .\\release\\tarball-vs-git-tag.diff) {\n  if ($l -like '######## *') { $rel = ($l -split ' ')[2] }\n  elseif ($l -like '+++ *' -and $prev -like '--- *1970-01-01*') { \"$rel \" + (($l -split '\\s+')[1] -replace '^[^/]*/', '') }\n  $prev = $l }",
           "explain": "`diff -ruN` shows a file that exists on one side only against an empty file dated `1970-01-01`. This prints release + path for every file that is only in the tarball."
         },
         {
           "id": "diff-count-releases",
           "title": "Which tarball-only files are not in both releases?",
+          "syntax": "awk '/<old-header-regex>/ && /<empty-side-date>/ {getline; p = $<field>; sub(/<prefix-regex>/, \"\", p); print p}' <diff-file> \\\n  | sort | uniq -c | sort -n | head",
           "command": "awk '/^--- / && /1970-01-01/ {getline; p = $2; sub(/^[^\\/]*\\//, \"\", p); print p}' release/tarball-vs-git-tag.diff \\\n  | sort | uniq -c | sort -n | head",
+          "syntaxPowershell": "$prev = ''\n$(foreach ($l in Get-Content .\\<diff-file>) {\n  if ($l -like '<new-header-pattern>' -and $prev -like '<old-header-pattern>') { ($l -split '\\s+')[<index>] -replace '<prefix-regex>', '' }\n  $prev = $l }) | Group-Object | Sort-Object Count | Select-Object -First <n> Count, Name",
           "powershell": "$prev = ''\n$(foreach ($l in Get-Content .\\release\\tarball-vs-git-tag.diff) {\n  if ($l -like '+++ *' -and $prev -like '--- *1970-01-01*') { ($l -split '\\s+')[1] -replace '^[^/]*/', '' }\n  $prev = $l }) | Group-Object | Sort-Object Count | Select-Object -First 10 Count, Name",
           "explain": "Counts how many releases ship each tarball-only file. Normal autotools output appears in both (count 2). Anything with count 1 deserves a look."
         },
         {
           "id": "diff-show-file",
           "title": "Show one file's diff",
+          "syntax": "awk -v f='<path-in-tree>' '/^(<file-header>|<binary-marker>|<section-marker>)/ {on = index($0, \"/\" f \" \") > 0} on' <diff-file>",
           "command": "awk -v f='m4/<name>.m4' '/^(diff -ruN|Binary files|######## )/ {on = index($0, \"/\" f \" \") > 0} on' release/tarball-vs-git-tag.diff",
+          "syntaxPowershell": "$f = '<path-in-tree>'; $on = $false\nforeach ($l in Get-Content .\\<diff-file>) {\n  if ($l -match '^(<file-header>|<binary-marker>|<section-marker>)') { $on = $l.Contains(\"/$f \") }\n  if ($on) { $l } }",
           "powershell": "$f = 'm4/<name>.m4'; $on = $false\nforeach ($l in Get-Content .\\release\\tarball-vs-git-tag.diff) {\n  if ($l -match '^(diff -ruN|Binary files|######## )') { $on = $l.Contains(\"/$f \") }\n  if ($on) { $l } }",
           "explain": "Prints the diff block of one file. Replace the path."
         },
         {
           "id": "strings-regex",
           "title": "Apply a regex to the strings dump",
+          "syntax": "grep -E '<regex-from-the-macro>' <strings-file>",
           "command": "grep -E '<regex copied from the macro>' release/fixture-strings.txt",
+          "syntaxPowershell": "# translate POSIX classes to .NET first\nSelect-String -Path .\\<strings-file> -Pattern '<translated-regex>' -CaseSensitive",
           "powershell": "# .NET regex has no [[:alnum:]]: translate it to [A-Za-z0-9] first\nSelect-String -Path .\\release\\fixture-strings.txt -Pattern '<translated regex>' -CaseSensitive",
           "explain": "Use the regex exactly as the macro does. POSIX classes like `[[:alnum:]]` work in `grep -E`; `{4}` means exactly four; `$` anchors the end of the line."
         },
         {
           "id": "buildlog-compare",
           "title": "Compare two package builds",
+          "syntax": "grep -nE '<configure-hook-marker>|<tool>: (<step-a>|<step-b>)' <build-log> | less",
           "command": "grep -nE 'config.status: executing|libtool: (compile|link)' distro/buildd-logs.txt | less",
+          "syntaxPowershell": "Select-String -Path .\\<build-log> -Pattern '<configure-hook-marker>|<tool>: (<step-a>|<step-b>)'",
           "powershell": "Select-String -Path .\\distro\\buildd-logs.txt -Pattern 'config.status: executing|libtool: (compile|link)'",
           "explain": "Every configure hook and every compiled and linked object, for both builds. An object that is linked but never compiled came from somewhere else."
         }
@@ -633,42 +698,54 @@
         {
           "id": "git-clone",
           "title": "Clone the bundle",
+          "syntax": "git clone <bundle-file> <dir> && cd <dir>",
           "command": "git clone repo/zfold.bundle zfold && cd zfold",
+          "syntaxPowershell": "git clone <bundle-file> <dir>; cd <dir>",
           "powershell": "git clone repo\\zfold.bundle zfold; cd zfold",
           "explain": "Optional: `repo/git-log.txt` has the same history as text."
         },
         {
           "id": "git-log-oneline",
           "title": "History at a glance",
+          "syntax": "git log --oneline --decorate --all | head -<n>",
           "command": "git log --oneline --decorate --all | head -40",
+          "syntaxPowershell": "git log --oneline --decorate --all | Select-Object -First <n>",
           "powershell": "git log --oneline --decorate --all | Select-Object -First 40",
           "explain": "Tags show up as `(tag: ...)`."
         },
         {
           "id": "git-shortlog",
           "title": "Who commits?",
+          "syntax": "git shortlog -<flags> --all",
           "command": "git shortlog -sne --all",
+          "syntaxPowershell": "git shortlog -<flags> --all",
           "powershell": "git shortlog -sne --all",
           "explain": "Commit counts per author and e-mail."
         },
         {
           "id": "git-file-history",
           "title": "History of a directory",
+          "syntax": "git log --format='<format>' --date=<date-style> --stat -- <dir>",
           "command": "git log --format='%h %ad %an %s' --date=iso --stat -- tests/files/",
+          "syntaxPowershell": "git log --format='<format>' --date=<date-style> --stat -- <dir>",
           "powershell": "git log --format='%h %ad %an %s' --date=iso --stat -- tests/files/",
           "explain": "Every commit that touched the test files, with the files changed."
         },
         {
           "id": "git-added",
           "title": "When was a file first added?",
+          "syntax": "git log --all --diff-filter=<filter> --format='<format>' --date=<date-style> -- '<path>'",
           "command": "git log --all --diff-filter=A --format='%h %ad %an %s' --date=iso -- 'tests/files/<file>'",
+          "syntaxPowershell": "git log --all --diff-filter=<filter> --format='<format>' --date=<date-style> -- '<path>'",
           "powershell": "git log --all --diff-filter=A --format='%h %ad %an %s' --date=iso -- 'tests/files/<file>'",
           "explain": "`--diff-filter=A` keeps only commits where the file was **added**, not modified."
         },
         {
           "id": "gitlog-text-headers",
           "title": "Same thing without git",
+          "syntax": "grep -nE '^<commit-marker>|^<date-marker>|^<file-header>|^<added-marker>' <git-log-export> | less",
           "command": "grep -nE '^commit |^Date: |^diff --git |^new file mode' repo/git-log.txt | less",
+          "syntaxPowershell": "Select-String -Path .\\<git-log-export> -Pattern '^<commit-marker>|^<date-marker>|^<file-header>|^<added-marker>'",
           "powershell": "Select-String -Path .\\repo\\git-log.txt -Pattern '^commit |^Date: |^diff --git |^new file mode'",
           "explain": "Commit headers, file headers and `new file mode` markers from the text export, with line numbers. An added file shows `new file mode` right after its `diff --git` line."
         }
@@ -680,42 +757,54 @@
         {
           "id": "perf-grep-dso",
           "title": "Where does a library show up?",
+          "syntax": "grep -n '<library>' <report-before> <report-after>",
           "command": "grep -n 'libzfold' perf/perf-report-before.txt perf/perf-report-after.txt",
+          "syntaxPowershell": "Select-String -Path .\\<report-glob> -Pattern '<library>'",
           "powershell": "Select-String -Path .\\perf\\perf-report-*.txt -Pattern 'libzfold'",
           "explain": "Compare how much sshd time a library gets before and after."
         },
         {
           "id": "perf-callchain",
           "title": "Read a call chain",
+          "syntax": "sed -n '/<symbol>$/,/<next-entry-regex>/p' <perf-report>",
           "command": "sed -n '/ssh_rsa_verify$/,/^    [0-9]/p' perf/perf-report-after.txt",
+          "syntaxPowershell": "$on = $false\nforeach ($l in Get-Content .\\<perf-report>) { if ($l -match '<symbol>$') { $on = $true }; if ($on) { $l }; if ($on -and $l -match '<next-entry-regex>' -and $l -notmatch '<symbol>') { break } }",
           "powershell": "$on = $false\nforeach ($l in Get-Content .\\perf\\perf-report-after.txt) { if ($l -match 'ssh_rsa_verify$') { $on = $true }; if ($on) { $l }; if ($on -and $l -match '^\\s+[0-9.]+%\\s+[0-9.]+%' -and $l -notmatch 'ssh_rsa_verify') { break } }",
           "explain": "Prints the call chain under sshd's RSA verify code in the after profile. Raw hex frames are code without symbols."
         },
         {
           "id": "maps-range",
           "title": "Library address ranges",
+          "syntax": "grep -E '<address-line-regex>' <gdb-audit-file>",
           "command": "grep -E '^ +0x' perf/gdb-got-audit.txt",
+          "syntaxPowershell": "Select-String -Path .\\<gdb-audit-file> -Pattern '<address-line-regex>'",
           "powershell": "Select-String -Path .\\perf\\gdb-got-audit.txt -Pattern '^ +0x'",
           "explain": "Each line: start, end, size, offset, permissions, file. An address belongs to a library if start <= address < end."
         },
         {
           "id": "got-in-range",
           "title": "GOT slots that point into a range",
+          "syntax": "lo=<start>; hi=<end>   # one library's range\nawk '$1 ~ /<hex-regex>/ && NF == <n-fields>' <gdb-audit-file> | while read slot name target; do\n  (( target <cmp> lo && target <cmp> hi )) && echo \"$name -> $target\"\ndone",
           "command": "lo=0x7f0000000000; hi=0x7f0000010000   # paste one library's Start and End\nawk '$1 ~ /^0x/ && NF == 3' perf/gdb-got-audit.txt | while read slot name target; do\n  (( target >= lo && target < hi )) && echo \"$name -> $target\"\ndone",
+          "syntaxPowershell": "$lo = [Convert]::ToInt64('<start>', 16); $hi = [Convert]::ToInt64('<end>', 16)\nGet-Content .\\<gdb-audit-file> | Where-Object { $_ -match '<slot-line-regex>' } | ForEach-Object {\n  $f = $_ -split '\\s+'; $t = [Convert]::ToInt64($f[<index>], 16); if ($t <cmp> $lo -and $t <cmp> $hi) { \"$($f[<index>]) -> $($f[<index>])\" } }",
           "powershell": "$lo = [Convert]::ToInt64('0x7f0000000000', 16); $hi = [Convert]::ToInt64('0x7f0000010000', 16)\nGet-Content .\\perf\\gdb-got-audit.txt | Where-Object { $_ -match '^0x[0-9a-f]+\\s+\\S+\\s+0x' } | ForEach-Object {\n  $f = $_ -split '\\s+'; $t = [Convert]::ToInt64($f[2], 16); if ($t -ge $lo -and $t -lt $hi) { \"$($f[1]) -> $($f[2])\" } }",
           "explain": "Paste a library's start and end, and it prints every imported function whose GOT slot points inside. bash arithmetic understands `0x` hex."
         },
         {
           "id": "hex-math",
           "title": "Hex arithmetic",
+          "syntax": "printf '<format>' $(( <address> - <library-start> ))",
           "command": "printf '0x%x\\n' $(( 0x7f0000012340 - 0x7f0000000000 ))",
+          "syntaxPowershell": "'<format>' -f ([Convert]::ToInt64('<address>', 16) - [Convert]::ToInt64('<library-start>', 16))",
           "powershell": "'0x{0:x}' -f ([Convert]::ToInt64('0x7f0000012340', 16) - [Convert]::ToInt64('0x7f0000000000', 16))",
           "explain": "Absolute address minus library start = offset inside the library, which is how perf, nm and objdump number things."
         },
         {
           "id": "nm-sections",
           "title": "Compare symbol tables",
+          "syntax": "grep -n '<section-marker>' <nm-listing>; grep -n '<offset>' <listing-glob> <report-glob>",
           "command": "grep -n '=====' binary/nm-libzfold.txt; grep -n '<offset>' binary/*.txt perf/*.txt",
+          "syntaxPowershell": "Select-String -Path .\\<nm-listing> -Pattern '<section-marker>'\nSelect-String -Path .\\<listing-glob>, .\\<report-glob> -Pattern '<offset>'",
           "powershell": "Select-String -Path .\\binary\\nm-libzfold.txt -Pattern '====='\nSelect-String -Path .\\binary\\*.txt, .\\perf\\*.txt -Pattern '<offset>'",
           "explain": "Find the sections, then search every listing for an offset you found elsewhere."
         }

@@ -426,6 +426,86 @@ html.admin-board-open { overflow: hidden; }
 }
 .admin-table tr.is-first td { background: var(--amber-soft); }
 
+/* ---- round 2: admin session, invite code, temp password, event, audit ---- */
+.admin-login-alt { margin: 16px 0 0; }
+.admin-login-alt a { color: var(--amber); }
+.admin-session-tag {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+  color: var(--green);
+  background: var(--green-soft);
+  border: 1px solid var(--green);
+  white-space: nowrap;
+}
+.pending-panel .admin-table-head { margin-bottom: 14px; }
+.pending-approve-all:empty { display: none; }
+.pending-approve-all .confirm-prompt { display: inline-flex; gap: 6px; }
+.pending-status { margin: -6px 0 10px; color: var(--green); }
+.pending-status[hidden] { display: none; }
+.acct-detail-meta { margin: 8px 0 0; }
+
+.invite-current { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+.invite-current p { margin: 0; }
+.invite-code { font-size: 1.15rem; letter-spacing: 0.08em; }
+.invite-form { display: grid; gap: 6px; }
+.invite-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.invite-input { width: 240px; font-family: var(--mono); }
+.invite-msg { margin: 8px 0 0; color: var(--green); }
+.invite-msg.sched-invalid { color: var(--red); }
+.invite-msg[hidden] { display: none; }
+
+.admin-dialog {
+  max-width: min(520px, calc(100vw - 32px));
+  width: 100%;
+  padding: 20px 22px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.admin-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+.admin-dialog p { margin: 0 0 12px; }
+.admin-pw { display: flex; justify-content: flex-start; margin: 4px 0 16px; }
+.admin-pw-value { user-select: all; letter-spacing: 0.04em; }
+.admin-dialog-actions { display: flex; justify-content: flex-end; }
+
+.adm-ev-body { gap: 20px; }
+.adm-ev-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0; font-size: 1.05rem; }
+.adm-ev-clock { margin: 6px 0 0; }
+.adm-ev-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); margin-inline-end: 4px; }
+.adm-ev-dot.is-live { background: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
+.adm-ev-dot.is-soon { background: var(--admin-blue); }
+.adm-ev-dot.is-over { background: var(--red); }
+.adm-ev-quick { display: flex; flex-wrap: wrap; gap: 8px; }
+.adm-ev-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ev-time-row { display: flex; gap: 6px; align-items: center; }
+.ev-time-row .admin-input { flex: 1 1 0; min-width: 0; width: 100%; }
+.adm-ev-form .sched-field { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.ev-time-row { min-width: 0; }
+.ev-tz { grid-column: 1 / -1; margin: 0; }
+.adm-ev-ann { display: grid; gap: 8px; }
+.ev-ann { width: 100%; resize: vertical; min-height: 4.5em; }
+.adm-ev-ann-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+.case-status.is-solved { color: var(--green); font-weight: 600; }
+.case-status.is-revealed { color: var(--amber); }
+.case-status.is-active { color: var(--admin-blue); }
+.case-status.is-locked { color: var(--muted); }
+.audit-target { overflow-wrap: anywhere; }
+.via-pill {
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.via-pill.is-session { color: var(--admin-blue); border-color: var(--admin-blue); }
+
 /* ---- responsive ---- */
 @media (max-width: 900px) {
   .admin-grid { grid-template-columns: minmax(0, 1fr); }
@@ -447,6 +527,9 @@ html.admin-board-open { overflow: hidden; }
   .cal-select { font-size: 0.7rem; padding: 3px 1px; }
   .pending-item { grid-template-columns: minmax(0, 1fr); }
   .pending-actions { grid-column: 1; grid-row: auto; }
+  .adm-ev-form { grid-template-columns: minmax(0, 1fr); }
+  .invite-input { width: 100%; flex: 1 1 100%; }
+  .admin-pw .admin-share-url { font-size: 1.1rem; }
 }
 
 /* ---- RTL (Hebrew) ----------------------------------------------------------

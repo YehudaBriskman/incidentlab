@@ -130,3 +130,28 @@ it yourself end to end, then schedule it in `#/admin`.
 `docs/CASE_BIBLE.md`, `docs/cases/`, `docs/INSTRUCTOR.md`, `solutions/`, `content-sealed/` and `build/truth/` contain the answers. Keep this
 repository private, or remove those paths before sharing it with players. Only `site/dist` should ever be
 public, plus the function bundle that `deploy.sh` uploads.
+
+## CI and end-to-end test
+
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `dev` and `main`: it runs
+`./scripts/build-all.sh` (generators, answer keys, packaging, every solver, site build, server tests), then starts
+`tests/local-server.ts` and runs the Playwright tests in `tests/e2e/` against it. On failure, the Playwright
+report, screenshots/traces and the server log are uploaded as the `playwright-report` artifact.
+
+- `tests/e2e/walkthrough.spec.ts`: a browser walkthrough: sign up, admin approval (via the API), today's incident,
+  setup, an optional paid command reveal, a wrong and then a correct Stage 1 answer (from `build/truth/all-answers.json`),
+  `#/me` score, sign out, then `admin` sign-in and the dashboard. UI selectors live in the `ui` object at the top.
+- `tests/e2e/api.spec.ts`: API-only checks (reserved username 409, public leaderboard, admin routes need auth).
+
+Run locally (after `./scripts/build-all.sh` once, so `build/truth/` exists):
+
+```bash
+cd site && npx vite build && cd ..                      # build site/dist
+node --experimental-strip-types tests/local-server.ts   # http://localhost:8888, in-memory store
+# in another terminal:
+cd tests/e2e && npm install
+CHROMIUM_PATH=/usr/bin/chromium npx playwright test     # or: npx playwright install chromium, then npx playwright test
+```
+
+`E2E_BASE_URL` points the tests at another server, and `ADMIN_KEY` must match that server's key
+(default `local-admin-key-0123456789`). The walkthrough changes the server's schedule, so don't point it at production.

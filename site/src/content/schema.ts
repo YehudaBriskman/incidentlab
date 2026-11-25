@@ -4,7 +4,9 @@ import { z } from "zod";
 
 export const HintSchema = z.object({
   cost: z.number().int().nonnegative(), // points deducted when revealed
-  text: z.string(),                     // markdown
+  // markdown. Authored in the JSON, but STRIPPED from the browser bundle (vite.config.ts) and served by
+  // the API only after the hint is paid for.
+  text: z.string().optional(),
 });
 
 export const StageSchema = z.object({
@@ -23,15 +25,21 @@ export const QuestionSchema = z.object({
   answerFormat: z.string(),             // e.g. "HH:MM:SS (UTC)"
   placeholder: z.string(),
   points: z.number().int().positive(),
+  targetMinutes: z.number().positive().optional(), // time-bonus target for this stage (default estMinutes / 6)
   hints: z.array(HintSchema).min(1).max(4), // ordered, revealed one at a time
   successNote: z.string(),              // markdown shown after correct answer ("why this matters")
 });
 
 export const ToolItemSchema = z.object({
   id: z.string().optional(),            // referenced by QuestionSchema.stage.tools
-  powershell: z.string().optional(),    // Windows PowerShell equivalent (no installs needed)
   title: z.string(),
-  command: z.string(),                  // shown in a copyable code block
+  // Free to view: the command's shape with <placeholders> instead of the concrete pattern/field/file.
+  syntax: z.string().optional(),
+  syntaxPowershell: z.string().optional(),
+  // The runnable commands. Authored in the JSON, STRIPPED from the browser bundle, and served by the
+  // API only after the player pays (5 points) or finishes the case.
+  command: z.string().optional(),
+  powershell: z.string().optional(),    // Windows PowerShell equivalent (no installs needed)
   explain: z.string(),                  // markdown
 });
 

@@ -1,5 +1,7 @@
 // Instructor dashboard (#/admin). All API data (usernames above all) is rendered via textContent / attributes only — never innerHTML.
-// Tabs: Accounts (approve sign-ups, per-user stats) · Live (one case, polled) · Schedule (incident of the day) · Stats (per case).
+// Tabs: Accounts (approve sign-ups, per-user stats, invite code, CSV) · Live (one case, polled) · Event (window, freeze,
+// announcement) · Schedule (incident of the day) · Stats (per case) · Audit log.
+// Auth: the `admin` session cookie (signed in on #/login with the ADMIN_KEY) or an admin key typed into the gate.
 import "../admin.css";
 import { T } from "../i18n/strings-tools";
 import { getLang } from "../i18n/i18n";
@@ -7,10 +9,14 @@ import {
   QUESTION_ORDER,
   type AccountStatus,
   type AdminProgress,
+  type AuditEntry,
   type CaseStats,
   type CaseSummary,
+  type LiveEvent,
   type QuestionId,
   type Schedule,
+  type ScoreBreakdown,
+  type Settings,
   type StageStatus,
   type TodayResponse,
   type UserStats,
@@ -19,20 +25,31 @@ import { cases, getCase } from "../content/load";
 import { copyButton, h, setChildren, type Child } from "../lib/dom";
 import {
   AdminApiError,
+  approveAll,
   clearAdminKey,
   deleteAccount,
   fetchAccounts,
+  fetchAudit,
   fetchCaseStats,
+  fetchEvent,
+  fetchExportCsv,
+  fetchMe,
   fetchProgress,
   fetchSchedule,
+  fetchSettings,
   fetchToday,
   getAdminKey,
+  logoutSession,
+  resetAccountPassword,
   resetProgress,
   restartPlayerCase,
+  saveEvent,
   saveSchedule,
+  saveSettings,
   setAccountStatus,
   setAdminKey,
   type AdminAccountsResult,
+  type AdminEventResult,
   type AdminProgressResult,
   type AdminStatsResult,
 } from "../lib/admin-api";
@@ -44,15 +61,19 @@ const STUCK_ALERT_MIN = 15;
 const TAB_STORAGE = "il.adminTab";
 const DEFAULT_TIMEZONE = "Asia/Jerusalem";
 
-type TabId = "accounts" | "live" | "schedule" | "stats";
-const TABS: readonly TabId[] = ["accounts", "live", "schedule", "stats"];
-const isTabId = (v: string | null): v is TabId => v === "accounts" || v === "live" || v === "schedule" || v === "stats";
+type TabId = "accounts" | "live" | "event" | "schedule" | "stats" | "audit";
+const TABS: readonly TabId[] = ["accounts", "live", "event", "schedule", "stats", "audit"];
+const isTabId = (v: string | null): v is TabId => TABS.some((t) => t === v);
+const AUDIT_LIMIT = 100;
+const EVENT_QUICK_MINUTES = 60;
+const INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O, 1/I/L: easy to read aloud and type
 
 type StageKey = "setup" | QuestionId;
 type LiveSortKey = "score" | "progress" | "name" | "stuck";
 type AcctSortKey = "rank" | "newest" | "seen" | "name";
 type AcctFilter = "all" | AccountStatus;
-type ConfirmKind = "delete" | "restart";
+type ConfirmKind = "delete" | "restart" | "reset-password" | "approve-all" | "invite-clear";
+type AuthMode = "key" | "session";
 
 // ---- content lookups (titles come from the bundled case content, ids from the server) ----
 
@@ -214,15 +235,18 @@ function stageTooltip(p: AdminProgress, stage: StageKey, now: number): string {
   const start = ms(sp.startedAt);
   const end = ms(sp.finishedAt) ?? now;
   const spent = start !== null ? formatDuration(end - start) : "—";
-  return [
+  const lines = [
     `${stage.toUpperCase()} ${title}: ${T().admStatus(status)}`,
     T().admWrongAttempts(sp.wrongAttempts),
     T().admHintsUsed(sp.hintsRevealed),
+    T().admCommandsUsed(sp.commandsRevealed),
     T().admTime(spent),
-    status === "solved" ? T().admPoints(sp.points) : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  ];
+  if (status === "solved") {
+    lines.push(T().admPoints(sp.points));
+    if (sp.breakdown) lines.push(...breakdownLines(sp.breakdown).map((l) => `  ${l}`));
+  }
+  return lines.join("\n");
 }
 
 function sortPlayers(players: readonly AdminProgress[], key: LiveSortKey, stages: readonly StageKey[]): AdminProgress[] {
@@ -301,6 +325,75 @@ function scheduleSig(s: Schedule): string {
   return JSON.stringify([s.timezone, s.defaultCaseId, s.lockToToday, days]);
 }
 
+// ---- event (datetime-local <-> ISO UTC) -------------------------------------------------
+
+/** ISO instant -> "YYYY-MM-DDTHH:mm" in this browser's local time (what <input type="datetime-local"> expects). */
+function isoToLocalInput(iso: string | null): string {
+  const t = ms(iso);
+  if (t === null) return "";
+  const d = new Date(t);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** "YYYY-MM-DDTHH:mm" (local) -> ISO UTC, or null when empty/invalid. */
+function localInputToIso(value: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(value)) return null;
+  const d = new Date(value); // no offset in the string: parsed as local time
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function browserTimeZone(): { name: string; offset: string } {
+  let name = "local";
+  try {
+    name = Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
+  } catch {
+    // keep "local"
+  }
+  const mins = -new Date().getTimezoneOffset();
+  const sign = mins >= 0 ? "+" : "−";
+  const abs = Math.abs(mins);
+  return { name, offset: `UTC${sign}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}` };
+}
+
+const cloneEvent = (e: LiveEvent): LiveEvent => ({ ...e, announcement: e.announcement ? { ...e.announcement } : null });
+const eventSig = (e: LiveEvent): string =>
+  JSON.stringify([e.name.trim(), e.startsAt, e.endsAt, e.freezeAt, e.enforceWindow, e.announcement?.text.trim() ?? "", e.announcement?.level ?? null]);
+
+/** Turns the form draft into what the server expects: trimmed name, empty announcement -> null. */
+function normalizeEvent(e: LiveEvent): LiveEvent {
+  const text = e.announcement?.text.trim() ?? "";
+  return { ...e, name: e.name.trim(), announcement: text ? { text, level: e.announcement?.level ?? "info" } : null };
+}
+
+function randomInviteCode(): string {
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  const chars = [...bytes].map((b) => INVITE_ALPHABET[b % INVITE_ALPHABET.length] ?? "X");
+  return `${chars.slice(0, 4).join("")}-${chars.slice(4).join("")}`;
+}
+
+// ---- scoring breakdown -------------------------------------------------------------------
+
+const signed = (n: number): string => (n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : "0");
+
+function breakdownLines(b: ScoreBreakdown): string[] {
+  const lines = [`${T().admBdBase} ${b.base}`];
+  if (b.hints) lines.push(`${T().admBdHints} ${signed(b.hints)}`);
+  if (b.commands) lines.push(`${T().admBdCommands} ${signed(b.commands)}`);
+  if (b.wrong) lines.push(`${T().admBdWrong} ${signed(b.wrong)}`);
+  if (b.time) lines.push(`${T().admBdTime} ${signed(b.time)}`);
+  if (b.clean) lines.push(`${T().admBdClean} ${signed(b.clean)}`);
+  if (b.firstBlood) lines.push(`${T().admBdFirstBlood} ${signed(b.firstBlood)}`);
+  lines.push(`${T().admBdTotal} ${b.total}`);
+  lines.push(T().admBdSolve(formatSeconds(b.solveSeconds), formatSeconds(b.targetSeconds)));
+  return lines;
+}
+
+/** Commands paid for on this case (summed over stages, like the server's UserStats). */
+function commandsUsed(p: AdminProgress): number {
+  return QUESTION_ORDER.reduce((sum, q) => sum + (p.stages[q]?.commandsRevealed ?? 0), 0);
+}
+
 // ---- keyed table rows (keep focus/scroll across 5s refreshes) -------------------------
 
 type RowEntry = { rows: HTMLTableRowElement[]; sig: string };
@@ -365,6 +458,7 @@ export function renderAdmin(root: HTMLElement): void {
   let disposed = false;
 
   const state = {
+    auth: null as AuthMode | null,
     tab: readStoredTab(),
     accounts: null as AdminAccountsResult | null,
     today: null as TodayResponse | null,
@@ -386,6 +480,11 @@ export function renderAdmin(root: HTMLElement): void {
     acctFilter: "all" as AcctFilter,
     acctSearch: "",
     expanded: new Set<string>(),
+    tempPassword: null as { username: string; password: string } | null,
+    approvedMsg: null as string | null,
+    exporting: false,
+    // live tab: players whose score breakdown is open
+    liveExpanded: new Set<string>(),
     // shared: two-step confirmations and in-flight row actions
     confirm: null as { kind: ConfirmKind; id: string } | null,
     busy: new Set<string>(),
@@ -399,6 +498,29 @@ export function renderAdmin(root: HTMLElement): void {
       msg: null as string | null,
       month: null as { y: number; m: number } | null,
     },
+    // class invite code (Accounts tab)
+    settings: {
+      server: null as Settings | null,
+      input: "",
+      saving: false,
+      error: null as string | null,
+      msg: null as string | null,
+      /** bumped by every save: a poll that started earlier must not overwrite the saved value */
+      rev: 0,
+    },
+    // event tab
+    event: {
+      server: null as LiveEvent | null,
+      draft: null as LiveEvent | null,
+      /** serverTime - Date.now() at the last response */
+      offsetMs: 0,
+      rev: 0,
+      loading: false,
+      saving: false,
+      error: null as string | null,
+      msg: null as string | null,
+    },
+    audit: null as AuditEntry[] | null,
   };
 
   const stopTimers = (): void => {
@@ -425,7 +547,7 @@ export function renderAdmin(root: HTMLElement): void {
     if (!location.hash.startsWith("#/admin")) dispose();
   }
   function onKeyDown(e: KeyboardEvent): void {
-    if (e.key === "Escape" && state.leaderboard) {
+    if (e.key === "Escape" && state.leaderboard && !pwDialog.open) {
       state.leaderboard = false;
       renderLeaderboard();
     }
@@ -439,7 +561,7 @@ export function renderAdmin(root: HTMLElement): void {
     }
   }
   function onBeforeUnload(e: BeforeUnloadEvent): void {
-    if (scheduleDirty()) e.preventDefault();
+    if (scheduleDirty() || eventDirty()) e.preventDefault();
   }
   window.addEventListener("hashchange", onHashChange);
   window.addEventListener("beforeunload", onBeforeUnload);
@@ -451,6 +573,7 @@ export function renderAdmin(root: HTMLElement): void {
   function showLogin(error: string | null): void {
     stopTimers();
     state.accounts = null;
+    state.auth = null;
     const input = h("input", {
       type: "password",
       id: "admin-key",
@@ -478,6 +601,7 @@ export function renderAdmin(root: HTMLElement): void {
       setAdminKey(key);
       submit.disabled = true;
       submit.textContent = T().admChecking;
+      state.auth = "key";
       void start();
     });
     setChildren(
@@ -489,6 +613,15 @@ export function renderAdmin(root: HTMLElement): void {
         h("h1", { class: "admin-title" }, T().admLoginTitle),
         h("p", { class: "muted" }, T().admLoginIntro),
         form,
+        h(
+          "p",
+          { class: "muted small admin-login-alt" },
+          T().admOrSignInBefore,
+          h("code", {}, "admin"),
+          T().admOrSignInAfter,
+          h("a", { href: "#/login" }, T().admSignInPage),
+          ".",
+        ),
       ),
     );
     input.focus();
@@ -498,8 +631,9 @@ export function renderAdmin(root: HTMLElement): void {
   function handleAuthError(err: unknown): boolean {
     if (!(err instanceof AdminApiError)) return false;
     if (err.status === 401) {
+      const wasSession = state.auth === "session";
       clearAdminKey();
-      showLogin(T().admKeyRejected);
+      showLogin(wasSession ? T().admSessionExpired : T().admKeyRejected);
       return true;
     }
     if (err.status === 503) {
@@ -508,12 +642,6 @@ export function renderAdmin(root: HTMLElement): void {
       return true;
     }
     return false;
-  }
-
-  function requireKey(): string | null {
-    const key = getAdminKey();
-    if (!key) showLogin(null);
-    return key;
   }
 
   function showActionError(err: unknown): void {
@@ -551,12 +679,39 @@ export function renderAdmin(root: HTMLElement): void {
     renderLeaderboard();
   });
   logoutBtn.addEventListener("click", () => {
+    const wasSession = state.auth === "session";
     clearAdminKey();
-    showLogin(null);
+    if (!wasSession) {
+      showLogin(null);
+      return;
+    }
+    logoutBtn.disabled = true;
+    logoutSession()
+      .catch(() => {
+        // the cookie may already be gone; either way the gate comes back
+      })
+      .finally(() => {
+        logoutBtn.disabled = false;
+        showLogin(null);
+      });
   });
 
-  const tabLabel = (tab: TabId): string =>
-    tab === "accounts" ? T().admTabAccounts : tab === "live" ? T().admTabLive : tab === "schedule" ? T().admTabSchedule : T().admTabStats;
+  const tabLabel = (tab: TabId): string => {
+    switch (tab) {
+      case "accounts":
+        return T().admTabAccounts;
+      case "live":
+        return T().admTabLive;
+      case "event":
+        return T().admTabEvent;
+      case "schedule":
+        return T().admTabSchedule;
+      case "stats":
+        return T().admTabStats;
+      case "audit":
+        return T().admTabAudit;
+    }
+  };
 
   const pendingTabBadge = h("span", { class: "tab-badge" });
   pendingTabBadge.hidden = true;
@@ -611,6 +766,7 @@ export function renderAdmin(root: HTMLElement): void {
     syncTabs();
     renderActiveTab();
     if (tab === "schedule" && !state.schedule.draft) void loadSchedule();
+    if (tab === "event" && !state.event.draft) void loadEvent();
     void load();
   }
 
@@ -626,16 +782,27 @@ export function renderAdmin(root: HTMLElement): void {
           h("p", { class: "eyebrow" }, T().admInstructorLive),
           h("h1", { class: "admin-title" }, T().admClassDashboard),
         ),
-        h("div", { class: "admin-head-actions" }, updatedEl, pauseBtn, refreshBtn, boardBtn, logoutBtn),
+        h(
+          "div",
+          { class: "admin-head-actions" },
+          state.auth === "session" ? h("span", { class: "admin-session-tag" }, T().admSignedInAsAdmin) : null,
+          updatedEl,
+          pauseBtn,
+          refreshBtn,
+          boardBtn,
+          logoutBtn,
+        ),
       ),
       tabList,
       bannerEl,
       [...tabPanels.values()],
       leaderboardEl,
+      pwDialog,
     );
     buildAccountsPanel();
     buildLivePanel();
     buildStatsPanel();
+    buildAuditPanel();
     pauseBtn.textContent = state.paused ? T().admResume : T().admPause;
     syncTabs();
   }
@@ -677,6 +844,7 @@ export function renderAdmin(root: HTMLElement): void {
     ariaLabel: string;
     confirmAria: string;
     busyLabel: string;
+    buttonClass?: string;
     run: () => Promise<void>;
     rerender: () => void;
   }): HTMLElement {
@@ -687,7 +855,7 @@ export function renderAdmin(root: HTMLElement): void {
         "button",
         {
           type: "button",
-          class: "btn btn-ghost btn-sm",
+          class: opts.buttonClass ?? "btn btn-ghost btn-sm",
           "aria-label": opts.ariaLabel,
           onclick: () => {
             state.confirm = { kind: opts.kind, id: opts.id };
@@ -744,6 +912,8 @@ export function renderAdmin(root: HTMLElement): void {
 
   const acctTilesEl = h("div", { class: "admin-tiles" });
   const pendingEl = h("div", { class: "pending-wrap" });
+  const approveAllEl = h("div", { class: "pending-approve-all" });
+  const pendingStatusEl = h("p", { class: "muted small pending-status", role: "status" });
   const pendingCountEl = h("span", { class: "count-badge" });
   const acctCountEl = h("span", { class: "muted small" });
   const acctTableEl = h("div", { class: "admin-table-wrap" });
@@ -790,7 +960,7 @@ export function renderAdmin(root: HTMLElement): void {
     }
   });
 
-  const ACCT_COLS = 11;
+  const ACCT_COLS = 14;
   const acctTbody = h("tbody", {});
   const acctTable = h(
     "table",
@@ -811,12 +981,168 @@ export function renderAdmin(root: HTMLElement): void {
         th(T().admColAccuracy, "num"),
         th(T().admColHints, "num"),
         th(T().admColWrong, "num"),
+        th(T().admColCommands, "num"),
+        th(T().admColBadges, "num"),
+        th(T().admColStreak, "num"),
         h("th", { scope: "col" }, h("span", { class: "visually-hidden" }, T().admColActions)),
       ),
     ),
     acctTbody,
   );
   const acctRowCache = new Map<string, RowEntry>();
+
+  // ---- CSV export ----
+  const exportBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm", title: T().admExportHint }, T().admExportCsv);
+  exportBtn.addEventListener("click", () => void exportCsv());
+
+  async function exportCsv(): Promise<void> {
+    if (state.exporting) return;
+    state.exporting = true;
+    exportBtn.disabled = true;
+    exportBtn.textContent = T().admExporting;
+    try {
+      const { blob, filename } = await fetchExportCsv();
+      const url = URL.createObjectURL(blob);
+      const a = h("a", { href: url, download: filename, hidden: true });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err: unknown) {
+      if (!handleAuthError(err)) {
+        state.banner = T().admExportFailed(errMessage(err));
+        renderBanner();
+      }
+    } finally {
+      state.exporting = false;
+      exportBtn.disabled = false;
+      exportBtn.textContent = T().admExportCsv;
+    }
+  }
+
+  // ---- one-time temporary password (native modal dialog: focus trap + Esc for free) ----
+  const pwDialog = h("dialog", { class: "admin-dialog", "aria-labelledby": "admin-pw-title" });
+  pwDialog.addEventListener("close", () => {
+    // The password is shown once: drop it from the DOM and from memory.
+    state.tempPassword = null;
+    pwDialog.replaceChildren();
+  });
+
+  function showTempPassword(username: string, password: string): void {
+    state.tempPassword = { username, password };
+    const done = h("button", { type: "button", class: "btn btn-primary", onclick: () => pwDialog.close() }, T().admDone);
+    setChildren(
+      pwDialog,
+      h("h2", { class: "admin-h2", id: "admin-pw-title" }, T().admTempPwTitle(username)),
+      h("p", { class: "muted" }, T().admTempPwHelp),
+      h("div", { class: "admin-share admin-pw" }, h("code", { class: "admin-share-url admin-pw-value" }, password), copyButton(() => password, T().admCopyPassword)),
+      h("div", { class: "admin-dialog-actions" }, done),
+    );
+    if (!pwDialog.open) pwDialog.showModal();
+    done.focus();
+  }
+
+  // ---- class invite code ----
+  const inviteCurrentEl = h("div", { class: "invite-current" });
+  const inviteInput = h("input", {
+    type: "text",
+    id: "admin-invite",
+    class: "admin-input invite-input",
+    placeholder: T().admInvitePh,
+    autocomplete: "off",
+    spellcheck: "false",
+    maxlength: 40,
+    dir: "ltr",
+    "aria-describedby": "admin-invite-help",
+  });
+  inviteInput.addEventListener("input", () => {
+    state.settings.input = inviteInput.value;
+    state.settings.msg = null;
+    state.settings.error = null;
+    renderInvite();
+  });
+  const inviteSetBtn = h("button", { type: "submit", class: "btn btn-primary btn-sm" }, T().admInviteSave);
+  const inviteGenBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admInviteGenerate);
+  const inviteClearBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admInviteClear);
+  const inviteMsgEl = h("p", { class: "small invite-msg", role: "status" });
+  const inviteForm = h(
+    "form",
+    { class: "invite-form" },
+    h("label", { class: "admin-label", for: "admin-invite" }, T().admInviteInputLabel),
+    h("div", { class: "invite-row" }, inviteInput, inviteSetBtn, inviteGenBtn, inviteClearBtn),
+  );
+  inviteForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const code = state.settings.input.trim();
+    if (code.length < 4 || code.length > 40) {
+      state.settings.error = T().admInviteInvalid;
+      renderInvite();
+      inviteInput.focus();
+      return;
+    }
+    void storeInvite(code);
+  });
+  inviteGenBtn.addEventListener("click", () => {
+    inviteInput.value = randomInviteCode();
+    state.settings.input = inviteInput.value;
+    state.settings.msg = null;
+    state.settings.error = null;
+    renderInvite();
+    inviteInput.focus();
+    inviteInput.select();
+  });
+  inviteClearBtn.addEventListener("click", () => void storeInvite(null));
+
+  async function storeInvite(code: string | null): Promise<void> {
+    const st = state.settings;
+    st.rev += 1;
+    st.saving = true;
+    st.error = null;
+    st.msg = null;
+    renderInvite();
+    try {
+      st.server = await saveSettings({ inviteCode: code });
+      if (disposed) return;
+      st.msg = code === null ? T().admInviteCleared : T().admInviteSaved;
+      st.input = "";
+      inviteInput.value = "";
+    } catch (err: unknown) {
+      if (disposed || handleAuthError(err)) return;
+      st.error = T().admSaveFailed(errMessage(err));
+    } finally {
+      st.saving = false;
+    }
+    renderInvite();
+  }
+
+  let inviteCurrentSig = "";
+  function renderInvite(): void {
+    const st = state.settings;
+    const code = st.server?.inviteCode ?? null;
+    const sig = JSON.stringify([getLang(), st.server === null, code]);
+    if (sig !== inviteCurrentSig) {
+      inviteCurrentSig = sig;
+      if (st.server === null) setChildren(inviteCurrentEl, h("p", { class: "muted small" }, T().admLoading));
+      else if (code === null) setChildren(inviteCurrentEl, h("p", { class: "muted invite-off" }, T().admInviteOff));
+      else {
+        setChildren(
+          inviteCurrentEl,
+          h("span", { class: "admin-label" }, T().admInviteCurrent),
+          h("code", { class: "admin-share-url invite-code" }, code),
+          copyButton(() => code, T().admCopyCode),
+        );
+      }
+    }
+    if (inviteInput.value !== st.input) inviteInput.value = st.input;
+    const trimmed = st.input.trim();
+    inviteSetBtn.disabled = st.saving || trimmed === "";
+    inviteGenBtn.disabled = st.saving;
+    inviteClearBtn.disabled = st.saving || code === null;
+    inviteInput.setAttribute("aria-invalid", st.error !== null && st.error === T().admInviteInvalid ? "true" : "false");
+    inviteMsgEl.textContent = st.error ?? st.msg ?? "";
+    inviteMsgEl.className = `small invite-msg${st.error ? " sched-invalid" : ""}`;
+    inviteMsgEl.hidden = !st.error && !st.msg;
+  }
 
   function buildAccountsPanel(): void {
     setChildren(
@@ -825,7 +1151,8 @@ export function renderAdmin(root: HTMLElement): void {
       h(
         "section",
         { class: "panel admin-panel pending-panel" },
-        h("h2", { class: "admin-h2" }, T().admPendingTitle, " ", pendingCountEl),
+        h("div", { class: "admin-table-head" }, h("h2", { class: "admin-h2" }, T().admPendingTitle, " ", pendingCountEl), approveAllEl),
+        pendingStatusEl,
         pendingEl,
       ),
       h(
@@ -835,22 +1162,30 @@ export function renderAdmin(root: HTMLElement): void {
           "div",
           { class: "admin-table-head" },
           h("h2", { class: "admin-h2" }, T().admAccountsTitle, " ", acctCountEl),
-          h("div", { class: "admin-controls" }, acctSearchInput, acctFilterSelect, acctSortSelect),
+          h("div", { class: "admin-controls" }, acctSearchInput, acctFilterSelect, acctSortSelect, exportBtn),
         ),
         h("p", { class: "muted small admin-hint" }, T().admAccountsHint),
         acctTableEl,
       ),
+      h(
+        "section",
+        { class: "panel admin-panel invite-panel" },
+        h("h2", { class: "admin-h2" }, T().admInviteTitle),
+        h("p", { class: "muted small admin-hint", id: "admin-invite-help" }, T().admInviteHelp),
+        inviteCurrentEl,
+        inviteForm,
+        inviteMsgEl,
+      ),
     );
+    renderInvite();
   }
 
   async function changeStatus(account: UserStats, action: "approve" | "reject"): Promise<void> {
-    const key = requireKey();
-    if (!key) return;
     const busyKey = `status:${account.accountId}`;
     state.busy.add(busyKey);
     renderAccounts();
     try {
-      const updated = await setAccountStatus(key, account.accountId, action);
+      const updated = await setAccountStatus(account.accountId, action);
       if (state.accounts) {
         state.accounts = {
           ...state.accounts,
@@ -916,14 +1251,45 @@ export function renderAdmin(root: HTMLElement): void {
     pendingTabBadge.textContent = String(pending.length);
     pendingTabBadge.hidden = pending.length === 0;
     pendingTabBadge.setAttribute("aria-label", T().admPendingBadge(pending.length));
+    pendingStatusEl.textContent = state.approvedMsg ?? "";
+    pendingStatusEl.hidden = state.approvedMsg === null;
     // Rebuild only when something visible changed, so focus on Approve/Reject survives polling.
-    const sig = [getLang(), ...pending.map((a) => `${a.accountId}:${a.username}:${state.busy.has(`status:${a.accountId}`) ? 1 : 0}`)].join("|");
+    const approveAllConfirm = state.confirm?.kind === "approve-all";
+    const sig = [
+      getLang(),
+      approveAllConfirm ? "confirm" : "",
+      state.busy.has("approve-all:all") ? "busy" : "",
+      ...pending.map((a) => `${a.accountId}:${a.username}:${state.busy.has(`status:${a.accountId}`) ? 1 : 0}`),
+    ].join("|");
     if (sig === pendingSig) return;
     pendingSig = sig;
     if (pending.length === 0) {
+      if (approveAllConfirm) state.confirm = null;
+      approveAllEl.replaceChildren();
       setChildren(pendingEl, h("p", { class: "muted admin-empty-small" }, T().admNoPending));
       return;
     }
+    const n = pending.length;
+    setChildren(
+      approveAllEl,
+      twoStep({
+        kind: "approve-all",
+        id: "all",
+        label: T().admApproveAll(n),
+        ariaLabel: T().admApproveAllLabel(n),
+        confirmAria: T().admConfirmApproveAllLabel(n),
+        busyLabel: T().admApproving,
+        buttonClass: "btn btn-primary btn-sm",
+        run: async () => {
+          const approved = await approveAll();
+          state.approvedMsg = T().admApprovedN(approved);
+        },
+        rerender: () => {
+          pendingSig = "";
+          renderPending(state.accounts?.accounts ?? []);
+        },
+      }),
+    );
     setChildren(
       pendingEl,
       h(
@@ -959,7 +1325,9 @@ export function renderAdmin(root: HTMLElement): void {
           th(T().admColSolved, "num"),
           th(T().admColRevealed, "num"),
           th(T().admColHints, "num"),
+          th(T().admColCommands, "num"),
           th(T().admColWrong, "num"),
+          th(T().admColFirstBloods, "num"),
           th(T().admColDuration, "num"),
           th(T().admColStarted),
           th(T().admColFinishedAt),
@@ -974,11 +1342,19 @@ export function renderAdmin(root: HTMLElement): void {
             {},
             h("td", {}, caseTitle(c.caseId)),
             h("td", {}, h("span", { class: `case-status is-${c.status}` }, T().admCaseStatus(c.status))),
-            h("td", { class: "num" }, `${c.score}/${c.maxScore}`),
+            h(
+              "td",
+              { class: "num", title: T().admScoreParTip(c.maxScore) },
+              String(c.score),
+              " ",
+              h("span", { class: "muted small" }, `(${T().admPar(c.maxScore)})`),
+            ),
             h("td", { class: "num" }, String(c.solved)),
             h("td", { class: "num" }, String(c.revealed)),
             h("td", { class: "num" }, String(c.hintsUsed)),
+            h("td", { class: "num" }, String(c.commandsRevealed)),
             h("td", { class: "num" }, String(c.wrongAttempts)),
+            h("td", { class: "num" }, String(c.firstBloods)),
             h("td", { class: "num" }, formatSeconds(c.durationSeconds)),
             h("td", { class: "col-seen" }, formatDateTime(c.startedAt)),
             h("td", { class: "col-seen" }, formatDateTime(c.completedAt)),
@@ -1001,11 +1377,16 @@ export function renderAdmin(root: HTMLElement): void {
       a.accuracy,
       a.hintsUsed,
       a.wrongAttempts,
+      a.commandsRevealed,
+      a.achievements.map((x) => x.id),
+      a.streak,
       relativeAgo(a.lastSeenAt, now),
       state.expanded.has(id),
       state.expanded.has(id) ? a.cases : null,
       state.confirm?.kind === "delete" && state.confirm.id === id,
+      state.confirm?.kind === "reset-password" && state.confirm.id === id,
       state.busy.has(`delete:${id}`),
+      state.busy.has(`reset-password:${id}`),
       state.busy.has(`status:${id}`),
     ]);
   }
@@ -1044,6 +1425,13 @@ export function renderAdmin(root: HTMLElement): void {
       h("td", { class: "num" }, formatPct(a.accuracy)),
       h("td", { class: "num" }, String(a.hintsUsed)),
       h("td", { class: "num" }, String(a.wrongAttempts)),
+      h("td", { class: "num" }, String(a.commandsRevealed)),
+      h(
+        "td",
+        { class: "num", title: T().admBadgesTip(a.achievements.map((x) => T().admAchievement(x.id)).join(", ")) },
+        String(a.achievements.length),
+      ),
+      h("td", { class: "num", title: T().admStreakTip(a.streak.current, a.streak.best) }, `${a.streak.current}/${a.streak.best}`),
       h(
         "td",
         { class: "col-actions" },
@@ -1052,6 +1440,21 @@ export function renderAdmin(root: HTMLElement): void {
           { class: "row-actions" },
           statusButtons(a, true),
           twoStep({
+            kind: "reset-password",
+            id: a.accountId,
+            label: T().admResetPw,
+            ariaLabel: T().admResetPwLabel(a.username),
+            confirmAria: T().admConfirmResetPwLabel(a.username),
+            busyLabel: T().admResettingPw,
+            run: async () => {
+              const password = await resetAccountPassword(a.accountId);
+              showTempPassword(a.username, password);
+            },
+            rerender: () => {
+              if (state.accounts) renderAccountsTable();
+            },
+          }),
+          twoStep({
             kind: "delete",
             id: a.accountId,
             label: T().admDelete,
@@ -1059,9 +1462,7 @@ export function renderAdmin(root: HTMLElement): void {
             confirmAria: T().admConfirmDeleteLabel(a.username),
             busyLabel: T().admDeleting,
             run: async () => {
-              const key = requireKey();
-              if (!key) return;
-              await deleteAccount(key, a.accountId);
+              await deleteAccount(a.accountId);
               state.expanded.delete(a.accountId);
               if (state.accounts) {
                 state.accounts = { ...state.accounts, accounts: state.accounts.accounts.filter((x) => x.accountId !== a.accountId) };
@@ -1081,7 +1482,19 @@ export function renderAdmin(root: HTMLElement): void {
       h(
         "td",
         { colspan: ACCT_COLS },
-        h("div", { class: "acct-detail-inner" }, h("p", { class: "admin-label" }, T().admPerCaseTitle(a.username)), caseStatsTable(a.cases)),
+        h(
+          "div",
+          { class: "acct-detail-inner" },
+          h("p", { class: "admin-label" }, T().admPerCaseTitle(a.username)),
+          caseStatsTable(a.cases),
+          h(
+            "p",
+            { class: "muted small acct-detail-meta" },
+            T().admBadgesTip(a.achievements.map((x) => T().admAchievement(x.id)).join(", ")),
+            " · ",
+            T().admStreakTip(a.streak.current, a.streak.best),
+          ),
+        ),
       ),
     );
     return [row, detail];
@@ -1142,10 +1555,11 @@ export function renderAdmin(root: HTMLElement): void {
       tile(T().admAcctStatus("rejected"), String(count("rejected"))),
     );
     renderPending(all);
+    renderInvite();
     // Drop UI state for accounts that disappeared.
     const ids = new Set(all.map((a) => a.accountId));
     for (const id of state.expanded) if (!ids.has(id)) state.expanded.delete(id);
-    if (state.confirm?.kind === "delete" && !ids.has(state.confirm.id)) state.confirm = null;
+    if ((state.confirm?.kind === "delete" || state.confirm?.kind === "reset-password") && !ids.has(state.confirm.id)) state.confirm = null;
     renderAccountsTable();
   }
 
@@ -1214,12 +1628,11 @@ export function renderAdmin(root: HTMLElement): void {
     resetBtn.disabled = resetInput.value.trim() !== "RESET";
   });
   resetBtn.addEventListener("click", () => {
-    const key = requireKey();
     const caseId = state.liveCaseId;
-    if (!key || !caseId || resetInput.value.trim() !== "RESET") return;
+    if (!caseId || resetInput.value.trim() !== "RESET") return;
     resetBtn.disabled = true;
     resetMsg.textContent = T().admResetting;
-    resetProgress(key, caseId)
+    resetProgress(caseId)
       .then(() => {
         resetInput.value = "";
         resetMsg.textContent = T().admCaseReset(caseTitle(caseId));
@@ -1245,6 +1658,7 @@ export function renderAdmin(root: HTMLElement): void {
         th(T().admColName),
         th(T().admColProgress),
         th(T().admColScore, "num"),
+        th(T().admColCommands, "num"),
         th(T().admColStage),
         th(T().admColSeen),
         h("th", { scope: "col" }, h("span", { class: "visually-hidden" }, T().admColActions)),
@@ -1334,7 +1748,7 @@ export function renderAdmin(root: HTMLElement): void {
       liveTilesEl,
       tile(T().admPlayers, String(players.length), T().admStuckCount(stuck)),
       tile(T().admFinished, String(finished.length), players.length ? `${Math.round((finished.length / players.length) * 100)}%` : undefined),
-      tile(T().admAvgScore, avg === null ? "—" : String(avg), maxScore ? T().admOf(maxScore) : undefined),
+      tile(T().admAvgScore, avg === null ? "—" : String(avg), maxScore ? T().admPar(maxScore) : undefined),
       tile(T().admMedianTime, med === null ? "—" : formatDuration(med), T().admFinishedPlayers),
     );
   }
@@ -1438,19 +1852,112 @@ export function renderAdmin(root: HTMLElement): void {
       Math.floor(p.stuckMinutes),
       st,
       relativeAgo(p.lastSeenAt, now),
+      commandsUsed(p),
+      state.liveExpanded.has(id) ? JSON.stringify(p.stages) : "",
       state.confirm?.kind === "restart" && state.confirm.id === id ? "confirm" : "",
       state.busy.has(`restart:${id}`) ? "busy" : "",
     ].join("|");
   }
 
-  function buildLiveRow(p: AdminProgress, stages: readonly StageKey[], now: number): HTMLTableRowElement {
+  const LIVE_COLS = 7;
+
+  /** Per-stage scoring for one player (the same numbers as the cell tooltips, reachable by keyboard and touch). */
+  function breakdownTable(p: AdminProgress): HTMLElement {
+    const num = (n: number | undefined): string => (n === undefined ? "—" : signed(n));
+    return h(
+      "table",
+      { class: "admin-table admin-subtable" },
+      h(
+        "thead",
+        {},
+        h(
+          "tr",
+          {},
+          th(T().admColStageShort),
+          th(T().admColStatus),
+          th(T().admBdBase, "num"),
+          th(T().admBdHints, "num"),
+          th(T().admBdCommands, "num"),
+          th(T().admBdWrong, "num"),
+          th(T().admBdTime, "num"),
+          th(T().admBdClean, "num"),
+          th(T().admBdFirstBlood, "num"),
+          th(T().admBdTotal, "num"),
+          th(T().admColSolveTime, "num"),
+        ),
+      ),
+      h(
+        "tbody",
+        {},
+        caseQuestionIds(p.caseId).map((q) => {
+          const sp = p.stages[q];
+          const b = sp?.status === "solved" ? sp.breakdown : null;
+          return h(
+            "tr",
+            {},
+            h("td", {}, h("span", { class: "q-id" }, q.toUpperCase()), " ", questionTitle(p.caseId, q)),
+            h("td", {}, h("span", { class: `case-status is-${sp?.status ?? "locked"}` }, T().admStatus(sp?.status ?? "locked"))),
+            h("td", { class: "num" }, b ? String(b.base) : "—"),
+            h("td", { class: "num" }, num(b?.hints)),
+            h("td", { class: "num", title: T().admCommandsUsed(sp?.commandsRevealed ?? 0) }, num(b?.commands)),
+            h("td", { class: "num" }, num(b?.wrong)),
+            h("td", { class: "num" }, num(b?.time)),
+            h("td", { class: "num" }, num(b?.clean)),
+            h("td", { class: "num" }, num(b?.firstBlood)),
+            h("td", { class: "num col-score" }, b ? String(b.total) : sp?.status === "solved" ? String(sp.points) : "—"),
+            h("td", { class: "num col-seen" }, b ? `${formatSeconds(b.solveSeconds)} / ${formatSeconds(b.targetSeconds)}` : "—"),
+          );
+        }),
+      ),
+    );
+  }
+
+  function buildLiveRows(p: AdminProgress, stages: readonly StageKey[], now: number): HTMLTableRowElement[] {
+    const expanded = state.liveExpanded.has(p.accountId);
+    const detailId = `live-detail-${p.accountId}`;
+    const toggle = h(
+      "button",
+      {
+        type: "button",
+        class: "acct-toggle",
+        "aria-expanded": String(expanded),
+        "aria-controls": detailId,
+        title: T().admShowBreakdown,
+        onclick: () => {
+          if (state.liveExpanded.has(p.accountId)) state.liveExpanded.delete(p.accountId);
+          else state.liveExpanded.add(p.accountId);
+          renderLiveTable();
+          container.querySelector<HTMLButtonElement>(`[aria-controls="${CSS.escape(detailId)}"]`)?.focus();
+        },
+      },
+      h("span", { class: "acct-caret", "aria-hidden": "true" }, "▸"),
+      h("span", { class: "player-name" }, p.username),
+    );
+    const row = buildLiveRow(p, stages, now, toggle);
+    if (!expanded) return [row];
+    row.classList.add("is-expanded");
+    const detail = h(
+      "tr",
+      { class: "acct-detail", id: detailId },
+      h(
+        "td",
+        { colspan: LIVE_COLS },
+        h("div", { class: "acct-detail-inner" }, h("p", { class: "admin-label" }, T().admBreakdownTitle(p.username)), breakdownTable(p)),
+      ),
+    );
+    return [row, detail];
+  }
+
+  function buildLiveRow(p: AdminProgress, stages: readonly StageKey[], now: number, nameCell: HTMLElement): HTMLTableRowElement {
     const caseId = p.caseId;
+    const cmds = commandsUsed(p);
     return h(
       "tr",
-      { class: `is-${stuckLevel(p)}`, "data-id": p.accountId },
-      h("td", { class: "col-name" }, h("span", { class: "player-name" }, p.username)),
+      { class: `acct-row is-${stuckLevel(p)}`, "data-id": p.accountId },
+      h("td", { class: "col-name" }, nameCell),
       h("td", {}, progressCells(p, stages, now)),
-      h("td", { class: "num col-score" }, String(p.score)),
+      h("td", { class: "num col-score", title: T().admScoreParTip(p.maxScore) }, String(p.score)),
+      h("td", { class: "num", title: T().admCommandsUsed(cmds) }, String(cmds)),
       h(
         "td",
         { class: "col-stage" },
@@ -1470,9 +1977,7 @@ export function renderAdmin(root: HTMLElement): void {
           confirmAria: T().admConfirmRestartLabel(p.username),
           busyLabel: T().admRestarting,
           run: async () => {
-            const key = requireKey();
-            if (!key) return;
-            await restartPlayerCase(key, p.accountId, caseId);
+            await restartPlayerCase(p.accountId, caseId);
           },
           rerender: () => renderLiveTable(),
         }),
@@ -1517,7 +2022,7 @@ export function renderAdmin(root: HTMLElement): void {
       sortPlayers(filtered, state.liveSort, stages).map((p) => ({
         key: p.accountId,
         sig: liveSignature(p, stages, now),
-        build: () => [buildLiveRow(p, stages, now)],
+        build: () => buildLiveRows(p, stages, now),
       })),
     );
   }
@@ -1534,6 +2039,7 @@ export function renderAdmin(root: HTMLElement): void {
     // A response for a previously selected case is ignored until the new one arrives.
     const players = state.progress?.caseId === caseId ? state.progress.players : [];
     if (state.confirm?.kind === "restart" && !players.some((p) => p.accountId === state.confirm?.id)) state.confirm = null;
+    for (const id of state.liveExpanded) if (!players.some((p) => p.accountId === id)) state.liveExpanded.delete(id);
     renderLiveTiles(players, caseId);
     renderFunnel(players, caseId);
     renderHelp(players, caseId);
@@ -1552,14 +2058,12 @@ export function renderAdmin(root: HTMLElement): void {
   }
 
   async function loadSchedule(): Promise<void> {
-    const key = requireKey();
-    if (!key) return;
     const sch = state.schedule;
     sch.loading = true;
     sch.error = null;
     renderSchedule();
     try {
-      const s = await fetchSchedule(key);
+      const s = await fetchSchedule();
       if (disposed) return;
       sch.server = cloneSchedule(s);
       sch.draft = cloneSchedule(s);
@@ -1623,15 +2127,14 @@ export function renderAdmin(root: HTMLElement): void {
   }
 
   async function onSaveSchedule(): Promise<void> {
-    const key = requireKey();
     const sch = state.schedule;
-    if (!key || !sch.draft) return;
+    if (!sch.draft) return;
     sch.saving = true;
     sch.error = null;
     sch.msg = null;
     renderSchedule();
     try {
-      const saved = await saveSchedule(key, sch.draft);
+      const saved = await saveSchedule(sch.draft);
       if (disposed) return;
       sch.server = cloneSchedule(saved);
       sch.draft = cloneSchedule(saved);
@@ -1861,6 +2364,441 @@ export function renderAdmin(root: HTMLElement): void {
   }
 
   // =====================================================================================
+  // Event tab (window, leaderboard freeze, announcement)
+  // Form controls are built once and synced from the draft, so polling never steals focus.
+  // =====================================================================================
+
+  const serverNow = (): number => Date.now() + state.event.offsetMs;
+  const isoAt = (t: number): string => new Date(Math.floor(t / 1000) * 1000).toISOString();
+
+  function eventDirty(): boolean {
+    const { server, draft } = state.event;
+    return server !== null && draft !== null && eventSig(server) !== eventSig(draft);
+  }
+
+  const evStatusEl = h("p", { class: "adm-ev-status", "aria-live": "off" });
+  const evClockEl = h("p", { class: "muted small adm-ev-clock" });
+  const evBodyEl = h("div", { class: "admin-tabpanel adm-ev-body" });
+
+  const evName = h("input", { type: "text", id: "ev-name", class: "admin-input", maxlength: 80, placeholder: T().admEventNamePh, autocomplete: "off" });
+  const timeInput = (id: string): HTMLInputElement =>
+    h("input", { type: "datetime-local", id, class: "admin-input ev-time", step: 60, dir: "ltr", "aria-describedby": "ev-tz" });
+  const evStart = timeInput("ev-start");
+  const evEnd = timeInput("ev-end");
+  const evFreeze = timeInput("ev-freeze");
+  const evEnforce = h("input", { type: "checkbox", id: "ev-enforce", "aria-describedby": "ev-enforce-help" });
+  const evAnnText = h("textarea", { id: "ev-ann", class: "admin-input ev-ann", maxlength: 280, rows: 3, "aria-describedby": "ev-ann-help ev-ann-count" });
+  const evAnnCount = h("span", { class: "muted small", id: "ev-ann-count" });
+  const evAnnLevel = h(
+    "select",
+    { id: "ev-ann-level", class: "admin-input" },
+    h("option", { value: "info" }, T().admLevel("info")),
+    h("option", { value: "warning" }, T().admLevel("warning")),
+  );
+  const evAnnClear = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admAnnClear);
+  const evStartNow = h("button", { type: "button", class: "btn btn-primary btn-sm" }, T().admStartNow);
+  const evEndNow = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admEndNow);
+  const evFreezeBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admFreezeNow);
+  const evSave = h("button", { type: "button", class: "btn btn-primary", id: "ev-save" }, T().admSaveEvent);
+  const evDiscard = h("button", { type: "button", class: "btn btn-ghost", id: "ev-discard" }, T().admDiscard);
+  const evStateEl = h("span", { class: "small", role: "status" });
+  const evErrorEl = h("p", { class: "admin-error", role: "alert" });
+
+  function clearTimeBtn(input: HTMLInputElement, label: string, apply: (d: LiveEvent) => void): HTMLButtonElement {
+    return h(
+      "button",
+      {
+        type: "button",
+        class: "btn btn-ghost btn-sm",
+        "aria-label": T().admClearTimeLabel(label),
+        onclick: () => {
+          input.value = "";
+          editEvent(apply);
+        },
+      },
+      T().admClearTime,
+    );
+  }
+
+  /** Mutates the draft from a control and refreshes the derived bits (no form rebuild). */
+  function editEvent(mutate: (d: LiveEvent) => void): void {
+    const ev = state.event;
+    if (!ev.draft) return;
+    mutate(ev.draft);
+    ev.msg = null;
+    ev.error = null;
+    renderEventControls();
+  }
+
+  evName.addEventListener("input", () => editEvent((d) => (d.name = evName.value)));
+  evStart.addEventListener("change", () => editEvent((d) => (d.startsAt = localInputToIso(evStart.value))));
+  evEnd.addEventListener("change", () => editEvent((d) => (d.endsAt = localInputToIso(evEnd.value))));
+  evFreeze.addEventListener("change", () => editEvent((d) => (d.freezeAt = localInputToIso(evFreeze.value))));
+  evEnforce.addEventListener("change", () => editEvent((d) => (d.enforceWindow = evEnforce.checked)));
+  const levelOf = (v: string): "info" | "warning" => (v === "warning" ? "warning" : "info");
+  evAnnText.addEventListener("input", () => editEvent((d) => (d.announcement = { text: evAnnText.value, level: levelOf(evAnnLevel.value) })));
+  evAnnLevel.addEventListener("change", () => editEvent((d) => (d.announcement = { text: evAnnText.value, level: levelOf(evAnnLevel.value) })));
+  evAnnClear.addEventListener("click", () => {
+    evAnnText.value = "";
+    editEvent((d) => (d.announcement = null));
+    evAnnText.focus();
+  });
+  evSave.addEventListener("click", () => void onSaveEvent());
+  evDiscard.addEventListener("click", () => {
+    const ev = state.event;
+    if (!ev.server) return;
+    ev.draft = cloneEvent(ev.server);
+    ev.msg = null;
+    ev.error = null;
+    syncEventForm();
+  });
+
+  /** Quick actions edit the draft with the server clock, then save it. */
+  function quickEvent(mutate: (d: LiveEvent, now: number) => void): void {
+    const ev = state.event;
+    if (!ev.draft || ev.saving) return;
+    const next = cloneEvent(ev.draft);
+    mutate(next, serverNow());
+    ev.draft = next;
+    syncEventForm();
+    void onSaveEvent();
+  }
+  evStartNow.addEventListener("click", () =>
+    quickEvent((d, now) => {
+      d.startsAt = isoAt(now);
+      d.endsAt = isoAt(now + EVENT_QUICK_MINUTES * 60_000);
+      // A freeze from an earlier run (or past the new end) would freeze the new event at the wrong moment.
+      const f = ms(d.freezeAt);
+      if (f !== null && (f < now || f > now + EVENT_QUICK_MINUTES * 60_000)) d.freezeAt = null;
+    }),
+  );
+  evEndNow.addEventListener("click", () =>
+    quickEvent((d, now) => {
+      d.endsAt = isoAt(now);
+      const s = ms(d.startsAt);
+      if ((s !== null && s >= now) || (s === null && d.enforceWindow)) d.startsAt = isoAt(now - 60_000);
+      const f = ms(d.freezeAt);
+      if (f !== null && f > now) d.freezeAt = null; // never reached: the standings at the end are final anyway
+    }),
+  );
+  evFreezeBtn.addEventListener("click", () =>
+    quickEvent((d, now) => {
+      if (isFrozen()) {
+        d.freezeAt = null;
+        return;
+      }
+      const end = ms(d.endsAt);
+      d.freezeAt = end !== null && end < now ? isoAt(end) : isoAt(now);
+    }),
+  );
+
+  function isFrozen(): boolean {
+    const f = ms(state.event.server?.freezeAt ?? null);
+    return f !== null && f <= serverNow();
+  }
+
+  function applyEventResult(res: AdminEventResult, fromPoll: boolean): void {
+    const ev = state.event;
+    ev.offsetMs = (ms(res.serverTime) ?? Date.now()) - Date.now();
+    const changed = ev.server === null || eventSig(ev.server) !== eventSig(res.event);
+    const keepDraft = fromPoll && ev.draft !== null && eventDirty();
+    ev.server = cloneEvent(res.event);
+    if (!keepDraft && (changed || ev.draft === null)) {
+      ev.draft = cloneEvent(res.event);
+      if (state.tab === "event") syncEventForm();
+    } else if (state.tab === "event") {
+      renderEventControls();
+    }
+  }
+
+  async function loadEvent(): Promise<void> {
+    const ev = state.event;
+    ev.loading = true;
+    ev.error = null;
+    renderEvent();
+    try {
+      const rev = ev.rev;
+      const res = await fetchEvent();
+      if (disposed) return;
+      if (rev === ev.rev) applyEventResult(res, false);
+    } catch (err: unknown) {
+      if (disposed || handleAuthError(err)) return;
+      ev.error = errMessage(err);
+    } finally {
+      ev.loading = false;
+    }
+    if (state.tab === "event") renderEvent();
+  }
+
+  async function onSaveEvent(): Promise<void> {
+    const ev = state.event;
+    if (!ev.draft || ev.saving) return;
+    ev.rev += 1;
+    ev.saving = true;
+    ev.error = null;
+    ev.msg = null;
+    renderEventControls();
+    try {
+      const res = await saveEvent(normalizeEvent(ev.draft));
+      if (disposed) return;
+      applyEventResult(res, false);
+      ev.draft = cloneEvent(res.event);
+      ev.msg = T().admEventSaved;
+      syncEventForm();
+    } catch (err: unknown) {
+      if (disposed || handleAuthError(err)) return;
+      ev.error = errMessage(err);
+    } finally {
+      ev.saving = false;
+    }
+    if (state.tab === "event") renderEventControls();
+  }
+
+  /** Copies the draft into the controls (after a load, save, discard or quick action). */
+  function syncEventForm(): void {
+    const d = state.event.draft;
+    if (!d) return;
+    evName.value = d.name;
+    evStart.value = isoToLocalInput(d.startsAt);
+    evEnd.value = isoToLocalInput(d.endsAt);
+    evFreeze.value = isoToLocalInput(d.freezeAt);
+    evEnforce.checked = d.enforceWindow;
+    evAnnText.value = d.announcement?.text ?? "";
+    evAnnLevel.value = d.announcement?.level ?? "info";
+    renderEventControls();
+  }
+
+  function renderEventControls(): void {
+    const ev = state.event;
+    const dirty = eventDirty();
+    const busy = ev.saving || ev.draft === null;
+    evSave.disabled = busy || !dirty;
+    evSave.textContent = ev.saving ? T().admSaving : T().admSaveEvent;
+    evDiscard.disabled = busy || !dirty;
+    for (const b of [evStartNow, evEndNow, evFreezeBtn]) b.disabled = busy;
+    evAnnClear.disabled = busy || evAnnText.value === "";
+    evAnnCount.textContent = T().admCharsLeft(280 - evAnnText.value.length);
+    evStateEl.textContent = dirty ? T().admUnsaved : ev.msg ?? "";
+    evStateEl.className = `small ${dirty ? "sched-dirty" : "muted"}`;
+    evErrorEl.textContent = ev.error ? T().admSaveFailed(ev.error) : "";
+    evErrorEl.hidden = ev.error === null;
+    renderEventStatus();
+  }
+
+  /** Status line + countdown from the saved event and the server clock (ticks every second). */
+  function renderEventStatus(): void {
+    const e = state.event.server;
+    evFreezeBtn.textContent = isFrozen() ? T().admUnfreeze : T().admFreezeNow;
+    if (!e) {
+      evStatusEl.textContent = "";
+      evClockEl.textContent = "";
+      return;
+    }
+    const now = serverNow();
+    const start = ms(e.startsAt);
+    const end = ms(e.endsAt);
+    let phase: string;
+    let tone: "live" | "idle" | "soon" | "over";
+    if (start === null && end === null) {
+      phase = T().admStatusNoWindow;
+      tone = "idle";
+    } else if (start !== null && now < start) {
+      phase = T().admStatusStartsIn(formatDuration(start - now));
+      tone = "soon";
+    } else if (end !== null && now >= end) {
+      phase = T().admStatusEnded(formatDuration(now - end));
+      tone = "over";
+    } else if (end === null) {
+      phase = T().admStatusLiveOpen;
+      tone = "live";
+    } else {
+      phase = start === null ? T().admStatusEndsIn(formatDuration(end - now)) : T().admStatusLive(formatDuration(end - now));
+      tone = "live";
+    }
+    const parts = [phase];
+    if (start !== null || end !== null) parts.push(e.enforceWindow ? T().admStatusEnforced : T().admStatusNotEnforced);
+    const f = ms(e.freezeAt);
+    if (f !== null) parts.push(f <= now ? T().admStatusFrozen(formatDateTime(e.freezeAt)) : T().admStatusFreezesIn(formatDuration(f - now)));
+    const label = e.name.trim();
+    setChildren(evStatusEl, h("span", { class: `adm-ev-dot is-${tone}`, "aria-hidden": "true" }), label ? h("strong", {}, label) : null, label ? " · " : "", parts.join(" · "));
+    evClockEl.textContent = T().admServerClock(new Intl.DateTimeFormat(locale(), { timeStyle: "medium" }).format(now));
+  }
+
+  function buildEventPanel(): void {
+    const tz = browserTimeZone();
+    const field = (id: string, label: string, ...rest: Child[]): HTMLElement =>
+      h("div", { class: "sched-field" }, h("label", { class: "admin-label", for: id }, label), rest);
+    setChildren(
+      evBodyEl,
+      h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, T().admEventTitle), evStatusEl, evClockEl),
+      h(
+        "section",
+        { class: "panel admin-panel" },
+        h("h2", { class: "admin-h2" }, T().admQuickActions),
+        h("p", { class: "muted small admin-hint" }, T().admQuickHelp),
+        h("div", { class: "adm-ev-quick" }, evStartNow, evEndNow, evFreezeBtn),
+      ),
+      h(
+        "section",
+        { class: "panel admin-panel" },
+        h("h2", { class: "admin-h2" }, T().admScheduleSettings),
+        h(
+          "div",
+          { class: "sched-form adm-ev-form" },
+          field("ev-name", T().admEventName, evName),
+          field("ev-start", T().admStartsAt, h("div", { class: "ev-time-row" }, evStart, clearTimeBtn(evStart, T().admStartsAt, (d) => (d.startsAt = null)))),
+          field("ev-end", T().admEndsAt, h("div", { class: "ev-time-row" }, evEnd, clearTimeBtn(evEnd, T().admEndsAt, (d) => (d.endsAt = null)))),
+          field(
+            "ev-freeze",
+            T().admFreezeAt,
+            h("div", { class: "ev-time-row" }, evFreeze, clearTimeBtn(evFreeze, T().admFreezeAt, (d) => (d.freezeAt = null))),
+            h("p", { class: "muted small" }, T().admFreezeHelp),
+          ),
+          h(
+            "div",
+            { class: "sched-field sched-lock" },
+            h("label", { class: "sched-check", for: "ev-enforce" }, evEnforce, h("span", {}, T().admEnforce)),
+            h("p", { class: "muted small", id: "ev-enforce-help" }, T().admEnforceHelp),
+          ),
+          h("p", { class: "muted small ev-tz", id: "ev-tz" }, T().admTzNote(tz.name, tz.offset)),
+        ),
+      ),
+      h(
+        "section",
+        { class: "panel admin-panel" },
+        h("h2", { class: "admin-h2" }, T().admAnnouncement),
+        h("p", { class: "muted small admin-hint", id: "ev-ann-help" }, T().admAnnouncementHelp),
+        h(
+          "div",
+          { class: "adm-ev-ann" },
+          h("label", { class: "visually-hidden", for: "ev-ann" }, T().admAnnouncement),
+          evAnnText,
+          h(
+            "div",
+            { class: "adm-ev-ann-row" },
+            h("label", { class: "admin-label", for: "ev-ann-level" }, T().admAnnLevel),
+            evAnnLevel,
+            evAnnClear,
+            evAnnCount,
+          ),
+        ),
+      ),
+      h("div", { class: "sched-actions panel admin-panel" }, evSave, evDiscard, evStateEl, evErrorEl),
+    );
+  }
+
+  let eventBuilt = false;
+  function renderEvent(): void {
+    const panel = tabPanels.get("event");
+    if (!panel) return;
+    const ev = state.event;
+    if (!ev.draft) {
+      eventBuilt = false;
+      setChildren(
+        panel,
+        ev.error
+          ? h(
+              "section",
+              { class: "panel admin-panel" },
+              h("p", { class: "admin-error", role: "alert" }, T().admLoadSectionFailed(ev.error)),
+              h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: () => void loadEvent() }, T().admRetry),
+            )
+          : h("p", { class: "muted admin-loading" }, T().admLoading),
+      );
+      return;
+    }
+    if (!eventBuilt) {
+      eventBuilt = true;
+      buildEventPanel();
+      setChildren(panel, evBodyEl);
+      syncEventForm();
+      return;
+    }
+    renderEventControls();
+  }
+
+  // =====================================================================================
+  // Audit log
+  // =====================================================================================
+
+  const auditBodyEl = h("div", { class: "admin-table-wrap" });
+  let auditSig = "";
+
+  function buildAuditPanel(): void {
+    setChildren(
+      tabPanels.get("audit") ?? container,
+      h(
+        "section",
+        { class: "panel admin-panel" },
+        h("h2", { class: "admin-h2" }, T().admAuditTitle),
+        h("p", { class: "muted small admin-hint" }, T().admAuditHint),
+        auditBodyEl,
+      ),
+    );
+    auditSig = "";
+  }
+
+  function auditTarget(e: AuditEntry, names: ReadonlyMap<string, string>): Child[] {
+    const out: Child[] = [];
+    if (e.target !== null) {
+      const name = names.get(e.target);
+      out.push(
+        name !== undefined
+          ? h("span", { class: "player-name" }, name)
+          : h("span", { class: "muted", title: e.target }, T().admUnknownAccount),
+      );
+    }
+    if (e.detail !== null) {
+      let detail = e.detail;
+      if (e.action === "progress.restart" || e.action === "progress.reset") {
+        detail = e.detail === "all cases" ? T().admAllCases : caseTitle(e.detail);
+      }
+      if (out.length > 0) out.push(" · ");
+      out.push(h("span", { class: "muted" }, detail));
+    }
+    if (out.length === 0) out.push("—");
+    return out;
+  }
+
+  function renderAudit(): void {
+    const entries = state.audit;
+    const names = new Map((state.accounts?.accounts ?? []).map((a) => [a.accountId, a.username] as const));
+    const sig = JSON.stringify([getLang(), entries, [...names]]);
+    if (sig === auditSig) return;
+    auditSig = sig;
+    if (entries === null) {
+      setChildren(auditBodyEl, h("p", { class: "muted admin-empty-small" }, T().admLoading));
+      return;
+    }
+    if (entries.length === 0) {
+      setChildren(auditBodyEl, h("p", { class: "muted admin-empty-small" }, T().admAuditEmpty));
+      return;
+    }
+    setChildren(
+      auditBodyEl,
+      h(
+        "table",
+        { class: "admin-table audit-table" },
+        h("thead", {}, h("tr", {}, th(T().admColTime), th(T().admColAction), th(T().admColTarget), th(T().admColVia))),
+        h(
+          "tbody",
+          {},
+          entries.map((e) =>
+            h(
+              "tr",
+              {},
+              h("td", { class: "col-seen", title: e.at }, formatDateTime(e.at)),
+              h("td", { title: e.action }, T().admAuditAction(e.action)),
+              h("td", { class: "audit-target" }, auditTarget(e, names)),
+              h("td", {}, h("span", { class: `via-pill is-${e.via}` }, T().admVia(e.via))),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // =====================================================================================
   // Stats tab
   // =====================================================================================
 
@@ -1938,7 +2876,7 @@ export function renderAdmin(root: HTMLElement): void {
         { class: "admin-tiles admin-tiles-sm" },
         tile(T().admPlayers, String(s.players)),
         tile(T().admFinished, String(s.completed), s.players ? `${Math.round((s.completed / s.players) * 100)}%` : undefined),
-        tile(T().admAvgScore, s.avgScore === null ? "—" : String(Math.round(s.avgScore)), maxScore ? T().admOf(maxScore) : undefined),
+        tile(T().admAvgScore, s.avgScore === null ? "—" : String(Math.round(s.avgScore)), maxScore ? T().admPar(maxScore) : undefined),
         tile(T().admAvgTime, s.avgDurationSeconds === null ? "—" : formatSeconds(Math.round(s.avgDurationSeconds)), T().admFinishedPlayers),
       ),
     ];
@@ -2080,13 +3018,21 @@ export function renderAdmin(root: HTMLElement): void {
       case "stats":
         renderStats();
         break;
+      case "event":
+        renderEvent();
+        break;
+      case "audit":
+        renderAudit();
+        break;
     }
   }
 
   function renderData(): void {
     // The pending count is visible on the tab from anywhere.
     if (state.tab !== "accounts") renderPending(state.accounts?.accounts ?? []);
-    if (state.tab === "schedule") renderScheduleToday(); // keep the editor (and focus) intact while polling
+    // Keep the schedule and event editors (and focus) intact while polling.
+    if (state.tab === "schedule") renderScheduleToday();
+    else if (state.tab === "event") renderEventStatus();
     else renderActiveTab();
     if (state.leaderboard) renderLeaderboard();
     renderUpdated();
@@ -2106,24 +3052,31 @@ export function renderAdmin(root: HTMLElement): void {
       state.queued = true;
       return;
     }
-    const key = getAdminKey();
-    if (!key) return showLogin(null);
+    if (state.auth === null) return showLogin(null);
     state.loading = true;
     state.queued = false;
     const tab = state.tab;
     const liveCase = state.liveCaseId;
+    const settingsRev = state.settings.rev;
+    const eventRev = state.event.rev;
     try {
-      const [accounts, today, progress, stats] = await Promise.all([
-        fetchAccounts(key),
+      const [accounts, today, progress, stats, settings, event, audit] = await Promise.all([
+        fetchAccounts(),
         fetchToday(),
-        tab === "live" && liveCase ? fetchProgress(key, liveCase) : Promise.resolve(null),
-        tab === "stats" ? fetchCaseStats(key) : Promise.resolve(null),
+        tab === "live" && liveCase ? fetchProgress(liveCase) : Promise.resolve(null),
+        tab === "stats" ? fetchCaseStats() : Promise.resolve(null),
+        tab === "accounts" ? fetchSettings() : Promise.resolve(null),
+        tab === "event" && !state.event.saving ? fetchEvent() : Promise.resolve(null),
+        tab === "audit" ? fetchAudit(AUDIT_LIMIT) : Promise.resolve(null),
       ]);
       if (disposed) return;
       state.accounts = accounts;
       state.today = today;
       if (progress && progress.caseId === state.liveCaseId) state.progress = progress;
       if (stats) state.stats = stats;
+      if (settings && settingsRev === state.settings.rev && !state.settings.saving) state.settings.server = settings;
+      if (event && eventRev === state.event.rev && !state.event.saving) applyEventResult(event, true);
+      if (audit) state.audit = audit;
       ensureLiveCase();
       state.lastUpdated = Date.now();
       state.banner = null;
@@ -2165,13 +3118,13 @@ export function renderAdmin(root: HTMLElement): void {
   }
 
   async function start(): Promise<void> {
-    const key = getAdminKey();
-    if (!key) return showLogin(null);
+    if (state.auth === null) return showLogin(null);
     try {
-      const [accounts, today] = await Promise.all([fetchAccounts(key), fetchToday()]);
+      const [accounts, today, settings] = await Promise.all([fetchAccounts(), fetchToday(), fetchSettings()]);
       if (disposed) return;
       state.accounts = accounts;
       state.today = today;
+      state.settings.server = settings;
       ensureLiveCase();
       state.lastUpdated = Date.now();
       state.banner = null;
@@ -2186,19 +3139,40 @@ export function renderAdmin(root: HTMLElement): void {
     renderData();
     renderActiveTab();
     if (state.tab === "schedule") void loadSchedule();
-    // Live and Stats need a second request (progress / stats) before they have data.
-    if (state.tab === "live" || state.tab === "stats") void load();
+    if (state.tab === "event") void loadEvent();
+    // Live, Stats and Audit need a second request before they have data.
+    if (state.tab === "live" || state.tab === "stats" || state.tab === "audit") void load();
     else scheduleNext();
     tickId = window.setInterval(() => {
       if (!container.isConnected) return dispose();
       renderUpdated();
+      if (state.tab === "event") renderEventStatus();
     }, 1000);
   }
 
-  if (getAdminKey()) {
+  /** The admin session cookie wins (no key gate); otherwise a key typed earlier in this tab; otherwise the gate. */
+  async function bootstrap(): Promise<void> {
     setChildren(container, h("p", { class: "muted admin-loading" }, T().admLoadingDashboard));
-    void start();
-  } else {
+    let sessionAdmin = false;
+    try {
+      const me = await fetchMe();
+      sessionAdmin = me?.role === "admin";
+    } catch {
+      // network trouble: fall back to the key (if any), whose own request reports the error
+    }
+    if (disposed) return;
+    if (sessionAdmin) {
+      // A stale key would be sent as a header and rejected (a bad header is never ignored), so drop it.
+      clearAdminKey();
+      state.auth = "session";
+      return start();
+    }
+    if (getAdminKey()) {
+      state.auth = "key";
+      return start();
+    }
     showLogin(null);
   }
+
+  void bootstrap();
 }

@@ -141,10 +141,11 @@
   "rules": [
     "עובדים רק מחבילת הראיות. אל תקראו את קוד ה-generator או את קוד האתר; זה הורס את הכיף.",
     "התשובות לא רגישות לאותיות גדולות/קטנות, ורווחים בהתחלה ובסוף מתעלמים מהם. הקפידו על הפורמט שמופיע מתחת לכל שאלה.",
-    "כל רמז עולה את הנקודות שמופיעות עליו. הרמזים נחשפים לפי הסדר, מדחיפה עדינה ועד כמעט הפקודה המלאה.",
+    "כל רמז עולה את הנקודות שמופיעות עליו. הרמזים נחשפים לפי הסדר, מדחיפה עדינה ועד כמעט הפקודה המלאה. ב-Toolbox התחביר של כל פקודה חינמי; חשיפת הפקודה המלאה עולה 5 נקודות. אחרי שמסיימים את התיק, כל הפקודות חינמיות.",
     "עבודה בזוגות מומלצת. דברו על ההיגיון שלכם בקול, בדיוק כמו ב-incident review אמיתי.",
     "כל כלי מותר: grep, awk, jq, Python, Wireshark, גיליון אלקטרוני, העורך האהוב עליכם. בלשונית Toolbox יש פקודות שיעזרו.",
-    "תשובות שגויות לא עולות כלום, אז נחשו בחופשיות. ובכל זאת, נסו להיות מסוגלים להסביר *למה* התשובה שלכם נכונה.",
+    "כל תשובה שגויה עולה 2 נקודות, עד 20 לכל שלב. נחשו כשיש לכם על מה להתבסס, ונסו להיות מסוגלים להסביר *למה* התשובה שלכם נכונה.",
+    "מהירות ודיוק משתלמים: פתרון מהיר מזכה בבונוס זמן של עד +30 לכל שלב, שהולך ופוחת אחרי זמן היעד של השלב. פתרון נקי (בלי רמזים, פקודות או תשובות שגויות) מזכה ב-+10, השחקן הראשון שפותר שלב מקבל +15 first blood, וסיום כל שישת השלבים בלי לחשוף תשובה מזכה ב-+50.",
     "אל תשתפו flags עם צוותים אחרים עד שכולם מסיימים. לשתף טכניקות זה בסדר.",
     "בחבילה הזאת יש שתי בעיות. לפני שאתם מאשימים אחת מהן, ודאו שהראיה שאתם משתמשים בה באמת שייכת לה."
   ],
@@ -174,6 +175,7 @@
       "answerFormat": "HH:MM:SS (UTC)",
       "placeholder": "08:30:00",
       "points": 100,
+      "targetMinutes": 8,
       "hints": [
         {
           "cost": 10,
@@ -216,6 +218,7 @@
       "answerFormat": "מזהה שינוי (CHG-NNNN)",
       "placeholder": "CHG-1234",
       "points": 100,
+      "targetMinutes": 8,
       "hints": [
         {
           "cost": 10,
@@ -258,6 +261,7 @@
       "answerFormat": "מספר שלם (בתים)",
       "placeholder": "1400",
       "points": 100,
+      "targetMinutes": 10,
       "hints": [
         {
           "cost": 10,
@@ -299,6 +303,7 @@
       "answerFormat": "כתובת IPv4",
       "placeholder": "192.0.2.10",
       "points": 100,
+      "targetMinutes": 11,
       "hints": [
         {
           "cost": 10,
@@ -340,6 +345,7 @@
       "answerFormat": "מספר שלם (hosts)",
       "placeholder": "5",
       "points": 100,
+      "targetMinutes": 9,
       "hints": [
         {
           "cost": 10,
@@ -381,6 +387,7 @@
       "answerFormat": "שם אופציה ב-unbound.conf (בלי נקודתיים)",
       "placeholder": "msg-cache-size",
       "points": 150,
+      "targetMinutes": 14,
       "hints": [
         {
           "cost": 10,
@@ -405,6 +412,8 @@
         {
           "id": "unzip-evidence",
           "title": "פריסת הראיות",
+          "syntax": "unzip <evidence-zip> && cd <case-folder>",
+          "syntaxPowershell": "Expand-Archive .\\<evidence-zip> -DestinationPath <dest>\ncd .\\<case-folder>",
           "command": "unzip ghost-in-the-network-evidence.zip && cd ghost-in-the-network",
           "explain": "פורס את החבילה. הכול נמצא תחת תיקייה עליונה אחת. קבצי ה-`.pcap` נמצאים רק ב-zip, לא ב-Explorer.",
           "powershell": "Expand-Archive .\\ghost-in-the-network-evidence.zip -DestinationPath .\ncd .\\ghost-in-the-network"
@@ -412,6 +421,8 @@
         {
           "id": "list-files",
           "title": "מה יש לנו",
+          "syntax": "find <dir> -type f | sort | xargs ls -la",
+          "syntaxPowershell": "Get-ChildItem <dir> -Recurse -File | Select-Object <properties>",
           "command": "find . -type f | sort | xargs ls -la",
           "explain": "כל הקבצים עם הגודל שלהם. שני לוגים גדולים; את כל השאר אפשר לקרוא מההתחלה עד הסוף.",
           "powershell": "Get-ChildItem -Recurse -File | Select-Object FullName, Length"
@@ -419,6 +430,8 @@
         {
           "id": "read-readme",
           "title": "קריאת ה-README",
+          "syntax": "less <file>",
+          "syntaxPowershell": "Get-Content <file> | Out-Host -Paging",
           "command": "less README_FIRST.txt",
           "explain": "ההערות של ה-on-call: רשימת הקבצים, ובעיקר אזור הזמן של כל מקור.",
           "powershell": "Get-Content README_FIRST.txt | Out-Host -Paging"
@@ -426,6 +439,8 @@
         {
           "id": "head-lines",
           "title": "הצצה לשורות הראשונות",
+          "syntax": "head -n <count> <file>",
+          "syntaxPowershell": "Get-Content <file> -TotalCount <count>",
           "command": "head -n 3 app/manifest-sync.log",
           "explain": "הסתכלו על הפורמט **לפני** שאתם מפרסרים. `tail -n 3` מראה את סוף החלון.",
           "powershell": "Get-Content app\\manifest-sync.log -TotalCount 3"
@@ -438,6 +453,8 @@
         {
           "id": "grep-count",
           "title": "ספירת התאמות",
+          "syntax": "grep -c '<pattern>' <file>",
+          "syntaxPowershell": "(Select-String -Path <file> -Pattern '<pattern>' -SimpleMatch).Count",
           "command": "grep -c '\"level\":\"error\"' app/manifest-sync.log",
           "explain": "`-c` מדפיס כמה שורות תואמות במקום את השורות עצמן. בדיקות שפיות מהירות.",
           "powershell": "(Select-String -Path app\\manifest-sync.log -Pattern '\"level\":\"error\"' -SimpleMatch).Count"
@@ -445,6 +462,8 @@
         {
           "id": "grep-first-match",
           "title": "עצירה בהתאמה הראשונה",
+          "syntax": "grep -m1 '<pattern>' <file>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<pattern>' | Select-Object -First 1",
           "command": "grep -m1 'pattern' firewall/kern-app-hosts.log",
           "explain": "`-m1` יוצא אחרי ההתאמה הראשונה. בקובץ שממוין לפי זמן, זו ההופעה ה**מוקדמת ביותר**.",
           "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'pattern' | Select-Object -First 1"
@@ -452,6 +471,8 @@
         {
           "id": "grep-exclude",
           "title": "היפוך / החרגה",
+          "syntax": "grep -v -e '<pattern>' <file> | head",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<pattern>' -SimpleMatch -NotMatch | Select-Object -First <count>",
           "command": "grep -v -e 'IN-DROP: ' firewall/kern-app-hosts.log | head",
           "explain": "`-v` משאיר שורות ש**לא** תואמות. טוב להסרת רעש של סורקים.",
           "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'IN-DROP: ' -SimpleMatch -NotMatch | Select-Object -First 10"
@@ -459,6 +480,8 @@
         {
           "id": "grep-only-match",
           "title": "הדפסת ההתאמה בלבד",
+          "syntax": "grep -o '<regex>' <file> | sort | uniq -c",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<regex>' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name",
           "command": "grep -o 'TYPE=[0-9]* CODE=[0-9]*' firewall/kern-app-hosts.log | sort | uniq -c",
           "explain": "`-o` מדפיס רק את הטקסט שהותאם. העבירו ל-`sort | uniq -c` כדי לקבל היסטוגרמה של ערכים.",
           "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'TYPE=\\d+ CODE=\\d+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name"
@@ -466,6 +489,8 @@
         {
           "id": "grep-context",
           "title": "הקשר סביב התאמה",
+          "syntax": "grep -n -B<before> -A<after> '<pattern>' <file> | head -<count>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<pattern>' -Context <before>,<after> | Select-Object -First <count>",
           "command": "grep -n -B2 -A6 'need to frag' pcap/app-03_large-request.txt | head -40",
           "explain": "`-B`/`-A` מציגים שורות לפני ואחרי כל התאמה, כדי לראות מה הוביל אליה ומה בא אחריה.",
           "powershell": "Select-String -Path pcap\\app-03_large-request.txt -Pattern 'need to frag' -Context 2,6 | Select-Object -First 5"
@@ -478,6 +503,8 @@
         {
           "id": "json-pretty",
           "title": "הדפסה יפה של שורה",
+          "syntax": "head -n1 <json-lines-file> | jq .",
+          "syntaxPowershell": "Get-Content <json-lines-file> -TotalCount 1 | ConvertFrom-Json | Format-List",
           "command": "head -n1 app/manifest-sync.log | jq .",
           "explain": "ראו את כל השדות של שורה לפני שאתם כותבים פילטרים. בכשלונות יש `phase` ו-`error` במקום `status`.",
           "powershell": "Get-Content app\\manifest-sync.log -TotalCount 1 | ConvertFrom-Json | Format-List"
@@ -485,6 +512,8 @@
         {
           "id": "json-unique-field",
           "title": "ערכים של שדה אחד",
+          "syntax": "jq -r '.<field>' <json-lines-file> | sort | uniq -c",
+          "syntaxPowershell": "Get-Content <json-lines-file> | ForEach-Object { ($_ | ConvertFrom-Json).<field> } | Group-Object | Select-Object Count, Name",
           "command": "jq -r '.msg' app/manifest-sync.log | sort | uniq -c",
           "explain": "מציג כל ערך שונה של שדה עם ספירה. החליפו את `.msg` ב-`.phase`, `.host` או `.peer`.",
           "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { ($_ | ConvertFrom-Json).msg } | Group-Object | Select-Object Count, Name"
@@ -492,6 +521,8 @@
         {
           "id": "json-filter-field",
           "title": "סינון לפי שדה",
+          "syntax": "jq -c 'select(.<field> == \"<value>\")' <json-lines-file> | head",
+          "syntaxPowershell": "Get-Content <json-lines-file> | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object <field> -eq '<value>' | Select-Object -First <count>",
           "command": "jq -c 'select(.phase == \"connect\")' app/manifest-sync.log | head",
           "explain": "`select()` משאיר את האובייקטים שתואמים. `-c` שומר אחד לשורה כדי שאפשר יהיה להמשיך ל-`head` ו-`wc`.",
           "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object phase -eq 'connect' | Select-Object -First 10"
@@ -499,6 +530,8 @@
         {
           "id": "json-first-by-time",
           "title": "השורה המוקדמת ביותר",
+          "syntax": "jq -r 'select(.<field> == \"<value>\") | .<time-field>' <json-lines-file> | sort | head -1",
+          "syntaxPowershell": "Get-Content <json-lines-file> | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object <field> -eq '<value>' | Sort-Object <time-field> | Select-Object -First 1",
           "command": "jq -r 'select(.phase == \"response\") | .ts' app/manifest-sync.log | sort | head -1",
           "explain": "שולפים את ה-timestamp של השורות התואמות וממיינים. לכל `ts` כאן אותו offset, אז מיון מחרוזות הוא גם מיון לפי זמן.",
           "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object phase -eq 'response' | Sort-Object ts | Select-Object -First 1"
@@ -506,6 +539,8 @@
         {
           "id": "json-two-fields",
           "title": "קיבוץ לפי כמה שדות",
+          "syntax": "jq -r 'select(.<field> == \"<value>\") | \"\\(.<key-a>) \\(.<key-b>) \\(.<key-c>)\"' <json-lines-file> | sort | uniq -c",
+          "syntaxPowershell": "Get-Content <json-lines-file> | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object <field> -eq '<value>' | Group-Object <key-a>, <key-b>, <key-c> | Select-Object Count, Name",
           "command": "jq -r 'select(.level == \"error\") | \"\\(.host) \\(.phase) \\(.peer)\"' app/manifest-sync.log | sort | uniq -c",
           "explain": "סופר כל צירוף. טבלה אחת שמפצלת את הכשלונות לפי host, לפי phase ולפי יעד.",
           "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object level -eq 'error' | Group-Object host, phase, peer | Select-Object Count, Name"
@@ -513,6 +548,8 @@
         {
           "id": "json-size-split",
           "title": "תוצאה לפי גודל בקשה",
+          "syntax": "jq -r 'select(.<field> == \"<value>\") | \"\\(.<key>) \\(if .<size-field> > <threshold> then \"big\" else \"small\" end) \\(.<outcome-a> // .<outcome-b>)\"' <json-lines-file> | sort | uniq -c",
+          "syntaxPowershell": "Get-Content <json-lines-file> | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object <field> -eq '<value>' | Group-Object <key>, { if ($_.<size-field> -gt <threshold>) { 'big' } else { 'small' } }, { if ($_.<outcome-a>) { $_.<outcome-a> } else { $_.<outcome-b> } } | Select-Object Count, Name",
           "command": "jq -r 'select(.method == \"POST\") | \"\\(.path) \\(if .req_bytes > 1300 then \"big\" else \"small\" end) \\(.phase // .status)\"' app/manifest-sync.log | sort | uniq -c",
           "explain": "מחלק בקשות לקטנות וגדולות ומראה איך כל אחת הסתיימה. שנו את סף הגודל וראו איפה הגבול.",
           "powershell": "Get-Content app\\manifest-sync.log | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object method -eq 'POST' | Group-Object path, { if ($_.req_bytes -gt 1300) { 'big' } else { 'small' } }, { if ($_.phase) { $_.phase } else { $_.status } } | Select-Object Count, Name"
@@ -525,6 +562,8 @@
         {
           "id": "local-to-utc",
           "title": "מקומי ל-UTC",
+          "syntax": "date -u -d '<local-timestamp-with-offset>' +<format>",
+          "syntaxPowershell": "([DateTimeOffset]'<local-timestamp-with-offset>').UtcDateTime.ToString('<format>')",
           "command": "date -u -d '2026-11-18T11:00:00.000+02:00' +%H:%M:%S",
           "explain": "ממיר timestamp עם offset (כמו בלוג האפליקציה) ל-UTC. בנובמבר ישראל היא **UTC+02:00**.",
           "powershell": "([DateTimeOffset]'2026-11-18T11:00:00.000+02:00').UtcDateTime.ToString('HH:mm:ss')"
@@ -532,6 +571,8 @@
         {
           "id": "epoch-to-utc",
           "title": "Epoch ל-UTC",
+          "syntax": "date -u -d @<epoch-seconds>",
+          "syntaxPowershell": "[DateTimeOffset]::FromUnixTimeSeconds(<epoch-seconds>).UtcDateTime.ToString('<format>')",
           "command": "date -u -d @1795424400",
           "explain": "ממיר שניות epoch לזמן UTC קריא. ב-macOS: `date -u -r 1795424400`.",
           "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1795424400).UtcDateTime.ToString('u')"
@@ -539,6 +580,8 @@
         {
           "id": "slack-timestamps",
           "title": "קריאת הצ'אט ב-UTC",
+          "syntax": "jq -r '.[] | \"\\(.<time-field> | tonumber | todate) \\(.<user-field>): \\(.<text-field>)\"' <chat-export>",
+          "syntaxPowershell": "Get-Content <chat-export> -Raw | ConvertFrom-Json | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([int][double]$_.<time-field>).UtcDateTime.ToString('<format>'), $_.<user-field>, $_.<text-field> }",
           "command": "jq -r '.[] | \"\\(.ts | tonumber | todate) \\(.user): \\(.text)\"' chat/inc-3107.json",
           "explain": "הופך את ה-`ts` של כל הודעה ל-UTC כדי שאפשר יהיה ליישר אותו מול שאר המקורות.",
           "powershell": "Get-Content chat\\inc-3107.json -Raw | ConvertFrom-Json | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([int][double]$_.ts).UtcDateTime.ToString('HH:mm:ss'), $_.user, $_.text }"
@@ -546,6 +589,8 @@
         {
           "id": "syslog-no-year",
           "title": "ל-syslog אין שנה",
+          "syntax": "date -u -d '<syslog-time> <year> UTC' +%s",
+          "syntaxPowershell": "([DateTimeOffset]::ParseExact('<syslog-time> <year>', '<format>', [Globalization.CultureInfo]::InvariantCulture, 'AssumeUniversal')).ToUnixTimeSeconds()",
           "command": "date -u -d 'Nov 18 09:30:00 2026 UTC' +%s",
           "explain": "חותמות syslog כמו `Nov 18 09:30:00` לא כוללות שנה ולא אזור זמן. הוסיפו את שניהם בעצמכם לפני ההמרה.",
           "powershell": "([DateTimeOffset]::ParseExact('Nov 18 09:30:00 2026', 'MMM dd HH:mm:ss yyyy', [Globalization.CultureInfo]::InvariantCulture, 'AssumeUniversal')).ToUnixTimeSeconds()"
@@ -558,6 +603,8 @@
         {
           "id": "tcpdump-read",
           "title": "קריאת pcap אמיתי",
+          "syntax": "tcpdump -nn -tttt -v -r <pcap-file>",
+          "syntaxPowershell": "& '<path-to-tshark.exe>' -n -t ad -V -r <pcap-file> | Out-Host -Paging",
           "command": "tcpdump -nn -tttt -v -r pcap/app-03_large-request.pcap",
           "explain": "קבצי ה-`.txt` הם הפלט של הפקודה הזאת, כך שלא צריך tcpdump. אם אתם מעדיפים Wireshark, השתמשו בקבצי ה-`.pcap` התאומים.",
           "powershell": "& 'C:\\Program Files\\Wireshark\\tshark.exe' -n -t ad -V -r pcap\\app-03_large-request.pcap | Out-Host -Paging"
@@ -565,6 +612,8 @@
         {
           "id": "tcpdump-flow",
           "title": "שורה אחת לכל packet",
+          "syntax": "grep -E '<packet-line-regex>' <capture-text> | cut -c1-<width>",
+          "syntaxPowershell": "Select-String -Path <capture-text> -Pattern '<packet-line-regex>' | ForEach-Object { $_.Line.Substring(0, [Math]::Min(<width>, $_.Line.Length)) }",
           "command": "grep -E '^ {4}[0-9.]+ > ' pcap/app-03_small-request.txt | cut -c1-150",
           "explain": "עם `-v`, tcpdump מדפיס שתי שורות לכל packet (כותרת IP ואז TCP). השאירו רק את השנייה כדי לקרוא את השיחה כרצף: מי שלח מה ועם אילו flags.",
           "powershell": "Select-String -Path pcap\\app-03_small-request.txt -Pattern '^ {4}[0-9.]+ > ' | ForEach-Object { $_.Line.Substring(0, [Math]::Min(150, $_.Line.Length)) }"
@@ -572,6 +621,8 @@
         {
           "id": "tcpdump-lengths",
           "title": "גודלי packets",
+          "syntax": "grep -oE '<length-regex>' <capture-text> | sort | uniq -c",
+          "syntaxPowershell": "Select-String -Path <capture-text> -Pattern '<length-regex>' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name",
           "command": "grep -oE 'proto [A-Z]+ \\([0-9]+\\), length [0-9]+' pcap/app-03_large-request.txt | sort | uniq -c",
           "explain": "ה-`length` בשורת ה-IP הוא גודל כל ה-packet. השוו את ה-packets הגדולים ביותר שכל צד שולח.",
           "powershell": "Select-String -Path pcap\\app-03_large-request.txt -Pattern 'proto [A-Z]+ \\(\\d+\\), length \\d+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name"
@@ -579,6 +630,8 @@
         {
           "id": "tcpdump-mss",
           "title": "MSS ב-handshake",
+          "syntax": "grep -o '<option-regex>' <capture-files>",
+          "syntaxPowershell": "Select-String -Path <capture-files> -Pattern '<option-regex>' | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Matches[0].Value }",
           "command": "grep -o 'mss [0-9]*' pcap/*.txt",
           "explain": "כל צד מכריז על ה-MSS שלו ב-SYN. השולח משתמש בקטן מבין השניים, ואף אחד מהם לא יודע על link צר יותר באמצע.",
           "powershell": "Select-String -Path pcap\\*.txt -Pattern 'mss \\d+' | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Matches[0].Value }"
@@ -586,6 +639,8 @@
         {
           "id": "tcpdump-icmp",
           "title": "שגיאות ICMP ומה הן מצטטות",
+          "syntax": "grep -n -A<after> '<protocol>' <capture-text> | head -<count>",
+          "syntaxPowershell": "Select-String -Path <capture-text> -Pattern '<protocol>' -Context 0,<after> | Select-Object -First <count>",
           "command": "grep -n -A3 'ICMP' pcap/app-03_large-request.txt | head -20",
           "explain": "שגיאת ICMP מצטטת את הכותרת של ה-packet שגרם לה, כך שרואים בדיוק איזה packet נדחה על ידי router, ולמה.",
           "powershell": "Select-String -Path pcap\\app-03_large-request.txt -Pattern 'ICMP' -Context 0,3 | Select-Object -First 5"
@@ -593,6 +648,8 @@
         {
           "id": "tcpdump-retrans",
           "title": "זיהוי retransmissions",
+          "syntax": "grep -oE '<seq-range-regex>' <capture-text> | sort | uniq -c | sort -rn | head",
+          "syntaxPowershell": "Select-String -Path <capture-text> -Pattern '<seq-range-regex>' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First <count> Count, Name",
           "command": "grep -oE 'seq [0-9]+:[0-9]+' pcap/app-03_large-request.txt | sort | uniq -c | sort -rn | head",
           "explain": "אותו טווח בתים שנשלח יותר מפעם אחת הוא retransmission. בדקו את המרווחים ביניהם: exponential backoff.",
           "powershell": "Select-String -Path pcap\\app-03_large-request.txt -Pattern 'seq \\d+:\\d+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count, Name"
@@ -600,6 +657,8 @@
         {
           "id": "wireshark-filters",
           "title": "פילטרי תצוגה ב-Wireshark",
+          "syntax": "tshark -r <pcap-file> -Y '<display-filter> || <display-filter>'",
+          "syntaxPowershell": "& '<path-to-tshark.exe>' -r <pcap-file> -Y '<display-filter> || <display-filter>'",
           "command": "tshark -r pcap/app-03_large-request.pcap -Y 'icmp.type == 3 || tcp.analysis.retransmission'",
           "explain": "אותו פילטר עובד בשורת הפילטר של Wireshark. נסו גם `tcp.len > 1300` ו-`icmp.code == 4`.",
           "powershell": "& 'C:\\Program Files\\Wireshark\\tshark.exe' -r pcap\\app-03_large-request.pcap -Y 'icmp.type == 3 || tcp.analysis.retransmission'"
@@ -612,6 +671,8 @@
         {
           "id": "fw-prefixes",
           "title": "איזה חוק רשם את זה?",
+          "syntax": "grep -oE '<log-prefix-regex>' <firewall-log> | sort | uniq -c",
+          "syntaxPowershell": "Select-String -Path <firewall-log> -Pattern '<log-prefix-regex>' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name",
           "command": "grep -oE 'IN-DROP[A-Z-]*:' firewall/kern-app-hosts.log | sort | uniq -c",
           "explain": "ה-`--log-prefix` של חוק ה-iptables פותח כל הודעה. כל prefix שייך לחוק אחד ב-`iptables-save`.",
           "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'IN-DROP[A-Z-]*:' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Select-Object Count, Name"
@@ -619,6 +680,8 @@
         {
           "id": "fw-first-drop",
           "title": "ה-drop הראשון מסוג מסוים",
+          "syntax": "grep '<pattern>' <firewall-log> | head -<count>",
+          "syntaxPowershell": "Select-String -Path <firewall-log> -Pattern '<pattern>' -SimpleMatch | Select-Object -First <count>",
           "command": "grep 'TYPE=3 CODE=4' firewall/kern-app-hosts.log | head -3",
           "explain": "ICMP type 3 זה destination-unreachable; code 4 זה fragmentation needed, ו-code 1 זה host unreachable. Type 11 זה time exceeded (traceroute).",
           "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'TYPE=3 CODE=4' -SimpleMatch | Select-Object -First 3"
@@ -626,6 +689,8 @@
         {
           "id": "fw-field-values",
           "title": "ערכים בתוך שורות netfilter",
+          "syntax": "grep -oE '(<KEY-A>|<KEY-B>)=<value-regex>' <firewall-log> | sort | uniq -c | sort -rn | head",
+          "syntaxPowershell": "Select-String -Path <firewall-log> -Pattern '(<KEY-A>|<KEY-B>)=<value-regex>' -AllMatches | ForEach-Object { $_.Matches.Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First <count> Count, Name",
           "command": "grep -oE '(MTU|SRC)=[0-9.]+' firewall/kern-app-hosts.log | sort | uniq -c | sort -rn | head",
           "explain": "Netfilter רושם זוגות `KEY=value`. החלק שבתוך `[...]` הוא ה-packet שמצוטט בתוך שגיאת ה-ICMP.",
           "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern '(MTU|SRC)=[\\d.]+' -AllMatches | ForEach-Object { $_.Matches.Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count, Name"
@@ -633,6 +698,8 @@
         {
           "id": "fw-per-host-minute",
           "title": "לפי host, לפי דקה",
+          "syntax": "grep '<pattern>' <firewall-log> | awk '{print $<host-field>, substr($<time-field>,1,<len>)}' | uniq -c | head -<count>",
+          "syntaxPowershell": "Select-String -Path <firewall-log> -Pattern '<pattern>' -SimpleMatch | ForEach-Object { $f = $_.Line -split '\\s+'; '{0} {1}' -f $f[<host-index>], $f[<time-index>].Substring(0,<len>) } | Group-Object | Select-Object -First <count> Count, Name",
           "command": "grep 'TYPE=3 CODE=4' firewall/kern-app-hosts.log | awk '{print $4, substr($3,1,5)}' | uniq -c | head -20",
           "explain": "מראה מתי כל host התחיל לרשום drop מסוים. שדה 4 הוא ה-host ושדה 3 הוא הזמן.",
           "powershell": "Select-String -Path firewall\\kern-app-hosts.log -Pattern 'TYPE=3 CODE=4' -SimpleMatch | ForEach-Object { $f = $_.Line -split '\\s+'; '{0} {1}' -f $f[3], $f[2].Substring(0,5) } | Group-Object | Select-Object -First 20 Count, Name"
@@ -640,6 +707,8 @@
         {
           "id": "iptables-diff",
           "title": "מה השתנה בחוקים?",
+          "syntax": "diff <rules-before> <rules-after>",
+          "syntaxPowershell": "Compare-Object (Get-Content <rules-before>) (Get-Content <rules-after>)",
           "command": "diff firewall/app-03_iptables-save_before.txt firewall/app-03_iptables-save_after.txt",
           "explain": "iptables עובר על INPUT **מלמעלה למטה** ועוצר בחוק הראשון שתואם. הסדר חשוב בדיוק כמו התוכן.",
           "powershell": "Compare-Object (Get-Content firewall\\app-03_iptables-save_before.txt) (Get-Content firewall\\app-03_iptables-save_after.txt)"
@@ -652,6 +721,8 @@
         {
           "id": "dig-answers",
           "title": "כל התשובות במבט אחד",
+          "syntax": "grep -H -A<after> '<section-header>' <dig-files>",
+          "syntaxPowershell": "Select-String -Path <dig-files> -Pattern '<section-header>' -Context 0,<after> | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Context.PostContext[0] }",
           "command": "grep -H -A1 'ANSWER SECTION' dns/dig/*.txt",
           "explain": "שורת תשובה אחת לכל שאילתה: שם, **TTL שנותר**, class, type, כתובת. בדקו גם איזה שרת ענה (`;; SERVER:`).",
           "powershell": "Select-String -Path dns\\dig\\*.txt -Pattern 'ANSWER SECTION' -Context 0,1 | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Context.PostContext[0] }"
@@ -659,6 +730,8 @@
         {
           "id": "dig-server-flags",
           "title": "מי ענה, והאם בסמכות?",
+          "syntax": "grep -H -E '<header-lines-regex>' <dig-files>",
+          "syntaxPowershell": "Select-String -Path <dig-files> -Pattern '<header-lines-regex>' | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Line }",
           "command": "grep -H -E '^;; (flags|SERVER|WHEN)' dns/dig/*.txt",
           "explain": "`aa` אומר תשובה authoritative ישירות מה-zone. בלי `aa` ומ-`127.0.0.1` אומר שענה cache מקומי.",
           "powershell": "Select-String -Path dns\\dig\\*.txt -Pattern '^;; (flags|SERVER|WHEN)' | ForEach-Object { '{0}: {1}' -f $_.Filename, $_.Line }"
@@ -666,6 +739,8 @@
         {
           "id": "zone-audit-record",
           "title": "ההיסטוריה של רשומה אחת",
+          "syntax": "grep '<record-pattern>' <audit-log>",
+          "syntaxPowershell": "Select-String -Path <audit-log> -Pattern '<record-pattern>' -SimpleMatch",
           "command": "grep 'name=ledger ' dns/zone-audit.log",
           "explain": "כל שינוי בשם DNS, ב-UTC: שינויי TTL, מחיקות, הוספות, וכרטיס השינוי שמאחורי כל אחד.",
           "powershell": "Select-String -Path dns\\zone-audit.log -Pattern 'name=ledger ' -SimpleMatch"
@@ -673,6 +748,8 @@
         {
           "id": "unbound-diff",
           "title": "השוואת ה-roles של ה-resolver",
+          "syntax": "diff <config-a> <config-b>",
+          "syntaxPowershell": "Compare-Object (Get-Content <config-a>) (Get-Content <config-b>)",
           "command": "diff dns/unbound/node-dns-v1.conf dns/unbound/node-dns-v2.conf",
           "explain": "שורות שמתחילות ב-`<` קיימות רק ב-v1, ו-`>` רק ב-v2. קראו כל אופציה שהשתנתה ב-man page של unbound.conf לפני שאתם מאשימים אותה.",
           "powershell": "Compare-Object (Get-Content dns\\unbound\\node-dns-v1.conf) (Get-Content dns\\unbound\\node-dns-v2.conf)"
@@ -680,6 +757,8 @@
         {
           "id": "ttl-math",
           "title": "מתי תשובה ב-cache תפוג?",
+          "syntax": "echo $(( $(date -u -d '<cached-at>' +%s) + <ttl-seconds> )) | xargs -I{} date -u -d @{}",
+          "syntaxPowershell": "([DateTimeOffset]'<cached-at>').AddSeconds(<ttl-seconds>).ToString('<format>')",
           "command": "echo $(( $(date -u -d 'Wed Nov 18 11:31:07 UTC 2026' +%s) + 10000 )) | xargs -I{} date -u -d @{}",
           "explain": "זמן השאילתה ועוד ה-TTL שנותר הוא הרגע שבו ה-cache יזרוק את התשובה. חישוב לאחור אומר מתי היא נשמרה ולכמה זמן.",
           "powershell": "([DateTimeOffset]'2026-11-18T11:31:07Z').AddSeconds(10000).ToString('u')"
@@ -692,6 +771,8 @@
         {
           "id": "csv-table",
           "title": "טבלה מסודרת",
+          "syntax": "column -s, -t < <csv-file>",
+          "syntaxPowershell": "Import-Csv <csv-file> | Format-Table",
           "command": "column -s, -t < network/inventory.csv",
           "explain": "מיישר עמודות CSV. עובד על `network/inventory.csv`. שדות במירכאות עם פסיקים מבלבלים את `column`, אז לשינויים השתמשו בכלי הבא.",
           "powershell": "Import-Csv network\\inventory.csv | Format-Table"
@@ -699,6 +780,8 @@
         {
           "id": "changes-window",
           "title": "שינויים בחלון זמן",
+          "syntax": "awk -F, '$<time-field> >= \"<window-start>\" && $<time-field> < \"<window-end>\" {print <fields>}' <csv-file>",
+          "syntaxPowershell": "Import-Csv <csv-file> | Where-Object { $_.<time-column> -ge '<window-start>' -and $_.<time-column> -lt '<window-end>' } | Format-Table <columns> -Wrap",
           "command": "awk -F, '$2 >= \"2026-11-18T08:00\" && $2 < \"2026-11-18T10:00\" {print $1, $2, $5}' changes/change-log.csv",
           "explain": "מחרוזות ISO-8601 ב-UTC ממוינות כמו זמנים, אז השוואת מחרוזות בוחרת חלון. הרחיבו אותו: יש סיבות שהן ישנות יותר ממה שנראה.",
           "powershell": "Import-Csv changes\\change-log.csv | Where-Object { $_.start_utc -ge '2026-11-18T08:00' -and $_.start_utc -lt '2026-11-18T10:00' } | Format-Table change_id, start_utc, team, summary -Wrap"
@@ -706,6 +789,8 @@
         {
           "id": "changes-grep",
           "title": "חיפוש שינוי לפי מילה",
+          "syntax": "grep -i '<keyword>' <csv-file>",
+          "syntaxPowershell": "Import-Csv <csv-file> | Where-Object <column> -match '<keyword>' | Format-List",
           "command": "grep -i 'tunnel' changes/change-log.csv",
           "explain": "חפשו בתקצירים מילה או tag שראיתם במקום אחר, כמו comment של חוק או שם של role.",
           "powershell": "Import-Csv changes\\change-log.csv | Where-Object summary -match 'tunnel' | Format-List"

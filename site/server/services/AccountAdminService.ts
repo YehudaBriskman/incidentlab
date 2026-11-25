@@ -1,19 +1,49 @@
-// Instructor-side account management: approve, reject, delete, plus progress resets.
+// Instructor-side account management: approve/reject/delete, password resets, progress resets, CSV export.
+import { randomBytes } from "node:crypto";
 import type { AccountStatus, AccountView, AdminProgress } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
+import type { FirstBloodRepository } from "../repositories/config-repositories.ts";
 import type { Repositories } from "../repositories/repositories.ts";
+import { mapWithConcurrency } from "../repositories/KvStore.ts";
 import { toAccountView } from "./AuthService.ts";
-import { ACCOUNT_ID_PATTERN, sha256Hex } from "./crypto.ts";
+import { ACCOUNT_ID_PATTERN, hashPassword, sha256Hex } from "./crypto.ts";
 import type { GameService } from "./GameService.ts";
+import type { StatsService } from "./StatsService.ts";
+
+// No look-alike characters (0/O, 1/l/I) so a password read aloud or off a projector is typed right.
+const TEMP_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const TEMP_PASSWORD_LENGTH = 10;
+
+const temporaryPassword = (): string => {
+  let out = "";
+  while (out.length < TEMP_PASSWORD_LENGTH) {
+    for (const byte of randomBytes(16)) {
+      // Reject bytes past the largest multiple of the alphabet size to keep the distribution uniform.
+      if (byte < 256 - (256 % TEMP_PASSWORD_ALPHABET.length) && out.length < TEMP_PASSWORD_LENGTH) out += TEMP_PASSWORD_ALPHABET[byte % TEMP_PASSWORD_ALPHABET.length];
+    }
+  }
+  return out;
+};
+
+/** RFC 4180 field: quote when needed, double inner quotes; neutralise spreadsheet formulas. */
+const csvField = (value: string | number | null): string => {
+  const text = value === null ? "" : String(value);
+  const safe = /^[=+\-@]/.test(text) ? `'${text}` : text;
+  return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+};
 
 export class AccountAdminService {
   private readonly repos: Repositories;
+  private readonly firstBlood: FirstBloodRepository;
   private readonly game: GameService;
+  private readonly stats: StatsService;
   private readonly now: () => Date;
 
-  constructor(deps: { repos: Repositories; game: GameService; now: () => Date }) {
+  constructor(deps: { repos: Repositories; firstBlood: FirstBloodRepository; game: GameService; stats: StatsService; now: () => Date }) {
     this.repos = deps.repos;
+    this.firstBlood = deps.firstBlood;
     this.game = deps.game;
+    this.stats = deps.stats;
     this.now = deps.now;
   }
 
@@ -28,7 +58,37 @@ export class AccountAdminService {
     return toAccountView(account);
   }
 
-  async delete(accountId: string): Promise<void> {
+  /** Approves every pending account. Returns how many were approved. */
+  async approveAll(): Promise<number> {
+    const pending = (await this.repos.accounts.list()).filter((a) => a.status === "pending");
+    const results = await mapWithConcurrency(pending, async (a) => {
+      try {
+        await this.setStatus(a.id, "approved");
+        return 1;
+      } catch {
+        return 0; // deleted or changed meanwhile: skip it
+      }
+    });
+    return results.reduce((sum: number, n) => sum + n, 0);
+  }
+
+  /** Sets a random temporary password, signs the account out and forces a change at next sign-in. */
+  async resetPassword(accountId: string): Promise<string> {
+    this.assertId(accountId);
+    const found = await this.repos.accounts.get(accountId);
+    if (!found) throw new AppError(404, "account not found");
+    const password = temporaryPassword();
+    const account = {
+      ...found.data,
+      passwordHash: await hashPassword(password),
+      mustChangePassword: true,
+      sessionEpoch: found.data.sessionEpoch + 1,
+    };
+    if (!(await this.repos.accounts.saveIfMatch(account, found.etag))) throw new AppError(409, "concurrent update, please retry");
+    return password;
+  }
+
+  async delete(accountId: string): Promise<{ username: string }> {
     this.assertId(accountId);
     const found = await this.repos.accounts.get(accountId);
     if (!found) throw new AppError(404, "account not found");
@@ -36,6 +96,7 @@ export class AccountAdminService {
     await this.repos.progress.deleteMany({ accountId });
     await this.repos.accounts.delete(accountId);
     await this.repos.usernames.release(sha256Hex(found.data.usernameKey));
+    return { username: found.data.username };
   }
 
   async liveProgress(caseId: string): Promise<{ generatedAt: string; caseId: string; players: AdminProgress[] }> {
@@ -51,10 +112,31 @@ export class AccountAdminService {
     return { generatedAt: this.now().toISOString(), caseId, players };
   }
 
+  /** Wipes progress (one player's case, one case, or everything). Resetting a whole case also frees its first bloods. */
   async resetProgress(filter: { caseId?: string; accountId?: string }): Promise<void> {
     if (filter.caseId !== undefined) this.game.caseSecrets(filter.caseId);
     if (filter.accountId !== undefined) this.assertId(filter.accountId);
     await this.repos.progress.deleteMany(filter);
+    if (filter.accountId === undefined) await this.firstBlood.clear(filter.caseId);
+  }
+
+  /** One row per account per case the account has opened. */
+  async exportCsv(): Promise<string> {
+    const users = await this.stats.allUsers();
+    const header = [
+      "username", "status", "rank", "total_score", "case", "case_status", "case_score", "par", "solved", "revealed",
+      "hints", "commands", "wrong", "first_bloods", "duration_seconds", "started_at", "completed_at", "achievements",
+    ];
+    const rows = users.flatMap((u) =>
+      u.cases
+        .filter((c) => c.status !== "not-started")
+        .map((c) => [
+          u.username, u.status, u.rank, u.totalScore, c.caseId, c.status, c.score, c.maxScore, c.solved, c.revealed,
+          c.hintsUsed, c.commandsRevealed, c.wrongAttempts, c.firstBloods, c.durationSeconds, c.startedAt, c.completedAt,
+          u.achievements.map((a) => a.id).join(" "),
+        ]),
+    );
+    return [header, ...rows].map((row) => row.map(csvField).join(",")).join("\r\n") + "\r\n";
   }
 
   private assertId(accountId: string): void {
