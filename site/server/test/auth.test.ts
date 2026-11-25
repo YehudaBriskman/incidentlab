@@ -80,13 +80,13 @@ test("login is rate limited per username", async () => {
   await expectStatus(client("10.2.0.1").call("/auth/login", { body: { username: "target", password: "password1" } }), 429, "rate-limited");
 });
 
-test("reject signs the account out and blocks login; delete frees the name", async () => {
+test("reject shows the rejected state and blocks login; delete frees the name", async () => {
   const { client, admin } = createHarness();
   const eve = client();
   await eve.call("/auth/register", { body: { username: "eve", password: "password1" } });
   const id = (await eve.json(await eve.call("/me"), AccountResponseSchema)).account.id;
   await expectStatus(admin(`/admin/accounts/${id}/reject`, { body: {} }), 200);
-  await expectStatus(eve.call("/me"), 401);
+  assert.equal((await eve.json(await eve.call("/me"), AccountResponseSchema)).account.status, "rejected"); // session kept so the UI can say so
   await expectStatus(client().call("/auth/login", { body: { username: "eve", password: "password1" } }), 403, "rejected");
   await expectStatus(admin(`/admin/accounts/${id}`, { method: "DELETE" }), 204);
   await expectStatus(client().call("/auth/register", { body: { username: "eve", password: "password1" } }), 201);
