@@ -1,63 +1,125 @@
 import "./styles.css";
+import { applyLang, getLang, setLang } from "./i18n/i18n";
+import { T } from "./i18n/strings-player";
 import { getCase } from "./content/load";
-import { h } from "./lib/dom";
-import { isTab, renderCase, stopCaseTimers } from "./views/case";
+import { onConnectivity } from "./lib/api";
+import { h, setChildren } from "./lib/dom";
+import { renderCase, stopCaseTimers } from "./views/case";
 import { renderHome } from "./views/home";
+import { renderToolbox } from "./views/toolbox";
+
+applyLang();
+
+/* ---------- language toggle (header, every page) ---------- */
+function mountLangToggle(): void {
+  const bar = document.querySelector(".topbar");
+  if (!(bar instanceof HTMLElement)) return;
+  const mk = (lang: "en" | "he", label: string): HTMLButtonElement => {
+    const btn = h("button", { type: "button", class: "lang-btn", lang, "aria-pressed": String(getLang() === lang), onclick: () => setLang(lang) }, label);
+    return btn;
+  };
+  const en = mk("en", "EN");
+  const he = mk("he", "עב");
+  const wrap = h("div", { class: "lang-toggle", role: "group", "aria-label": T().langToggle }, en, h("span", { class: "lang-sep", "aria-hidden": "true" }, "|"), he);
+  bar.append(wrap);
+  window.addEventListener("hashchange", () => {
+    en.setAttribute("aria-pressed", String(getLang() === "en"));
+    he.setAttribute("aria-pressed", String(getLang() === "he"));
+    wrap.setAttribute("aria-label", T().langToggle);
+  });
+}
+mountLangToggle();
 
 const root = document.getElementById("app");
 if (!(root instanceof HTMLElement)) throw new Error("#app root missing");
 const appRoot: HTMLElement = root;
 
+/* ---------- global safety net: never white-screen ---------- */
+const toastHost = h("div", { class: "toast-host", "aria-live": "polite" });
+document.body.append(toastHost);
+function toast(message: string): void {
+  const el = h("div", { class: "toast", role: "status" }, message);
+  toastHost.append(el);
+  window.setTimeout(() => el.remove(), 5000);
+}
+window.addEventListener("error", (ev) => {
+  console.error(ev.error ?? ev.message);
+  toast(T().toastError);
+});
+window.addEventListener("unhandledrejection", (ev) => {
+  console.error(ev.reason);
+  toast(T().toastRequestFailed);
+});
+
+const banner = h("div", { class: "net-banner", role: "status", hidden: true });
+document.body.prepend(banner);
+onConnectivity((state) => {
+  banner.hidden = state === "ok";
+  banner.textContent = state === "retrying" ? T().netRetrying : T().netDown;
+});
+
 function notFound(message: string): void {
-  document.title = "Not found · IncidentLab";
-  appRoot.replaceChildren(
-    h(
-      "section",
-      { class: "not-found" },
-      h("p", { class: "mono accent" }, "404 · NO SUCH INCIDENT"),
-      h("h1", {}, message),
-      h("a", { class: "btn btn-primary", href: "#/" }, "Back to all cases"),
-    ),
+  document.title = T().notFoundTitle;
+  setChildren(
+    appRoot,
+    h("section", { class: "center-card" }, h("p", { class: "mono accent" }, "404"), h("h1", {}, message), h("a", { class: "btn btn-primary", href: "#/" }, T().backToCases)),
   );
 }
 
-let lastCaseId: string | null = null;
+function loadingView(): void {
+  setChildren(appRoot, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, T().loading)));
+}
+
+function lazyView(load: () => Promise<(root: HTMLElement) => void>): void {
+  loadingView();
+  const token = routeToken;
+  load()
+    .then((render) => {
+      if (token === routeToken) render(appRoot);
+    })
+    .catch((err: unknown) => {
+      console.error(err);
+      if (token === routeToken) notFound(T().pageFailed);
+    });
+}
+
+let routeToken = 0;
 
 function route(): void {
-  const hash = window.location.hash.replace(/^#\/?/, "");
+  routeToken++;
+  // Strip the "?query" part (Explorer deep links: #/case/<id>/explorer?f=...) before matching.
+  const hash = (window.location.hash.replace(/^#\/?/, "").split("?")[0]) ?? "";
   const parts = hash.split("/").filter((part) => part.length > 0).map(decodeURIComponent);
   stopCaseTimers();
+  window.scrollTo(0, 0);
 
-  if (parts.length === 0) {
-    lastCaseId = null;
-    renderHome(appRoot);
-    window.scrollTo(0, 0);
-    return;
-  }
-  if (parts[0] === "case" && parts[1] !== undefined) {
-    const c = getCase(parts[1]);
-    if (!c) {
-      notFound(`Case "${parts[1]}" does not exist (yet).`);
+  try {
+    if (parts.length === 0) {
+      renderHome(appRoot);
       return;
     }
-    const tabPart = parts[2] ?? "briefing";
-    const tab = isTab(tabPart) ? tabPart : "briefing";
-    const sameCase = lastCaseId === c.id;
-    const scrollY = window.scrollY;
-    renderCase(appRoot, c, tab);
-    lastCaseId = c.id;
-    if (sameCase) {
-      // switching tabs: keep the header in view, move focus to the new panel
-      const tabs = document.querySelector(".tabs");
-      const top = tabs instanceof HTMLElement ? tabs.getBoundingClientRect().top + window.scrollY - 8 : 0;
-      window.scrollTo(0, Math.min(scrollY, top));
-      document.getElementById("panel")?.focus({ preventScroll: true });
-    } else {
-      window.scrollTo(0, 0);
+    if (parts[0] === "admin" && parts.length === 1) {
+      lazyView(() => import("./views/admin").then((m) => m.renderAdmin));
+      return;
     }
-    return;
+    if (parts[0] === "case" && parts[1] !== undefined) {
+      const c = getCase(parts[1]);
+      if (!c) {
+        notFound(T().caseMissing(parts[1]));
+        return;
+      }
+      const sub = parts[2];
+      if (sub === undefined) renderCase(appRoot, c);
+      else if (sub === "toolbox") renderToolbox(appRoot, c);
+      else if (sub === "explorer") lazyView(() => import("./views/explorer").then((m) => m.renderExplorer));
+      else notFound(T().notOnRunbook);
+      return;
+    }
+    notFound(T().notOnRunbook);
+  } catch (err) {
+    console.error(err);
+    notFound(T().pageBroke);
   }
-  notFound("That page is not on the runbook.");
 }
 
 // The skip link must not touch the hash, or the router would treat it as a route.

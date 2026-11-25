@@ -1,0 +1,861 @@
+{
+  "id": "3am-outage",
+  "title": "The 3 AM Outage – התקלה של 3 לפנות בוקר",
+  "subtitle": "ה-checkout קרס ל-27 דקות בליל שישי. ה-rollback תיקן את זה, אבל אף אחד לא יודע למה זה נשבר.",
+  "difficulty": "medium",
+  "estMinutes": 50,
+  "tags": [
+    "log-forensics",
+    "nginx",
+    "jq",
+    "time-zones",
+    "git",
+    "nodejs",
+    "incident-response"
+  ],
+  "inspiredBy": {
+    "title": "Cloudflare global outage",
+    "year": 2019,
+    "summary": "ב-2 ביולי 2019 Cloudflare העלתה חוק WAF חדש שהכיל ביטוי רגולרי חשוף ל-catastrophic backtracking. הוא נפרס גלובלית בבת אחת, הקפיץ את ה-CPU לאפס פנוי בכל שרתי ה-edge וגרם לשגיאות 502 נרחבות במשך כ-27 דקות, עד שה-WAF כובה באמצעות kill switch גלובלי."
+  },
+  "briefing": "**יום שני, 09:12. המטה של Shipfast.**\n\nביום שישי, קצת אחרי 3 לפנות בוקר שעון מקומי, ה-checkout מת. במשך כ-**27 דקות** לקוחות יכלו לגלוש אבל לא לשלם. מישהו עשה rollback ל-checkout והכול חזר לעבוד. אף אחד לא יודע *למה* זה נשבר.\n\nה-RCA על השולחן שלך, להגשה היום: ציר זמן, root cause ומי נפגע.\n\n**חבילת הראיות** מכילה את מה שה-on-call אסף: לוגים של nginx ושל האפליקציה, מטריקות, ה-slow log של Postgres, דיפלויים, ערוץ ה-Slack והיסטוריית ה-git של השירות. **קראו קודם את `README_FIRST.txt`**, ושימו לב לאזורי הזמן: לא כל המקורות מסכימים מה השעה.\n\nשישה שלבים בנויים כמו RCA אמיתי: **מתי** זה התחיל, **מה השתנה**, **מה הפעיל** את זה, **איפה בקוד**, **למה זה נמשך**, ומה ה-**blast radius**. כל תשובה היא ערך קטן ומדויק. נתקעתם? השתמשו ב-Toolbox וברמזים.",
+  "setupChecklist": [
+    "השיגו את הראיות: הורידו ופרסו את **חבילת הראיות**, *או* פתחו את ה-**Evidence Explorer** כדי לעיין בכל הקבצים בדפדפן (בלי התקנות).",
+    "קראו את `README_FIRST.txt` מההתחלה ועד הסוף.",
+    "רשמו את אזור הזמן של כל מקור: nginx, Postgres והדיפלויים ב-**UTC**, לוג האפליקציה ב-**שעון מקומי (+02:00)**, המטריקות ו-Slack ב-**epoch seconds**.",
+    "בחרו מסלול: **bash** (Linux, macOS או WSL), **Windows PowerShell** (לכל פקודה ב-Toolbox יש גרסת PowerShell), או ה-**Explorer בדפדפן**.",
+    "git הוא אופציונלי: `repo/git-log.txt` מכיל את ההיסטוריה המלאה (כולל diffs) כטקסט רגיל."
+  ],
+  "evidenceZip": "/evidence/3am-outage-evidence.zip",
+  "evidence": [
+    {
+      "path": "README_FIRST.txt",
+      "format": "text",
+      "description": "הערות התדריך מצוות ה-on-call, רשימת הקבצים והערות חשובות על פורמטי זמן. מתחילים כאן."
+    },
+    {
+      "path": "nginx/access.log",
+      "format": "nginx log (UTC)",
+      "description": "כל בקשת HTTP שעברה דרך ה-edge proxy במהלך הלילה, עם status, תזמונים, request id (`rid`) ו-customer id (`cid`)."
+    },
+    {
+      "path": "nginx/nginx.conf.snippet",
+      "format": "nginx config",
+      "description": "הגדרת ה-`log_format` וה-timeouts של ה-proxy, כדי שתדעו מה כל שדה (וכל timestamp) מייצג."
+    },
+    {
+      "path": "app/checkout-service.log",
+      "format": "JSON lines",
+      "description": "לוגים מובנים מה-pods של שירות ה-checkout: מחזור חיי הבקשה, גרסאות, אזהרות, restarts. בדקו את ה-offset של ה-timestamp."
+    },
+    {
+      "path": "metrics/checkout_metrics.csv",
+      "format": "CSV (unix epoch)",
+      "description": "מטריקות של שירות ה-checkout ברזולוציה של 15 שניות: pods ready, CPU, event-loop lag, p99 latency, RPS, error rate, restarts."
+    },
+    {
+      "path": "db/postgresql-slow.log",
+      "format": "Postgres log (UTC)",
+      "description": "slow-query log ואירועים בולטים מה-database הראשי."
+    },
+    {
+      "path": "deploys/deploys.log",
+      "format": "text (UTC ISO-8601)",
+      "description": "דיפלויים ו-rollbacks בכל השירותים בימים האחרונים."
+    },
+    {
+      "path": "slack/inc-checkout.json",
+      "format": "Slack export (JSON)",
+      "description": "ערוץ האירוע, כפי שיוצא. `ts` הוא epoch seconds שמור כמחרוזת. התייחסו לדעות שבו כהשערות, לא כעובדות."
+    },
+    {
+      "path": "repo/shipfast-checkout.bundle",
+      "format": "git bundle",
+      "description": "ההיסטוריה המלאה של ה-repo של שירות ה-checkout, כולל tags. משכפלים עם `git clone shipfast-checkout.bundle`."
+    },
+    {
+      "path": "repo/git-log.txt",
+      "format": "text (git log -p)",
+      "description": "אותה היסטוריית repo כטקסט רגיל: כל commit, tag ו-diff (`git log -p --decorate --all`). השתמשו בזה אם אין לכם git."
+    }
+  ],
+  "rules": [
+    "עובדים רק מחבילת הראיות. אל תקראו את קוד ה-generator או את קוד האתר; זה הורס את הכיף.",
+    "התשובות לא רגישות לאותיות גדולות/קטנות, ורווחים בהתחלה ובסוף מתעלמים מהם. הקפידו על הפורמט שמופיע מתחת לכל שאלה.",
+    "כל רמז עולה את הנקודות שמופיעות עליו. הרמזים נחשפים לפי הסדר, מדחיפה עדינה ועד כמעט הפקודה המלאה.",
+    "עבודה בזוגות מומלצת. דברו על ההיגיון שלכם בקול, בדיוק כמו ב-incident review אמיתי.",
+    "כל כלי מותר: grep, awk, jq, Python, גיליון אלקטרוני, העורך האהוב עליכם. בלשונית Toolbox יש פקודות שיעזרו.",
+    "תשובות שגויות לא עולות כלום, אז נחשו בחופשיות. ובכל זאת, נסו להיות מסוגלים להסביר *למה* התשובה שלכם נכונה.",
+    "אל תשתפו flags עם צוותים אחרים עד שכולם מסיימים. לשתף טכניקות זה בסדר.",
+    "זהירות עם הקוד שתמצאו: חלק ממנו איטי בכוונה. קראו את האזהרה ב-Toolbox לפני שאתם מריצים ניסויי regex."
+  ],
+  "questions": [
+    {
+      "stage": {
+        "name": "מתי זה התחיל?",
+        "goal": "מצאו את זמן ה-UTC המדויק של שגיאת השרת הראשונה שמשתמשים ראו.",
+        "lookFor": [
+          "`nginx/access.log` הוא ב-UTC ורושם מתי בקשה *הסתיימה*",
+          "ה-status הוא המספר בן 3 הספרות מיד אחרי הבקשה שבמירכאות",
+          "כל 5xx נחשב, בכל path",
+          "קחו את ה-timestamp המוקדם ביותר, לא רק את השורה הראשונה שאתם רואים"
+        ],
+        "tools": [
+          "filter-5xx",
+          "first-last-match",
+          "status-histogram",
+          "per-minute-5xx",
+          "grep-regex"
+        ],
+        "explorerTip": "פתחו את `nginx/access.log` והוסיפו פילטר **regex** `\" 5\\d\\d ` כדי להשאיר רק שורות 5xx. השתמשו ב-**First match** כדי לקפוץ להתאמה המוקדמת ביותר ובדקו את ה-**histogram by minute** כדי לראות איפה השגיאות מתרכזות. הזמן בתוך `[...]` כבר ב-UTC."
+      },
+      "id": "q1",
+      "title": "מתי זה התחיל?",
+      "prompt": "מתי משתמשים ראו שגיאות לראשונה?\n\nמצאו את הבקשה **הראשונה** ב-`nginx/access.log` שהחזירה שגיאת שרת (**כל status בטווח 500–599**, בכל path).\n\nענו עם הזמן שלה **ב-UTC** בפורמט `HH:MM:SS` (בלי תאריך, בלי מילישניות).",
+      "answerFormat": "HH:MM:SS (UTC)",
+      "placeholder": "04:20:00",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "קוד ה-status הוא שדה נפרד בכל שורת nginx. הסתכלו ב-`nginx/nginx.conf.snippet` כדי לראות באיזה מיקום הוא יושב. הלוג כבר מסודר כרונולוגית, אז ההתאמה הראשונה היא התשובה."
+        },
+        {
+          "cost": 20,
+          "text": "פצלו כל שורה לפי רווחים. ה-status נופל בשדה `$9` (ספרו מול ה-`log_format`). סננו statuses שמתחילים ב-`5`, ועצרו בהתאמה הראשונה."
+        },
+        {
+          "cost": 40,
+          "text": "משהו כמו:\n\n```sh\nawk '$9 ~ /^5[0-9][0-9]$/ {print $4, $9, $7; exit}' nginx/access.log\n```\n\nאחר כך הורידו את חלק התאריך מהשדה `[dd/Mon/yyyy:HH:MM:SS`. אל תמירו את הזמן: nginx כבר רושם כאן UTC."
+        }
+      ],
+      "successNote": "ה-`$time_local` של nginx רושם מתי הבקשה **הסתיימה**, לא מתי התחילה. בקשה שנתקעה 30 שניות נרשמת 30 שניות אחרי שהנזק התחיל. תמיד שאלו *איזה רגע ה-timestamp מייצג* ו*באיזה אזור זמן הוא* לפני שאתם מיישרים מקורות."
+    },
+    {
+      "stage": {
+        "name": "מה השתנה?",
+        "goal": "זהו את ה-commit שה-checkout באמת הריץ כשהשגיאות התחילו.",
+        "lookFor": [
+          "`deploys/deploys.log` מפרט כל release עם ה-commit המקוצר שלו",
+          "כמה שירותים עלו באותו לילה; רק אחד מהם משרת את ה-checkout",
+          "השוו את זמני הדיפלוי לתשובה שלכם בשלב 1",
+          "דעות ב-Slack הן לא ראיות"
+        ],
+        "tools": [
+          "line-up-sources",
+          "versions-over-time",
+          "git-tags",
+          "git-show-release",
+          "git-log-oneline"
+        ],
+        "explorerTip": "פתחו את `deploys/deploys.log` וסננו **contains** `service=checkout`. מצאו את הדיפלוי האחרון של checkout *לפני* ה-5xx הראשון (שניהם ב-UTC). אחר כך פתחו את `repo/git-log.txt`, סננו **contains** את ה-tag של הגרסה והשתמשו ב-**First match** כדי לאמת את ה-commit."
+      },
+      "id": "q2",
+      "title": "מה השתנה?",
+      "prompt": "איזה **commit ה-checkout באמת הריץ כשהשגיאות התחילו**? מצאו את ה-release שנפרס, ואז את ה-commit שלו ב-repo.\n\nענו עם ה-**short SHA בן 7 התווים** (hex באותיות קטנות).",
+      "answerFormat": "short SHA בן 7 תווים (hex)",
+      "placeholder": "a1b2c3d",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "שימו את ה-timestamp מ-Q1 ליד `deploys/deploys.log`. איזה דיפלוי של checkout היה *live* באותו רגע? האחרון, או אחד לפניו? השדה `version` בכל שורה בלוג האפליקציה מאשר מה כל pod באמת הריץ."
+        },
+        {
+          "cost": 20,
+          "text": "שכפלו את ה-bundle והתאימו את ה-**version** שנפרס ל-**git tag**. `git show <tag>` אומר לכם לאיזה commit ה-tag מצביע. השדה `commit=` בלוג הדיפלויים אמור להסכים איתו. אם נשארו שני מועמדים, קראו את שני ה-diffs ושאלו איזה מהם יכול באופן סביר להקפיא pod."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngit clone repo/shipfast-checkout.bundle && cd shipfast-checkout\ngit tag --sort=creatordate | tail -5\ngit log --oneline -1 <tag>      # short SHA of the tagged commit\ngit show <tag> --stat           # what did that release touch?\n```\n\nהצלבה: `grep checkout deploys/deploys.log` והשדה `version` בלוג האפליקציה ממש לפני השגיאה הראשונה."
+        }
+      ],
+      "successNote": "הדיפלוי האחרון הוא החשוד הראשון, לא אוטומטית האשם. release אחד עלה יותר מחצי שעה לפני שמשהו נשבר, אז להסתמך רק על \"הכי עדכני\" היה שולח אתכם לכיוון הלא נכון. הצליבו *מתי כל שינוי עלה לאוויר* עם *מתי הסימפטומים התחילו*, ואז אמתו בקריאת ה-diff."
+    },
+    {
+      "stage": {
+        "name": "מה הפעיל את זה?",
+        "goal": "מצאו את ההזמנה שה-checkout שלה התחיל אבל אף פעם לא הסתיים.",
+        "lookFor": [
+          "`app/checkout-service.log` הוא JSON lines בשעון *מקומי* (+02:00)",
+          "כל checkout רושם start, ובדרך כלל גם done",
+          "חפשו ממש לפני השגיאות הראשונות, אחרי המרת אזורי זמן",
+          "pod קפוא משתתק, אחר כך מפגר, ואז עושה restart"
+        ],
+        "tools": [
+          "json-filter-msg",
+          "never-finished",
+          "json-follow-order",
+          "pod-timeline",
+          "utc-to-local"
+        ],
+        "explorerTip": "השתמשו בווידג'ט **time converter** כדי להמיר את זמן ה-UTC משלב 1 ל-+02:00. פתחו את `app/checkout-service.log`, הוסיפו **JSON field filter** `msg = checkout.start` והסתכלו על starts קצת לפני הזמן הזה. סננו **contains** כל order ID מועמד: זה שאין לו `checkout.done` הוא החשוד."
+      },
+      "id": "q3",
+      "title": "מה הפעיל את זה?",
+      "prompt": "הזמנה אחת בלוג של שירות ה-checkout **התחילה ולא הסתיימה אף פעם**: `checkout.start` בלי `checkout.done` תואם, ואחריה ה-pod השתתק.\n\nמה ה-**order ID** של ההזמנה ה\"מורעלת\" הזו?",
+      "answerFormat": "Order ID, למשל ORD-XXXXXX",
+      "placeholder": "ORD-1A2B3C",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "`app/checkout-service.log` הוא JSON lines ב-**שעון מקומי (+02:00)**, בעוד nginx ב-UTC. המירו את הזמן מ-Q1 לפני שאתם מחפשים. זכרו ש-nginx רשם את *סוף* הבקשה, שעשתה timeout אחרי 30 שניות."
+        },
+        {
+          "cost": 20,
+          "text": "הסתכלו על שורות `checkout.start` מכ-30 שניות לפני ה-5xx הראשון. לכל הזמנה, בדקו אם מופיע אי פעם `checkout.done` עם אותו `order`. אפשר גם לעקוב אחרי ה-`rid` של בקשת ה-nginx הכושלת הראשונה לתוך לוג האפליקציה."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\n# starts vs dones per order, then diff them\njq -r 'select(.msg==\"checkout.start\") | .order' app/checkout-service.log | sort -u > started\njq -r 'select(.msg==\"checkout.done\")  | .order' app/checkout-service.log | sort -u > done\ncomm -23 started done\n# or: grep '<rid-from-nginx>' app/checkout-service.log\n```"
+        }
+      ],
+      "successNote": "חלק מהבאגים קופצים רק על input ספציפי. דיפלוי יכול להיראות בריא 15 דקות עד שמגיע ה-payload היחיד שמפעיל אותו. בקשה ש**מתחילה ולא נגמרת אף פעם** (בלי לוג סיום, בלי שגיאה) היא סימן קלאסי ל-thread או event loop שנתקע, ולא לקריסה."
+    },
+    {
+      "stage": {
+        "name": "איפה בקוד?",
+        "goal": "מצאו את הפונקציה ב-release הבעייתי שיכולה לחסום את ה-event loop של Node.",
+        "lookFor": [
+          "הסתכלו על מה שה-release הבעייתי שינה, לא על כל ה-repo",
+          "quantifiers מקוננים כמו `(x+)*` יכולים לעשות backtracking קטסטרופלי",
+          "שורת הלוג של ההזמנה המורעלת רומזת איזה סוג input היא נשאה",
+          "התשובה היא שם של פונקציה, לא שם של קובץ"
+        ],
+        "tools": [
+          "git-show-release",
+          "git-diff-releases",
+          "git-pickaxe",
+          "git-grep",
+          "regex-timing"
+        ],
+        "explorerTip": "פתחו את `repo/git-log.txt` (ה-`git log -p` המלא). סננו **contains** את ה-tag של ה-release משלב 2 והשתמשו ב-**First match** כדי לקפוץ ל-commit הזה, ואז סננו **regex** `^\\+.*(function|RegExp|=\\s*/\\^)` כדי לראות רק שורות שנוספו ומגדירות פונקציות או regexes."
+      },
+      "id": "q4",
+      "title": "איפה בקוד?",
+      "prompt": "משהו ב-release הזה לוקח המון זמן על input מסוים וחוסם את כל תהליך ה-Node.js.\n\nאיזו **פונקציה** מכילה את הקוד המסוכן? ענו עם השם שלה **בדיוק כמו בקוד** (בלי סוגריים, בלי path).",
+      "answerFormat": "functionName (כמו בקוד)",
+      "placeholder": "validateCartItems",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "בדקו מה היה להזמנה המורעלת שלרוב ההזמנות לא היה. בלוג האפליקציה יש כמה שדות נוספים על `checkout.start`. אחר כך קראו את ה-diff של ה-release שמצאתם ב-Q2."
+        },
+        {
+          "cost": 20,
+          "text": "ה-release הוסיף טיפול חדש ב-input. חפשו **ביטוי רגולרי** ב-diff, ספציפית כזה עם quantifier *בתוך* group שבעצמו מכומת, כמו `( ... + ... )*`."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\ngit show <bad-sha> --stat\ngit show <bad-sha> -- src/\ngit grep -n -E 'RegExp|/\\^.*\\)\\*' <bad-sha>\n```\n\nהתשובה היא הפונקציה המיוצאת ש*משתמשת* ב-regex החשוד, לא השם של הקבוע."
+        }
+      ],
+      "successNote": "**Catastrophic backtracking:** עם quantifiers מקוננים כמו `(\\w+\\s?)*`, מנוע regex מבוסס backtracking יכול לפצל מחרוזת של מילים במספר אקספוננציאלי של דרכים. כשהתו האחרון גורם להתאמה להיכשל, הוא מנסה את **כולן**. 99 תווים מספיקים כדי להעסיק CPU הרבה יותר זמן ממה שמישהו יחכה, וב-Node.js שהוא single-threaded זה חוסם הכול."
+    },
+    {
+      "stage": {
+        "name": "למה זה נמשך?",
+        "goal": "ספרו כמה פעמים בסך הכול ההזמנה המורעלת נשלחה.",
+        "lookFor": [
+          "כל שליחה רושמת שורת start משלה עם request id חדש",
+          "retries ולחיצות חוזרות נוחתים על pods שונים",
+          "ספרו שליחות, לא כל שורת לוג שמזכירה את ההזמנה",
+          "כללו את הראשונה"
+        ],
+        "tools": [
+          "json-follow-order",
+          "grep-count",
+          "count-unique",
+          "json-msg-types"
+        ],
+        "explorerTip": "ב-`app/checkout-service.log`, הוסיפו **JSON field filter** `order = <your stage 3 order>` וגם `msg = checkout.start`; מספר ההתאמות הוא התשובה. הצליבו עם **Count unique** עם ה-regex `\"rid\":\"([0-9a-f]+)\"`."
+      },
+      "id": "q5",
+      "title": "למה זה נמשך?",
+      "prompt": "בקשה רעה אחת מקפיאה pod אחד, ובכל זאת ההשבתה נמשכה ~27 דקות. משהו המשיך **להרעיל מחדש** את השירות.\n\nכמה פעמים **בסך הכול** ההזמנה המורעלת נשלחה ל-checkout? ענו עם **מספר שלם, כולל הראשונה**.",
+      "answerFormat": "מספר שלם (סה\"כ, כולל הראשונה)",
+      "placeholder": "3",
+      "points": 100,
+      "hints": [
+        {
+          "cost": 10,
+          "text": "כל שליחה של הזמנה יוצרת בקשה חדשה, עם `rid` חדש, אבל ה-order ID נשאר זהה. ספרו כמה פעמים ההזמנה הזו *התחילה*."
+        },
+        {
+          "cost": 20,
+          "text": "ספרו שורות `checkout.start` של ההזמנה המורעלת בלוג האפליקציה. הצליבו מול nginx: בקשות `POST /api/checkout` של אותו לקוח שהסתיימו ב-5xx. שימו לב על איזה pod נחת כל ניסיון, ומה קרה ל-pod הזה אחר כך."
+        },
+        {
+          "cost": 40,
+          "text": "```sh\njq -c 'select(.msg==\"checkout.start\" and .order==\"ORD-XXXXXX\") | {ts, pod, rid}' \\\n  app/checkout-service.log | wc -l\n```"
+        }
+      ],
+      "successNote": "**Retries** של הלקוח (אוטומטיים, ועוד משתמשים חסרי סבלנות שלחצו שוב) המשיכו לשלוח את אותו payload מורעל. Round-robin load balancing פיזר אותו על כל ה-pods, ו-**liveness probes** עשו restart ל-pods קפואים ישר בחזרה לקו האש. Retries צריכים backoff ותקרה, והמערכת צריכה דרך לדחות inputs שכבר הפילו אותה. אחרת self-healing פשוט הופך ל-self-reinfecting."
+    },
+    {
+      "stage": {
+        "name": "Blast radius",
+        "goal": "ספרו את הלקוחות האמיתיים הייחודיים שקיבלו 5xx ב-checkout.",
+        "lookFor": [
+          "רק שורות `POST /api/checkout` עם status בטווח 500–599",
+          "השתמשו בכל הקובץ, לא רק בחלון האירוע",
+          "הלקוח הוא השדה `cid=` בסוף כל שורה",
+          "הוציאו את `cid=-` ואת `cid=cus_synthetic`"
+        ],
+        "tools": [
+          "grep-regex",
+          "grep-exclude",
+          "grep-only-match",
+          "count-unique",
+          "group-two-fields"
+        ],
+        "explorerTip": "פתחו את `nginx/access.log`, הוסיפו פילטר **regex** `\"POST /api/checkout [^\"]*\" 5\\d\\d `, הוסיפו פילטרי **NOT** ל-`cid=-` ול-`cid=cus_synthetic`, ואז הריצו **Count unique** עם ה-regex `cid=(\\S+)`. מספר הערכים הייחודיים הוא התשובה."
+      },
+      "id": "q6",
+      "title": "Blast radius",
+      "prompt": "כמה **לקוחות אמיתיים** נפגעו?\n\nספרו את **ערכי `cid=` הייחודיים** עם **לפחות 5xx אחד** (500–599) על **`POST /api/checkout`**, בכל מקום ב-`nginx/access.log` (כל הקובץ).\n\nהוציאו את `cid=-` (אנונימי) ואת `cid=cus_synthetic` (המוניטור שלנו). ענו עם **מספר שלם**.",
+      "answerFormat": "מספר שלם (לקוחות ייחודיים)",
+      "placeholder": "42",
+      "points": 150,
+      "hints": [
+        {
+          "cost": 15,
+          "text": "צריך שלושה פילטרים (method + path, סוג status, לקוח אמיתי), ואז ספירה *ייחודית*. אל תספרו בקשות: לקוח אחד שעשה retry חמש פעמים הוא עדיין לקוח אחד."
+        },
+        {
+          "cost": 30,
+          "text": "התאימו שורות עם `\"POST /api/checkout ` ו-status של `5xx` בשדה `$9`. חלצו את ערך ה-`cid=` (השדה האחרון), הוציאו את `-` ואת `cus_synthetic`, ואז `sort -u | wc -l`."
+        },
+        {
+          "cost": 50,
+          "text": "```sh\nawk '$6==\"\\\"POST\" && $7==\"/api/checkout\" && $9 ~ /^5/ {print $NF}' nginx/access.log \\\n  | sed 's/^cid=//' | grep -v -x -e '-' -e 'cus_synthetic' \\\n  | sort -u | wc -l\n```"
+        }
+      ],
+      "successNote": "ה-blast radius קובע את התגובה: מי מקבל מייל התנצלות, האם ה-status page אומר \"חלק\" או \"רוב\" המשתמשים, והאם צריך לבצע reconciliation לתשלומים שנכשלו. ספרו **אנשים**, לא בקשות, וזכרו לסנן את התנועה הסינתטית שלכם, שאחרת מנפחת את ההשפעה."
+    }
+  ],
+  "toolbox": [
+    {
+      "category": "התמצאות ראשונית",
+      "items": [
+        {
+          "id": "unzip-evidence",
+          "title": "פריסת הראיות",
+          "command": "unzip 3am-outage-evidence.zip && cd 3am-outage",
+          "explain": "פורס את החבילה. הכול נמצא תחת תיקייה עליונה אחת.",
+          "powershell": "Expand-Archive .\\3am-outage-evidence.zip -DestinationPath .\ncd .\\3am-outage"
+        },
+        {
+          "id": "list-files",
+          "title": "מה יש לנו כאן",
+          "command": "ls -laR",
+          "explain": "מציג את כל הקבצים רקורסיבית עם הגדלים. קובץ ענק הוא בדרך כלל זה ששווה לדגום ראשון.",
+          "powershell": "Get-ChildItem -Recurse | Select-Object FullName, Length"
+        },
+        {
+          "id": "head-lines",
+          "title": "הצצה לשורות הראשונות",
+          "command": "head -n 5 nginx/access.log",
+          "explain": "הסתכלו על הפורמט **לפני** שאתם מפרסרים אותו. `tail -n 5` מראה את סוף החלון.",
+          "powershell": "Get-Content nginx\\access.log -TotalCount 5"
+        },
+        {
+          "id": "line-count",
+          "title": "כמה הוא גדול?",
+          "command": "wc -l nginx/access.log app/checkout-service.log",
+          "explain": "ספירת שורות אומרת לכם אם אפשר לעבור על הקובץ בעין או שצריך לבצע אגרגציה.",
+          "powershell": "Get-ChildItem nginx\\access.log, app\\checkout-service.log | ForEach-Object { '{0,8} {1}' -f (Get-Content $_.FullName | Measure-Object -Line).Lines, $_.Name }"
+        },
+        {
+          "id": "browse-file",
+          "title": "עיון בלי גלישת שורות",
+          "command": "less -S nginx/access.log",
+          "explain": "`-S` חותך שורות ארוכות במקום לגלוש אותן. השתמשו ב-`/pattern` לחיפוש, `n` להתאמה הבאה, `G` לסוף הקובץ.",
+          "powershell": "Get-Content nginx\\access.log | Out-Host -Paging"
+        },
+        {
+          "id": "file-type",
+          "title": "איזה סוג קובץ זה?",
+          "command": "file repo/shipfast-checkout.bundle metrics/*.csv",
+          "explain": "מזהה סוגי קבצים: טקסט, JSON, git bundle וכן הלאה.",
+          "powershell": "Get-ChildItem repo, metrics | Select-Object Name, Length\nGet-Content metrics\\checkout_metrics.csv -TotalCount 2"
+        },
+        {
+          "id": "read-readme",
+          "title": "קראו את ה-README",
+          "command": "cat README_FIRST.txt",
+          "explain": "ברצינות. יש בו הערות על פורמטים ואזורי זמן.",
+          "powershell": "Get-Content README_FIRST.txt"
+        }
+      ]
+    },
+    {
+      "category": "grep וחברים",
+      "items": [
+        {
+          "id": "grep-count",
+          "title": "ספירת התאמות",
+          "command": "grep -c ' 404 ' nginx/access.log",
+          "explain": "`-c` מדפיס את מספר השורות התואמות במקום את השורות עצמן. בדיקות שפיות מהירות.",
+          "powershell": "(Select-String -Path nginx\\access.log -Pattern ' 404 ' -SimpleMatch).Count"
+        },
+        {
+          "id": "grep-regex",
+          "title": "Extended regex",
+          "command": "grep -E '\" (502|504) ' nginx/access.log | head",
+          "explain": "`-E` מאפשר alternation `|`, `+`, `{n}` וכן הלאה בלי backslashes. ה-`\" ` בהתחלה מעגן את ההתאמה מיד אחרי מחרוזת הבקשה.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern '\" (502|504) ' | Select-Object -First 10"
+        },
+        {
+          "id": "grep-line-numbers",
+          "title": "מספרי שורות",
+          "command": "grep -n 'pattern' app/checkout-service.log | head",
+          "explain": "`-n` מוסיף לכל התאמה את מספר השורה שלה, מה שעוזר לקפוץ אליה ב-`less` (`<num>G`).",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'pattern' | Select-Object -First 10 LineNumber, Line"
+        },
+        {
+          "id": "grep-first-match",
+          "title": "עצירה בהתאמה הראשונה",
+          "command": "grep -m1 -E 'pattern' nginx/access.log",
+          "explain": "`-m1` יוצא אחרי ההתאמה הראשונה. בלוג ממוין כרונולוגית, זה נותן לכם את ההופעה ה*מוקדמת ביותר*.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern 'pattern' | Select-Object -First 1"
+        },
+        {
+          "id": "grep-exclude",
+          "title": "היפוך / החרגה",
+          "command": "grep -v -e 'kube-probe' -e 'Shipfast-Synthetic' nginx/access.log",
+          "explain": "`-v` משאיר שורות ש**לא** תואמות. כל `-e` מוסיף pattern נוסף. מעולה להסרת health checks ורעש סינתטי.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern 'kube-probe', 'Shipfast-Synthetic' -NotMatch"
+        },
+        {
+          "id": "grep-only-match",
+          "title": "הדפסת ההתאמה בלבד",
+          "command": "grep -o 'cid=[^ ]*' nginx/access.log | sort | uniq -c | sort -rn | head",
+          "explain": "`-o` מוציא רק את הטקסט שהותאם, מה שהופך אותו לאידיאלי לחילוץ שדה אחד משורות מבולגנות.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern 'cid=\\S+' | ForEach-Object { $_.Matches[0].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count, Name"
+        },
+        {
+          "id": "grep-context",
+          "title": "הקשר סביב התאמה",
+          "command": "grep -n -B3 -A10 'ORD-XXXXXX' app/checkout-service.log",
+          "explain": "`-B`/`-A` מציגים שורות לפני ואחרי כל התאמה, כדי שתראו מה קרה סביב אירוע.",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'ORD-XXXXXX' -Context 3,10"
+        },
+        {
+          "id": "grep-gzip",
+          "title": "חיפוש בלוגים דחוסים",
+          "command": "zgrep -c 'pattern' rotated.log.gz",
+          "explain": "בעולם האמיתי לוגים ישנים דחוסים ב-gzip. `zgrep`/`zcat` קוראים אותם בלי לפרוס.",
+          "powershell": "$gz = New-Object IO.Compression.GZipStream([IO.File]::OpenRead(\"$PWD\\rotated.log.gz\"), [IO.Compression.CompressionMode]::Decompress)\n((New-Object IO.StreamReader($gz)).ReadToEnd() -split \"`n\" | Select-String 'pattern').Count"
+        }
+      ]
+    },
+    {
+      "category": "awk / sort / uniq",
+      "items": [
+        {
+          "id": "nginx-fields",
+          "title": "חילוץ שדות משורות nginx",
+          "command": "awk '{print $4, $6, $7, $9}' nginx/access.log | head",
+          "explain": "awk מפצל לפי whitespace. בפורמט הזה: `$1` IP, `$4` `[time`, `$6` `\"METHOD`, `$7` path, `$9` status, `$NF` `cid=...`. אמתו מול ה-`log_format`.",
+          "powershell": "Get-Content nginx\\access.log -TotalCount 10 | ForEach-Object { $f = $_ -split ' '; \"$($f[3]) $($f[5]) $($f[6]) $($f[8])\" }"
+        },
+        {
+          "id": "status-histogram",
+          "title": "היסטוגרמה של status codes",
+          "command": "awk '{print $9}' nginx/access.log | sort | uniq -c | sort -rn",
+          "explain": "המבט הראשון הקלאסי על כל access log: כמה יש מכל status code.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern '\" (\\d{3}) ' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "filter-5xx",
+          "title": "סינון לפי שדה",
+          "command": "awk '$9 >= 500 && $9 <= 599' nginx/access.log | head",
+          "explain": "תנאים של awk על שדות מדויקים יותר מ-grep, כי `500` יכול להופיע גם בספירת bytes.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern '\" 5\\d\\d ' | Select-Object -First 10"
+        },
+        {
+          "id": "per-minute-5xx",
+          "title": "קיבוץ לפי דקה",
+          "command": "awk '$9 ~ /^5/ {print substr($4, 14, 5)}' nginx/access.log | uniq -c",
+          "explain": "`substr($4,14,5)` מחלץ `HH:MM` מתוך `[13/Nov/2026:HH:MM:SS`. מכיוון שהלוג ממוין, `uniq -c` נותן ספירה לפי דקה. השתמשו ב-`,8)` לפי שנייה.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern ':(\\d\\d:\\d\\d):\\d\\d \\+0000\\] \"[^\"]*\" 5\\d\\d ' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name"
+        },
+        {
+          "id": "per-minute-all",
+          "title": "לפי דקה עם cut",
+          "command": "cut -d: -f2,3 nginx/access.log | sort | uniq -c | head",
+          "explain": "`cut` על `:` נותן `HH:MM` מתוך ה-timestamp. גס יותר מ-awk, אבל מהיר.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern ':(\\d\\d:\\d\\d):\\d\\d ' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object -First 10 Count, Name"
+        },
+        {
+          "id": "group-two-fields",
+          "title": "קיבוץ לפי שני שדות",
+          "command": "awk '{print $7, $9}' nginx/access.log | sort | uniq -c | sort -rn | head -20",
+          "explain": "אילו שילובים של path + status שולטים? מעולה כדי לראות *אילו* endpoints נכשלים.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern '\"\\w+ (\\S+) [^\"]*\" (\\d{3}) ' | ForEach-Object { $_.Matches[0].Groups[1].Value + ' ' + $_.Matches[0].Groups[2].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 20 Count, Name"
+        },
+        {
+          "id": "count-unique",
+          "title": "ספירת ערכים ייחודיים",
+          "command": "awk '{print $NF}' nginx/access.log | sort -u | wc -l",
+          "explain": "`sort -u` מסיר כפילויות, ו-`wc -l` סופר את מה שנשאר. משתמשים, IPs, rids ייחודיים וכן הלאה.",
+          "powershell": "(Select-String -Path nginx\\access.log -Pattern 'cid=(\\S+)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Sort-Object -Unique | Measure-Object).Count"
+        },
+        {
+          "id": "first-last-match",
+          "title": "הופעה ראשונה ואחרונה",
+          "command": "awk '$9 ~ /^5/' nginx/access.log | sed -n '1p;$p'",
+          "explain": "מדפיס את השורה התואמת הראשונה והאחרונה, וכך נותן את ההתחלה והסוף של תופעה במכה אחת.",
+          "powershell": "$hits = Select-String -Path nginx\\access.log -Pattern '\" 5\\d\\d '\n$hits[0].Line\n$hits[-1].Line"
+        }
+      ]
+    },
+    {
+      "category": "jq ללוגי JSON",
+      "items": [
+        {
+          "id": "json-pretty",
+          "title": "הדפסה יפה של שורה אחת",
+          "command": "head -n1 app/checkout-service.log | jq .",
+          "explain": "ראו כל שדה ששורת לוג נושאת לפני שאתם כותבים פילטרים.",
+          "powershell": "Get-Content app\\checkout-service.log -TotalCount 1 | ConvertFrom-Json | Format-List"
+        },
+        {
+          "id": "json-filter-msg",
+          "title": "סינון לפי message",
+          "command": "jq -c 'select(.msg==\"checkout.start\")' app/checkout-service.log | head",
+          "explain": "`select()` משאיר אובייקטים תואמים, ו-`-c` שומר אותם אחד בשורה כדי שעדיין תוכלו להשתמש ב-grep, head ו-wc.",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"msg\":\"checkout.start\"' | ForEach-Object { $_.Line | ConvertFrom-Json } | Select-Object -First 10 ts, pod, order, customer"
+        },
+        {
+          "id": "json-follow-order",
+          "title": "מעקב אחרי הזמנה אחת",
+          "command": "jq -c 'select(.order==\"ORD-XXXXXX\")' app/checkout-service.log",
+          "explain": "כל האירועים של הזמנה אחת. יש start *וגם* done?",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'ORD-XXXXXX' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json } | Format-Table ts, pod, msg, order, rid"
+        },
+        {
+          "id": "json-custom-output",
+          "title": "פלט מותאם עם -r",
+          "command": "jq -r '\"\\(.ts) \\(.pod) \\(.msg) \\(.order // \"\")\"' app/checkout-service.log | less -S",
+          "explain": "`-r` מדפיס מחרוזות גולמיות, ו-`\\(...)` משלב שדות. `//` נותן ערך ברירת מחדל כששדה חסר.",
+          "powershell": "Get-Content app\\checkout-service.log | ForEach-Object { $j = $_ | ConvertFrom-Json; \"$($j.ts) $($j.pod) $($j.msg) $($j.order)\" } | Out-Host -Paging"
+        },
+        {
+          "id": "json-msg-types",
+          "title": "אילו סוגי messages קיימים?",
+          "command": "jq -r '.msg' app/checkout-service.log | sort | uniq -c | sort -rn",
+          "explain": "היסטוגרמה של סוגי אירועים. אזהרות נדירות בולטות מיד.",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"msg\":\"([^\"]+)\"' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object Count, Name"
+        },
+        {
+          "id": "json-group-count",
+          "title": "קיבוץ וספירה (slurp)",
+          "command": "jq -s 'map(select(.level==\"warn\")) | group_by(.msg) | map({msg: .[0].msg, n: length})' app/checkout-service.log",
+          "explain": "`-s` טוען את כל השורות למערך אחד, כך שאפשר להשתמש ב-`group_by`, `sort_by` ו-`length` על כל הקובץ.",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '\"level\":\"warn\"' | ForEach-Object { $_.Line | ConvertFrom-Json } | Group-Object msg | Select-Object Count, Name"
+        },
+        {
+          "id": "json-numeric-filter",
+          "title": "סינון לפי מספרים",
+          "command": "jq -c 'select(.msg==\"eventloop.lag\" and .lag_ms > 1000) | {ts, pod, lag_ms}' app/checkout-service.log",
+          "explain": "השוואות מספריות ובניית אובייקט `{a, b}` משאירות רק את השדות שמעניינים אתכם.",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern 'eventloop.lag' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json } | Where-Object { $_.lag_ms -gt 1000 } | Format-Table ts, pod, lag_ms"
+        },
+        {
+          "id": "versions-over-time",
+          "title": "גרסאות לאורך זמן",
+          "command": "jq -r '[.ts, .pod, .version] | @tsv' app/checkout-service.log | uniq -f2 | less",
+          "explain": "`@tsv` הופך מערכים לשורות מופרדות בטאבים. בשילוב עם `uniq` רואים מתי כל pod החליף גרסה.",
+          "powershell": "Get-Content app\\checkout-service.log | ForEach-Object { $j = $_ | ConvertFrom-Json; \"$($j.ts)`t$($j.pod)`t$($j.version)\" } | Out-Host -Paging"
+        }
+      ]
+    },
+    {
+      "category": "הצלבת מקורות",
+      "items": [
+        {
+          "id": "rid-from-nginx",
+          "title": "שליפת request id מ-nginx",
+          "command": "grep -m1 -E '\" 50[0-9] ' nginx/access.log | grep -o 'rid=[0-9a-f]*'",
+          "explain": "nginx ושירות ה-checkout חולקים את ה-`rid` (request id), שהוא החוט שמושכים בו כדי לקשר בין שני הצדדים של בקשה.",
+          "powershell": "(Select-String -Path nginx\\access.log -Pattern '\" 50\\d .*rid=([0-9a-f]+)' | Select-Object -First 1).Matches[0].Groups[1].Value"
+        },
+        {
+          "id": "rid-in-app-log",
+          "title": "מציאת הבקשה בלוג האפליקציה",
+          "command": "grep '<rid>' app/checkout-service.log | jq .",
+          "explain": "אותה בקשה מנקודת המבט של השירות: איזה pod, איזו הזמנה, איזו גרסה, והאם היא הסתיימה?",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '<rid>' -SimpleMatch | ForEach-Object { $_.Line | ConvertFrom-Json }"
+        },
+        {
+          "id": "customer-requests",
+          "title": "כל הבקשות של לקוח אחד",
+          "command": "grep 'cid=cus_XXXX' nginx/access.log | awk '{print $4, $6, $7, $9, $(NF-2)}'",
+          "explain": "retries של אותו אדם מסתדרים כאן בשורה. שימו לב לתזמון בין הניסיונות.",
+          "powershell": "Select-String -Path nginx\\access.log -Pattern 'cid=cus_XXXX\\b' | ForEach-Object Line"
+        },
+        {
+          "id": "line-up-sources",
+          "title": "יישור שני מקורות לפי זמן",
+          "command": "grep -h '01:2[0-9]' deploys/deploys.log db/postgresql-slow.log | sort | head",
+          "explain": "מיזוג אירועים מקבצים שונים לתצוגה אחת, **אבל רק אחרי שכולם באותו אזור זמן**.",
+          "powershell": "Select-String -Path deploys\\deploys.log, db\\postgresql-slow.log -Pattern '01:2\\d' | ForEach-Object Line | Sort-Object | Select-Object -First 20"
+        },
+        {
+          "id": "never-finished",
+          "title": "בקשות שלא הסתיימו",
+          "command": "comm -23 <(jq -r 'select(.msg==\"x.start\")|.rid' app.log | sort -u) <(jq -r 'select(.msg==\"x.done\")|.rid' app.log | sort -u)",
+          "explain": "`comm -23` מדפיס שורות שנמצאות רק ברשימה הממוינת הראשונה: דברים שהתחילו ואין להם סיום תואם.",
+          "powershell": "$done = @{}\nSelect-String -Path app.log -Pattern '\"msg\":\"x.done\"' | ForEach-Object { $done[($_.Line | ConvertFrom-Json).rid] = 1 }\nSelect-String -Path app.log -Pattern '\"msg\":\"x.start\"' | ForEach-Object { $_.Line | ConvertFrom-Json } | Where-Object { -not $done.ContainsKey($_.rid) }"
+        },
+        {
+          "id": "pod-timeline",
+          "title": "ציר זמן של pod",
+          "command": "jq -r 'select(.pod==\"<pod>\") | \"\\(.ts) \\(.level) \\(.msg)\"' app/checkout-service.log | less",
+          "explain": "סיפור החיים של pod אחד. פערים (שקט) יכולים להיות מעידים בדיוק כמו שגיאות.",
+          "powershell": "Select-String -Path app\\checkout-service.log -Pattern '<pod>' -SimpleMatch | ForEach-Object { $j = $_.Line | ConvertFrom-Json; \"$($j.ts) $($j.level) $($j.msg)\" } | Out-Host -Paging"
+        }
+      ]
+    },
+    {
+      "category": "אזורי זמן ו-timestamps",
+      "items": [
+        {
+          "id": "epoch-to-utc",
+          "title": "Epoch ל-UTC",
+          "command": "date -u -d @1794531600",
+          "explain": "ממיר unix epoch seconds לזמן UTC קריא (GNU date). ב-macOS: `date -u -r 1794531600`.",
+          "powershell": "[DateTimeOffset]::FromUnixTimeSeconds(1794531600).UtcDateTime.ToString('u')"
+        },
+        {
+          "id": "utc-to-local",
+          "title": "UTC לשעון מקומי (ישראל)",
+          "command": "TZ=Asia/Jerusalem date -d '2026-11-13T00:30:00Z'",
+          "explain": "מראה מה היה רגע UTC בשעון של המשרד. בנובמבר ישראל ב-**UTC+02:00**.",
+          "powershell": "([DateTimeOffset]'2026-11-13T00:30:00Z').ToOffset([TimeSpan]'02:00')"
+        },
+        {
+          "id": "local-to-utc",
+          "title": "שעון מקומי ל-UTC",
+          "command": "date -u -d '2026-11-13T02:30:00+02:00' +%H:%M:%S",
+          "explain": "מנרמל timestamp עם offset (כמו של לוג האפליקציה) ל-UTC. `+%H:%M:%S` קובע את פורמט הפלט.",
+          "powershell": "([DateTimeOffset]'2026-11-13T02:30:00+02:00').UtcDateTime.ToString('HH:mm:ss')"
+        },
+        {
+          "id": "epoch-python",
+          "title": "Python one-liner",
+          "command": "python3 -c 'from datetime import datetime, timezone; print(datetime.fromtimestamp(1794531600, timezone.utc))'",
+          "explain": "אותה המרה, אבל portable. החליפו ל-`timezone(timedelta(hours=2))` כדי לקבל שעון מקומי.",
+          "powershell": "# no Python needed on Windows:\n[DateTimeOffset]::FromUnixTimeSeconds(1794531600).ToString('yyyy-MM-dd HH:mm:ss zzz')"
+        },
+        {
+          "id": "time-to-epoch",
+          "title": "זמן קריא ל-epoch",
+          "command": "date -u -d '2026-11-13 01:00:00' +%s",
+          "explain": "שימושי למציאת השורה המתאימה בקובץ שמאונדקס לפי epoch, כמו ה-CSV של המטריקות.",
+          "powershell": "([DateTimeOffset]'2026-11-13T01:00:00Z').ToUnixTimeSeconds()"
+        },
+        {
+          "id": "csv-epoch-column",
+          "title": "המרת עמודה שלמה ב-CSV",
+          "command": "awk -F, 'NR>1 {cmd=\"date -u -d @\"$1\" +%H:%M:%S\"; cmd | getline t; close(cmd); print t, $0}' metrics/checkout_metrics.csv | head",
+          "explain": "מוסיף לכל שורת מטריקות זמן UTC קריא. קצת איטי (מריץ fork של `date` לכל שורה), אבל בסדר לכמה מאות שורות.",
+          "powershell": "Import-Csv metrics\\checkout_metrics.csv | Select-Object -First 10 @{n='utc'; e={ [DateTimeOffset]::FromUnixTimeSeconds([long]$_.ts_epoch).ToString('HH:mm:ss') }}, *"
+        },
+        {
+          "id": "slack-timestamps",
+          "title": "timestamps של Slack",
+          "command": "jq -r '.[] | \"\\(.ts | tonumber | floor | todate) \\(.user): \\(.text)\"' slack/inc-checkout.json",
+          "explain": "ה-`ts` של Slack הוא *מחרוזת* epoch עם חלק עשרוני. `tonumber | floor | todate` נותן ISO-8601 UTC.",
+          "powershell": "(Get-Content slack\\inc-checkout.json -Raw | ConvertFrom-Json) | ForEach-Object { '{0} {1}: {2}' -f [DateTimeOffset]::FromUnixTimeSeconds([long][Math]::Floor([double]$_.ts)).ToString('u'), $_.user, $_.text }"
+        }
+      ]
+    },
+    {
+      "category": "מטריקות CSV",
+      "items": [
+        {
+          "id": "csv-table",
+          "title": "טבלה מסודרת",
+          "command": "column -s, -t < metrics/checkout_metrics.csv | less -S",
+          "explain": "מיישר עמודות CSV כדי שבאמת תוכלו לקרוא אותן. `-s,` קובע את המפריד ו-`-t` בונה טבלה.",
+          "powershell": "Import-Csv metrics\\checkout_metrics.csv | Format-Table | Out-Host -Paging"
+        },
+        {
+          "id": "csv-header",
+          "title": "הצגת ה-header עם מספרי עמודות",
+          "command": "head -1 metrics/checkout_metrics.csv | tr , '\\n' | nl",
+          "explain": "ממספר כל עמודה, כדי שתדעו באיזה `$N` להשתמש ב-awk.",
+          "powershell": "$i = 0; (Get-Content metrics\\checkout_metrics.csv -TotalCount 1) -split ',' | ForEach-Object { $i++; \"$i $_\" }"
+        },
+        {
+          "id": "csv-select",
+          "title": "בחירת עמודות",
+          "command": "awk -F, '{print $1, $3, $4}' metrics/checkout_metrics.csv | head",
+          "explain": "`-F,` מפצל לפי פסיקים. הדפיסו רק את העמודות שאתם חוקרים.",
+          "powershell": "Import-Csv metrics\\checkout_metrics.csv | Select-Object -First 10 ts_epoch, cpu_pct_max, eventloop_lag_p99_ms"
+        },
+        {
+          "id": "csv-first-over",
+          "title": "השורה הראשונה מעל סף",
+          "command": "awk -F, 'NR>1 && $7 > 0.05 {print; exit}' metrics/checkout_metrics.csv",
+          "explain": "מוצא מתי מטריקה חוצה קו לראשונה (כאן, עמודת ה-error rate). אחר כך המירו את `$1` עם `date -u -d @...`.",
+          "powershell": "Import-Csv metrics\\checkout_metrics.csv | Where-Object { [double]$_.error_rate -gt 0.05 } | Select-Object -First 1"
+        },
+        {
+          "id": "csv-all-over",
+          "title": "כל השורות מעל סף",
+          "command": "awk -F, 'NR>1 && $4 > 1000 {print $1, $4}' metrics/checkout_metrics.csv",
+          "explain": "מראה את הטווח המלא של אנומליה: מתי התחילה, מתי נגמרה, והאם הייתה רציפה.",
+          "powershell": "Import-Csv metrics\\checkout_metrics.csv | Where-Object { [double]$_.eventloop_lag_p99_ms -gt 1000 } | Select-Object ts_epoch, eventloop_lag_p99_ms"
+        },
+        {
+          "id": "csv-min-max",
+          "title": "Min / max של עמודה",
+          "command": "awk -F, 'NR>1 {if($2<m||m==\"\")m=$2; if($2>M)M=$2} END{print m, M}' metrics/checkout_metrics.csv",
+          "explain": "בדיקת טווח מהירה: האם pods_ready ירד אי פעם לאפס?",
+          "powershell": "Import-Csv metrics\\checkout_metrics.csv | ForEach-Object { [double]$_.pods_ready } | Measure-Object -Minimum -Maximum"
+        }
+      ]
+    },
+    {
+      "category": "git forensics",
+      "items": [
+        {
+          "id": "git-clone",
+          "title": "שכפול bundle",
+          "command": "git clone repo/shipfast-checkout.bundle && cd shipfast-checkout",
+          "explain": "bundle הוא repo שלם בקובץ אחד. שכפול שלו נותן working copy רגיל עם היסטוריה ו-tags מלאים. אין git? הקובץ `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט רגיל (`git log -p --decorate --all`).",
+          "powershell": "# git is optional: read repo\\git-log.txt instead\nGet-Content repo\\git-log.txt | Out-Host -Paging"
+        },
+        {
+          "id": "git-log-oneline",
+          "title": "ההיסטוריה במבט אחד",
+          "command": "git log --oneline --decorate --graph | head -30",
+          "explain": "`--decorate` מציג tags ו-branches ליד ה-commits, כדי שתראו איפה כל release יושב. אין git? הקובץ `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט רגיל (`git log -p --decorate --all`).",
+          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern '^commit ' -Context 0,5 | Select-Object -First 30"
+        },
+        {
+          "id": "git-tags",
+          "title": "רשימת tags",
+          "command": "git tag --sort=creatordate",
+          "explain": "ה-releases לפי הסדר. התאימו אותם לגרסאות בלוגי הדיפלוי. אין git? הקובץ `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט רגיל (`git log -p --decorate --all`).",
+          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern 'tag: [^,)]+' -AllMatches | ForEach-Object { $_.Matches.Value }"
+        },
+        {
+          "id": "git-show-release",
+          "title": "מה יש ב-release?",
+          "command": "git show <tag> --stat",
+          "explain": "הודעת ה-commit, המחבר, התאריך והקבצים שנגעו בהם ב-commit שה-tag מצביע עליו. אין git? הקובץ `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט רגיל (`git log -p --decorate --all`).",
+          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern 'tag: v2.14.1\\b' -Context 0,60"
+        },
+        {
+          "id": "git-diff-releases",
+          "title": "Diff בין שני releases",
+          "command": "git diff v2.13.4..v2.14.0 --stat",
+          "explain": "כל מה שהשתנה בין שתי גרסאות. הורידו את `--stat` כדי לקבל את ה-patch המלא. אין git? הקובץ `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט רגיל (`git log -p --decorate --all`).",
+          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern '^commit |^\\+\\+\\+ b/' | Select-Object -First 40 Line"
+        },
+        {
+          "id": "git-pickaxe",
+          "title": "מי הוסיף מחרוזת",
+          "command": "git log -p -S'pattern' --oneline",
+          "explain": "ה-\"pickaxe\": commits שהוסיפו או הסירו מופעים של `pattern`, עם ה-patches שלהם. אין git? הקובץ `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט רגיל (`git log -p --decorate --all`).",
+          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern '^commit |^[+-].*pattern' | ForEach-Object Line"
+        },
+        {
+          "id": "git-grep",
+          "title": "חיפוש בקוד ב-revision מסוים",
+          "command": "git grep -n 'pattern' <tag>",
+          "explain": "מריץ grep על העץ כפי שהיה ב-tag הזה, בלי לעשות לו checkout. אין git? הקובץ `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט רגיל (`git log -p --decorate --all`).",
+          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern 'pattern' -Context 2,2"
+        },
+        {
+          "id": "git-blame",
+          "title": "Blame לטווח שורות",
+          "command": "git blame -L 1,30 src/path/to/file.ts",
+          "explain": "מי נגע אחרון בכל שורה, ובאיזה commit. הוסיפו `-w` כדי להתעלם משינויי whitespace. אין git? הקובץ `repo/git-log.txt` מכיל את אותה היסטוריה כטקסט רגיל (`git log -p --decorate --all`).",
+          "powershell": "# git is optional: read repo\\git-log.txt instead\nSelect-String -Path repo\\git-log.txt -Pattern '^commit |^Author:|^\\+\\+\\+ b/src/path/to/file.ts' | ForEach-Object Line"
+        }
+      ]
+    },
+    {
+      "category": "בדיקת שפיות ל-regex (זהירות!)",
+      "items": [
+        {
+          "id": "regex-timing",
+          "title": "תזמון regex ב-Node (רק בגדלים בטוחים)",
+          "command": "node -e 'const re=/^(a+)+$/; for (let n=18;n<=26;n++){const s=\"a\".repeat(n)+\"!\"; const t=Date.now(); re.test(s); console.log(n, Date.now()-t, \"ms\")}'",
+          "explain": "מודד כמה זמן לוקח ל-regex **להיכשל** על inputs באורך הולך וגדל שמסתיימים בתו שהוא לא יכול להתאים. `(a+)+` הוא ה-pattern הרשע הקלאסי; החליפו בכל regex שאתם חושדים בו (ובצורת input שמתאימה לו). אם הזמן בערך **מוכפל בכל תו נוסף**, זה אקספוננציאלי.\n\n**אזהרה: אף פעם אל תעברו ~28 תווים.** כל תו נוסף מכפיל את זמן הריצה, אז עוד כמה והטרמינל שלכם קפוא לדקות, או לשנים. אם זה קורה, `Ctrl+C`, או `pkill node` מטרמינל אחר.",
+          "powershell": "$re = [regex]'^(a+)+$'\nforeach ($n in 18..24) { $s = ('a' * $n) + '!'; $t = [Diagnostics.Stopwatch]::StartNew(); [void]$re.IsMatch($s); \"$n $($t.ElapsedMilliseconds) ms\" }"
+        },
+        {
+          "id": "regex-timing-python",
+          "title": "אותה בדיקה ב-Python",
+          "command": "python3 -c '\nimport re, time\nfor n in range(18, 25):\n    s = \"a\" * n + \"!\"\n    t = time.time()\n    re.match(r\"^(a+)+$\", s)\n    print(n, round((time.time() - t) * 1000), \"ms\")\n'",
+          "explain": "גם `re` של Python הוא מנוע backtracking ומתפוצץ באותה צורה. הדביקו כמו שזה: המחרוזת הרב-שורתית בתוך מירכאות בודדות עובדת ב-bash וב-zsh. **אותה אזהרה: שמרו על n קטן.**",
+          "powershell": "# PowerShell uses .NET regex, which backtracks too:\n$re = [regex]'^(a+)+$'\n18..24 | ForEach-Object { $s = ('a' * $_) + '!'; '{0} {1:N0} ms' -f $_, (Measure-Command { $re.IsMatch($s) }).TotalMilliseconds }"
+        },
+        {
+          "id": "regex-timeout",
+          "title": "הרצה עם timeout קשיח",
+          "command": "timeout 10s node -e '...your test...'",
+          "explain": "רשת ביטחון: הורג את התהליך אחרי 10 שניות, לא משנה מה.",
+          "powershell": "$re = New-Object Text.RegularExpressions.Regex('^(a+)+$', 'None', [TimeSpan]::FromSeconds(5))\ntry { $re.IsMatch(('a' * 40) + '!') } catch { 'timed out after 5s' }"
+        },
+        {
+          "id": "regex-linear",
+          "title": "השוואה לגרסה לינארית",
+          "command": "node -e 'const re=/^[\\w\\s]*$/; const s=\"a \".repeat(5000)+\"!\"; console.time(\"t\"); re.test(s); console.timeEnd(\"t\")'",
+          "explain": "character class עם quantifier יחיד לא יכול לעשות backtracking אקספוננציאלי. אפילו על 10,000 תווים הוא מסיים בהרבה פחות ממילישנייה.",
+          "powershell": "$re = [regex]'^[\\w\\s]*$'; $s = ('a ' * 5000) + '!'\n(Measure-Command { $re.IsMatch($s) }).TotalMilliseconds"
+        }
+      ]
+    },
+    {
+      "category": "Postgres slow log",
+      "items": [
+        {
+          "id": "pg-slow-all",
+          "title": "כל ה-statements האיטיים",
+          "command": "grep 'duration:' db/postgresql-slow.log | head",
+          "explain": "כל שורה שרשמה משך של query.",
+          "powershell": "Select-String -Path db\\postgresql-slow.log -Pattern 'duration:' | Select-Object -First 10 Line"
+        },
+        {
+          "id": "pg-slower-than",
+          "title": "Queries איטיים מ-X ms",
+          "command": "awk '/duration:/ {for(i=1;i<=NF;i++) if($i==\"duration:\" && $(i+1)>2000) print $1, $2, $(i+1)}' db/postgresql-slow.log",
+          "explain": "מוצא את ה-token `duration:` ומדפיס את ה-timestamp ואת המשך כשהוא מעל 2000 ms. כווננו את הסף לפי הצורך.",
+          "powershell": "Select-String -Path db\\postgresql-slow.log -Pattern 'duration: ([\\d.]+) ms' | Where-Object { [double]$_.Matches[0].Groups[1].Value -gt 2000 } | ForEach-Object { $_.Line.Substring(0, 23) + '  ' + $_.Matches[0].Groups[1].Value }"
+        },
+        {
+          "id": "pg-per-minute",
+          "title": "Queries איטיים לפי דקה",
+          "command": "grep 'duration:' db/postgresql-slow.log | cut -c12-16 | uniq -c",
+          "explain": "תווים 12–16 הם `HH:MM` בתוך `2026-11-13 HH:MM:SS UTC`. היסטוגרמה מראה *מתי* ה-DB התקשה, וגם מתי הוא *השתתק*.",
+          "powershell": "Select-String -Path db\\postgresql-slow.log -Pattern '^\\S+ (\\d\\d:\\d\\d).*duration:' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Select-Object Count, Name"
+        },
+        {
+          "id": "pg-connections",
+          "title": "מי התחבר?",
+          "command": "grep -E 'connection authorized|application_name' db/postgresql-slow.log",
+          "explain": "מציג sessions שנפתחים, ואיזו אפליקציה פתחה אותם (backup jobs, migrations, אפליקציות).",
+          "powershell": "Select-String -Path db\\postgresql-slow.log -Pattern 'connection authorized|application_name'"
+        },
+        {
+          "id": "pg-non-query",
+          "title": "אירועים שאינם queries",
+          "command": "grep -v 'duration:' db/postgresql-slow.log | head -40",
+          "explain": "Checkpoints, חיבורים, COPY: פעילות הרקע סביב ה-queries.",
+          "powershell": "Select-String -Path db\\postgresql-slow.log -Pattern 'duration:' -NotMatch | Select-Object -First 40 Line"
+        }
+      ]
+    }
+  ],
+  "debrief": "_Sealed._ פתרו את כל שש השאלות כדי לפענח את ה-debrief: הוא מוצפן ב-AES-GCM עם מפתח שנגזר מהתשובות שלכם."
+}

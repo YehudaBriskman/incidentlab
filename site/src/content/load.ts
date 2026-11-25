@@ -1,7 +1,5 @@
-import { CaseSchema, FlagsSchema, TeasersSchema, type Case, type Flags, type Teaser } from "./schema";
-import flagsJson from "../generated/flags.json";
-import sealedJson from "../generated/debrief.sealed.json";
-import { SealedDebriefSchema, type SealedDebrief } from "./sealed";
+import { getLang } from "../i18n/i18n";
+import { CaseSchema, TeasersSchema, type Case, type Teaser } from "./schema";
 
 /*
  * Content is bundled at build time and validated with zod at startup.
@@ -11,7 +9,7 @@ import { SealedDebriefSchema, type SealedDebrief } from "./sealed";
  * dead-code-eliminated in production builds) and only when no real case with
  * the same id exists, so it never ships.
  */
-const realCaseModules = import.meta.glob<unknown>(["./cases/*.json", "!./cases/_*.json"], {
+const realCaseModules = import.meta.glob<unknown>(["./cases/*.json", "!./cases/_*.json", "!./cases/*.he.json"], {
   eager: true,
   import: "default",
 });
@@ -19,6 +17,9 @@ const realCaseModules = import.meta.glob<unknown>(["./cases/*.json", "!./cases/_
 const devCaseModules: Record<string, unknown> = import.meta.env.DEV
   ? import.meta.glob<unknown>("./cases/_*.json", { eager: true, import: "default" })
   : {};
+
+// Hebrew translations: cases/<id>.he.json. Optional; a missing or invalid file falls back to English.
+const heCaseModules = import.meta.glob<unknown>("./cases/*.he.json", { eager: true, import: "default" });
 
 const teaserModules = import.meta.glob<unknown>("./teasers.json", { eager: true, import: "default" });
 
@@ -51,21 +52,32 @@ function parseTeasers(): Teaser[] {
 }
 
 export const cases: ReadonlyMap<string, Case> = parseCases();
+
+/** Hebrew overrides keyed by case id; only valid files whose id matches an English case. */
+function parseHebrewCases(): Map<string, Case> {
+  const out = new Map<string, Case>();
+  for (const [path, raw] of Object.entries(heCaseModules)) {
+    const result = CaseSchema.safeParse(raw);
+    if (!result.success) {
+      console.warn(`[content] ${path} failed schema validation; using English`, result.error.issues);
+      continue;
+    }
+    if (cases.has(result.data.id)) out.set(result.data.id, result.data);
+  }
+  return out;
+}
+const heCases: ReadonlyMap<string, Case> = parseHebrewCases();
+
+function localized(c: Case | undefined): Case | undefined {
+  if (c === undefined || getLang() !== "he") return c;
+  return heCases.get(c.id) ?? c;
+}
 export const teasers: readonly Teaser[] = parseTeasers();
-export const flags: Flags = FlagsSchema.parse(flagsJson);
 
 export function getCase(id: string): Case | undefined {
-  return cases.get(id);
+  return localized(cases.get(id));
 }
 
 export function featuredCase(): Case | undefined {
-  return cases.get(FEATURED_CASE_ID) ?? cases.values().next().value;
-}
-
-const sealedResult = SealedDebriefSchema.safeParse(sealedJson);
-if (!sealedResult.success) console.error("[content] debrief.sealed.json failed schema validation", sealedResult.error.issues);
-
-/** Sealed (encrypted) debrief for a case, if one is bundled. */
-export function sealedDebriefFor(caseId: string): SealedDebrief | undefined {
-  return sealedResult.success && sealedResult.data.caseId === caseId ? sealedResult.data : undefined;
+  return localized(cases.get(FEATURED_CASE_ID) ?? cases.values().next().value);
 }

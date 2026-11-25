@@ -7,13 +7,17 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:server": "node --test --experimental-strip-types server/"
   },
   "dependencies": {
+    "@netlify/blobs": "11.1.9",
+    "@netlify/functions": "6.1.1",
     "marked": "18.2.1",
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@types/node": "26.6.6",
     "typescript": "7.0.2",
     "vite": "8.3.8"
   }
