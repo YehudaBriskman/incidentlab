@@ -26,7 +26,7 @@ test("staged flow, scoring, reveal, debrief per case", async () => {
   const harness = createHarness();
   const { player } = await approvedPlayer(harness, "Ada");
   const progress = await player.json(await player.call("/cases/alpha/progress"), ProgressResponseSchema);
-  assert.equal(progress.progress.maxScore, 650);
+  assert.equal(progress.progress.maxScore, 5 * (100 + 30 + 10) + (150 + 30 + 10) + 50); // par
   assert.equal(progress.progress.stages.q1.status, "locked");
 
   await expectStatus(player.call("/cases/alpha/answer", { body: { questionId: "q1", answer: "x" } }), 403, "locked");
@@ -39,7 +39,10 @@ test("staged flow, scoring, reveal, debrief per case", async () => {
   assert.equal(crossCase.correct, false);
   const right = await player.json(await player.call("/cases/alpha/answer", { body: { questionId: "q1", answer: "  ALPHA-A1 " } }), AnswerResponseSchema);
   assert.equal(right.correct, true);
-  assert.equal(right.progress.stages.q1.points, 90);
+  assert.equal(right.progress.stages.q1.breakdown?.hints, -10);
+  assert.equal(right.progress.stages.q1.breakdown?.wrong, -4); // two wrong answers
+  assert.equal(right.progress.stages.q1.breakdown?.firstBlood, 15);
+  assert.equal(right.progress.stages.q1.points, 100 - 10 - 4 + 30 + 15);
 
   await expectStatus(player.call("/cases/alpha/debrief"), 403, "locked");
   const revealed = await player.json(await player.call("/cases/alpha/reveal", { body: { questionId: "q2" } }), ProgressResponseSchema);
@@ -74,7 +77,7 @@ test("parallel correct answers score once", async () => {
   const results = await Promise.all(Array.from({ length: 5 }, () => player.call("/cases/alpha/answer", { body: { questionId: "q1", answer: "alpha-a1" } })));
   assert.ok(results.every((r) => r.status === 200));
   const after = await player.json(await player.call("/cases/alpha/progress"), ProgressResponseSchema);
-  assert.equal(after.progress.score, 100);
+  assert.equal(after.progress.score, 100 + 30 + 10 + 15); // clean, fast, first blood
   assert.equal(after.progress.stages.q2.status, "active");
 });
 
@@ -123,7 +126,7 @@ test("stats: per user, rank, per case, admin live view and resets", async () => 
   await bob.player.call("/cases/alpha/progress");
 
   const mine = await ada.player.json(await ada.player.call("/me/stats"), UserStatsResponseSchema);
-  assert.equal(mine.stats.totalScore, 100);
+  assert.equal(mine.stats.totalScore, 100 - 2 + 30 + 15); // one wrong, fast, first blood
   assert.equal(mine.stats.rank, 1);
   assert.equal(mine.stats.accuracy, 0.5);
   assert.equal(mine.stats.casesStarted, 1);

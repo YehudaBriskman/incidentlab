@@ -1,20 +1,30 @@
+import type { AuditEntry } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
-import { sha256Hex, safeEqual } from "./crypto.ts";
+import type { AuthService } from "./AuthService.ts";
+import { safeEqual, sha256Hex } from "./crypto.ts";
 
 const MIN_ADMIN_KEY_LENGTH = 16;
 
+/** Admin access: the X-Admin-Key header, or the session cookie of `admin` signed in with that key. */
 export class AdminAuthService {
-  private readonly adminKey: string | undefined;
+  private readonly adminKey: () => string | undefined;
+  private readonly auth: AuthService;
 
-  constructor(adminKey: string | undefined) {
-    this.adminKey = adminKey;
+  constructor(deps: { adminKey: () => string | undefined; auth: AuthService }) {
+    this.adminKey = deps.adminKey;
+    this.auth = deps.auth;
   }
 
-  /** Throws 503 when admin is disabled, 401 when the key is missing or wrong. */
-  assertAdmin(providedKey: string | null): void {
-    if (!this.adminKey || this.adminKey.length < MIN_ADMIN_KEY_LENGTH) throw new AppError(503, "admin disabled");
-    if (!providedKey) throw new AppError(401, "admin key required");
-    // Compare fixed-length digests so timingSafeEqual never sees different lengths.
-    if (!safeEqual(sha256Hex(providedKey), sha256Hex(this.adminKey))) throw new AppError(401, "invalid admin key");
+  /** Throws 503 when admin is disabled, 401 when neither credential is valid. Returns how the caller authenticated. */
+  async assertAdmin(input: { headerKey: string | null; sessionToken: string | null }): Promise<AuditEntry["via"]> {
+    const adminKey = this.adminKey();
+    if (!adminKey || adminKey.length < MIN_ADMIN_KEY_LENGTH) throw new AppError(503, "admin disabled");
+    if (input.headerKey) {
+      // Compare fixed-length digests so timingSafeEqual never sees different lengths.
+      if (safeEqual(sha256Hex(input.headerKey), sha256Hex(adminKey))) return "key";
+      throw new AppError(401, "invalid admin key");
+    }
+    if (await this.auth.isAdminSession(input.sessionToken)) return "session";
+    throw new AppError(401, "admin key required");
   }
 }
