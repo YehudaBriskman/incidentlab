@@ -133,7 +133,7 @@ public, plus the function bundle that `deploy.sh` uploads.
 
 ## CI and end-to-end test
 
-`.github/workflows/ci.yml` runs on every pull request and on pushes to `dev` and `main`: it runs
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`: it runs
 `./scripts/build-all.sh` (generators, answer keys, packaging, every solver, site build, server tests), then starts
 `tests/local-server.ts` and runs the Playwright tests in `tests/e2e/` against it. On failure, the Playwright
 report, screenshots/traces and the server log are uploaded as the `playwright-report` artifact.
