@@ -559,35 +559,51 @@
 :where(.code-block, .answer-code, .ex-view, .prose pre) { --focus-ring: var(--code-accent); --focus-halo: var(--code-bg); }
 :where(.admin-login-alt) { --accent: var(--accent-text); }
 
-/* ============ base ============ */
+/* ============ base ============
+   Global elements on the 2.0.0 roles: body text, the heading roles, links (text colour + amber underline), a
+   two-colour focus ring, selection and scrollbars. */
 *, *::before, *::after { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--canvas);
-  color: var(--text);
+  background: var(--level-0);
+  color: var(--text-1);
   font-family: var(--font-sans);
-  font-size: var(--step-0);
+  font-size: var(--type-body-size);
+  font-weight: var(--type-body-weight);
   line-height: var(--leading-body);
   display: flex;
   flex-direction: column;
 }
 main { flex: 1; width: 100%; max-width: var(--page); margin: 0 auto; padding: 0 var(--gutter) var(--space-8); outline: none; }
-a { color: var(--accent-text); text-underline-offset: 3px; }
+/* Links read as text; the amber underline is the cue (thicker on hover), never colour alone. */
+a {
+  color: var(--text-1);
+  text-decoration-line: underline; text-decoration-color: var(--link-underline);
+  text-decoration-thickness: max(1px, 0.08em); text-underline-offset: 3px;
+}
+a:hover { text-decoration-thickness: 2px; }
+/* Focus: a 2px ring outside a 2px halo of the page colour (WCAG C40), so it holds on any background. The halo
+   is zero-specificity: components that draw their own box-shadow keep it and get the ring alone. */
 :focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); }
-h1, h2, h3, h4 { line-height: var(--leading-tight); letter-spacing: -0.01em; margin: 0 0 0.5em; }
-h1 { font-size: clamp(1.7rem, 4.5vw, 2.4rem); }
+:where(:focus-visible) { box-shadow: 0 0 0 var(--focus-offset) var(--focus-halo); }
+::selection { background: var(--selection-bg); color: var(--text-1); }
+h1, h2, h3, h4 { margin: 0 0 var(--gap-related); }
+h1 { font-size: var(--type-page-title-size); line-height: var(--type-page-title-lh); font-weight: var(--type-page-title-weight); letter-spacing: var(--type-page-title-track); }
+h2 { font-size: var(--type-headline-size); line-height: var(--type-headline-lh); font-weight: var(--type-headline-weight); letter-spacing: var(--type-headline-track); }
+h3 { font-size: var(--type-title-size); line-height: var(--type-title-lh); font-weight: var(--type-title-weight); letter-spacing: var(--type-title-track); }
+h4 { font-size: var(--type-body-size); line-height: var(--type-body-lh); font-weight: 600; }
 code, pre, .mono { font-family: var(--font-mono); }
 /* Ligatures would turn != into ≠ and -> into an arrow: players copy and retype these, so show every char. */
 code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-code, .input.mono {
   font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0;
 }
-.muted { color: var(--text-muted); }
+.muted { color: var(--text-2); }
 .accent { color: var(--accent-text); }
-.small { font-size: var(--step--1); }
+.small { font-size: var(--type-small-size); line-height: var(--type-small-lh); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.skip-link { position: absolute; inset-inline-start: var(--space-2); top: -60px; z-index: calc(var(--z-toast) + 1); background: var(--accent); color: var(--on-accent); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); }
+.skip-link { position: absolute; inset-inline-start: var(--space-2); top: -60px; z-index: calc(var(--z-toast) + 1); background: var(--accent); color: var(--on-accent); font-weight: 600; text-decoration: none; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); }
 .skip-link:focus { top: var(--space-2); }
 [hidden] { display: none !important; }
 
@@ -832,8 +848,8 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 .btn-copy.is-copied { color: var(--success-fg); border-color: var(--success-fg); }
 .link-btn {
   display: inline-flex; align-items: center; justify-content: center; min-block-size: var(--target-min); min-inline-size: var(--target-min);
-  background: none; border: 0; padding: 0; font: inherit; color: var(--accent-text);
-  text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+  background: none; border: 0; padding: 0; font: inherit; color: var(--text-1);
+  text-decoration: underline; text-decoration-color: var(--link-underline); text-underline-offset: 3px; cursor: pointer;
 }
 .link-btn.muted { color: var(--text-muted); font-size: var(--step--1); }
 .link-btn.small { font-size: var(--step--1); }
