@@ -87,7 +87,9 @@
 .ex-notice-warn { background: var(--danger-bg); color: var(--danger-fg); }
 .ex-notice-info { background: var(--success-bg); color: var(--success-fg); }
 .ex-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
-.ex-actions .btn.is-copied { color: var(--success-fg); background: var(--success-bg); }
+.ex-drawer-tools .btn.is-copied { color: var(--success-fg); background: var(--success-bg); }
+/* the ⋯ menu button (#112): an icon button at the toolbar end, after the wrap toggle */
+.ex-more { font-size: var(--step-1); line-height: 1; }
 .ex-toggle { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--control-sm); padding: 0 var(--space-2); font-size: var(--step--1); color: var(--text-2); cursor: pointer; margin-inline-start: auto; }
 
 /* log pane (always dark) */
@@ -300,6 +302,7 @@ th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
   .ex-controls[open] > .ex-fieldset { padding: 0 var(--space-3) var(--space-3); }
   .ex-step .ex-input { min-width: 0; flex-basis: 100%; }
   .ex-toggle { margin-inline-start: 0; }
+  .ex-more { margin-inline-start: auto; }
 }
 
 /* ============ RTL (Hebrew) ============ */
