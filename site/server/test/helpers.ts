@@ -17,8 +17,8 @@ const caseSecrets = (id: string) => ({
   questions: { q1: q, q2: q, q3: q, q4: q, q5: q, q6: { ...q, points: 150 } },
   hints: { q1: hintTexts("q1"), q2: hintTexts("q2"), q3: hintTexts("q3"), q4: hintTexts("q4"), q5: hintTexts("q5"), q6: hintTexts("q6") },
   tools: {
-    "grep-5xx": { command: "grep ' 5[0-9][0-9] ' access.log", powershell: "Select-String ' 5\\d\\d ' access.log" },
-    "jq-start": { command: "jq 'select(.msg==\"start\")' app.log", powershell: null },
+    "grep-5xx": { command: "grep ' 5[0-9][0-9] ' access.log", powershell: "Select-String ' 5\\d\\d ' access.log", lab: "jq -r 'select(.status >= 500) | .path' access.jsonl" },
+    "jq-start": { command: "jq 'select(.msg==\"start\")' app.log", powershell: null, lab: null },
   },
   estMinutes: 60,
 });

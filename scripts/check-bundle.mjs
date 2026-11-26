@@ -6,7 +6,7 @@
 // content API, paid content from the game API after charging. So the check fails on any of:
 //   - a case's free content (briefing, question prompts, debrief, setup checklist) in any shipped file;
 //   - a JSON file shaped like a case (an `id` plus `questions`), or any file under dist/evidence/;
-//   - a paid string (hint text, runnable command) in any encoding the bundler may have used;
+//   - a paid string (hint text, runnable command, lab command) in any encoding the bundler may have used;
 //   - an answer from the answer keys (whole-token match, like the package leak scan);
 //   - a file whose name mentions secrets or answers.
 // It proves it read the bundle: the entry HTML and at least one JS chunk must be among the files it scanned.
@@ -15,9 +15,10 @@ import { join } from "node:path";
 import { PAID_MIN_LENGTH, createAnswerScan, createTextScan } from "../site/shared/leak-scan.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname;
-const DIST = join(ROOT, "site/dist");
-const CASES = join(ROOT, "site/src/content/cases");
-const SECRETS = join(ROOT, "site/server/generated/secrets.json");
+// The three inputs can be pointed elsewhere, so a test can run the check on a planted leak.
+const DIST = process.env.CHECK_BUNDLE_DIST ?? join(ROOT, "site/dist");
+const CASES = process.env.CHECK_BUNDLE_CASES ?? join(ROOT, "site/src/content/cases");
+const SECRETS = process.env.CHECK_BUNDLE_SECRETS ?? join(ROOT, "site/server/generated/secrets.json");
 
 const walk = (dir) => readdirSync(dir).flatMap((name) => {
   const path = join(dir, name);
@@ -56,6 +57,7 @@ for (const file of caseFiles) {
   for (const s of data.toolbox ?? []) for (const it of s.items ?? []) {
     if (it.command) paid.push([`command ${it.id}`, it.command]);
     if (it.powershell) paid.push([`powershell ${it.id}`, it.powershell]);
+    if (it.lab) paid.push([`lab ${it.id}`, it.lab]);
   }
   for (const [kind, text] of paid) {
     if (text.length < PAID_MIN_LENGTH) continue;
