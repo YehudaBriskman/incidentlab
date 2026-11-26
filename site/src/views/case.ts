@@ -9,6 +9,7 @@ import { TG } from "../i18n/strings-game";
 import { withApprovedAccount } from "./auth";
 import { announce, confirmButton, copyButton, ensureAnnouncer, h, html, setChildren } from "../lib/dom";
 import { md, mdInline } from "../lib/markdown";
+import { readingLayout } from "../components/readingLayout";
 import { formatElapsed } from "../lib/time";
 import { formatNumber, isRelabel, locale } from "../i18n/i18n";
 import { commandCard, isCleanSoFar, lockedToday, type CommandContext, type LockedToday } from "./toolbox";
@@ -917,9 +918,12 @@ function shareLine(c: Case, player: ProgressView): HTMLElement {
 
 function renderDebrief(c: Case, player: ProgressView): HTMLElement {
   const body = h("div", { class: "prose" }, h("p", { class: "muted" }, T().loadingDebrief));
+  // The debrief is long: an "On this page" contents list appears once it has enough headings.
+  const reading = readingLayout({ content: body, tocLabel: TP().onThisPage, idPrefix: "debrief" });
   getDebrief(c.id)
     .then((markdown) => {
       body.replaceChildren(bidiProse(html("div", {}, md(markdown))));
+      reading.refresh();
     })
     .catch((err: unknown) => {
       body.replaceChildren(
@@ -952,7 +956,7 @@ function renderDebrief(c: Case, player: ProgressView): HTMLElement {
       h("a", { class: "btn btn-primary", href: "#/leaderboard" }, TG().homeLeaderboard),
       h("a", { class: "btn", href: "#/" }, T().backToCases),
     ),
-    body,
+    reading.element,
   );
 }
 

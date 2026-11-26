@@ -14,6 +14,7 @@ export const TP = defineStrings({
     cancel: "Cancel",
     copy: "Copy",
     copied: "Copied",
+    onThisPage: "On this page",
     copyFailed: "Copy failed",
     copiedAnnounce: "Copied to the clipboard.",
 
@@ -128,6 +129,7 @@ export const TP = defineStrings({
     cancel: "ביטול",
     copy: "העתקה",
     copied: "הועתק",
+    onThisPage: "בעמוד זה",
     copyFailed: "ההעתקה נכשלה",
     copiedAnnounce: "הועתק ללוח.",
 

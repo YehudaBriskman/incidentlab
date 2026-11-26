@@ -1406,3 +1406,17 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
 .result-panel .answer-line .btn-copy { margin: 0; }
 .hints-used { margin-block-start: var(--space-5); }
 .debrief-next { margin-block: var(--space-5); }
+
+/* ============ reading layout + form layout (src/components/readingLayout.ts, formLayout.ts) ============ */
+.reading { max-inline-size: var(--read); }
+.toc { margin-block: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+.toc-summary { cursor: pointer; padding: var(--space-3) var(--space-4); min-block-size: var(--target-min); font-weight: 600; font-size: var(--step--1); }
+.toc nav { padding: 0 var(--space-4) var(--space-3); }
+.toc-list { margin: 0; padding-inline-start: 1.3em; display: grid; gap: var(--space-1); font-size: var(--step--1); }
+.toc-list a { display: inline-flex; align-items: center; min-block-size: var(--target-min); }
+.toc-list .toc-sub { margin-inline-start: var(--space-4); list-style-type: circle; }
+.reading :is(h2, h3)[tabindex="-1"]:focus { outline: none; }
+.reading :is(h2, h3)[tabindex="-1"]:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); }
+.form-section { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-4); margin: 0 0 var(--space-4); display: grid; gap: var(--space-4); min-inline-size: 0; }
+.form-section-legend { padding-inline: var(--space-2); font-weight: 600; font-size: var(--step--1); }
+.form-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }

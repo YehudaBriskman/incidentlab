@@ -1,8 +1,9 @@
 // Sign in / sign up, the "waiting for approval" screen and the forced password change.
 // `withApprovedAccount` is the single gate every playable view goes through.
+import { formField, type FormField } from "../components/formLayout";
 import { PasswordSchema, UsernameSchema, type AccountView } from "../../shared/contract";
 import { ApiError, changePassword, login, register } from "../lib/api";
-import { h, setChildren, type Child } from "../lib/dom";
+import { h, setChildren } from "../lib/dom";
 import { getLang, isRelabel } from "../i18n/i18n";
 import { isAdmin, loadAccount, setAccount, signOut } from "../lib/session";
 import { TA } from "../i18n/strings-account";
@@ -162,57 +163,11 @@ function errorText(err: unknown): string {
 
 /* ================= fields, inline errors and the error summary ================= */
 
-type Field = {
-  input: HTMLInputElement;
-  /** The visible label text (used for the summary and the Show/Hide toggle name). */
-  label: string;
-  /** label row, hint, error slot and input, in reading order */
-  nodes: Child[];
-  setError: (message: string | null) => void;
-  hasError: () => boolean;
-};
+type Field = FormField;
 
-/**
- * One labelled field: label (with an optional Show/Hide toggle), hint, inline error, input.
- * The hint and the error sit between the label and the input and are linked by `aria-describedby`.
- */
+/** One labelled field: label, hint, inline error, input (shared component; see components/formLayout.ts). */
 function makeField(opts: { input: HTMLInputElement; label: string; help?: string; toggle?: HTMLElement }): Field {
-  const id = opts.input.id;
-  const helpId = `${id}-help`;
-  const errorId = `${id}-error`;
-  const errorEl = h("p", { id: errorId, class: "field-error", hidden: true });
-  const describe = (): void => {
-    const ids = [opts.help ? helpId : null, errorEl.hidden ? null : errorId].filter((v): v is string => v !== null);
-    if (ids.length > 0) opts.input.setAttribute("aria-describedby", ids.join(" "));
-    else opts.input.removeAttribute("aria-describedby");
-  };
-  describe();
-  const setError = (message: string | null): void => {
-    errorEl.textContent = message ?? "";
-    errorEl.hidden = message === null;
-    if (message === null) opts.input.removeAttribute("aria-invalid");
-    else opts.input.setAttribute("aria-invalid", "true");
-    describe();
-  };
-  return {
-    input: opts.input,
-    label: opts.label,
-    setError,
-    hasError: () => !errorEl.hidden,
-    // One group per field, so the label sits closer to its own input than to the previous field.
-    nodes: [
-      h(
-        "div",
-        { class: "field" },
-        h("label", { class: "field-label", for: id }, opts.label),
-        opts.help ? h("p", { id: helpId, class: "field-help muted small" }, opts.help) : null,
-        errorEl,
-        opts.input,
-        // After the input, so Tab goes username → password → submit without stopping on the toggle first.
-        opts.toggle ?? null,
-      ),
-    ],
-  };
+  return formField({ input: opts.input, label: opts.label, help: opts.help, extra: opts.toggle });
 }
 
 /** A password input with a Show/Hide toggle whose name says which field it reveals ("Show new password"). */
