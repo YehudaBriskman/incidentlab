@@ -1,6 +1,6 @@
 // Instructor-side account management: approve/reject/delete, password resets, progress resets, CSV export.
 import { randomBytes } from "node:crypto";
-import type { AccountStatus, AccountView, AdminProgress } from "../../shared/contract.ts";
+import type { AccountRecordRole, AccountStatus, AccountView, AdminProgress } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
 import type { FirstBloodRepository } from "../repositories/config-repositories.ts";
 import type { Repositories } from "../repositories/repositories.ts";
@@ -68,6 +68,17 @@ export class AccountAdminService {
     // Rejecting keeps the session: the player then sees the "not approved" screen instead of a silent
     // sign-out. Every case route already refuses rejected accounts, and they can't sign in again.
     const account = { ...found.data, status, decidedAt: this.now().toISOString() };
+    if (!(await this.repos.accounts.saveIfMatch(account, found.etag))) throw new AppError(409, "concurrent update, please retry");
+    return toAccountView(account);
+  }
+
+  /** Grants or revokes the author role. Sessions stay valid: the role is read from the record on each request. */
+  async setRole(accountId: string, role: AccountRecordRole): Promise<AccountView> {
+    this.assertId(accountId);
+    const found = await this.repos.accounts.get(accountId);
+    if (!found) throw new AppError(404, "account not found");
+    if (found.data.role === role) return toAccountView(found.data);
+    const account = { ...found.data, role };
     if (!(await this.repos.accounts.saveIfMatch(account, found.etag))) throw new AppError(409, "concurrent update, please retry");
     return toAccountView(account);
   }

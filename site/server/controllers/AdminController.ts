@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AdminResetRequestSchema, CaseIdSchema, EventSchema, ScheduleSchema, SettingsSchema } from "../../shared/contract.ts";
+import { AdminResetRequestSchema, CaseIdSchema, EventSchema, ScheduleSchema, SetAccountRoleRequestSchema, SettingsSchema } from "../../shared/contract.ts";
 import type { AuditEntry } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
 import type { AccountAdminService } from "../services/AccountAdminService.ts";
@@ -61,6 +61,12 @@ export class AdminController {
   async approve(req: Request, accountId: string): Promise<Response> {
     await parseBody(req, EmptyBodySchema);
     const account = await this.mutation(req, { action: "account.approve", target: accountId }, () => this.deps.accounts.setStatus(accountId, "approved"));
+    return json(200, { account });
+  }
+
+  async setRole(req: Request, accountId: string): Promise<Response> {
+    const { role } = await parseBody(req, SetAccountRoleRequestSchema);
+    const account = await this.mutation(req, { action: "account.role", target: accountId, detail: role }, () => this.deps.accounts.setRole(accountId, role));
     return json(200, { account });
   }
 

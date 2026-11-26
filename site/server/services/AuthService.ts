@@ -52,7 +52,7 @@ export const toAccountView = (account: AccountRecord): AccountView => ({
   username: account.username,
   status: account.status,
   createdAt: account.createdAt,
-  role: "player",
+  role: account.role,
   mustChangePassword: account.mustChangePassword,
 });
 
@@ -101,6 +101,7 @@ export class AuthService {
       lastSeenAt: nowIso,
       lastLoginAt: nowIso,
       mustChangePassword: false,
+      role: "player",
     };
     // Claim the name first: the conditional write makes uniqueness race-free.
     if (!(await this.repos.usernames.claim(hashedKey, account.id))) throw new AppError(409, "that username is taken", { code: "username-taken" });
@@ -192,6 +193,20 @@ export class AuthService {
     if (account.status === "rejected") throw new AppError(403, "this account was not approved", { code: "rejected" });
     if (account.mustChangePassword) throw new AppError(403, "set a new password first", { code: "password-change-required" });
     return account;
+  }
+
+  /**
+   * Who may manage case content: the admin session, or an approved author account (not waiting on a forced
+   * password change). Case routes then check ownership for authors (`createdBy`).
+   */
+  async requireAuthor(token: string | null): Promise<Principal> {
+    const { principal } = await this.authenticate(token);
+    if (principal.kind === "admin") return principal;
+    const account = principal.account;
+    if (account.role !== "author") throw new AppError(403, "only authors and the instructor can manage cases", { code: "not-author" });
+    if (account.status !== "approved") throw new AppError(403, "this account is not approved", { code: account.status });
+    if (account.mustChangePassword) throw new AppError(403, "set a new password first", { code: "password-change-required" });
+    return principal;
   }
 
   /** A player changes their own password. Other sessions of the account are signed out; this one stays. */

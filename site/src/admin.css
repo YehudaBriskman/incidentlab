@@ -366,6 +366,7 @@ html.admin-sticky-tabs { scroll-padding-top: calc(var(--adm-tabs-h, 45px) + var(
 .pending-bulk:empty { display: none; }
 .status-pill.is-pending { --pill-fg: var(--warning-fg); --pill-bg: var(--warning-bg); --pill-line: var(--warning-fg); }
 .status-pill.is-approved { --pill-fg: var(--success-fg); --pill-bg: var(--success-bg); --pill-line: var(--success-fg); }
+.status-pill.is-author { --pill-fg: var(--info-fg); --pill-bg: var(--info-bg); --pill-line: var(--info-fg); }
 .status-pill.is-rejected { --pill-fg: var(--danger-fg); --pill-bg: var(--danger-bg); --pill-line: var(--danger-fg); }
 .acct-row.is-rejected .player-name { color: var(--text-muted); text-decoration: line-through; }
 .acct-toggle {

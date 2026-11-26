@@ -30,8 +30,8 @@ export type Client = {
   json<T extends z.ZodType>(res: Response, schema: T): Promise<z.infer<T>>;
 };
 
-export const createHarness = (options: { now?: () => Date; ip?: string } = {}) => {
-  const app = createApp({ store: new InMemoryKvStore(), secrets: SECRETS, adminKey: () => ADMIN_KEY, now: options.now });
+export const createHarness = (options: { now?: () => Date; ip?: string; store?: InMemoryKvStore } = {}) => {
+  const app = createApp({ store: options.store ?? new InMemoryKvStore(), secrets: SECRETS, adminKey: () => ADMIN_KEY, now: options.now });
 
   /** A browser-like client that keeps its own cookie jar. */
   const client = (ip = options.ip ?? "10.0.0.1"): Client & { cookie(): string | null } => {
