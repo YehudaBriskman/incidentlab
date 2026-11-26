@@ -17,7 +17,8 @@ content-sealed/<id>.debrief.md (+ optional <id>.debrief.he.md). Writes:
 Normalization must match normalizeAnswer() in site/shared/normalize.ts:
   trim -> lowercase -> collapse runs of whitespace to a single space.
 Every run first checks normalize_answer() against site/shared/normalize-vectors.json, the vectors the
-TypeScript implementation is tested against too.
+TypeScript implementation is tested against too, and answer_fingerprint() against
+site/shared/fingerprint-vectors.json (its twin is site/shared/answer-fingerprint.ts).
 
 Python 3 stdlib only. Run from anywhere; paths are resolved from the repo root.
 """
@@ -42,6 +43,7 @@ CASE_GENERATORS = ROOT / "generator" / "cases"
 ANSWERS_OUT = TRUTH_DIR / "answers.json"
 ALL_ANSWERS_OUT = TRUTH_DIR / "all-answers.json"
 NORMALIZE_VECTORS = ROOT / "site" / "shared" / "normalize-vectors.json"
+FINGERPRINT_VECTORS = ROOT / "site" / "shared" / "fingerprint-vectors.json"
 QUESTION_IDS = ["q1", "q2", "q3", "q4", "q5", "q6"]
 
 _HMS_RE = re.compile(r"(\d{2}:\d{2}:\d{2})")
@@ -240,7 +242,19 @@ def answer_fingerprint(sealed: dict) -> str:
     ).hexdigest()
 
 
+def check_fingerprint_vectors() -> None:
+    """answer_fingerprint() has a TypeScript twin (site/shared/answer-fingerprint.ts, used by case uploads)."""
+    vectors = load_json(FINGERPRINT_VECTORS).get("vectors")
+    if not isinstance(vectors, list) or not vectors:
+        fail(f"{FINGERPRINT_VECTORS.relative_to(ROOT)} has no vectors")
+    for vector in vectors:
+        if answer_fingerprint(vector["input"]) != vector["fingerprint"]:
+            fail(f"answer_fingerprint() disagrees with {FINGERPRINT_VECTORS.relative_to(ROOT)}; "
+                 "keep it in step with site/shared/answer-fingerprint.ts")
+
+
 def main() -> int:
+    check_fingerprint_vectors()
     all_answers = collect_answers()
     cases = {case_id: sealed_case(case_id, answers) for case_id, answers in all_answers.items()}
 
