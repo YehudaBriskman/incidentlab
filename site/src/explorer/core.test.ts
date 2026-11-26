@@ -34,10 +34,10 @@ test("countUnique and histogram", () => {
 
 test("json field filter and match ranges", () => {
   const line = '{"level":"error","msg":"x.y","nested":{"k":3}}';
-  assert.ok(core.jsonLineMatches(line, { field: "msg", value: "x.y" }));
-  assert.ok(core.jsonLineMatches(line, { field: "nested.k", value: "3" }));
-  assert.ok(!core.jsonLineMatches(line, { field: "level", value: "info" }));
-  assert.deepEqual(core.parseJsonFilter(" msg = a.b "), { field: "msg", value: "a.b" });
+  assert.ok(core.jsonLineMatches(line, { field: "msg", op: "eq", value: "x.y" }));
+  assert.ok(core.jsonLineMatches(line, { field: "nested.k", op: "eq", value: "3" }));
+  assert.ok(!core.jsonLineMatches(line, { field: "level", op: "eq", value: "info" }));
+  assert.deepEqual(core.parseJsonFilter(" msg = a.b "), { field: "msg", op: "eq", value: "a.b" });
   assert.deepEqual(core.matchRanges("aXbxc", [{ kind: "contains", text: "x", ci: true }]), [[1, 2], [3, 4]]);
 });
 
@@ -60,9 +60,11 @@ test("deep link state round-trips", () => {
   const state = {
     file: "nginx/access.log",
     steps: [{ kind: "regex" as const, text: '" 5\\d\\d &x=?', ci: false }, { kind: "not" as const, text: "healthz", ci: true }],
-    json: { field: "msg", value: "a=b" },
+    json: [{ field: "msg", op: "eq" as const, value: "a=b" }],
     cols: ["ts", "msg"],
     line: null,
+    sort: null,
+    time: null,
   };
   assert.deepEqual(core.decodeState(core.encodeState(state)), state);
   assert.deepEqual(core.parseCsvLine('a,"b,c",d'), ["a", "b,c", "d"]);
@@ -96,7 +98,7 @@ test("real checkout-service.log is detected as JSON lines", () => {
   const lines = core.splitLines(readFileSync(p, "utf8"));
   assert.ok(core.looksLikeJsonLines(lines));
   const t = Date.now();
-  core.applyFilters(lines, [], { field: "level", value: "*" });
+  core.applyFilters(lines, [], { field: "level", op: "exists", value: "" });
   assert.ok(Date.now() - t < 1000);
 });
 
@@ -169,8 +171,91 @@ test("zones: EST/EDT, CET and a fixed +02:00", () => {
 test("year hint and line deep link", () => {
   assert.equal(core.yearHint(["x 2026-11-18T00:00:00Z", "[13/Nov/2026:00:00:00 +0000]", "2025-01-01"]), 2026);
   assert.equal(core.yearHint(["no dates"]), null);
-  const st = core.decodeState(core.encodeState({ file: "a.log", steps: [], json: null, cols: [], line: 42 }));
+  const st = core.decodeState(core.encodeState({ file: "a.log", steps: [], json: [], cols: [], line: 42 }));
   assert.equal(st.line, 42);
+});
+
+test("json conditions: operators, several at once, and their text form", () => {
+  const lines = [
+    '{"level":"error","svc":"checkout","http":{"status":502}}',
+    '{"level":"info","svc":"checkout","http":{"status":200}}',
+    '{"level":"error","svc":"cart"}',
+    "not json",
+  ];
+  const run = (...conds: Array<import("./core").JsonFilter>): number[] => [...core.applyFilters(lines, [], conds)];
+  assert.deepEqual(run({ field: "level", op: "eq", value: "error" }, { field: "svc", op: "eq", value: "checkout" }), [0]);
+  assert.deepEqual(run({ field: "http.status", op: "exists", value: "" }), [0, 1]);
+  assert.deepEqual(run({ field: "svc", op: "ne", value: "checkout" }), [2]);
+  assert.deepEqual(run({ field: "svc", op: "has", value: "CHECK" }), [0, 1]);
+  assert.deepEqual(core.parseJsonFilter("a != b"), { field: "a", op: "ne", value: "b" });
+  assert.deepEqual(core.parseJsonFilter("a ~= b"), { field: "a", op: "has", value: "b" });
+  assert.deepEqual(core.parseJsonFilter("a = *"), { field: "a", op: "exists", value: "" });
+  for (const f of [{ field: "a", op: "ne" as const, value: "x=y" }, { field: "a.b", op: "has" as const, value: "q" }]) {
+    assert.deepEqual(core.parseJsonFilter(core.formatJsonFilter(f)), f);
+  }
+});
+
+test("json field paths come from a sample, most common first", () => {
+  const lines = ['{"ts":"x","level":"info","http":{"status":200}}', '{"ts":"y","level":"warn","err":"e"}'];
+  assert.deepEqual(core.jsonFieldPaths(lines).slice(0, 2), ["ts", "level"]);
+  assert.ok(core.jsonFieldPaths(lines).includes("http.status"));
+  assert.deepEqual(core.flattenJson({ a: 1, b: { c: [1, 2] } }), [["a", "1"], ["b.c", "[1,2]"]]);
+});
+
+test("time range filter keeps lines inside a histogram bucket", () => {
+  const lines = [
+    "[13/Nov/2026:00:00:05 +0000] a",
+    "[13/Nov/2026:00:01:59 +0000] b",
+    "[13/Nov/2026:00:02:00 +0000] c",
+    "no stamp",
+  ];
+  const t0 = Date.UTC(2026, 10, 13, 0, 0);
+  const time = { pattern: "\\[(\\d+/\\w+/\\d+:\\d\\d:\\d\\d)", year: null, from: t0, to: t0 + 120_000 };
+  assert.deepEqual([...core.applyFilters(lines, [], null, Number.POSITIVE_INFINITY, false, { time })], [0, 1]);
+  const st = core.decodeState(core.encodeState({ file: "x", steps: [], json: [], cols: [], time, sort: { col: 2, desc: true } }));
+  assert.deepEqual(st.time, time);
+  assert.deepEqual(st.sort, { col: 2, desc: true });
+  assert.equal(core.decodeState("t=1-2&tp=(").time, null);
+});
+
+test("sorting a CSV view: numeric, text, empty last, stable", () => {
+  const lines = ["name,n", "b,10", "a,9", "c,", "a,10"];
+  const view = [1, 2, 3, 4];
+  assert.deepEqual([...core.sortIndices(lines, view, { kind: "csv", index: 1 }, false)], [2, 1, 4, 3]);
+  assert.deepEqual([...core.sortIndices(lines, view, { kind: "csv", index: 1 }, true)], [1, 4, 2, 3]);
+  assert.deepEqual([...core.sortIndices(lines, view, { kind: "csv", index: 0 }, false)], [2, 4, 1, 3]);
+  const json = ['{"a":"x2"}', '{"a":"x10"}', '{"b":1}'];
+  assert.deepEqual([...core.sortIndices(json, [0, 1, 2], { kind: "json", path: "a" }, false)], [0, 1, 2]);
+  assert.deepEqual([...core.sortIndices(json, [0, 1, 2], { kind: "json", path: "a" }, true)], [1, 0, 2]);
+});
+
+test("CSV column widths fit content and leave room for an inline epoch time", () => {
+  const w = core.csvColumnWidths(["ts,status,note", "1794528000,200,", "1794528060,502,a long note"]);
+  assert.equal(w[0], 10 + core.EPOCH_SUFFIX_CH + 1);
+  assert.equal(w[1], 7);
+  assert.equal(w[2], 12);
+  assert.equal(core.epochLabel("1794528000"), core.formatInZone(1794528000_000, "UTC").replace(" UTC", "") + "Z");
+  assert.deepEqual(core.epochTokens("2 123 eni-1 1794528000 1794528060 ACCEPT 1794528000").map(([v]) => v), ["1794528000", "1794528060"]);
+  assert.deepEqual(core.epochTokens("id 12345678901 port 443"), []);
+});
+
+test("key=value pairs for the detail drawer", () => {
+  assert.deepEqual(core.kvPairs('kernel: IN=eth0 SRC=10.0.0.5 DPT=22 msg="a b" x='), [
+    ["IN", "eth0"], ["SRC", "10.0.0.5"], ["DPT", "22"], ["msg", "a b"], ["x", ""],
+  ]);
+  assert.deepEqual(core.kvPairs("GET /a?b=c HTTP/1.1"), []);
+});
+
+test("file list groups by top folder and searches every term", () => {
+  const files = ["README_FIRST.txt", "nginx/access.log", "app/a.log", "nginx/b.conf", "notes.md"];
+  assert.deepEqual(core.groupByDir(files, (f) => f).map((g) => [g.dir, g.items]), [
+    ["", ["README_FIRST.txt", "notes.md"]],
+    ["nginx", ["nginx/access.log", "nginx/b.conf"]],
+    ["app", ["app/a.log"]],
+  ]);
+  assert.ok(core.matchesQuery("nginx log", ["nginx/access.log", "nginx log (UTC)"]));
+  assert.ok(!core.matchesQuery("nginx pcap", ["nginx/access.log"]));
+  assert.ok(core.matchesQuery("  ", ["x"]));
 });
 
 test("plural categories", () => {
