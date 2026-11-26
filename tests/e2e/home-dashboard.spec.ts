@@ -51,17 +51,35 @@ test("signed out: intro with a sign-up action, how-it-works card, today's card a
   await expect(page.locator(".page-aside-trigger, .aside-trigger")).toHaveCount(0);
 });
 
-test("signed in: progress shows in the Continue card, the today card and the table", async ({ page, request }) => {
+test("signed in on today's case only: one card resumes it (no Continue card repeating it, #125)", async ({ page, request }) => {
   await signedInPlayer(page, request);
   const api = (path: string): string => `/api/cases/${CASE_ID}${path}`;
   expect((await page.request.get(api("/progress"))).status()).toBe(200);
   expect((await page.request.post(api("/setup-done"), { data: {} })).status()).toBe(200);
   expect((await page.request.post(api("/answer"), { data: { questionId: "q1", answer: answerFor(CASE_ID, "q1") } })).status()).toBe(200);
   await englishHome(page);
-  await expect(ui.continueCard(page).getByRole("link", { name: /Ghost in the Network/ })).toBeVisible();
   await expect(ui.todayCard(page).getByRole("link", { name: "Resume" })).toHaveAttribute("href", `#/case/${CASE_ID}`);
+  await expect(ui.todayCard(page)).toContainText(/in progress/i);
+  await expect(ui.continueCard(page)).toHaveCount(0);
+  await expect(page.locator(".home-top")).toHaveClass(/is-single/);
+  // exactly one Resume path to the case above the table
+  await expect(page.locator(".home-top").locator(`a[href="#/case/${CASE_ID}"]`).filter({ hasText: "Resume" })).toHaveCount(1);
   await expect(ui.row(page, CASE_ID)).toContainText("1/6");
   await expect(ui.row(page, CASE_ID)).toContainText(/in progress/i);
+});
+
+test("signed in with another case in progress: Continue lists it, not today's case", async ({ page, request }) => {
+  await signedInPlayer(page, request);
+  const other = "3am-outage";
+  for (const id of [CASE_ID, other]) {
+    expect((await page.request.get(`/api/cases/${id}/progress`)).status()).toBe(200);
+    expect((await page.request.post(`/api/cases/${id}/setup-done`, { data: {} })).status()).toBe(200);
+  }
+  await englishHome(page);
+  await expect(page.locator(".home-top")).not.toHaveClass(/is-single/);
+  await expect(ui.continueCard(page).getByRole("link", { name: /3 AM Outage/ })).toBeVisible();
+  await expect(ui.continueCard(page).getByRole("link", { name: /Ghost in the Network/ })).toHaveCount(0);
+  await expect(ui.todayCard(page).getByRole("link", { name: "Resume" })).toHaveAttribute("href", `#/case/${CASE_ID}`);
 });
 
 test("search and the filter popover by keyboard, with the count badge, clear and the URL query", async ({ page, request }) => {
@@ -112,9 +130,10 @@ test("Enter on a row's case link opens the case, and the visit shows under Recen
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`#/case/${CASE_ID}$`));
   await expect(page.locator(".view h1, h1").first()).toBeVisible();
-  // Opening the case starts it: it is listed under "In progress" (once, not again as a visit).
+  // Opening today's case starts it: the Today card resumes it, so Continue (which would only repeat it) is gone.
   await page.goto("/#/");
-  await expect(ui.continueCard(page).getByRole("link", { name: /Ghost in the Network/ })).toHaveCount(1);
+  await expect(ui.todayCard(page).getByRole("link", { name: /Ghost in the Network/ })).toHaveCount(1);
+  await expect(ui.continueCard(page)).toHaveCount(0);
 
   // The toolbox is a place of its own: it shows under "Recently visited".
   await page.goto(`/#/case/${CASE_ID}/toolbox`);
