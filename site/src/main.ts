@@ -228,7 +228,7 @@ function route(): void {
         lazyView(() =>
           Promise.all([loadCase(id), loadCaseViews()]).then(([c, views]): View => {
             if (c === undefined) return missing;
-            return sub === "toolbox" ? legacy((root) => views.renderToolbox(root, c)) : () => views.caseView(c);
+            return sub === "toolbox" ? () => views.toolboxView(c) : () => views.caseView(c);
           }),
         );
       }
