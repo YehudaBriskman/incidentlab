@@ -289,7 +289,9 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, l
               draw();
             },
           },
-          h("span", { class: `step-icon${inNav ? " nav-sub-icon is-glyph" : ""}`, "aria-hidden": "true" }, icon),
+          // The glyph is drawn by CSS (attr(data-glyph)) so it is not text: the button's name is its label and
+          // state, and the visible text is the label alone (Label in Name, WCAG 2.5.3).
+          h("span", { class: `step-icon${inNav ? " nav-sub-icon is-glyph" : ""}`, "aria-hidden": "true", "data-glyph": icon }),
           h("span", { class: `step-label${inNav ? " nav-label" : ""}` }, label),
         );
         return h("li", {}, btn);

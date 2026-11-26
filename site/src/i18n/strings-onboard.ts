@@ -134,7 +134,8 @@ export const TO = defineStrings({
     enterPassword: "הזינו סיסמה.",
     enterCurrentPassword: "הזינו את הסיסמה הנוכחית.",
     enterTempPassword: "הזינו את הסיסמה הזמנית שאיתה נכנסתם.",
-    showField: (label: string): string => `הצגת ${label}`,
+    // starts with the visible word "הצגה" (Label in Name, WCAG 2.5.3)
+    showField: (label: string): string => `הצגה: ${label}`,
     hideField: (label: string): string => `הסתרת ${label}`,
     rateLimited: (seconds: number): string => `יותר מדי ניסיונות לשם המשתמש הזה. נסו שוב בעוד ${clock(seconds)}.`,
     rateLimitOver: "אפשר לנסות שוב עכשיו.",

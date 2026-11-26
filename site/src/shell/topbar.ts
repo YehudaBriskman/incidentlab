@@ -192,7 +192,8 @@ function createAccountMenu(): HTMLElement {
     const name = account.username;
     button.textContent = "";
     button.append(h("span", { class: "avatar", "aria-hidden": "true" }, initials(name)));
-    button.setAttribute("aria-label", TS().accountButton(name));
+    // Label in Name (WCAG 2.5.3): the visible initials start the name, so "click AL" works in speech control.
+    button.setAttribute("aria-label", `${initials(name)}, ${TS().accountButton(name)}`);
     button.title = name;
     panel.setAttribute("aria-label", TS().accountPanel);
     const role = isAdmin(account) ? TS().roleAdmin : account.role === "author" ? TS().roleAuthor : TS().rolePlayer;
