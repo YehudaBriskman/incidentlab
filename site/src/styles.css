@@ -101,13 +101,23 @@
   --space-8: 64px;
   --gutter: var(--space-4);
 
-  /* radius: md = 8 */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  /* radius: one 4px base, five steps (x0.5 / 0.75 / 1 / 1.5 / 2). Controls, panels and code panes md 4; cards
+     and floating surfaces lg 6; dialogs and sheets xl 8; pills full. */
+  --radius-base: 4px;
+  --radius-xs: calc(var(--radius-base) * 0.5);
+  --radius-sm: calc(var(--radius-base) * 0.75);
+  --radius-md: var(--radius-base);
+  --radius-lg: calc(var(--radius-base) * 1.5);
+  --radius-xl: calc(var(--radius-base) * 2);
   --radius-full: 9999px;
+  /* nesting rule: inner = outer - padding, never below xs (a menu item inside a 4px-padded menu, a code block
+     inside a card). The two common cases as tokens; anything else writes the same max(calc()). */
+  --radius-inner-lg: max(var(--radius-xs), calc(var(--radius-lg) - var(--space-1)));
+  --radius-inner-xl: max(var(--radius-xs), calc(var(--radius-xl) - var(--space-1)));
+
+  /* edges: one hairline, one state stripe (inset box-shadow with --dir, never a thick border on a radius) */
+  --edge-width: 1px;
+  --stripe-width: 3px;
 
   /* type: reading scale (deviation D3), 7 steps; body 17px at the default 16px root */
   /* Hebrew sits right after the Latin face in every stack: Hebrew names and labels render in Plex Sans Hebrew
@@ -413,6 +423,29 @@
 :where(:root[data-spacing="wide"]) p { margin-block-end: 2em; }
 :root[data-spacing="wide"] :is(code, pre, kbd, samp, .mono, .code-block, .ex-viewport) { letter-spacing: normal; word-spacing: normal; }
 
+/* ============ tokens: elevation (five levels, #96) ============
+   Surface tone first, then shadow. Light: white levels 1-4 on a 0.972 canvas, separated by layered warm shadows
+   from one light source (y offset only). Dark: each level is lighter (--level-1..4), shadows are 30-50% black
+   so they still read, and an inset top highlight marks the lit edge. Forced colours drop shadows, so every
+   raised surface keeps a border there (see the forced-colours base rule). */
+:root {
+  --elev-0: none;
+  --elev-1: 0 1px 2px light-dark(oklch(0.3 0.02 65 / 0.07), oklch(0 0 0 / 0.3)),
+    0 1px 3px light-dark(oklch(0.3 0.02 65 / 0.05), oklch(0 0 0 / 0.2)),
+    inset 0 1px 0 light-dark(transparent, oklch(1 0 0 / 0.04));
+  --elev-2: 0 1px 2px light-dark(oklch(0.3 0.02 65 / 0.07), oklch(0 0 0 / 0.35)),
+    0 4px 8px -2px light-dark(oklch(0.3 0.02 65 / 0.1), oklch(0 0 0 / 0.4)),
+    inset 0 1px 0 light-dark(transparent, oklch(1 0 0 / 0.05));
+  --elev-3: 0 2px 4px light-dark(oklch(0.3 0.02 65 / 0.07), oklch(0 0 0 / 0.4)),
+    0 8px 16px -4px light-dark(oklch(0.3 0.02 65 / 0.12), oklch(0 0 0 / 0.45)),
+    0 16px 32px -8px light-dark(oklch(0.3 0.02 65 / 0.1), oklch(0 0 0 / 0.35)),
+    inset 0 1px 0 light-dark(transparent, oklch(1 0 0 / 0.06));
+  --elev-4: 0 4px 8px light-dark(oklch(0.3 0.02 65 / 0.07), oklch(0 0 0 / 0.45)),
+    0 16px 32px -8px light-dark(oklch(0.3 0.02 65 / 0.16), oklch(0 0 0 / 0.5)),
+    0 32px 64px -16px light-dark(oklch(0.3 0.02 65 / 0.18), oklch(0 0 0 / 0.45)),
+    inset 0 1px 0 light-dark(transparent, oklch(1 0 0 / 0.07));
+}
+
 /* ============ tokens: alias layer (deprecated names -> 2.0.0 roles) ============
    The views were written against these names. Each one maps onto the role that does its job, so every page
    keeps rendering until the sweeps (#97) move it onto the roles. Don't use them in new code. */
@@ -439,15 +472,10 @@
   --sans: var(--font-sans);
   --mono: var(--font-mono);
   --radius: var(--radius-lg);
-  --shadow-sm: 0 1px 1px color-mix(in oklab, var(--shadow-color) 6%, transparent),
-    0 2px 4px color-mix(in oklab, var(--shadow-color) 6%, transparent);
-  --shadow-md: 0 1px 2px color-mix(in oklab, var(--shadow-color) 8%, transparent),
-    0 4px 8px color-mix(in oklab, var(--shadow-color) 8%, transparent),
-    0 12px 24px color-mix(in oklab, var(--shadow-color) 8%, transparent);
-  --shadow-lg: 0 2px 4px color-mix(in oklab, var(--shadow-color) 8%, transparent),
-    0 8px 16px color-mix(in oklab, var(--shadow-color) 8%, transparent),
-    0 24px 48px color-mix(in oklab, var(--shadow-color) 12%, transparent);
-  --shadow: var(--shadow-md);
+  --shadow-sm: var(--elev-1);
+  --shadow-md: var(--elev-2);
+  --shadow-lg: var(--elev-3);
+  --shadow: var(--elev-2);
 }
 /* Scoped aliases: inside the dark code island the ring and halo follow the pane (#96 F10). Admin's sign-in
    link still reads --accent as a text colour (admin.css belongs to the admin sweep), so it gets the text shade. */
@@ -1301,7 +1329,12 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
    Fills that carry meaning are background-only, which forced colours erase: give them system colours,
    borders and a non-colour cue so progress, selection and status stay readable. */
 @media (forced-colors: active) {
-  :root { --focus-ring: Highlight; }
+  :root { --focus-ring: Highlight; --focus-halo: Canvas; }
+  /* Raised surfaces (elevation 2-4) are drawn by shadow and tone, both of which forced colours remove: keep an
+     edge so a menu, panel or dialog still reads as a layer. */
+  :where(.ov-dialog, .ov-sheet, .ov-popover, .ov-menu, .toast, .settings-panel, .nav-panel, .ex-drawer, .col-chooser-pop) {
+    border: var(--edge-width) solid CanvasText;
+  }
   .btn, .input, .shell-tabs, .lang-btn, .announce, .notice, .question-box, .score-card, .hint, .briefing { border: 1px solid CanvasText; }
   .progress-track, .meter-track, .bar { forced-color-adjust: none; background: Canvas; border: 1px solid CanvasText; }
   .progress-track { height: 8px; }
