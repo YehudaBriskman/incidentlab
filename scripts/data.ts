@@ -10,6 +10,7 @@
 //   node --experimental-strip-types scripts/data.ts upload <package.case.zip> [--publish] [--accept-answer-changes] [--url <base>]
 //   node --experimental-strip-types scripts/data.ts publish <case-id> <version> [--accept-answer-changes] [--url <base>]
 //   node --experimental-strip-types scripts/data.ts usage      (read-only: monthly bandwidth and counters vs the free plan)
+//   node --experimental-strip-types scripts/data.ts gc-evidence [--apply]   (evidence chunks nothing uses; dry run first)
 //     upload/publish go through the HTTP API (scripts/upload-case.ts), not Blobs: the URL defaults to the
 //     local server, production needs an explicit --url.
 //
@@ -22,6 +23,8 @@ import { MIGRATIONS } from "../site/server/migrations/index.ts";
 import { pendingMigrations, runMigrations } from "../site/server/migrations/runner.ts";
 import { BACKUP_STORE, BlobsKvStore, LEGACY_STORE, PRIMARY_STORE } from "../site/server/repositories/KvStore.ts";
 import type { BlobsCredentials } from "../site/server/repositories/KvStore.ts";
+import { BlobsByteStore } from "../site/server/repositories/ByteStore.ts";
+import { EvidenceGcService, GcAbort } from "../site/server/services/EvidenceGcService.ts";
 import { SnapshotSchema, diffSnapshot, restoreSnapshot, takeSnapshot } from "../site/server/services/BackupService.ts";
 import type { Snapshot, SnapshotDiff } from "../site/server/services/BackupService.ts";
 import { runPublishCli, runUploadCli } from "./upload-case.ts";
@@ -108,6 +111,35 @@ const main = async (): Promise<void> => {
       console.log("[data] restored.");
       return;
     }
+    case "gc-evidence": {
+      // Mark-and-sweep of evidence chunks no case version or live upload uses (#122). Dry run unless --apply.
+      const credentialsNow = credentials();
+      const gc = new EvidenceGcService({
+        kv: store(PRIMARY_STORE),
+        bytes: new BlobsByteStore({ name: PRIMARY_STORE, credentials: credentialsNow }),
+        now: () => new Date(),
+      });
+      try {
+        const plan = await gc.plan();
+        const unreferenced = plan.candidates.filter((c) => c.reason === "unreferenced").length;
+        console.log(`[data] evidence: ${plan.storedChunks} chunks stored, ${plan.referencedFiles} files referenced, ${plan.liveUploads} upload(s) in progress`);
+        console.log(`[data] collectable: ${plan.candidates.length} chunks (${unreferenced} of files nobody uses, ${plan.candidates.length - unreferenced} past a file's end), up to ${Math.ceil((plan.candidates.length * 4) / 1024)} GB`);
+        for (const c of plan.candidates.slice(0, 20)) console.log(`[data]   ${c.key} (${c.reason})`);
+        if (plan.candidates.length > 20) console.log(`[data]   … and ${plan.candidates.length - 20} more`);
+        if (!flag("--apply")) {
+          console.log("[data] dry run: nothing deleted. Re-run with --apply (takes a backup of the records first; chunk bytes come back only by re-uploading their case package).");
+          return;
+        }
+        if (plan.candidates.length === 0) return console.log("[data] nothing to collect.");
+        await backupToDisk("pre-gc");
+        const deleted = await gc.sweep();
+        console.log(`[data] deleted ${deleted.length} chunks.`);
+      } catch (error) {
+        if (error instanceof GcAbort) die(`gc-evidence stopped: ${error.message}`);
+        throw error;
+      }
+      return;
+    }
     case "migrate": {
       const primary = store(PRIMARY_STORE);
       const pending = await pendingMigrations(primary, MIGRATIONS);
@@ -140,7 +172,7 @@ const main = async (): Promise<void> => {
       return;
     }
     default:
-      die("commands: backup | list-backups | restore <src> [--apply] [--prune] | migrate [--apply|--check] | upload <package> [--publish] [--accept-answer-changes] [--url <base>] | publish <case-id> <version> [--accept-answer-changes] [--url <base>] | usage", 2);
+      die("commands: backup | list-backups | restore <src> [--apply] [--prune] | migrate [--apply|--check] | upload <package> [--publish] [--accept-answer-changes] [--url <base>] | publish <case-id> <version> [--accept-answer-changes] [--url <base>] | usage | gc-evidence [--apply]", 2);
   }
 };
 
