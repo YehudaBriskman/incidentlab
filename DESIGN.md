@@ -136,7 +136,7 @@ IncidentLab is a learning game for engineers: each case is a fictional outage wi
 - **Status roles:** `success` (solved, approved, finished), `warning` (stuck, pending, stale, unsaved), `danger` (wrong, rejected, delete, alerts), `info` (live/today/session/frozen). Each has `-fg` and a `-bg` tint (10% light, 16% dark). Status is always also carried by text, an icon or a shape.
 - **Buttons on fills:** `--on-accent` and `--on-danger` are white in light and the dark canvas in dark (white on the dark-theme red would be 3:1).
 - **Boundaries:** `--border` is for decorative dividers only. Every input, select, checkbox and button edge uses `--border-strong` (>= 3:1, WCAG 1.4.11).
-- **Themes:** OS-driven via `prefers-color-scheme`, overridable with `<html data-theme="light|dark">`; `prefers-contrast: more` swaps in the generator's contrast-100 values; `forced-colors: active` maps meaning onto system colours (see Accessibility).
+- **Themes:** OS-driven via `prefers-color-scheme`, overridable with `<html data-theme="light|dark">` from the ⚙ menu (`data-contrast="more"` mirrors `prefers-contrast: more`); `prefers-contrast: more` swaps in the generator's contrast-100 values; `forced-colors: active` maps meaning onto system colours (see Accessibility).
 
 ## Typography
 
@@ -151,7 +151,8 @@ IncidentLab is a learning game for engineers: each case is a fictional outage wi
 - 4px spacing base, 8 steps (`--space-1…8`: 4, 8, 12, 16, 24, 32, 48, 64). `--gutter` 16px.
 - Widths: `--read` 760 (stage, prose), `--page` 1080 (chrome, main), `--page-narrow` 900 (stats, leaderboard), `--page-wide` 1280 (admin).
 - Density: comfortable everywhere; admin tables use the same scale with smaller type.
-- **Phone header:** logo and event clock share row 1, account actions and the language toggle row 2 (DOM order = visual order). 152px instead of 233px at 390px; the announcement ends at 231px instead of 339px.
+- **App shell:** a grid of navbar, announcement, a reserved sidebar column (#60), main and footer. The navbar row is 56px (`--control-md` + `--space-3`) and spans `--page`; the live strip under it (today's case, event clock, connectivity) hides when empty.
+- **Narrow header (≤1024px):** navigation, account and language fold behind a menu button; the row keeps logo, menu and ⚙ (DOM order = visual order). Signed in at 390px the header is the navbar row plus the live strip.
 
 ## Elevation & Depth
 
@@ -182,6 +183,8 @@ IncidentLab is a learning game for engineers: each case is a fictional outage wi
 | Table header | `.stats-table thead th`, `.admin-table th`, `.prose thead th`, `.ex-table th` | `--step--2`, uppercase, `--text-muted` on `--surface-2`, `--border-strong` underline |
 | Focus ring | global `:focus-visible` | `--focus-width` 2px solid `--focus-ring`, offset `--focus-offset` 2px; inset (-2px) only inside clipped scrollers (shell tabs, explorer rows); `Highlight` in forced colours; `--code-accent` inside the code island |
 | Tabs | `.shell-tab[aria-selected]`, `.admin-tab.is-active` | accent tint + 2–3px accent underline; Highlight fill/underline in forced colours |
+| Navbar | `.navbar`, `.nav-link[aria-current]`, `.nav-toggle`, `.settings-btn` | 56px row; current page = 2px accent underline (3px inline-start bar in the folded menu, `--dir`); underline in forced colours |
+| Display settings | `.settings-panel` (Popover API), `.settings-option` | `--shadow-lg`, `--radius-lg`; checked option = accent tint + accent edge. Applies `data-theme`, `data-text-scale`, `data-motion`, `data-contrast`, `data-spacing` on `<html>` (token overrides only) |
 | Progress | `.progress-*`, `.meter-*`, `.bar*`, `.funnel-*`, `.cell.*` | fills on `--surface-3`/`--border`; forced colours: Canvas track + CanvasText edge + Highlight fill; revealed cells hatched |
 
 ## Do's and Don'ts
