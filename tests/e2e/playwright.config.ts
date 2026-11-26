@@ -18,7 +18,8 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   timeout: 90_000,
   expect: { timeout: 10_000 },
-  reporter: process.env.CI ? [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]] : [["list"]],
+  // CI runs 4 shards (--shard=i/4): each writes a blob report, and the e2e-report job merges them into one HTML.
+  reporter: process.env.CI ? [["list"], ["blob"]] : [["list"]],
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:8888",
     viewport: { width: 1280, height: 900 },
