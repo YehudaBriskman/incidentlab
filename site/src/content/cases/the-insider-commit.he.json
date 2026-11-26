@@ -31,7 +31,7 @@
   "evidence": [
     {
       "path": "README_FIRST.txt",
-      "format": "text",
+      "format": "טקסט",
       "description": "תדריך מ-SecOps, רשימת הקבצים, אזורי זמן ומילון מונחים. מתחילים כאן."
     },
     {
@@ -41,7 +41,7 @@
     },
     {
       "path": "perf/hyperfine-ssh-login.txt",
-      "format": "benchmark (UTC)",
+      "format": "בנצ'מרק (UTC)",
       "description": "benchmarks של התחברות מצד הלקוח, לפני ואחרי, עם שרת ביקורת."
     },
     {
@@ -56,7 +56,7 @@
     },
     {
       "path": "perf/gdb-got-audit.txt",
-      "format": "gdb output",
+      "format": "פלט gdb",
       "description": "טווחי הכתובות של הספריות ב-sshd חי, ולאן כל אחד מה-GOT slots שלו מצביע."
     },
     {
@@ -71,7 +71,7 @@
     },
     {
       "path": "release/SHA256SUMS.txt",
-      "format": "text (UTC)",
+      "format": "טקסט (UTC)",
       "description": "hashes של ה-tarballs, בדיקות חתימה וניסיון לשחזר את ה-tarballs מ-git."
     },
     {
@@ -86,12 +86,12 @@
     },
     {
       "path": "release/stage1-recovered.txt",
-      "format": "text (defanged)",
+      "format": "טקסט (מנוטרל)",
       "description": "מה ש-SecOps שחזרו כשהריצו את ה-pipeline החשוד ב-sandbox. לקרוא אחרי שלב 3."
     },
     {
       "path": "binary/nm-libzfold.txt",
-      "format": "nm listing",
+      "format": "רשימת nm",
       "description": "טבלאות סימבולים (dynamic ו-debug) של שני builds של הספרייה."
     },
     {
@@ -101,17 +101,17 @@
     },
     {
       "path": "distro/changelog",
-      "format": "Debian changelog",
+      "format": "changelog של Debian",
       "description": "ה-changelog של חבילת zfold בהפצה."
     },
     {
       "path": "distro/buildd-logs.txt",
-      "format": "sbuild log (UTC)",
+      "format": "לוג sbuild (UTC)",
       "description": "לוגי ה-build של חבילות ההפצה לשתי גרסאות, במצב verbose."
     },
     {
       "path": "distro/bug-10442.txt",
-      "format": "bug report",
+      "format": "דיווח באג",
       "description": "הבאג בהפצה שביקש שדרוג מהיר."
     },
     {
@@ -121,7 +121,7 @@
     },
     {
       "path": "chat/incident-channel.json",
-      "format": "Slack-like JSON (epoch)",
+      "format": "JSON בסגנון Slack (epoch)",
       "description": "הצ'אט של האירוע ב-Halyard. תיאוריות, לא עובדות."
     },
     {
