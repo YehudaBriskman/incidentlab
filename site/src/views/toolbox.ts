@@ -7,7 +7,8 @@ import type { Case } from "../../shared/case";
 import { getProgress, revealCommand } from "../lib/api";
 import { recordVisit } from "../lib/recent";
 import { announce, copyButton, ensureAnnouncer, h, html, setChildren, type Child } from "../lib/dom";
-import { confirm } from "../lib/overlay";
+import { confirm, tooltip } from "../lib/overlay";
+import "../player.css";
 import { playErrorText } from "../lib/errors";
 import { md } from "../lib/markdown";
 import { isAdmin, loadAccount, loadToday } from "../lib/session";
@@ -192,7 +193,7 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
     "div",
     { class: `cmd${full ? " is-revealed" : ""}`, "data-tool": toolId ?? null },
     h("div", { class: "cmd-head" }, h("h4", {}, item.title), tag, tabBar),
-    full ? null : h("p", { class: "syntax-label mono" }, TG().syntaxLabel),
+    full ? null : h("p", { class: "syntax-label" }, TG().syntaxLabel),
     h("div", { class: "code-wrap" }, pre, full ? copyButton(current, T().copy) : null),
     html("div", { class: "prose small" }, md(item.explain)),
     action !== null ? h("div", { class: "cmd-actions" }, action, errorEl) : null,
@@ -226,7 +227,7 @@ export function renderToolbox(root: HTMLElement, c: Case): void {
   document.title = T().allCommandsTitle(c.title);
   const hash = window.location.hash;
   const stillHere = (): boolean => window.location.hash === hash;
-  setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, T().loading)));
+  setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted" }, T().loading)));
   loadAccount()
     .then((account) => {
       if (!stillHere()) return;
@@ -343,6 +344,7 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
     "aria-describedby": `${filterId}-hint ${filterId}-count`,
   });
   filter.value = filters.get(c.id) ?? "";
+  tooltip(filter, TP().filterHint);
   const count = h("p", { id: `${filterId}-count`, class: "muted small tb-count" });
   const none = h("p", { class: "muted tb-none", hidden: true }, TP().filterNone);
   let announceTimer: number | null = null;
@@ -378,7 +380,7 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
     "div",
     { class: "tb-filter", role: "search" },
     h("label", { class: "answer-label", for: filterId }, TP().filterLabel),
-    h("p", { id: `${filterId}-hint`, class: "muted small" }, TP().filterHint),
+    h("p", { id: `${filterId}-hint`, class: "visually-hidden" }, TP().filterHint),
     filter,
     count,
   );
