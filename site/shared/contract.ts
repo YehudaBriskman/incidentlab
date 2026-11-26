@@ -299,7 +299,13 @@ export const TrashRestoreResponseSchema = z.object({ restored: z.number().int().
 // Admin auth: header X-Admin-Key: <ADMIN_KEY env var>.
 // Errors: non-2xx with body ErrorBody. 400 validation, 401 auth, 403 forbidden/locked/not approved, 404, 409, 429 rate limit.
 
-export const ErrorBodySchema = z.object({ error: z.string(), code: z.string().optional(), retryAfterSeconds: z.number().optional() });
+export const ErrorBodySchema = z.object({
+  error: z.string(),
+  code: z.string().optional(),
+  retryAfterSeconds: z.number().optional(),
+  /** itemized problems (a rejected case upload lists every failed check) */
+  details: z.array(z.string()).optional(),
+});
 
 // POST /api/auth/register  -> 201 {account} + cookie (status "pending" until the admin approves,
 //                             "approved" right away with a valid inviteCode). 409 code "reserved" / "username-taken".
