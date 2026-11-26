@@ -283,6 +283,9 @@ th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
 @media (forced-colors: active) {
   .ex-drawer { border-color: CanvasText; }
   .ex-chart rect.is-picked { fill: Highlight; }
+  /* the cursor line is a tint and an inset bar, both erased by forced colours (#130) */
+  .ex-row.is-cursor { forced-color-adjust: none; background: Highlight; color: HighlightText; box-shadow: none; }
+  .ex-row.is-cursor .ex-ln, .ex-row.is-cursor mark { color: HighlightText; }
 }
 
 @media (prefers-reduced-motion: reduce) {
