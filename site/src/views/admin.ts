@@ -247,6 +247,21 @@ function formatDateTimeSec(iso: string | null): string {
   return t === null ? "—" : new Intl.DateTimeFormat(locale(), { dateStyle: "medium", timeStyle: "medium" }).format(t);
 }
 
+/** Same, with the browser's time zone named ("25 Nov 2026, 14:04:11 GMT+2"): the audit log's full-time tooltip. */
+function formatDateTimeSecZone(iso: string | null): string {
+  const t = ms(iso);
+  if (t === null) return "—";
+  return new Intl.DateTimeFormat(locale(), {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  }).format(t);
+}
+
 /** Same, with the time zone named ("25 Nov 2026, 18:30 GMT+2"): for values typed in a browser-formatted picker. */
 function formatDateTimeZone(iso: string | null): string {
   const t = ms(iso);
@@ -1751,7 +1766,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   const trashTable = dataTable<TrashEntry>({
     columns: [
       { id: "item", header: T().admColItem, rowHeader: true, className: "trash-label", cell: (e) => h("span", { dir: "auto" }, e.label), sortValue: (e) => e.label },
-      { id: "deleted", header: T().admColDeletedAt, className: "col-seen", cell: (e) => tipped(h("span", {}, formatDateTime(e.deletedAt)), e.deletedAt), sortValue: (e) => ms(e.deletedAt), sortFirst: "desc" },
+      { id: "deleted", header: T().admColDeletedAt, className: "col-seen", cell: (e) => tipped(h("span", {}, formatDateTime(e.deletedAt)), formatDateTimeZone(e.deletedAt)), sortValue: (e) => ms(e.deletedAt), sortFirst: "desc" },
       { id: "expires", header: T().admColExpires, className: "col-seen", cell: (e) => tipped(h("span", {}, relativeIn(e.expiresAt, trashNow)), formatDateTime(e.expiresAt)), sortValue: (e) => ms(e.expiresAt) },
       { id: "records", header: T().admColRecords, numeric: true, cell: (e) => fmtInt(e.records), sortValue: (e) => e.records, sortFirst: "desc" },
       {
@@ -2701,9 +2716,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       tile(
         T().admAvgScoreAll,
         avg === null ? "—" : fmtInt(avg),
-        [maxScore ? T().admPar(fmtInt(maxScore)) : null, T().admSample(fmtInt(players.length))].filter((x) => x !== null).join(" · "),
+        [maxScore ? T().admPar(fmtInt(maxScore)) : null, T().admSample(players.length, fmtInt(players.length))].filter((x) => x !== null).join(" · "),
       ),
-      tile(T().admMedianTime, med === null ? "—" : formatFinish(med), `${T().admFinishedPlayers} · ${T().admSample(fmtInt(finished.length))}`),
+      tile(T().admMedianTime, med === null ? "—" : formatFinish(med), T().admFinishedSample(finished.length, fmtInt(finished.length))),
     );
     setTilesSummary(liveTiles, T().admLiveSummary(fmtInt(players.length), fmtInt(finished.length), fmtInt(needing)));
   }
@@ -3395,7 +3410,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     tzField.setError(tzValid ? null : T().admTimezoneInvalid);
     tzInput.addEventListener("input", () => {
       const v = tzInput.value.trim();
-      tzField.setError(v === "" || isValidTimeZone(v) ? null : T().admTimezoneInvalid);
+      const ok = v === "" || isValidTimeZone(v);
+      tzField.setError(ok ? null : T().admTimezoneInvalid);
+      syncSave(ok);
     });
     tzInput.addEventListener("change", () => {
       const v = tzInput.value.trim();
@@ -3415,10 +3432,20 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
 
     const saveBtn = h(
       "button",
-      { type: "button", class: "btn btn-primary", id: "sched-save", disabled: !dirty || sch.saving },
+      { type: "button", class: "btn btn-primary", id: "sched-save", "aria-describedby": "sched-status" },
       sch.saving ? T().admSaving : T().admSaveSchedule,
     );
     saveBtn.addEventListener("click", () => void onSaveSchedule());
+    const entries = Object.keys(draft.days).length;
+    const statusEl = h("span", { class: "small", id: "sched-status", role: "status" });
+    // An unknown time zone blocks Save, and the save bar says so (the field shows the details).
+    function syncSave(tzOk: boolean): void {
+      saveBtn.disabled = !dirty || sch.saving || !tzOk;
+      const blocked = dirty && !tzOk;
+      statusEl.className = `small ${blocked || dirty ? "sched-dirty" : "muted"}`;
+      statusEl.textContent = blocked ? T().admScheduleFixTz : dirty ? T().admUnsaved : (sch.msg ?? T().admScheduledDays(entries));
+    }
+    syncSave(tzValid);
     const discardBtn = h(
       "button",
       { type: "button", class: "btn btn-ghost", id: "sched-discard", disabled: !dirty || sch.saving },
@@ -3429,7 +3456,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       renderSchedule();
     });
 
-    const entries = Object.keys(draft.days).length;
     setChildren(
       panel,
       todayPanel,
@@ -3457,7 +3483,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         { class: "sched-actions panel admin-panel", hidden: !scheduleBarVisible() },
         saveBtn,
         discardBtn,
-        h("span", { class: `small ${dirty ? "sched-dirty" : "muted"}`, role: "status" }, dirty ? T().admUnsaved : sch.msg ?? T().admScheduledDays(entries)),
+        statusEl,
         sch.error ? h("p", { class: "admin-error", role: "alert" }, T().admScheduleSaveFailed(sch.error)) : null,
       ),
     );
@@ -3880,7 +3906,18 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     const f = ms(e.freezeAt);
     if (f !== null) parts.push(f <= now ? T().admStatusFrozen(formatDateTime(e.freezeAt)) : T().admStatusFreezesIn(formatDuration(f - now)));
     const label = e.name.trim();
-    setChildren(evStatusEl, h("span", { class: `adm-ev-dot is-${tone}`, "aria-hidden": "true" }), label ? h("strong", {}, label) : null, label ? " · " : "", parts.join(" · "));
+    // Each part carries its separator at its own end, so a wrapped line never starts with a stray "·" (#129).
+    const segs: Array<{ text: string; strong: boolean }> = [
+      ...(label ? [{ text: label, strong: true }] : []),
+      ...parts.map((text) => ({ text, strong: false })),
+    ];
+    setChildren(
+      evStatusEl,
+      h("span", { class: `adm-ev-dot is-${tone}`, "aria-hidden": "true" }),
+      segs.map((s, i) =>
+        h("span", { class: "adm-ev-part" }, s.strong ? h("strong", {}, s.text) : s.text, i < segs.length - 1 ? " ·" : ""),
+      ),
+    );
     evClockEl.textContent = T().admServerClock(new Intl.DateTimeFormat(locale(), { timeStyle: "medium" }).format(now));
   }
 
@@ -4019,7 +4056,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         header: T().admColTime,
         className: "col-seen",
         // Seconds matter here: a class's approvals land within the same minute.
-        cell: (e) => tipped(h("time", { datetime: e.at }, formatDateTimeSec(e.at)), e.at),
+        cell: (e) => tipped(h("time", { datetime: e.at }, formatDateTimeSec(e.at)), formatDateTimeSecZone(e.at)),
         sortValue: (e) => ms(e.at),
         sortFirst: "desc",
         csv: (e) => e.at,
@@ -4181,6 +4218,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     const med = median(finishTimes);
     const timeValue = med !== null ? formatFinish(med) : s.avgDurationSeconds !== null ? formatFinish(s.avgDurationSeconds * 1000) : "—";
     const timeLabel = med !== null || s.avgDurationSeconds === null ? T().admMedianTime : T().admAvgTime;
+    const timeSample = med !== null ? finishTimes.length : s.completed;
     const head = h(
       "div",
       { class: "stats-case-head" },
@@ -4200,14 +4238,14 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         { class: "stats-kpi is-lead" },
         h("div", { class: "admin-tile-label" }, T().admCompletion),
         h("div", { class: "stats-kpi-value" }, formatPct(s.completed / s.players)),
-        h("div", { class: "admin-tile-sub" }, T().admCompletionSub(fmtInt(s.completed), fmtInt(s.players))),
+        h("div", { class: "admin-tile-sub" }, T().admCompletionSub(fmtInt(s.completed), s.players, fmtInt(s.players))),
       ),
       h(
         "div",
         { class: "stats-kpi" },
         h("div", { class: "admin-tile-label" }, timeLabel),
         h("div", { class: "stats-kpi-value" }, timeValue),
-        h("div", { class: "admin-tile-sub" }, `${T().admFinishedPlayers} · ${T().admSample(fmtInt(med !== null ? finishTimes.length : s.completed))}`),
+        h("div", { class: "admin-tile-sub" }, T().admFinishedSample(timeSample, fmtInt(timeSample))),
       ),
       h(
         "div",
@@ -4230,7 +4268,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       { class: "muted small stats-secondary" },
       `${T().admAvgScoreFinishers}: ${s.avgScore === null ? "—" : fmtInt(Math.round(s.avgScore))}`,
       maxScore ? ` (${T().admPar(fmtInt(maxScore))})` : "",
-      ` · ${T().admSample(fmtInt(s.completed))}`,
+      ` · ${T().admFinishedSample(s.completed, fmtInt(s.completed))}`,
     );
     // Per question: a bar of everyone who reached it, split into solved / gave up / still on it (text says the same).
     const bars = h(

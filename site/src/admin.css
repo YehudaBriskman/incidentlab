@@ -107,7 +107,7 @@ input.admin-input[type="search"] {
    and a 20px semibold tabular value. */
 .admin-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2); margin: 0; }
 .admin-tiles .stat-tile {
-  min-height: 72px; padding: var(--space-2) var(--space-3); gap: 2px; justify-content: center;
+  min-height: 72px; padding: var(--space-2) var(--space-3); gap: 2px; justify-content: flex-start; /* labels and values line up whether or not a tile has a sub-line (#129) */
   background: var(--level-1); border: 0; border-radius: var(--radius-card); box-shadow: var(--surface-lift);
 }
 .admin-tiles .stat-label { font-size: var(--type-label-size); font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-2); }
@@ -155,7 +155,7 @@ input.admin-input[type="search"] {
 .admin-empty-small { margin: var(--space-1) 0; }
 
 /* ---- badges (pill tones; the base lives in styles.css) & cells ---- */
-.stuck-badge { font-family: var(--font-mono); }
+.stuck-badge { font-variant-numeric: tabular-nums; }
 .stuck-badge.is-warn { --pill-fg: var(--warning-fg); --pill-bg: var(--warning-bg); --pill-line: var(--warning-fg); }
 .stuck-badge.is-alert { --pill-fg: var(--danger-fg); --pill-bg: var(--danger-bg); --pill-line: var(--danger-fg); }
 /* Help reasons share the pill base (styles.css) through .stuck-badge's tones. */
@@ -297,7 +297,7 @@ input.admin-input[type="search"] {
   --pill-line: var(--accent);
   min-width: 1.6em;
   padding: 1px var(--space-2);
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-weight: 700;
 }
 .tab-badge[hidden] { display: none; }
@@ -416,10 +416,10 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 .cal-day.is-past { opacity: 0.6; }
 .cal-day.is-today { background: var(--info-bg); box-shadow: inset 0 0 0 2px var(--info-fg); opacity: 1; }
 .cal-day-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1); }
-.cal-num { font-family: var(--font-mono); font-weight: 600; }
+.cal-num { font-weight: 600; font-variant-numeric: tabular-nums; }
 .cal-wd { display: none; color: var(--text-muted); font-size: var(--step--1); }
 .cal-day-head { flex-wrap: wrap; }
-.cal-day .today-tag { margin: 0; font-size: 0.7rem; padding: 0 var(--space-1); }
+.cal-day .today-tag { margin: 0; font-size: var(--type-label-size); padding: 0 var(--space-1); }
 .cal-select { width: 100%; font-size: var(--type-label-size); padding-block: var(--space-1); min-height: 32px; }
 .cal-day:not(.is-set) .cal-select { color: var(--text-muted); }
 
@@ -454,7 +454,7 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 .key-open { background: var(--info-bg); border: 1px solid var(--info-fg); }
 .stats-table-view summary { cursor: pointer; font-size: var(--step--1); color: var(--accent-strong); min-height: var(--target-min); display: inline-flex; align-items: center; }
 .stats-table-view[open] summary { margin-bottom: var(--space-2); }
-.q-id { font-family: var(--font-mono); color: var(--text-muted); }
+.q-id { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-muted); }
 /* Hardest question: a neutral flag, not an error state. */
 .stats-q-table tr.is-hardest > :is(td, th) { background: var(--fill-inset); font-weight: 600; }
 .stats-hardest { margin: 0; }
@@ -590,10 +590,10 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 .pc-head { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-2); }
 .pc-head .acct-toggle { min-width: 0; }
 .pc-head .player-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-score { font-family: var(--font-mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+.pc-score { font-weight: 600; font-variant-numeric: tabular-nums; }
 .pc-meta { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: var(--step--1); }
 .pc-stage { flex: 1 1 auto; min-width: 0; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-meta > :last-child { flex: none; font-family: var(--font-mono); }
+.pc-meta > :last-child { flex: none; font-variant-numeric: tabular-nums; }
 .pc-seen { margin: 0; }
 .stage-strip { list-style: none; margin: var(--space-1) 0 0; padding: 0; display: grid; gap: var(--space-1); }
 .strip-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); font-size: var(--step--1); }
