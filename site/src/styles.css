@@ -1,56 +1,18 @@
 /* =====================================================================
-   IncidentLab design tokens, "Night Shift" (DESIGN.md 2.0.0, issue #97). DESIGN.md is the decision record.
+   IncidentLab design tokens: Night Shift colours (2.0.0) with the Soft UI geometry, depth and motion (DESIGN.md 3.0.0, #97).
    Colour roles are OKLCH in warm graphite with one pager-amber fill (#f5a524) in every theme, written once as
    light-dark() pairs plus one high-contrast block. scripts/check-contrast.mts verifies every text and UI pair
    (WCAG 2 + APCA) in light, dark and both high-contrast themes. Components use these roles, never raw values;
    the alias layer keeps the pre-2.0 names working until the sweeps move each view onto the roles.
    ===================================================================== */
 
-/* ============ fonts: IBM Plex, self-hosted OFL subsets ============
+/* ============ fonts: system UI font + IBM Plex Mono for code (DESIGN.md 3.0.0 "Soft UI") ============
+   The interface uses the platform font (SF Pro on Apple, Segoe UI on Windows, Noto on Android/Linux), as Apple
+   and Liba do. Only Plex Mono is self-hosted, for code and logs. The note below is kept for the mono faces.
    One superfamily for Latin, Hebrew and code (DESIGN.md Typography). Plex Sans is the variable Latin subset
    (wght 100-700); Plex Sans Hebrew ships four static weights of the Hebrew subset only, so a page without
    Hebrew never downloads it (unicode-range); Plex Mono ships 400 and 600 (code is copyable text, rarely bold).
    Source: the @fontsource npm packages 5.3.0. Licences: public/fonts/OFL-ibm-plex-*.txt. */
-@font-face {
-  font-family: "IBM Plex Sans";
-  font-style: normal;
-  font-weight: 100 700;
-  font-display: swap;
-  src: url("/fonts/ibm-plex-sans-latin-wght-normal.woff2") format("woff2");
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-  font-family: "IBM Plex Sans Hebrew";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("/fonts/ibm-plex-sans-hebrew-hebrew-400-normal.woff2") format("woff2");
-  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
-}
-@font-face {
-  font-family: "IBM Plex Sans Hebrew";
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("/fonts/ibm-plex-sans-hebrew-hebrew-500-normal.woff2") format("woff2");
-  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
-}
-@font-face {
-  font-family: "IBM Plex Sans Hebrew";
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url("/fonts/ibm-plex-sans-hebrew-hebrew-600-normal.woff2") format("woff2");
-  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
-}
-@font-face {
-  font-family: "IBM Plex Sans Hebrew";
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url("/fonts/ibm-plex-sans-hebrew-hebrew-700-normal.woff2") format("woff2");
-  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
-}
 @font-face {
   font-family: "IBM Plex Mono";
   font-style: normal;
@@ -69,14 +31,6 @@
 }
 /* Metric-matched local fallbacks (capsize metrics: Plex 1025/-275 per 1000, xWidthAvg 451 sans / 600 mono):
    the swap from fallback to webfont barely moves text. Arial carries Hebrew, so the Hebrew stack shares it. */
-@font-face {
-  font-family: "Plex Sans Fallback";
-  src: local("Arial"), local("ArialMT"), local("Liberation Sans");
-  ascent-override: 101.32%;
-  descent-override: 27.18%;
-  line-gap-override: 0%;
-  size-adjust: 101.17%;
-}
 @font-face {
   font-family: "Plex Mono Fallback";
   src: local("Courier New"), local("CourierNewPSMT"), local("Liberation Mono");
@@ -101,19 +55,23 @@
   --space-8: 64px;
   --gutter: var(--space-4);         /* 16 below 600px; 24 from 600; 32 from 1056 (media rules below) */
 
-  /* radius: one 4px base, five steps (x0.5 / 0.75 / 1 / 1.5 / 2). Controls, panels and code panes md 4; cards
-     and floating surfaces lg 6; dialogs and sheets xl 8; pills full. */
-  --radius-base: 4px;
-  --radius-xs: calc(var(--radius-base) * 0.5);
-  --radius-sm: calc(var(--radius-base) * 0.75);
-  --radius-md: var(--radius-base);
-  --radius-lg: calc(var(--radius-base) * 1.5);
-  --radius-xl: calc(var(--radius-base) * 2);
-  --radius-full: 9999px;
-  /* nesting rule: inner = outer - padding, never below xs (a menu item inside a 4px-padded menu, a code block
-     inside a card). The two common cases as tokens; anything else writes the same max(calc()). */
-  --radius-inner-lg: max(var(--radius-xs), calc(var(--radius-lg) - var(--space-1)));
-  --radius-inner-xl: max(var(--radius-xs), calc(var(--radius-xl) - var(--space-1)));
+  /* radius by role (Soft UI, DESIGN.md 3.0.0, after Liba): marks 4, controls 8, cards 12, floating surfaces 16,
+     pills/circles full. The old size names map onto the roles so existing rules pick them up. */
+  --radius-mark: 4px;       /* checkbox, tab trigger, close x, progress rail */
+  --radius-control: 8px;    /* button, icon button (square), input, select, menu item, tooltip, skeleton */
+  --radius-card: 12px;      /* card, KPI tile, table shell, panel, empty state */
+  --radius-surface: 16px;   /* dialog, menu, popover, sheet edge */
+  --radius-pill: 9999px;    /* avatar, switch, badge, chip, status dot, account button */
+  --radius-base: var(--radius-mark);
+  --radius-xs: var(--radius-mark);
+  --radius-sm: 6px;
+  --radius-md: var(--radius-control);
+  --radius-lg: var(--radius-card);
+  --radius-xl: var(--radius-surface);
+  --radius-full: var(--radius-pill);
+  /* nesting rule: inner = outer - padding (a 16px menu with 4px padding holds 8px items) */
+  --radius-inner-lg: max(var(--radius-mark), calc(var(--radius-lg) - var(--space-1)));
+  --radius-inner-xl: max(var(--radius-mark), calc(var(--radius-xl) - var(--space-1)));
 
   /* edges: one hairline, one state stripe (inset box-shadow with --dir, never a thick border on a radius) */
   --edge-width: 1px;
@@ -123,9 +81,9 @@
      Sizes are rem, so the browser default and [data-text-scale] scale them. Hebrew overrides: :lang(he) below. */
   /* Hebrew sits right after the Latin face in every stack: Hebrew names and labels render in Plex Sans Hebrew
      on every OS, also inside mono-styled text. */
-  --font-sans: "IBM Plex Sans", "IBM Plex Sans Hebrew", "Plex Sans Fallback", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-sans-he: "IBM Plex Sans Hebrew", "IBM Plex Sans", "Plex Sans Fallback", system-ui, "Segoe UI", Arial, sans-serif;
-  --font-mono: "IBM Plex Mono", "IBM Plex Sans Hebrew", "Plex Mono Fallback", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: system-ui, -apple-system, "Segoe UI", "Noto Sans Hebrew", "Noto Sans", Roboto, Arial, sans-serif;
+  --font-sans-he: system-ui, -apple-system, "Segoe UI", "Noto Sans Hebrew", "Arial Hebrew", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", "Plex Mono Fallback", ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans Hebrew", monospace;
   --type-display-size: clamp(2rem, 1.6rem + 1.6vw, 2.5rem);   /* home welcome only */
   --type-display-lh: 1.1;
   --type-display-weight: 600;
@@ -193,12 +151,24 @@
   --focus-offset: 2px;
 
   /* motion */
-  --motion-dur-short: 150ms;
-  --motion-dur-medium: 240ms;
-  --motion-dur-long: 400ms;
+  /* motion (Soft UI, after Liba): four durations, three curves; no springs, no page transitions */
+  --motion-tap: 80ms;        /* press */
+  --motion-settle: 150ms;    /* hover, focus, selection, tint */
+  --motion-enter: 220ms;     /* menu, popover, tooltip, toast */
+  --motion-surface: 300ms;   /* dialog, sheet */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-lift: cubic-bezier(0.2, 0.9, 0.3, 1);
+  --press-scale: 0.97;
+  --lift-raise: -1px;
+  --enter-scale: 0.95;
+  --enter-travel: 8px;
+  --motion-dur-short: var(--motion-settle);
+  --motion-dur-medium: var(--motion-enter);
+  --motion-dur-long: var(--motion-surface);
   --motion-dur-data: 900ms;
-  --motion-ease-standard: cubic-bezier(0.2, 0, 0.38, 0.9);
-  --motion-ease-enter: cubic-bezier(0, 0, 0.38, 0.9);
+  --motion-ease-standard: var(--ease-standard);
+  --motion-ease-enter: var(--ease-standard);
 
   /* spacing roles (#89): components pick a role, not a raw step. Inside a group < between groups, at every level. */
   --gap-tight: var(--space-1);      /* 4: label to control, title to its meta, icon to text */
@@ -277,9 +247,10 @@
 /* @tokens:base */
 :root {
   /* 0 canvas: the page */
-  --level-0: light-dark(oklch(0.972 0.005 80), oklch(0.165 0.006 70));
-  /* 1 card: cards, panels, tiles, table wrappers */
-  --level-1: light-dark(oklch(1 0 0), oklch(0.205 0.008 70));
+  /* Soft UI: the light canvas sits clearly below the cards (borderless cards separate by tone + soft shadow) */
+  --level-0: light-dark(oklch(0.955 0.007 80), oklch(0.165 0.006 70));
+  /* 1 card: cards, panels, tiles, table wrappers (near-white, not pure white) */
+  --level-1: light-dark(oklch(0.993 0.002 80), oklch(0.21 0.008 70));
   /* 2 raised: sticky bars, phone nav panel, drawers */
   --level-2: light-dark(oklch(1 0 0), oklch(0.235 0.008 70));
   /* 3 floating: popover, menu, toast */
@@ -327,13 +298,13 @@
   /* focus: inner halo between element and ring */
   --focus-halo: light-dark(oklch(1 0 0), oklch(0.165 0.006 70));
   /* status: wrong, rejected, delete */
-  --danger-fg: light-dark(oklch(0.48 0.18 27), oklch(0.875 0.065 25));
+  --danger-fg: light-dark(oklch(0.465 0.18 27), oklch(0.875 0.065 25));
   --danger-bg: light-dark(oklch(0.965 0.016 25), oklch(0.26 0.05 25));
   --danger-line: light-dark(oklch(0.58 0.17 27), oklch(0.64 0.16 25));
   /* .btn-danger label on danger-fg */
   --on-danger: light-dark(oklch(1 0 0), oklch(0.17 0.02 25));
   /* status: pending, stuck, unsaved, stale (orange, not brand) */
-  --warning-fg: light-dark(oklch(0.48 0.14 40), oklch(0.87 0.07 48));
+  --warning-fg: light-dark(oklch(0.465 0.135 40), oklch(0.87 0.07 48));
   --warning-bg: light-dark(oklch(0.965 0.018 50), oklch(0.26 0.045 45));
   --warning-line: light-dark(oklch(0.6 0.16 42), oklch(0.68 0.14 45));
   /* status: solved, approved */
@@ -479,6 +450,10 @@
 :root[data-text-scale="125"] { font-size: 125%; }
 /* reduced motion on request: the same result as prefers-reduced-motion: reduce, for every animation */
 :root[data-motion="reduce"] {
+  --press-scale: 1;
+  --lift-raise: 0px;
+  --enter-scale: 1;
+  --enter-travel: 0px;
   --motion-dur-short: 0ms;
   --motion-dur-medium: 0ms;
   --motion-dur-long: 0ms;
@@ -500,27 +475,32 @@
 :where(:root[data-spacing="wide"]) p { margin-block-end: 2em; }
 :root[data-spacing="wide"] :is(code, pre, kbd, samp, .mono, .code-block, .ex-viewport) { letter-spacing: normal; word-spacing: normal; }
 
-/* ============ tokens: elevation (five levels, #96) ============
-   Surface tone first, then shadow. Light: white levels 1-4 on a 0.972 canvas, separated by layered warm shadows
-   from one light source (y offset only). Dark: each level is lighter (--level-1..4), shadows are 30-50% black
-   so they still read, and an inset top highlight marks the lit edge. Forced colours drop shadows, so every
-   raised surface keeps a border there (see the forced-colours base rule). */
+/* ============ tokens: elevation (Soft UI, DESIGN.md 3.0.0, after Liba) ============
+   Two-layer soft shadows with negative spread, inked in our warm graphite (light) or black (dark). Light: the
+   canvas sits darker than the cards, so cards need no border. Dark: shadows barely show, so depth is lighter
+   surfaces plus a 1px top highlight (--elevation-edge). Forced colours drop shadows: raised surfaces keep a
+   border there (forced-colours base rule). */
 :root {
+  --elevation-ink: light-dark(oklch(0.2 0.012 65), oklch(0 0 0));
+  --elevation-a1: light-dark(0.08, 0.30);
+  --elevation-a2: light-dark(0.12, 0.40);
+  --elevation-a3: light-dark(0.18, 0.55);
+  --elevation-edge: inset 0 1px 0 0 light-dark(transparent, oklch(1 0 0 / 0.06));
+  --surface-lift: 0 1px 2px 0 light-dark(oklch(0.2 0.012 65 / 0.08), oklch(0 0 0 / 0.3)),
+    0 4px 10px -2px light-dark(oklch(0.2 0.012 65 / 0.12), oklch(0 0 0 / 0.35)), var(--elevation-edge);
+  --elevation-1: 0 1px 2px 0 light-dark(oklch(0.2 0.012 65 / 0.08), oklch(0 0 0 / 0.3)),
+    0 1px 1px -1px light-dark(oklch(0.2 0.012 65 / 0.08), oklch(0 0 0 / 0.3)), var(--elevation-edge);
+  --elevation-2: 0 4px 12px -2px light-dark(oklch(0.2 0.012 65 / 0.12), oklch(0 0 0 / 0.4)),
+    0 2px 4px -2px light-dark(oklch(0.2 0.012 65 / 0.08), oklch(0 0 0 / 0.3)), var(--elevation-edge);
+  --elevation-3: 0 12px 32px -4px light-dark(oklch(0.2 0.012 65 / 0.18), oklch(0 0 0 / 0.55)),
+    0 4px 8px -4px light-dark(oklch(0.2 0.012 65 / 0.12), oklch(0 0 0 / 0.4)), var(--elevation-edge);
+  --shadow-edge: 0 1px 0 0 var(--border);   /* sticky header divider: a shadow, so it travels with the header */
+  /* the 2.0.0 five-level names map onto the ladder */
   --elev-0: none;
-  --elev-1: 0 1px 2px light-dark(oklch(0.3 0.02 65 / 0.07), oklch(0 0 0 / 0.3)),
-    0 1px 3px light-dark(oklch(0.3 0.02 65 / 0.05), oklch(0 0 0 / 0.2)),
-    inset 0 1px 0 light-dark(transparent, oklch(1 0 0 / 0.04));
-  --elev-2: 0 1px 2px light-dark(oklch(0.3 0.02 65 / 0.07), oklch(0 0 0 / 0.35)),
-    0 4px 8px -2px light-dark(oklch(0.3 0.02 65 / 0.1), oklch(0 0 0 / 0.4)),
-    inset 0 1px 0 light-dark(transparent, oklch(1 0 0 / 0.05));
-  --elev-3: 0 2px 4px light-dark(oklch(0.3 0.02 65 / 0.07), oklch(0 0 0 / 0.4)),
-    0 8px 16px -4px light-dark(oklch(0.3 0.02 65 / 0.12), oklch(0 0 0 / 0.45)),
-    0 16px 32px -8px light-dark(oklch(0.3 0.02 65 / 0.1), oklch(0 0 0 / 0.35)),
-    inset 0 1px 0 light-dark(transparent, oklch(1 0 0 / 0.06));
-  --elev-4: 0 4px 8px light-dark(oklch(0.3 0.02 65 / 0.07), oklch(0 0 0 / 0.45)),
-    0 16px 32px -8px light-dark(oklch(0.3 0.02 65 / 0.16), oklch(0 0 0 / 0.5)),
-    0 32px 64px -16px light-dark(oklch(0.3 0.02 65 / 0.18), oklch(0 0 0 / 0.45)),
-    inset 0 1px 0 light-dark(transparent, oklch(1 0 0 / 0.07));
+  --elev-1: var(--surface-lift);
+  --elev-2: var(--elevation-1);
+  --elev-3: var(--elevation-2);
+  --elev-4: var(--elevation-3);
 }
 
 /* ============ tokens: alias layer (deprecated names -> 2.0.0 roles) ============
@@ -549,10 +529,10 @@
   --sans: var(--font-sans);
   --mono: var(--font-mono);
   --radius: var(--radius-lg);
-  --shadow-sm: var(--elev-1);
-  --shadow-md: var(--elev-2);
-  --shadow-lg: var(--elev-3);
-  --shadow: var(--elev-2);
+  --shadow-sm: var(--surface-lift);
+  --shadow-md: var(--elevation-2);
+  --shadow-lg: var(--elevation-3);
+  --shadow: var(--surface-lift);
 }
 /* Scoped alias: inside the dark code island the ring and halo follow the pane (#96 F10). */
 :where(.code-block, .answer-code, .ex-view, .prose pre) { --focus-ring: var(--code-accent); --focus-halo: var(--code-bg); }
@@ -1844,3 +1824,114 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
 .status-pill.is-case-published { --pill-fg: var(--success-fg); --pill-bg: var(--success-bg); --pill-line: var(--success-fg); }
 .status-pill.is-case-draft { --pill-fg: var(--warning-fg); --pill-bg: var(--warning-bg); --pill-line: var(--warning-fg); }
 .status-pill.is-case-trashed { --pill-fg: var(--danger-fg); --pill-bg: var(--danger-bg); --pill-line: var(--danger-fg); }
+
+/* =====================================================================
+   Soft UI layer (DESIGN.md 3.0.0, after Liba): geometry, depth, glass and motion on top of the Night Shift
+   colours. Last in the file on purpose: it restyles the shared component classes without touching each view.
+   ===================================================================== */
+
+/* ---- cards: no border; separated from the canvas by tone and a soft two-layer shadow ---- */
+:is(.featured-card, .center-card, .question-box, .path-card, .case-card, .stat-tile, .table-wrap, .notice, .ach,
+  .detail-list, .toc, .form-section, .author-diff, .event-strip, .admin-panel, .resume-card) {
+  border-color: transparent;
+  border-radius: var(--radius-card);
+  box-shadow: var(--surface-lift);
+}
+/* the one emphasised card keeps a faint amber ring instead of a glow */
+.today-card { border-color: transparent; box-shadow: var(--surface-lift), inset 0 0 0 1px var(--accent-line); }
+/* cards you act on lift a little on hover */
+@media (hover: hover) {
+  :is(.case-card, .path-card, .resume-card) { transition: transform var(--motion-settle) var(--ease-standard), box-shadow var(--motion-settle) var(--ease-standard); }
+  :is(.case-card, .path-card, .resume-card):hover { transform: translateY(var(--lift-raise)); box-shadow: var(--elevation-2); }
+}
+/* empty states keep a dashed edge (they are a slot, not a surface) */
+.dt-message, .ex-empty-card { border-radius: var(--radius-card); }
+
+/* ---- buttons: 8px, tinted by default, no border; amber only on the primary; press scale ---- */
+.btn {
+  border-color: transparent; background: var(--fill-inset); border-radius: var(--radius-control);
+  transition: background-color var(--motion-settle) var(--ease-standard), color var(--motion-settle) var(--ease-standard),
+    box-shadow var(--motion-settle) var(--ease-standard), transform var(--motion-tap) var(--ease-standard);
+}
+.btn:hover { border-color: transparent; background: var(--fill-track); }
+.btn:active:not(:disabled) { transform: scale(var(--press-scale)); }
+.btn-ghost { background: transparent; }
+.btn-ghost:hover { background: var(--hover); }
+.btn-primary, .btn-primary:hover { border-color: transparent; }
+.btn-danger { border-color: transparent; }
+/* inputs keep the 3:1 control edge (WCAG 1.4.11); 8px corners */
+:is(.input, .admin-input, .ex-input, .ex-select, select.input) { border-radius: var(--radius-control); }
+
+/* ---- chips, badges, dots: pills and circles ---- */
+:is(.chip, .status-pill, .via-pill, .count-badge, .tab-badge, .ex-chip, .today-tag) { border-radius: var(--radius-pill); }
+
+/* ---- overlays: floating surfaces get 16px corners, a soft subtle edge and the elevation ladder ---- */
+.ov-dialog, .ov-sheet { border: 1px solid var(--border); box-shadow: var(--elevation-3); background: var(--level-4); }
+@media (min-width: 640px) { .ov-dialog:not(.is-full) { border-radius: var(--radius-surface); } }
+.ov-sheet.is-bottom { border-start-start-radius: var(--radius-surface); border-start-end-radius: var(--radius-surface); }
+.ov-popover { border: 1px solid var(--border); border-radius: var(--radius-surface); box-shadow: var(--elevation-2); background: var(--level-3); }
+.ov-menu { padding: var(--space-1); }
+.ov-menu-item { min-block-size: 32px; border-radius: var(--radius-control); padding-inline: var(--space-2); transition: background-color var(--motion-settle) var(--ease-standard); }
+.ov-menu-item:hover { background: var(--hover); }
+.ov-tooltip { border: 1px solid var(--border); border-radius: var(--radius-control); box-shadow: var(--elevation-1); background: var(--level-3); padding: 6px var(--space-3); }
+.toast { border-color: var(--border); border-radius: var(--radius-card); box-shadow: var(--elevation-2); }
+/* modal scrim: our ink at 40%, frosted; never carries text */
+.ov-dialog::backdrop, .ov-sheet::backdrop {
+  background: color-mix(in oklab, var(--elevation-ink) 40%, transparent);
+  -webkit-backdrop-filter: blur(12px) saturate(120%); backdrop-filter: blur(12px) saturate(120%);
+}
+
+/* ---- glass chrome: the top bar (92% opaque, so text always reads) ---- */
+.navbar, .surface-chrome {
+  background: color-mix(in oklab, var(--surface) 92%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(140%); backdrop-filter: blur(20px) saturate(140%);
+  border-block-end-color: color-mix(in oklab, var(--border) 70%, transparent);
+  box-shadow: var(--elevation-1);
+}
+/* glass turns opaque when the user asks for less transparency or more contrast */
+@media (prefers-reduced-transparency: reduce) {
+  .navbar, .surface-chrome { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .ov-dialog::backdrop, .ov-sheet::backdrop { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+:root[data-contrast="more"] :is(.navbar, .surface-chrome) { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+/* ---- motion: popups fade + scale 0.95 + 8px from the trigger side over 220ms; dialogs scale over 300ms and
+        leave on the faster exit curve. transform-origin comes from lib/overlay.ts (the anchor point). ---- */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion="reduce"]) :is(.ov-popover, .toast) {
+    transition: opacity var(--motion-enter) var(--ease-standard), transform var(--motion-enter) var(--ease-standard),
+      overlay var(--motion-enter) allow-discrete, display var(--motion-enter) allow-discrete;
+  }
+  :root:not([data-motion="reduce"]) :is(.ov-dialog, .ov-sheet) {
+    transition: opacity var(--motion-surface) var(--ease-standard), transform var(--motion-surface) var(--ease-standard),
+      overlay var(--motion-surface) allow-discrete, display var(--motion-surface) allow-discrete;
+  }
+  :root:not([data-motion="reduce"]) :is(.ov-dialog, .ov-sheet):not([open]),
+  :root:not([data-motion="reduce"]) .ov-popover:not(:popover-open) { transition-timing-function: var(--ease-exit); }
+  :root:not([data-motion="reduce"]) :is(.ov-dialog, .ov-sheet)::backdrop { transition-duration: var(--motion-settle); }
+  .ov-dialog:not([open]):not(.is-full) { transform: scale(var(--enter-scale)); }
+  .ov-popover:not(:popover-open) { transform: translateY(calc(-1 * var(--enter-travel))) scale(var(--enter-scale)); }
+  .ov-popover[data-side="top"]:not(:popover-open) { transform: translateY(var(--enter-travel)) scale(var(--enter-scale)); }
+  @starting-style {
+    .ov-dialog[open]:not(.is-full) { transform: scale(var(--enter-scale)); }
+    .ov-popover:popover-open { transform: translateY(calc(-1 * var(--enter-travel))) scale(var(--enter-scale)); }
+    .ov-popover[data-side="top"]:popover-open { transform: translateY(var(--enter-travel)) scale(var(--enter-scale)); }
+  }
+}
+
+/* ---- type: tracking tightens as size grows (Latin only; :lang(he) resets it above) ---- */
+h1 { letter-spacing: -0.015em; }
+h2 { letter-spacing: -0.01em; }
+h3 { letter-spacing: -0.005em; }
+
+/* ---- scrolling: thin scrollbars, no layout jump when one appears ---- */
+html { scrollbar-gutter: stable; }
+* { scrollbar-width: thin; scrollbar-color: var(--fill-track) transparent; }
+
+/* ---- forced colours: shadows vanish there, so every raised surface gets its border back ---- */
+@media (forced-colors: active) {
+  :is(.featured-card, .center-card, .question-box, .path-card, .case-card, .stat-tile, .table-wrap, .notice, .ach,
+    .detail-list, .toc, .form-section, .author-diff, .event-strip, .admin-panel, .resume-card, .today-card, .btn) {
+    border-color: CanvasText;
+  }
+}
