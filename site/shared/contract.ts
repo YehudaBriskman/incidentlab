@@ -272,15 +272,15 @@ export const AuditEntrySchema = z.object({
 export type AuditEntry = z.infer<typeof AuditEntrySchema>;
 
 // ---- trash (soft deletes) ---------------------------------------------------
-// Deleting an account or resetting progress moves the data to the trash first. Entries can be restored
+// Deleting an account or a case, or resetting progress, moves the data to the trash first. Entries can be restored
 // for TRASH_RETENTION_DAYS; restore never overwrites newer data (409 or "skipped").
 
 export const TRASH_RETENTION_DAYS = 7;
 
 export const TrashEntrySchema = z.object({
   id: z.string(),
-  kind: z.enum(["account", "progress"]),
-  /** what was removed, for humans: "account dana_k", "progress of 3am-outage (12 players)" */
+  kind: z.enum(["account", "progress", "case"]),
+  /** what was removed, for humans: "account dana_k", "progress of 3am-outage (12 players)", "case my-case" */
   label: z.string(),
   deletedAt: z.string(),
   expiresAt: z.string(),
