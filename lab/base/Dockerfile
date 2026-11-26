@@ -8,9 +8,11 @@
 # exists (#144, #151); pin the base by digest when publishing.
 FROM alpine:3.20
 
+# libgcc and libstdc++ let VS Code's server run in the container (Codespaces and Dev Containers, #150).
 RUN apk add --no-cache \
       bash coreutils grep sed findutils gawk diffutils util-linux-misc \
-      tcpdump bind-tools jq less vim git unzip file procps tzdata ca-certificates
+      tcpdump bind-tools jq less vim git unzip file procps tzdata ca-certificates \
+      libgcc libstdc++
 
 # A non-root analyst. The evidence is read-only for the case; players work in /home/analyst.
 RUN adduser -D -s /bin/bash analyst
