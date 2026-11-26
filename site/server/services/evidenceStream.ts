@@ -140,6 +140,14 @@ export const streamChunks = (chunks: EvidenceChunkRepository, entry: EvidenceEnt
 };
 
 const IMMUTABLE = "public, max-age=31536000, immutable";
+
+/**
+ * Netlify CDN caching for evidence (#141; netlify.toml sets `cache = "manual"` on this Edge Function). The URL
+ * carries the case version and files never change in place, so a complete GET is cached for a year: later
+ * loads skip the Edge Function and the Blobs reads (a 40 MB log streamed from Blobs takes ~14 s). Partial
+ * (206), 304, 416 and HEAD responses are never cached at the CDN, so a cached partial can't be served whole.
+ */
+export const cdnCacheFor = (status: number, method: string): string => (status === 200 && method === "GET" ? IMMUTABLE : "no-store");
 // Edge Function responses do not get netlify.toml [[headers]], so the hardening headers are set here.
 const HARDENING = { "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; sandbox" };
 
@@ -194,21 +202,22 @@ export class EvidenceService {
       ...HARDENING,
       ...(resolved.downloadName ? { "content-disposition": `attachment; filename="${resolved.downloadName}"` } : {}),
     };
-    if (matchesEtag(req.headers.get("if-none-match"), etag)) return new Response(null, { status: 304, headers: base });
+    const cdn = (status: number): Record<string, string> => ({ "netlify-cdn-cache-control": cdnCacheFor(status, method) });
+    if (matchesEtag(req.headers.get("if-none-match"), etag)) return new Response(null, { status: 304, headers: { ...base, ...cdn(304) } });
 
     const ifRange = req.headers.get("if-range");
     const range = ifRange !== null && ifRange.trim() !== etag ? null : parseRange(req.headers.get("range"), entry.size);
     if (range === "unsatisfiable") {
-      return new Response(null, { status: 416, headers: { ...base, "content-range": `bytes */${entry.size}` } });
+      return new Response(null, { status: 416, headers: { ...base, ...cdn(416), "content-range": `bytes */${entry.size}` } });
     }
     const body = (bytes: ByteRange | undefined): ReadableStream<Uint8Array> | null =>
       method === "HEAD" || entry.size === 0 ? null : this.read(entry, bytes);
     if (range === null) {
-      return new Response(body(undefined), { status: 200, headers: { ...base, "content-length": String(entry.size) } });
+      return new Response(body(undefined), { status: 200, headers: { ...base, ...cdn(200), "content-length": String(entry.size) } });
     }
     return new Response(body(range), {
       status: 206,
-      headers: { ...base, "content-length": String(range.end - range.start + 1), "content-range": `bytes ${range.start}-${range.end}/${entry.size}` },
+      headers: { ...base, ...cdn(206), "content-length": String(range.end - range.start + 1), "content-range": `bytes ${range.start}-${range.end}/${entry.size}` },
     });
   }
 }

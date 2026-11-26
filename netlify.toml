@@ -29,10 +29,14 @@
 # DB-stored evidence (#64): an Edge Function streams the 4 MiB chunks from Blobs, with Range support, so
 # files past the Function payload limits (40 MB today) work. It is the only evidence path (#68): the site
 # publishes no static evidence. A returned response ends the request, so the SPA rewrite never applies here.
-# No `cache = "manual"`: the CDN does not cache it; browsers do (immutable, the URL carries the version).
+# `cache = "manual"` (#141): the CDN caches what the function marks cacheable through Netlify-CDN-Cache-Control,
+# which is complete GET 200s only (the URL carries the version, files never change in place). Partial (206),
+# HEAD, 304, 416 and 404 responses are no-store, so a cached partial is never served whole. Later loads skip the
+# function and the Blobs reads entirely.
 [[edge_functions]]
   path = "/evidence/db/*"
   function = "evidence"
+  cache = "manual"
 
 # SPA fallback: client-side routes (e.g. /cases/3am-outage) serve index.html.
 # Real files (assets) still win because force = false.
