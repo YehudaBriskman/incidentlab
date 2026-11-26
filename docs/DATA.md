@@ -19,6 +19,10 @@ plus public and sealed content), `evidence:` (evidence files in 4 MiB chunks, `E
 `upload:` (in-progress chunked uploads) to `incidentlab-v2`. The schemas live in `site/shared/case-records.ts`
 and follow the rules below.
 
+Their input is the **case package** (`build/packages/<id>-v<n>.case.zip`, format in `docs/CASE_CONTRACT.md`).
+Packages are build artefacts: `scripts/build-all.sh` writes and validates them under the gitignored `build/`.
+They contain the answer keys, so they are never committed, deployed or put under `site/`.
+
 ## Rules for changing stored records
 
 1. **Additive only.** New fields get a zod `.default(...)`, so every record already stored still parses.
