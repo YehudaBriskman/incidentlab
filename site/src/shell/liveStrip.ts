@@ -147,7 +147,9 @@ export function mountLiveStrip(header: HTMLElement): void {
     net.classList.toggle("is-down", state !== "ok");
     sync(); // show the strip first: a live region that appears with its text already in it is often not read
     window.setTimeout(() => {
-      net.textContent = netState === "ok" ? "" : netState === "retrying" ? T().netRetrying : T().netDown;
+      // "your progress is saved" only means something while playing a case; elsewhere (sign-in, home) say less
+      const playing = window.location.hash.startsWith("#/case/");
+      net.textContent = netState === "ok" ? "" : netState === "retrying" ? T().netRetrying : playing ? T().netDownPlaying : T().netDown;
     }, 100);
   });
   if (status !== null) new MutationObserver(sync).observe(status, { attributes: true, attributeFilter: ["class"] });
