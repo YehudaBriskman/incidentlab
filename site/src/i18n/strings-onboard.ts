@@ -1,7 +1,7 @@
 import { defineStrings, formatNumber, locale } from "./i18n";
 
 // Strings for onboarding and the public pages (wave 3): auth form errors, the pending / rejected / forced
-// password screens, toasts and 404, the home landing, the stats KPIs and the leaderboard states.
+// password screens, 404, the home landing, the stats KPIs and the leaderboard states.
 // Values that come from users or content (names, case titles) are never concatenated in here: views put
 // them in their own <bdi> next to these fragments.
 
@@ -51,9 +51,7 @@ export const TO = defineStrings({
     pwHelpForcedCarried: "Your instructor reset your password. Choose a new one that only you know.",
     pwChangedContinue: "Password changed. Opening your cases…",
 
-    // toasts and 404
-    toastDismiss: "Dismiss",
-    toastCount: (n: number): string => `×${n}`,
+    // 404
     notOnRunbook: "That page is not on the runbook.",
     notFoundHint: "The link may be old, or the page was renamed.",
     toLeaderboard: "Leaderboard",
@@ -160,8 +158,6 @@ export const TO = defineStrings({
     pwHelpForcedCarried: "המדריכים איפסו את הסיסמה שלכם. בחרו סיסמה חדשה שרק אתם יודעים.",
     pwChangedContinue: "הסיסמה שונתה. פותחים את התיקים…",
 
-    toastDismiss: "סגירה",
-    toastCount: (n: number): string => `×${n}`,
     notOnRunbook: "הדף הזה לא מופיע בספר הנהלים.",
     notFoundHint: "אולי הקישור ישן, או שהדף קיבל שם אחר.",
     toLeaderboard: "טבלת מובילים",

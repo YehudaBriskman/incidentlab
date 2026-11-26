@@ -43,13 +43,13 @@ test("case play keeps focus, discloses bonus losses and explains finished stages
     const trigger = page.locator(".hint-trigger");
     await expect(trigger).toContainText(/ends the \+10 clean bonus/);
     await trigger.click();
-    const prompt = page.locator(".hints .confirm-prompt");
+    const prompt = page.getByRole("alertdialog"); // the shared confirm dialog (lib/overlay.ts)
     await expect(prompt).toContainText(/also ends the \+10 clean bonus/);
     await expect(prompt.getByRole("button", { name: /cancel/i })).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(page.locator(".hint-trigger")).toBeFocused();
     await page.locator(".hint-trigger").click();
-    await page.locator(".hints .confirm-prompt").getByRole("button", { name: /^yes, spend/i }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: /^yes, spend/i }).click();
     await expect(page.locator('.hint[data-hint="0"]')).toBeFocused();
   });
 
@@ -81,7 +81,7 @@ test("case play keeps focus, discloses bonus losses and explains finished stages
     const trigger = page.locator(".reveal-trigger");
     await expect(trigger).toContainText(/−50 completion bonus/);
     await trigger.click();
-    const prompt = page.locator(".reveal .confirm-prompt");
+    const prompt = page.getByRole("alertdialog");
     await expect(prompt).toContainText(/lose the \+50 completion bonus/);
     await expect(prompt.getByRole("button", { name: /keep trying/i })).toBeFocused();
     await prompt.getByRole("button", { name: /yes, reveal/i }).click();

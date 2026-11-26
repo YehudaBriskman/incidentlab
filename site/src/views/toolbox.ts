@@ -5,7 +5,8 @@
 import { QUESTION_ORDER, SCORING, type ProgressView, type StageProgress, type TodayResponse } from "../../shared/contract";
 import type { Case } from "../../shared/case";
 import { getProgress, revealCommand } from "../lib/api";
-import { announce, confirmButton, copyButton, ensureAnnouncer, h, html, setChildren, type Child } from "../lib/dom";
+import { announce, copyButton, ensureAnnouncer, h, html, setChildren, type Child } from "../lib/dom";
+import { confirm } from "../lib/overlay";
 import { playErrorText } from "../lib/errors";
 import { md } from "../lib/markdown";
 import { isAdmin, loadAccount, loadToday } from "../lib/session";
@@ -146,31 +147,33 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
     const stageNo = activeStageNumber(progress);
     const active = stageNo !== null ? progress.stages[QUESTION_ORDER[stageNo - 1] ?? "q1"] : undefined;
     if (stageNo !== null && active !== undefined) {
-      const reveal = confirmButton({
-        label: TG().revealCommand(SCORING.COMMAND_COST),
-        prompt: TP().cmdPrompt(SCORING.COMMAND_COST, stageNo, SCORING.CLEAN_BONUS, isCleanSoFar(active)),
-        confirmLabel: TP().cmdConfirm(SCORING.COMMAND_COST),
-        className: "btn btn-sm btn-reveal",
-        sizeClass: "btn-sm",
-        tone: "accent",
-        onConfirm: () => {
-          for (const b of reveal.querySelectorAll("button")) b.disabled = true;
-          errorEl.textContent = "";
-          revealCommand(ctx.caseId, toolId)
-            .then((next) => {
-              ctx.onProgress(next);
-              announce(TG().commandRevealedAnnounce(item.title));
-              window.requestAnimationFrame(() => {
-                const card = document.querySelector(`[data-tool="${CSS.escape(toolId)}"]`);
-                const target = card?.querySelector<HTMLElement>(".btn-copy") ?? null;
-                target?.focus({ preventScroll: true });
-              });
-            })
-            .catch((err: unknown) => {
-              for (const b of reveal.querySelectorAll("button")) b.disabled = false;
-              errorEl.textContent = playErrorText(err);
+      // The confirm states the full cost; the card re-renders with the command once the server has charged it.
+      const reveal = h("button", { type: "button", class: "btn btn-sm btn-reveal" }, TG().revealCommand(SCORING.COMMAND_COST));
+      reveal.addEventListener("click", () => {
+        errorEl.textContent = "";
+        const charged: { progress: ProgressView | null } = { progress: null };
+        confirm({
+          title: TP().cmdTitle,
+          body: TP().cmdPrompt(SCORING.COMMAND_COST, stageNo, SCORING.CLEAN_BONUS, isCleanSoFar(active)),
+          confirmLabel: TP().cmdConfirm(SCORING.COMMAND_COST),
+          run: async () => {
+            charged.progress = await revealCommand(ctx.caseId, toolId);
+          },
+        })
+          .then((ok) => {
+            const next = charged.progress;
+            if (!ok || next === null) return;
+            ctx.onProgress(next);
+            announce(TG().commandRevealedAnnounce(item.title));
+            window.requestAnimationFrame(() => {
+              const card = document.querySelector(`[data-tool="${CSS.escape(toolId)}"]`);
+              const target = card?.querySelector<HTMLElement>(".btn-copy") ?? null;
+              target?.focus({ preventScroll: true });
             });
-        },
+          })
+          .catch((err: unknown) => {
+            errorEl.textContent = playErrorText(err);
+          });
       });
       action = reveal;
     }

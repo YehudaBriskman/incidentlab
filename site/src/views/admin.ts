@@ -27,6 +27,7 @@ import {
 } from "../../shared/contract";
 import { cachedCase } from "../content/load";
 import { copyButton, h, setChildren, type Child } from "../lib/dom";
+import { banner, closeMenu, confirm, menu, openDialog, showDialog, toast, type ConfirmOptions, type DialogHandle, type MenuItem } from "../lib/overlay";
 import {
   AdminApiError,
   approveAll,
@@ -790,11 +791,11 @@ export function renderAdmin(root: HTMLElement): void {
     if (savedNoteTimer !== null) window.clearTimeout(savedNoteTimer);
     window.removeEventListener("hashchange", onHashChange);
     window.removeEventListener("beforeunload", onBeforeUnload);
-    document.removeEventListener("keydown", onKeyDown);
     document.removeEventListener("visibilitychange", onVisibility);
     document.removeEventListener("focusin", onFocusIn);
     document.removeEventListener("click", onDocClick, { capture: true });
-    document.documentElement.classList.remove("admin-board-open", "admin-savebar-open", "admin-sticky-tabs");
+    document.documentElement.classList.remove("admin-savebar-open", "admin-sticky-tabs");
+    boardDialog?.close(null);
     narrowMq.removeEventListener("change", onNarrowChange);
     if (activeCleanup === dispose) activeCleanup = null;
     if (activeInstance?.container === container) activeInstance = null;
@@ -822,16 +823,28 @@ export function renderAdmin(root: HTMLElement): void {
     return parts.join(" + ");
   }
 
+  /** Leaves #/admin for `href` once the instructor agreed to drop the unsaved edits. */
+  function leaveTo(href: string): void {
+    leaveConfirmed = true;
+    window.setTimeout(() => (leaveConfirmed = false), 1000); // the target may not change the hash after all
+    location.href = href;
+  }
+
   /**
-   * Runs after the router (which registered first). Leaving #/admin with unsaved edits asks; staying puts the
-   * old URL back and re-runs the route, which re-attaches this same instance (drafts intact).
+   * Runs after the router (which registered first). Leaving #/admin with unsaved edits (Back, a typed URL)
+   * asks; staying puts the old URL back and re-runs the route, which re-attaches this same instance (drafts
+   * intact). The URL is put back only after the answer, so the other page's late renders cannot land on top.
    */
   function onHashChange(): void {
     if (disposed || isAdminHash(location.hash)) return; // inside #/admin: renderAdmin re-attaches us
     const dirty = dirtySections();
-    if (dirty !== "" && !leaveConfirmed && !window.confirm(T().admLeaveConfirm(dirty))) {
-      history.replaceState(history.state, "", shownUrl);
-      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    if (dirty !== "" && !leaveConfirmed) {
+      void confirmLeave(dirty).then((ok) => {
+        if (disposed) return;
+        if (ok) return dispose();
+        history.replaceState(history.state, "", shownUrl);
+        window.dispatchEvent(new HashChangeEvent("hashchange"));
+      });
       return;
     }
     leaveConfirmed = false;
@@ -846,13 +859,11 @@ export function renderAdmin(root: HTMLElement): void {
     const href = link?.getAttribute("href") ?? "";
     if (!href.startsWith("#") || isAdminHash(href) || link?.hasAttribute("download")) return;
     const dirty = dirtySections();
-    if (dirty === "") return;
-    if (window.confirm(T().admLeaveConfirm(dirty))) {
-      leaveConfirmed = true;
-      window.setTimeout(() => (leaveConfirmed = false), 1000); // the link may not change the hash after all
-    } else {
-      e.preventDefault();
-    }
+    if (dirty === "" || leaveConfirmed) return;
+    e.preventDefault();
+    void confirmLeave(dirty).then((ok) => {
+      if (ok) leaveTo(href);
+    });
   }
 
   /** The URL changed inside #/admin (Back/Forward between tabs, or a pasted link): follow it. */
@@ -877,12 +888,6 @@ export function renderAdmin(root: HTMLElement): void {
     },
     dirtyDrafts: () => ({ schedule: scheduleDirty() ? state.schedule.draft : null, event: eventDirty() ? state.event.draft : null }),
   };
-  function onKeyDown(e: KeyboardEvent): void {
-    if (e.key === "Escape" && state.leaderboard && !pwDialog.open && !confirmDialog.open) {
-      state.leaderboard = false;
-      renderLeaderboard();
-    }
-  }
   function onVisibility(): void {
     if (document.visibilityState === "hidden") {
       if (pollId !== null) window.clearTimeout(pollId);
@@ -911,14 +916,13 @@ export function renderAdmin(root: HTMLElement): void {
   const narrowMq = window.matchMedia(NARROW_QUERY);
   function onNarrowChange(): void {
     state.narrow = narrowMq.matches;
-    if (rowMenu.matches(":popover-open")) rowMenu.hidePopover();
+    closeMenu();
     if (state.accounts) renderActiveTab();
   }
   narrowMq.addEventListener("change", onNarrowChange);
   window.addEventListener("hashchange", onHashChange);
   document.addEventListener("click", onDocClick, { capture: true });
   window.addEventListener("beforeunload", onBeforeUnload);
-  document.addEventListener("keydown", onKeyDown);
   document.addEventListener("visibilitychange", onVisibility);
   document.addEventListener("focusin", onFocusIn);
 
@@ -1011,9 +1015,12 @@ export function renderAdmin(root: HTMLElement): void {
   const refreshBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admRefresh);
   const boardBtn = h("button", { type: "button", class: "btn btn-primary btn-sm head-wide" }, T().admLeaderboard);
   const logoutBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm head-wide" }, T().admSignOut);
-  const bannerEl = h("div", { class: "admin-banner", role: "status" });
-  const leaderboardEl = h("div", { class: "admin-board", role: "dialog", "aria-modal": "true", "aria-label": T().admLeaderboard });
-  leaderboardEl.hidden = true;
+  // Connection problems and failed actions: one dismissible banner under the tabs (lib/overlay.ts).
+  const statusBanner = banner({ tone: "warning", text: "", dismissible: true, className: "admin-banner", onDismiss: () => void (state.banner = null) });
+  statusBanner.hide();
+  // The projector board: a full-screen modal dialog (lib/overlay.ts) whose content re-renders in place.
+  const leaderboardEl = h("div", { class: "admin-board-content" });
+  let boardDialog: DialogHandle<string> | null = null;
 
   pauseBtn.addEventListener("click", () => {
     state.paused = !state.paused;
@@ -1122,9 +1129,14 @@ export function renderAdmin(root: HTMLElement): void {
     const leaving = state.tab;
     const dirty = leaving === "schedule" ? scheduleDirty() : leaving === "event" ? eventDirty() : false;
     if (dirty) {
-      if (!window.confirm(T().admLeaveConfirm(leaving === "schedule" ? T().admSecSchedule : T().admSecEvent))) return false;
-      if (leaving === "schedule") discardSchedule();
-      else discardEvent();
+      // Ask first; the tab stays until the draft is discarded, then the switch runs again (now clean).
+      void confirmLeave(leaving === "schedule" ? T().admSecSchedule : T().admSecEvent).then((ok) => {
+        if (!ok || disposed || state.tab !== leaving) return;
+        if (leaving === "schedule") discardSchedule();
+        else discardEvent();
+        if (selectTab(tab)) tabButtons.get(tab)?.focus();
+      });
+      return false;
     }
     state.tab = tab;
     storeTab(tab);
@@ -1175,12 +1187,8 @@ export function renderAdmin(root: HTMLElement): void {
         ),
       ),
       tabList,
-      bannerEl,
+      statusBanner.el,
       [...tabPanels.values()],
-      leaderboardEl,
-      pwDialog,
-      confirmDialog,
-      rowMenu,
     );
     document.documentElement.classList.add("admin-sticky-tabs");
     buildAccountsPanel();
@@ -1203,8 +1211,12 @@ export function renderAdmin(root: HTMLElement): void {
   }
 
   function renderBanner(): void {
-    bannerEl.textContent = state.banner ?? "";
-    bannerEl.hidden = state.banner === null;
+    if (state.banner === null) {
+      statusBanner.hide();
+      return;
+    }
+    statusBanner.update({ text: state.banner });
+    statusBanner.show();
   }
 
   function tile(label: string, value: string, sub?: string): HTMLElement {
@@ -1221,159 +1233,40 @@ export function renderAdmin(root: HTMLElement): void {
     return h("th", { scope: "col", class: cls }, label);
   }
 
-  // ---- confirm dialog (native modal <dialog>: focus trap, Esc = cancel) ---------------------
+  // ---- confirms and row menus (lib/overlay.ts) ---------------------------------------------
   // The title names the target and the action, the button repeats it ("Delete dana_k"), focus starts on the
-  // safe choice, and only destructive actions are red.
+  // safe choice, and only destructive actions are red. An action that fails closes the dialog and shows the
+  // banner.
 
-  const confirmDialog = h("dialog", { class: "admin-dialog admin-confirm", "aria-labelledby": "admin-confirm-title", "aria-describedby": "admin-confirm-body" });
-  let confirmBusy = false;
-  confirmDialog.addEventListener("cancel", (e) => {
-    // Esc while the action is running would hide its outcome.
-    if (confirmBusy) e.preventDefault();
-  });
+  function askConfirm(opts: Omit<ConfirmOptions, "tone"> & { tone: "danger" | "primary" }): Promise<boolean> {
+    return confirm({ ...opts, tone: opts.tone === "danger" ? "danger" : "default", cancelLabel: opts.cancelLabel ?? T().admCancel }).catch(
+      (err: unknown) => {
+        showActionError(err);
+        return false;
+      },
+    );
+  }
 
-  function askConfirm(opts: {
-    title: string;
-    body: string;
-    note?: string;
-    confirmLabel: string;
-    cancelLabel?: string;
-    busyLabel?: string;
-    tone: "danger" | "primary";
-    /** runs while the dialog stays open (button shows busyLabel); an error closes it and shows the banner */
-    run?: () => Promise<void>;
-    /** where focus goes after the dialog closes (the trigger may have been re-rendered meanwhile) */
-    returnFocus?: () => HTMLElement | null;
-  }): Promise<boolean> {
-    return new Promise((resolve) => {
-      let settled = false;
-      const finish = (ok: boolean): void => {
-        if (settled) return;
-        settled = true;
-        confirmBusy = false;
-        if (confirmDialog.open) confirmDialog.close();
-        confirmDialog.replaceChildren();
-        resolve(ok);
-        const target = opts.returnFocus?.() ?? null;
-        if (target && target.isConnected) target.focus();
-      };
-      const cancel = h("button", { type: "button", class: "btn btn-ghost", "data-confirm-cancel": "" }, opts.cancelLabel ?? T().admCancel);
-      const yes = h(
-        "button",
-        { type: "button", class: `btn ${opts.tone === "danger" ? "btn-danger" : "btn-primary"}`, "data-confirm-ok": "" },
-        opts.confirmLabel,
-      );
-      cancel.addEventListener("click", () => finish(false));
-      yes.addEventListener("click", () => {
-        const run = opts.run;
-        if (!run) return finish(true);
-        confirmBusy = true;
-        yes.disabled = true;
-        cancel.disabled = true;
-        yes.textContent = opts.busyLabel ?? opts.confirmLabel;
-        run()
-          .then(() => finish(true))
-          .catch((err: unknown) => {
-            finish(false);
-            showActionError(err);
-          });
-      });
-      confirmDialog.onclose = () => {
-        if (!confirmDialog.open) finish(false); // Esc; a stale close event from an earlier dialog finds it open again
-      };
-      setChildren(
-        confirmDialog,
-        h("h2", { class: "admin-h2", id: "admin-confirm-title" }, opts.title),
-        h("p", { id: "admin-confirm-body" }, opts.body),
-        opts.note ? h("p", { class: "muted small" }, opts.note) : null,
-        h("div", { class: "admin-dialog-actions" }, cancel, yes),
-      );
-      if (!confirmDialog.open) confirmDialog.showModal();
-      cancel.focus();
+  /** Unsaved schedule or event edits: ask before they are dropped. Resolves true to discard and go on. */
+  function confirmLeave(what: string): Promise<boolean> {
+    return askConfirm({
+      title: T().admLeaveTitle,
+      body: T().admLeaveConfirm(what),
+      confirmLabel: T().admLeaveDiscard,
+      cancelLabel: T().admLeaveStay,
+      tone: "danger",
     });
   }
 
-  // ---- row actions menu (APG menu button): one shared popover in the top layer, so table scrollers never clip it ----
-
-  type MenuItem = { label: string; danger?: boolean; run: () => void };
-  const rowMenu = h("div", { class: "row-menu", role: "menu", popover: "auto", id: "admin-row-menu" });
-  let rowMenuTrigger: HTMLElement | null = null;
   const menuTriggerEl = (key: string): HTMLElement | null => container.querySelector<HTMLElement>(`[data-menu="${CSS.escape(key)}"]`);
 
-  rowMenu.addEventListener("toggle", (e) => {
-    const open = e instanceof ToggleEvent ? e.newState === "open" : rowMenu.matches(":popover-open");
-    const trigger = rowMenuTrigger;
-    trigger?.setAttribute("aria-expanded", String(open));
-    if (open) return;
-    rowMenuTrigger = null;
-    // Esc or a click outside: focus goes back to the button (unless an item moved it somewhere on purpose).
-    const active = document.activeElement;
-    if (trigger && trigger.isConnected && (active === null || active === document.body || rowMenu.contains(active))) trigger.focus();
-  });
-  rowMenu.addEventListener("keydown", (e) => {
-    const items = [...rowMenu.querySelectorAll<HTMLButtonElement>("[role=menuitem]")];
-    const idx = items.findIndex((x) => x === document.activeElement);
-    let next = -1;
-    if (e.key === "ArrowDown") next = (idx + 1) % items.length;
-    else if (e.key === "ArrowUp") next = (idx - 1 + items.length) % items.length;
-    else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = items.length - 1;
-    else if (e.key === "Tab") {
-      rowMenu.hidePopover();
-      return;
-    }
-    if (next < 0) return;
-    e.preventDefault();
-    items[next]?.focus();
-  });
-
-  function openRowMenu(trigger: HTMLElement, label: string, items: readonly MenuItem[]): void {
-    if (rowMenu.matches(":popover-open")) rowMenu.hidePopover();
-    rowMenuTrigger = trigger;
-    rowMenu.setAttribute("aria-label", label);
-    setChildren(
-      rowMenu,
-      items.map((item) =>
-        h(
-          "button",
-          {
-            type: "button",
-            role: "menuitem",
-            tabindex: -1,
-            class: `row-menu-item${item.danger ? " is-danger" : ""}`,
-            onclick: () => {
-              rowMenu.hidePopover();
-              item.run();
-            },
-          },
-          item.label,
-        ),
-      ),
-    );
-    rowMenu.showPopover();
-    // Under the button, aligned to its inline-end edge; flipped above when it would leave the viewport.
-    const r = trigger.getBoundingClientRect();
-    const m = rowMenu.getBoundingClientRect();
-    const gap = 4;
-    const rtl = document.documentElement.dir === "rtl";
-    const maxLeft = window.innerWidth - m.width - 8;
-    const left = Math.min(Math.max(8, rtl ? r.left : r.right - m.width), Math.max(8, maxLeft));
-    const below = r.bottom + gap + m.height <= window.innerHeight - 8;
-    rowMenu.style.left = `${left}px`;
-    rowMenu.style.top = `${below ? r.bottom + gap : Math.max(8, r.top - gap - m.height)}px`;
-    rowMenu.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
-  }
-
-  /** The "⋯" button that opens a row's actions; `key` finds it again after a re-render (focus return). */
+  /** The "⋯" button that opens a row's actions menu; `key` finds it again after a re-render (focus return). */
   function menuButton(label: string, key: string, items: () => readonly MenuItem[], text?: string): HTMLButtonElement {
     const btn = h(
       "button",
       {
         type: "button",
         class: `btn btn-ghost btn-sm row-menu-btn${text ? "" : " is-icon"}`,
-        "aria-haspopup": "menu",
-        "aria-expanded": "false",
-        "aria-controls": "admin-row-menu",
         "aria-label": label,
         title: label,
         "data-menu": key,
@@ -1381,19 +1274,7 @@ export function renderAdmin(root: HTMLElement): void {
       text ? h("span", {}, text) : null,
       h("span", { class: "row-menu-dots", "aria-hidden": "true" }, "⋯"),
     );
-    btn.addEventListener("click", () => {
-      if (rowMenuTrigger === btn && rowMenu.matches(":popover-open")) {
-        rowMenu.hidePopover();
-        return;
-      }
-      openRowMenu(btn, label, items());
-    });
-    btn.addEventListener("keydown", (e) => {
-      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-      e.preventDefault();
-      openRowMenu(btn, label, items());
-      if (e.key === "ArrowUp") [...rowMenu.querySelectorAll<HTMLButtonElement>("[role=menuitem]")].pop()?.focus();
-    });
+    menu(btn, items, { label });
     return btn;
   }
 
@@ -1625,26 +1506,22 @@ export function renderAdmin(root: HTMLElement): void {
     }
   }
 
-  // ---- one-time temporary password (native modal dialog: focus trap + Esc for free) ----
-  const pwDialog = h("dialog", { class: "admin-dialog", "aria-labelledby": "admin-pw-title" });
-  pwDialog.addEventListener("close", () => {
-    // The password is shown once: drop it from the DOM and from memory.
-    state.tempPassword = null;
-    pwDialog.replaceChildren();
-  });
-
+  // ---- one-time temporary password (a dialog from lib/overlay.ts) ----
   function showTempPassword(username: string, password: string): void {
     state.tempPassword = { username, password };
-    const done = h("button", { type: "button", class: "btn btn-primary", onclick: () => pwDialog.close() }, T().admDone);
-    setChildren(
-      pwDialog,
-      h("h2", { class: "admin-h2", id: "admin-pw-title" }, T().admTempPwTitle(username)),
-      h("p", { class: "muted" }, T().admTempPwHelp),
-      h("div", { class: "admin-share admin-pw" }, h("code", { class: "admin-share-url admin-pw-value" }, password), copyButton(() => password, T().admCopyPassword)),
-      h("div", { class: "admin-dialog-actions" }, done),
-    );
-    if (!pwDialog.open) pwDialog.showModal();
-    done.focus();
+    void openDialog({
+      size: "sm",
+      title: T().admTempPwTitle(username),
+      className: "admin-pw-dialog",
+      body: [
+        h("p", { class: "muted" }, T().admTempPwHelp),
+        h("div", { class: "admin-share admin-pw" }, h("code", { class: "admin-share-url admin-pw-value" }, password), copyButton(() => password, T().admCopyPassword)),
+      ],
+      actions: [{ value: "done", label: T().admDone, tone: "primary", autofocus: true }],
+    }).then(() => {
+      // The password is shown once: the dialog left the DOM on close; drop it from memory too.
+      state.tempPassword = null;
+    });
   }
 
   // ---- class invite code ----
@@ -2006,7 +1883,7 @@ export function renderAdmin(root: HTMLElement): void {
     });
     items.push({
       label: T().admDeleteItem,
-      danger: true,
+      tone: "danger",
       run: () =>
         void askConfirm({
           title: T().admDeleteTitle(a.username),
@@ -2015,6 +1892,7 @@ export function renderAdmin(root: HTMLElement): void {
           cancelLabel: T().admKeepAccount,
           busyLabel: T().admDeleting,
           tone: "danger",
+          typedName: a.username,
           run: async () => {
             await deleteAccount(a.accountId);
             state.expanded.delete(a.accountId);
@@ -2024,7 +1902,9 @@ export function renderAdmin(root: HTMLElement): void {
             renderAccounts();
             void load();
           },
-          returnFocus: () => acctSearchInput,
+          returnFocus: () => menuTriggerEl(key) ?? acctSearchInput,
+        }).then((ok) => {
+          if (ok) toast({ tone: "success", text: T().admDeletedToast(a.username, TRASH_RETENTION_DAYS) });
         }),
     });
     return items;
@@ -2545,37 +2425,27 @@ export function renderAdmin(root: HTMLElement): void {
     liveTableEl.classList.toggle("is-compact", state.liveDensity === "compact");
   }
 
-  // Reset this case: typed confirmation.
-  const resetInput = h("input", {
-    type: "text",
-    class: "admin-input",
-    placeholder: T().admResetPlaceholder,
-    "aria-label": T().admResetLabel,
-    autocomplete: "off",
-    dir: "ltr",
-  });
-  const resetBtn = h("button", { type: "button", class: "btn btn-danger btn-sm", disabled: true }, T().admResetCase);
-  const resetMsg = h("span", { class: "muted small", role: "status" });
+  // Reset this case: a danger confirm that needs the case id typed in.
+  const resetBtn = h("button", { type: "button", class: "btn btn-danger btn-sm" }, T().admResetCase);
   const resetTextEl = h("p", { class: "muted small" });
-  resetInput.addEventListener("input", () => {
-    resetBtn.disabled = resetInput.value.trim() !== "RESET";
-  });
   resetBtn.addEventListener("click", () => {
     const caseId = state.liveCaseId;
-    if (!caseId || resetInput.value.trim() !== "RESET") return;
-    resetBtn.disabled = true;
-    resetMsg.textContent = T().admResetting;
-    resetProgress(caseId)
-      .then(() => {
-        resetInput.value = "";
-        resetMsg.textContent = T().admCaseReset(caseTitle(caseId));
-        void load();
-      })
-      .catch((err: unknown) => {
-        if (handleAuthError(err)) return;
-        resetMsg.textContent = `${T().admResetFailed}: ${errMessage(err)}`;
-        resetBtn.disabled = resetInput.value.trim() !== "RESET";
-      });
+    if (!caseId) return;
+    const title = caseTitle(caseId);
+    void askConfirm({
+      title: T().admResetCaseTitle(title),
+      body: T().admResetCaseText(title),
+      confirmLabel: T().admResetCase,
+      busyLabel: T().admResetting,
+      tone: "danger",
+      typedName: caseId,
+      run: () => resetProgress(caseId),
+      returnFocus: () => resetBtn,
+    }).then((ok) => {
+      if (!ok) return;
+      toast({ tone: "success", text: T().admCaseReset(title) });
+      void load();
+    });
   });
 
   const LIVE_COLS = 7;
@@ -2650,7 +2520,7 @@ export function renderAdmin(root: HTMLElement): void {
         { class: "panel admin-panel admin-danger" },
         h("h2", { class: "admin-h2" }, T().admDangerZone),
         resetTextEl,
-        h("div", { class: "admin-reset" }, resetInput, resetBtn, resetMsg),
+        h("div", { class: "admin-reset" }, resetBtn),
       ),
     ];
   }
@@ -2963,7 +2833,7 @@ export function renderAdmin(root: HTMLElement): void {
     return menuButton(T().admActionsFor(p.username), key, () => [
       {
         label: T().admRestartItem,
-        danger: true,
+        tone: "danger",
         run: () => {
           const solved = caseQuestionIds(caseId).filter((q) => isFinishedStatus(p.stages[q]?.status ?? "locked")).length;
           void askConfirm({
@@ -4358,12 +4228,19 @@ export function renderAdmin(root: HTMLElement): void {
   });
 
   function renderLeaderboard(): void {
-    leaderboardEl.hidden = !state.leaderboard;
-    document.documentElement.classList.toggle("admin-board-open", state.leaderboard);
     if (!state.leaderboard) {
-      leaderboardEl.replaceChildren();
-      boardBtn.focus();
+      boardDialog?.close(null); // focus goes back to the button (or the "More" menu) that opened it
       return;
+    }
+    const opening = boardDialog === null;
+    if (opening) {
+      const handle = showDialog<string>({ size: "full", title: T().admLeaderboard, header: false, closeButton: false, body: leaderboardEl, className: "admin-board" });
+      boardDialog = handle;
+      void handle.result.then(() => {
+        if (boardDialog === handle) boardDialog = null;
+        state.leaderboard = false;
+        leaderboardEl.replaceChildren();
+      });
     }
     const b = state.board;
     // Scope options: overall + released cases (rebuilt each time; keeps the selection).
@@ -4380,10 +4257,7 @@ export function renderAdmin(root: HTMLElement): void {
       {
         type: "button",
         class: "btn btn-ghost admin-board-close",
-        onclick: () => {
-          state.leaderboard = false;
-          renderLeaderboard();
-        },
+        onclick: () => boardDialog?.close(null),
       },
       T().admClose,
     );
@@ -4418,6 +4292,7 @@ export function renderAdmin(root: HTMLElement): void {
       );
     }
     const focusedScope = document.activeElement === boardScopeSelect;
+    const focusInside = opening || leaderboardEl.contains(document.activeElement);
     setChildren(
       leaderboardEl,
       h(
@@ -4439,9 +4314,9 @@ export function renderAdmin(root: HTMLElement): void {
         body,
       ),
     );
-    // Re-appending moves focus to <body>: put it back (Close on first open).
+    // Re-appending moves focus out of the dialog: put it back (Close on first open).
     if (focusedScope) boardScopeSelect.focus();
-    else close.focus();
+    else if (focusInside || document.activeElement === boardDialog?.el) close.focus();
   }
 
   // ---- render dispatch ------------------------------------------------------------------

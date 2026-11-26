@@ -7,7 +7,8 @@ import { caseSummary } from "../content/load";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { withApprovedAccount } from "./auth";
-import { announce, confirmButton, copyButton, ensureAnnouncer, h, html, setChildren } from "../lib/dom";
+import { announce, copyButton, ensureAnnouncer, h, html, setChildren } from "../lib/dom";
+import { confirm } from "../lib/overlay";
 import { md, mdInline } from "../lib/markdown";
 import { readingLayout } from "../components/readingLayout";
 import { formatElapsed } from "../lib/time";
@@ -773,51 +774,57 @@ function renderQuestionStage(
   );
   const nextHint = q.hints[s.hintsRevealed];
   const hintError = h("p", { class: "form-error", role: "alert" });
-  // A hint costs more than a full command, so it gets the same two-step confirm (Cancel focused, Escape cancels).
+  // A hint costs more than a full command, so it gets the same confirm (Cancel focused, Escape cancels).
   const hintBtn = nextHint
-    ? confirmButton({
-        label: TP().revealHint(s.hintsRevealed + 1, q.hints.length, nextHint.cost, SCORING.CLEAN_BONUS, cleanOpen),
-        prompt: TP().hintPrompt(s.hintsRevealed + 1, nextHint.cost, SCORING.CLEAN_BONUS, cleanOpen),
-        confirmLabel: TP().cmdConfirm(nextHint.cost),
-        className: "btn btn-ghost hint-trigger",
-        tone: "accent",
-        onConfirm: () => {
-          for (const b of hintBtn?.querySelectorAll("button") ?? []) b.disabled = true;
-          hintError.textContent = "";
-          revealHint(c.id, id)
-            .then((p) => {
-              announce(TP().hintAnnounce(s.hintsRevealed + 1, nextHint.cost));
-              update(p, id, { kind: "hint", index: s.hintsRevealed });
-            })
-            .catch((err: unknown) => {
-              for (const b of hintBtn?.querySelectorAll("button") ?? []) b.disabled = false;
-              hintError.textContent = errorMessage(err);
-            });
-        },
-      })
+    ? h("button", { type: "button", class: "btn btn-ghost hint-trigger" }, TP().revealHint(s.hintsRevealed + 1, q.hints.length, nextHint.cost, SCORING.CLEAN_BONUS, cleanOpen))
     : null;
+  hintBtn?.addEventListener("click", () => {
+    if (nextHint === undefined) return;
+    hintError.textContent = "";
+    const charged: { progress: ProgressView | null } = { progress: null };
+    confirm({
+      title: TP().hintTitle,
+      body: TP().hintPrompt(s.hintsRevealed + 1, nextHint.cost, SCORING.CLEAN_BONUS, cleanOpen),
+      confirmLabel: TP().cmdConfirm(nextHint.cost),
+      run: async () => {
+        charged.progress = await revealHint(c.id, id);
+      },
+    })
+      .then((ok) => {
+        const next = charged.progress;
+        if (!ok || next === null) return;
+        announce(TP().hintAnnounce(s.hintsRevealed + 1, nextHint.cost));
+        update(next, id, { kind: "hint", index: s.hintsRevealed });
+      })
+      .catch((err: unknown) => {
+        hintError.textContent = errorMessage(err);
+      });
+  });
 
   const revealError = h("p", { class: "form-error", role: "alert" });
-  const reveal = confirmButton({
-    label: TP().revealAnswer(SCORING.COMPLETION_BONUS, completionOpen),
-    prompt: TP().revealPrompt(index, SCORING.COMPLETION_BONUS, completionOpen),
-    confirmLabel: TP().revealConfirm,
-    cancelLabel: TP().keepTrying,
-    className: "btn btn-ghost btn-sm reveal-trigger",
-    sizeClass: "btn-sm",
-    tone: "neutral",
-    onConfirm: () => {
-      for (const b of reveal.querySelectorAll("button")) b.disabled = true;
-      revealAnswer(c.id, id)
-        .then((p) => {
-          announce(TP().revealedAnnounce(p.stages[id]?.revealedAnswer ?? ""));
-          update(p, id, { kind: "result" });
-        })
-        .catch((err: unknown) => {
-          for (const b of reveal.querySelectorAll("button")) b.disabled = false;
-          revealError.textContent = errorMessage(err);
-        });
-    },
+  // The confirm states the full cost; the stage re-renders once the server has charged it.
+  const reveal = h("button", { type: "button", class: "btn btn-ghost btn-sm reveal-trigger" }, TP().revealAnswer(SCORING.COMPLETION_BONUS, completionOpen));
+  reveal.addEventListener("click", () => {
+    revealError.textContent = "";
+    const charged: { progress: ProgressView | null } = { progress: null };
+    confirm({
+      title: TP().revealTitle,
+      body: TP().revealPrompt(index, SCORING.COMPLETION_BONUS, completionOpen),
+      confirmLabel: TP().revealConfirm,
+      cancelLabel: TP().keepTrying,
+      run: async () => {
+        charged.progress = await revealAnswer(c.id, id);
+      },
+    })
+      .then((ok) => {
+        const next = charged.progress;
+        if (!ok || next === null) return;
+        announce(TP().revealedAnnounce(next.stages[id]?.revealedAnswer ?? ""));
+        update(next, id, { kind: "result" });
+      })
+      .catch((err: unknown) => {
+        revealError.textContent = errorMessage(err);
+      });
   });
 
   const meter = stageMeter(c, q, s);

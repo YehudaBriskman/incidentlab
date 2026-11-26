@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test:server": "node --test --experimental-strip-types \"server/test/*.test.ts\"",
-    "test:client": "node --test --experimental-strip-types \"src/explorer/*.test.ts\" \"src/components/*.test.ts\""
+    "test:client": "node --test --experimental-strip-types \"src/explorer/*.test.ts\" \"src/components/*.test.ts\" \"src/lib/*.test.ts\""
   },
   "dependencies": {
     "@netlify/blobs": "11.1.9",

@@ -138,6 +138,20 @@
   --page: 1080px;
   --page-narrow: 900px;
   --page-wide: 1280px;
+  /* overlay widths (lib/overlay.ts): dialog sm/md/lg and side sheets */
+  --dialog-sm: 30rem;
+  --dialog-md: 40rem;
+  --dialog-lg: var(--read);
+  --sheet-size: 24rem;
+  --toast-size: 22.5rem;
+
+  /* layers: what stays in the page. Modals and popovers open in the top layer, ordered by open order;
+     these order the in-page layers and the no-Popover-API fallback the same way. */
+  --z-sidebar: 30;
+  --z-sheet: 40;
+  --z-dialog: 50;
+  --z-popover: 55;
+  --z-toast: 60;
 
   /* direction multiplier for the few physical effects (inset box-shadow markers) */
   --dir: 1;
@@ -438,7 +452,7 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 .accent { color: var(--accent); }
 .small { font-size: var(--step--1); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.skip-link { position: absolute; inset-inline-start: var(--space-2); top: -60px; z-index: 50; background: var(--accent); color: var(--on-accent); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); }
+.skip-link { position: absolute; inset-inline-start: var(--space-2); top: -60px; z-index: calc(var(--z-toast) + 1); background: var(--accent); color: var(--on-accent); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); }
 .skip-link:focus { top: var(--space-2); }
 [hidden] { display: none !important; }
 
@@ -506,12 +520,10 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
   background: var(--warning-bg); color: var(--warning-fg); font-weight: 600;
 }
 
-/* ⚙ display settings: a Popover API panel anchored under the button (positioned by settingsMenu.ts) */
+/* ⚙ display settings: an .ov-popover panel (lib/overlay.ts popover()) anchored under the button */
 .settings-panel {
-  position: fixed; inset: auto; margin: 0; z-index: 55;
   inline-size: min(22rem, calc(100vw - 2 * var(--gutter))); max-block-size: calc(100vh - var(--space-8)); overflow: auto;
-  padding: var(--space-4); border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
-  background: var(--surface); color: var(--text); box-shadow: var(--shadow-lg);
+  padding: var(--space-4); border-radius: var(--radius-lg);
 }
 .settings-title { font-size: var(--step-0); margin: 0 0 var(--space-3); }
 .settings-group { border: 0; margin: 0 0 var(--space-3); padding: 0; min-inline-size: 0; }
@@ -535,7 +547,7 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
   .logo { margin-inline-end: auto; }
   .nav-toggle { display: inline-flex; }
   .nav-panel {
-    display: none; position: absolute; inset-block-start: 100%; inset-inline: 0; z-index: 30;
+    display: none; position: absolute; inset-block-start: 100%; inset-inline: 0; z-index: var(--z-sidebar);
     flex-direction: column; align-items: stretch; gap: var(--space-3);
     padding: var(--space-3) var(--gutter) var(--space-4);
     background: var(--surface); border-block-end: 1px solid var(--border); box-shadow: var(--shadow-md);
@@ -550,8 +562,6 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success-fg); display: inline-block; }
 .footer { text-align: center; color: var(--text-muted); font-size: var(--step--2); padding: var(--space-6) var(--gutter); }
-.toast-host { position: fixed; bottom: var(--space-4); inset-inline: var(--space-4); display: flex; flex-direction: column; align-items: center; gap: var(--space-2); z-index: 60; pointer-events: none; }
-.toast { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); max-width: 480px; box-shadow: var(--shadow-lg); }
 
 /* ============ buttons ============ */
 .btn {
@@ -580,8 +590,128 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 .link-btn.muted { color: var(--text-muted); font-size: var(--step--1); }
 .link-btn.small { font-size: var(--step--1); }
 .link-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.confirm-wrap { display: inline-flex; }
-.confirm-prompt { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* ============ overlays (lib/overlay.ts): dialog, confirm, sheet, popover, menu, toast, banner ============
+   Modals and popovers sit in the top layer; the --z-* tokens order what stays in the page. Enter and exit
+   transitions run only with motion allowed (prefers-reduced-motion and [data-motion=reduce] both drop them). */
+html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
+.ov-dialog, .ov-sheet {
+  z-index: var(--z-dialog); padding: 0; color: var(--text); background: var(--surface);
+  border: 1px solid var(--border-strong); box-shadow: var(--shadow-lg); overflow: hidden;
+}
+.ov-dialog[open], .ov-sheet[open] { display: flex; flex-direction: column; }
+.ov-dialog::backdrop, .ov-sheet::backdrop { background: var(--scrim); }
+.ov-dialog { margin: auto; inline-size: min(var(--dialog-md), calc(100vw - 2 * var(--gutter))); max-inline-size: none; max-block-size: calc(100dvh - 2 * var(--space-5)); border-radius: var(--radius-lg); }
+.ov-dialog.is-sm { inline-size: min(var(--dialog-sm), calc(100vw - 2 * var(--gutter))); }
+.ov-dialog.is-lg { inline-size: min(var(--dialog-lg), calc(100vw - 2 * var(--gutter))); }
+.ov-dialog.is-full { inset: 0; margin: 0; inline-size: auto; block-size: auto; max-block-size: none; border: 0; border-radius: 0; box-shadow: none; background: var(--canvas); }
+.ov-sheet { z-index: var(--z-sheet); margin: 0; max-inline-size: 100vw; max-block-size: 100dvh; border-radius: 0; }
+.ov-sheet.is-start, .ov-sheet.is-end { inset-block: 0; block-size: 100dvh; inline-size: min(var(--sheet-size), calc(100vw - var(--space-7))); }
+.ov-sheet.is-start { inset-inline: 0 auto; border-block: 0; border-inline-start: 0; }
+.ov-sheet.is-end { inset-inline: auto 0; border-block: 0; border-inline-end: 0; }
+.ov-sheet.is-bottom { inset-block: auto 0; inset-inline: 0; inline-size: 100vw; max-block-size: 85dvh; border-block-end: 0; border-inline: 0; border-start-start-radius: var(--radius-xl); border-start-end-radius: var(--radius-xl); padding-block-end: env(safe-area-inset-bottom, 0px); }
+.ov-head { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-5) var(--space-5) 0; }
+.ov-title { flex: 1; margin: 0; font-size: var(--step-1); line-height: var(--leading-tight); overflow-wrap: anywhere; }
+.ov-close, .toast-close, .banner-close {
+  flex: none; display: inline-grid; place-items: center; min-inline-size: var(--control-sm); min-block-size: var(--control-sm);
+  border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-muted);
+  font: inherit; font-size: var(--step-1); line-height: 1; cursor: pointer;
+}
+.ov-close { margin-block-start: calc(-1 * var(--space-2)); margin-inline-end: calc(-1 * var(--space-2)); }
+.ov-close:hover, .toast-close:hover, .banner-close:hover { background: var(--hover); color: var(--text); }
+.ov-body { flex: 1 1 auto; min-block-size: 0; overflow: auto; padding: var(--space-3) var(--space-5) var(--space-5); }
+.ov-body p { margin: 0 0 var(--space-3); }
+.ov-body > :last-child { margin-block-end: 0; }
+.ov-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); padding: var(--space-3) var(--space-5) var(--space-5); border-block-start: 1px solid var(--border); }
+.ov-confirm .ov-body { padding-block-end: var(--space-3); }
+.ov-confirm .ov-actions { border-block-start: 0; padding-block-start: var(--space-2); }
+.ov-dialog.is-full .ov-body { padding: 0; }
+.ov-typed { display: grid; gap: var(--space-2); margin-block-start: var(--space-4); }
+.ov-typed-label { font-size: var(--step--1); font-weight: 600; }
+.ov-typed-name { font-family: var(--font-mono); padding: 0 var(--space-1); border-radius: var(--radius-xs); background: var(--surface-2); overflow-wrap: anywhere; }
+.ov-typed .ov-typed-hint { margin: 0; }
+@media (max-width: 480px) {
+  .ov-actions { flex-direction: column-reverse; align-items: stretch; }
+  .ov-head, .ov-body, .ov-actions { padding-inline: var(--space-4); }
+}
+
+/* popover (non-modal, anchored by script) and the APG menu */
+.ov-popover {
+  position: fixed; inset: auto; margin: 0; z-index: var(--z-popover); padding: 0;
+  color: var(--text); background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+}
+.ov-menu { min-inline-size: 12rem; max-inline-size: calc(100vw - 2 * var(--space-2)); padding: var(--space-1); }
+.ov-menu:focus { outline: none; }
+.ov-menu-item {
+  display: flex; align-items: center; inline-size: 100%; min-block-size: var(--control-sm);
+  padding: var(--space-1) var(--space-3); border: 0; border-radius: var(--radius-sm);
+  font: inherit; font-size: var(--step--1); text-align: start; color: var(--text); background: none; cursor: pointer;
+}
+.ov-menu-item:hover, .ov-menu-item:focus-visible { background: var(--surface-2); }
+.ov-menu-item:focus-visible { outline-offset: -2px; }
+.ov-menu-item[aria-disabled="true"] { color: var(--text-muted); cursor: not-allowed; }
+.ov-menu-item.is-danger { color: var(--danger-fg); }
+.ov-menu-item.is-danger:not(:first-child) { margin-block-start: var(--space-1); border-block-start: 1px solid var(--border); border-start-start-radius: 0; border-start-end-radius: 0; }
+
+/* toasts (bottom inline-end, one polite live region) and banners (inline) share the tone roles */
+.toast, .banner { --tone-fg: var(--info-fg); --tone-bg: var(--info-bg); }
+:is(.toast, .banner)[data-tone="success"] { --tone-fg: var(--success-fg); --tone-bg: var(--success-bg); }
+:is(.toast, .banner)[data-tone="warning"] { --tone-fg: var(--warning-fg); --tone-bg: var(--warning-bg); }
+:is(.toast, .banner)[data-tone="error"] { --tone-fg: var(--danger-fg); --tone-bg: var(--danger-bg); }
+.toast-host {
+  position: fixed; z-index: var(--z-toast); inset-inline-end: var(--space-4); inset-block-end: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+  display: flex; flex-direction: column; gap: var(--space-2); inline-size: min(var(--toast-size), calc(100vw - 2 * var(--space-4))); pointer-events: none;
+}
+.toast {
+  pointer-events: auto; display: flex; align-items: flex-start; gap: var(--space-2);
+  padding-block: var(--space-2); padding-inline: var(--space-3) var(--space-1);
+  color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-inline-start: 4px solid var(--tone-fg);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-lg); font-size: var(--step--1);
+}
+.toast-icon, .banner-icon {
+  flex: none; display: inline-grid; place-items: center; inline-size: 1.25rem; block-size: 1.25rem; margin-block-start: var(--space-2);
+  border-radius: var(--radius-full); background: var(--tone-fg); color: var(--surface); font-size: var(--step--2); font-weight: 700; line-height: 1;
+}
+.toast-text, .banner-text { flex: 1; min-inline-size: 0; margin: 0; padding-block: var(--space-2); overflow-wrap: anywhere; }
+.toast-count { color: var(--text-muted); font-variant-numeric: tabular-nums; font-weight: 600; }
+.toast-action { flex: none; margin-block: var(--space-1); }
+.banner {
+  display: flex; align-items: flex-start; gap: var(--space-2); padding-block: 0; padding-inline: var(--space-3) var(--space-1);
+  color: var(--text); background: var(--tone-bg); border: 1px solid var(--tone-fg); border-radius: var(--radius-md); font-size: var(--step--1);
+}
+.banner-text { white-space: pre-line; }
+.banner-close { margin-block: var(--space-1); }
+
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion="reduce"]) :is(.ov-dialog, .ov-sheet, .ov-popover, .toast) {
+    transition: opacity var(--motion-dur-medium) var(--motion-ease-enter), transform var(--motion-dur-medium) var(--motion-ease-enter),
+      overlay var(--motion-dur-medium) allow-discrete, display var(--motion-dur-medium) allow-discrete;
+  }
+  :root:not([data-motion="reduce"]) :is(.ov-dialog, .ov-sheet)::backdrop {
+    transition: opacity var(--motion-dur-medium) var(--motion-ease-standard), overlay var(--motion-dur-medium) allow-discrete, display var(--motion-dur-medium) allow-discrete;
+  }
+  :is(.ov-dialog, .ov-sheet):not([open]), :is(.ov-dialog, .ov-sheet):not([open])::backdrop, .ov-popover:not(:popover-open), .toast.is-leaving { opacity: 0; }
+  .ov-dialog:not([open]):not(.is-full) { transform: translateY(var(--space-2)) scale(0.98); }
+  .ov-sheet.is-start:not([open]) { transform: translateX(calc(var(--dir) * -100%)); }
+  .ov-sheet.is-end:not([open]) { transform: translateX(calc(var(--dir) * 100%)); }
+  .ov-sheet.is-bottom:not([open]) { transform: translateY(100%); }
+  .ov-popover:not(:popover-open) { transform: translateY(calc(-1 * var(--space-1))); }
+  .toast.is-leaving { transform: translateY(var(--space-2)); }
+  @starting-style {
+    :is(.ov-dialog, .ov-sheet)[open], :is(.ov-dialog, .ov-sheet)[open]::backdrop, .ov-popover:popover-open, .toast { opacity: 0; }
+    .ov-dialog[open]:not(.is-full) { transform: translateY(var(--space-2)) scale(0.98); }
+    .ov-sheet.is-start[open] { transform: translateX(calc(var(--dir) * -100%)); }
+    .ov-sheet.is-end[open] { transform: translateX(calc(var(--dir) * 100%)); }
+    .ov-sheet.is-bottom[open] { transform: translateY(100%); }
+    .ov-popover:popover-open { transform: translateY(calc(-1 * var(--space-1))); }
+    .toast { transform: translateY(var(--space-2)); }
+  }
+}
+@media (forced-colors: active) {
+  .ov-dialog, .ov-sheet, .ov-popover, .toast, .banner { border-color: CanvasText; }
+  .toast-icon, .banner-icon { forced-color-adjust: none; background: CanvasText; color: Canvas; }
+}
 
 /* ============ inputs: one boundary (border-strong, >= 3:1) and one height scale ============ */
 .input {
@@ -956,18 +1086,12 @@ p.notice.form-error { display: block; }
 .event-clock.is-over, .event-clock.is-before { --pill-fg: var(--text-2); --pill-line: var(--border-strong); --pill-bg: var(--surface); }
 .event-strip.is-over, .event-strip.is-before { border-color: var(--border); }
 .event-strip.is-over .event-strip-when, .event-strip.is-over .today-kicker { color: var(--text-2); }
-.announce { display: flex; align-items: flex-start; gap: var(--space-3); max-width: var(--page); width: calc(100% - 2 * var(--gutter)); margin: 0 auto var(--space-4); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--surface); }
-.announce-inner { flex: 1; display: flex; gap: var(--space-2); align-items: baseline; min-width: 0; }
-.announce-text { margin: 0; overflow-wrap: anywhere; white-space: pre-line; }
-.announce-label { flex: none; }
-.announce-info { border-color: var(--accent-line); }
-.announce-warning { background: var(--danger-bg); border-color: var(--danger-fg); }
-.announce-warning .announce-text { font-weight: 600; color: var(--text); }
-.announce-close { flex: none; background: none; border: 0; color: var(--text-muted); font-size: 1.4rem; line-height: 1; min-width: var(--control-xs); min-height: var(--control-xs); border-radius: var(--radius-sm); cursor: pointer; }
-.announce-close:hover { color: var(--text); background: var(--surface-2); }
+/* the announcement is a .banner (lib/overlay.ts); this only places it in the shell column */
+.announce { max-width: var(--page); width: calc(100% - 2 * var(--gutter)); margin: 0 auto var(--space-4); }
+.announce[data-tone="warning"] .banner-text { font-weight: 600; }
 @media (max-width: 640px) {
   .event-clock { max-width: 100%; }
-  .announce { margin-bottom: var(--space-3); padding-block: var(--space-1); padding-inline: var(--space-3) var(--space-1); align-items: center; font-size: var(--step--1); }
+  .announce { margin-bottom: var(--space-3); }
 }
 
 /* ============ home ============ */
@@ -1095,11 +1219,6 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
 /* ===== case play (wave 3) ===== */
 /* Case stage, stepper, answer form, inline confirms and the toolbox page. Tokens only; RTL by logical properties. */
 
-/* Inline confirm: the prompt states the full cost; the buttons keep the trigger's size class (no height jump). */
-.confirm-wrap { display: inline-flex; max-inline-size: 100%; }
-.confirm-prompt { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
-.confirm-text { font-size: var(--step--1); color: var(--text); }
-.confirm-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .reveal-trigger { color: var(--text-muted); font-weight: 500; }
 
 /* Toolbox page: filter, and a one-row sticky section list. */
@@ -1217,20 +1336,6 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
 .pending-status:empty, .pending-checked:empty { display: none; }
 .center-card h1[tabindex="-1"]:focus { outline: none; }
 .center-card h1[tabindex="-1"]:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); }
-
-/* --- toasts: bottom-end, never over the whole width; errors stay until closed --- */
-.toast-host { inset-inline: auto var(--space-4); inset-block-end: calc(var(--space-4) + env(safe-area-inset-bottom, 0px)); align-items: stretch; max-width: min(360px, calc(100vw - 2 * var(--space-4))); }
-.toast { pointer-events: auto; display: flex; align-items: flex-start; gap: var(--space-2); padding-block: var(--space-2); padding-inline: var(--space-4) var(--space-1); }
-.toast-error { border-inline-start: 4px solid var(--danger-fg); }
-.toast-text { margin: 0; flex: 1; padding-block: var(--space-1); }
-.toast-count { color: var(--text-muted); font-variant-numeric: tabular-nums; font-weight: 600; }
-.toast-count[hidden] { display: none; }
-.toast-close { flex: none; min-width: var(--control-xs); min-height: var(--control-xs); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-muted); font: inherit; font-size: var(--step-1); line-height: 1; cursor: pointer; }
-.toast-close:hover { background: var(--hover); color: var(--text); }
-@media (prefers-reduced-motion: no-preference) {
-  .toast { transition: opacity var(--motion-dur-medium) var(--motion-ease-enter); }
-  @starting-style { .toast { opacity: 0; } }
-}
 
 /* --- home: landing hero, one amber action --- */
 .hero.is-pending { visibility: hidden; }

@@ -72,60 +72,6 @@ export function announce(message: string): void {
   window.setTimeout(() => (el.textContent = message), 60);
 }
 
-/* ---------- two-step inline confirm ---------- */
-
-export type ConfirmTone = "accent" | "neutral" | "danger";
-
-/**
- * Two-step inline confirmation: the first click swaps the trigger for a short prompt with
- * "Cancel / confirm". The safe choice (Cancel) gets focus, Escape cancels, and focus returns to the
- * trigger. Both confirm buttons reuse `sizeClass`, so the row keeps its height when it switches.
- * `prompt` states the full cost of the action before it is confirmed.
- */
-export function confirmButton(opts: {
-  label: string;
-  confirmLabel: string;
-  cancelLabel?: string;
-  prompt?: string;
-  className?: string;
-  sizeClass?: string;
-  tone?: ConfirmTone;
-  onConfirm: () => void;
-}): HTMLElement {
-  const wrap = h("span", { class: "confirm-wrap" });
-  const size = opts.sizeClass ?? "";
-  const toneClass = { accent: "btn-primary", neutral: "", danger: "btn-danger" }[opts.tone ?? "accent"];
-  const showIdle = (focus: boolean): void => {
-    const trigger = h("button", { type: "button", class: opts.className ?? "btn btn-ghost", onclick: showConfirm }, opts.label);
-    wrap.replaceChildren(trigger);
-    if (focus) trigger.focus();
-  };
-  const cancel = (): void => showIdle(true);
-  const showConfirm = (): void => {
-    const promptId = `confirm-${++confirmSeq}`;
-    const yes = h("button", { type: "button", class: `btn ${toneClass} ${size}`.trim(), onclick: () => opts.onConfirm() }, opts.confirmLabel);
-    const no = h("button", { type: "button", class: `btn btn-ghost ${size}`.trim(), onclick: cancel }, opts.cancelLabel ?? TP().cancel);
-    const group = h(
-      "span",
-      { class: "confirm-prompt", role: "group", "aria-labelledby": opts.prompt ? promptId : null, "aria-label": opts.prompt ? null : opts.label },
-      opts.prompt ? h("span", { class: "confirm-text", id: promptId }, opts.prompt) : null,
-      h("span", { class: "confirm-actions" }, no, yes),
-    );
-    group.addEventListener("keydown", (ev) => {
-      if (ev instanceof KeyboardEvent && ev.key === "Escape") {
-        ev.preventDefault();
-        ev.stopPropagation();
-        cancel();
-      }
-    });
-    wrap.replaceChildren(group);
-    no.focus();
-  };
-  showIdle(false);
-  return wrap;
-}
-let confirmSeq = 0;
-
 export async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
