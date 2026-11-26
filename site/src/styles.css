@@ -92,6 +92,9 @@
   --type-page-title-lh: 1.2;
   --type-page-title-weight: 600;
   --type-page-title-track: -0.015em;
+  --type-page-title-compact-size: 1.5rem;                      /* 24: player page h1 (player.css) */
+  --type-page-title-compact-lh: 1.25;
+  --type-page-title-compact-track: -0.02em;
   --type-headline-size: 1.375rem;                              /* 22: h2, stage question, section titles */
   --type-headline-lh: 1.3;
   --type-headline-weight: 600;
@@ -99,7 +102,7 @@
   --type-title-size: 1.125rem;                                 /* 18: h3, card, command and panel titles */
   --type-title-lh: 1.35;
   --type-title-weight: 600;
-  --type-title-track: 0;
+  --type-title-track: -0.005em;
   --type-prose-size: 1.0625rem;                                /* 17: case prompt, debrief, hints (max --measure) */
   --type-prose-lh: 1.65;
   --type-prose-weight: 400;
@@ -216,7 +219,7 @@
 
 /* Hebrew: no case, no tracking, looser leading, and a 13px label (Hebrew letters run small at 12px). */
 :root:lang(he) {
-  --type-display-track: 0; --type-page-title-track: 0; --type-headline-track: 0; --type-kpi-track: 0;
+  --type-display-track: 0; --type-page-title-track: 0; --type-page-title-compact-track: 0; --type-headline-track: 0; --type-title-track: 0; --type-kpi-track: 0;
   --track-label: 0;
   --type-display-lh: 1.25; --type-page-title-lh: 1.3; --type-headline-lh: 1.4; --type-title-lh: 1.45;
   --type-prose-lh: 1.75; --type-body-lh: 1.6; --type-small-lh: 1.55; --type-label-lh: 1.45; --type-kpi-lh: 1.2;
@@ -650,13 +653,16 @@ body { min-height: 0; overflow: hidden; }
 .nav-sub .step.nav-sub-link { min-block-size: calc(var(--control-sm) - var(--space-1)); box-shadow: none; }
 .nav-sub .step.nav-sub-link.is-viewing { background: var(--fill-inset); color: var(--text-1); box-shadow: none; border-radius: var(--radius-md); }
 .nav-sub .step-icon.is-glyph {
-  inline-size: 20px; block-size: 20px; border-radius: var(--radius-full); border: 1.5px solid var(--edge-control);
-  font-size: var(--type-label-size); font-weight: 600; font-variant-numeric: tabular-nums;
+  inline-size: 20px; block-size: 20px; border-radius: var(--radius-pill); border: 0;
+  background: var(--fill-inset); color: var(--text-2);
+  font-family: inherit; font-size: var(--type-label-size); font-weight: 600; font-variant-numeric: tabular-nums;
 }
 .nav-sub .step-label { display: block; text-align: start; font-size: var(--type-small-size); -webkit-line-clamp: unset; }
-.nav-sub .step-active .step-icon { border-color: var(--edge-selected); color: var(--accent-text); }
-.nav-sub .step-solved .step-icon { background: var(--success-fg); border-color: var(--success-fg); color: var(--level-1); }
-.nav-sub .step-revealed .step-icon { border-style: dashed; }
+/* Soft UI pills: a tint per state, never a solid disc; the glyph (number, check, star) carries the meaning */
+.nav-sub .step-active .step-icon { background: var(--accent-soft); color: var(--accent-text); box-shadow: inset 0 0 0 1.5px var(--edge-selected); }
+.nav-sub .step-solved .step-icon { background: var(--success-bg); color: var(--success-fg); }
+.nav-sub .step-revealed .step-icon { background: none; box-shadow: inset 0 0 0 0 transparent; outline: 1.5px dashed var(--edge-control); outline-offset: -1.5px; }
+@media (forced-colors: active) { .nav-sub .step-icon.is-glyph { border: 1px solid CanvasText; } .nav-sub .step-revealed .step-icon { border-style: dashed; outline: 0; } }
 .nav-sub .step-locked { color: var(--text-3); cursor: default; }
 .nav-sub .step-locked:hover { background: none; color: var(--text-3); }
 .nav-sub-icon.is-dot::before { content: ""; inline-size: 6px; block-size: 6px; border-radius: var(--radius-full); background: currentColor; }
@@ -788,8 +794,9 @@ main.app-content {
   max-width: none; margin: 0; padding: var(--space-4) var(--gutter) var(--space-8);
 }
 .app-notice:empty { display: none; }
-.app-notice, .page-header, .page-body { inline-size: 100%; max-inline-size: var(--page); margin-inline: auto; }
-:root[data-aside-page] :is(.app-notice, .page-header, .page-body), .app-content[data-layout="fit"] :is(.app-notice, .page-header, .page-body) { max-inline-size: var(--page-wide); }
+/* Dashboard frame: every page fills the content area at every width (no capped column, no dead side space).
+   Long reading text keeps its own --read / --measure cap inside the page (.stage-wrap, .reading, .prose). */
+.app-notice, .page-header, .page-body { inline-size: 100%; max-inline-size: none; margin-inline: 0; }
 .page-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap-stack); align-items: start; }
 #app { min-inline-size: 0; outline: none; }
 .view { display: contents; }
@@ -1127,7 +1134,7 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 .chip-frozen { font-weight: 700; }
 
 /* ============ table: one header style ============ */
-.stats-table thead th, .admin-table thead th, .prose thead th, .ex-table th {
+.stats-table thead th, .admin-table thead th, .prose thead th {
   color: var(--text-muted); font-size: var(--step--2); text-transform: var(--label-case); letter-spacing: var(--type-label-track);
   font-weight: 600; text-align: start; background: var(--surface-2); border-bottom: 1px solid var(--border-strong);
 }
@@ -1182,7 +1189,7 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 .progress-stats { font-size: var(--step--1); color: var(--text-2); min-width: 0; overflow-wrap: anywhere; }
 
 /* ============ stage ============ */
-.stage-wrap { max-width: var(--read); margin: 0 auto; }
+.stage-wrap { max-width: none; margin: 0; } /* fills the page; paragraphs keep --measure */
 /* design-review-ignore LU-OUTLINE-NONE: tabindex=-1 route focus target (focused by script after navigation), never a Tab stop */
 .stage-wrap:focus { outline: none; }
 .stage { display: flex; flex-direction: column; gap: var(--space-6); }
@@ -1310,7 +1317,7 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 @keyframes skeleton-pulse { 50% { opacity: 0.55; } }
 
 /* ============ stats page ============ */
-.stats-page { max-width: var(--page-narrow); padding: var(--space-6) 0; }
+.stats-page { max-width: none; padding: var(--space-6) 0; }
 .stats-page h1 { margin: var(--space-3) 0 var(--space-1); }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--space-3); margin: var(--space-5) 0 var(--space-2); }
 .stat-tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4); }
@@ -1416,7 +1423,7 @@ p.notice.form-error { display: block; }
 }
 
 /* ============ leaderboard ============ */
-.lb-page { max-width: var(--page-narrow); margin: 0 auto; padding: var(--space-5) 0; }
+.lb-page { max-width: none; margin: 0; padding: var(--space-5) 0; }
 .lb-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: var(--space-4); margin-bottom: var(--space-4); }
 .lb-head h1 { margin: var(--space-2) 0 2px; }
 .lb-case-title { margin: 0; color: var(--text-2); }
@@ -1807,7 +1814,7 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
 .debrief-next { margin-block: var(--space-5); }
 
 /* ============ reading layout + form layout (src/components/readingLayout.ts, formLayout.ts) ============ */
-.reading { max-inline-size: var(--read); }
+.reading { max-inline-size: none; } /* fills the page; paragraphs keep --measure */
 .toc { margin-block: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
 .toc-summary { cursor: pointer; padding: var(--space-3) var(--space-4); min-block-size: var(--target-min); font-weight: 600; font-size: var(--step--1); }
 .toc nav { padding: 0 var(--space-4) var(--space-3); }
@@ -1821,7 +1828,7 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
 .form-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 
 /* ============ case authoring (#/author, views/author.ts) ============ */
-.author-page { max-inline-size: var(--page-narrow); padding-block: var(--space-6); }
+.author-page { max-inline-size: none; padding-block: var(--space-6); }
 .author-page h1 { margin: 0 0 var(--space-1); }
 .author-form { margin-block: var(--space-5); }
 .check-row { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--target-min); font-size: var(--step--1); }
@@ -1931,11 +1938,6 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
     .ov-popover[data-side="top"]:popover-open { transform: translateY(var(--enter-travel)) scale(var(--enter-scale)); }
   }
 }
-
-/* ---- type: tracking tightens as size grows (Latin only; :lang(he) resets it above) ---- */
-h1 { letter-spacing: -0.015em; }
-h2 { letter-spacing: -0.01em; }
-h3 { letter-spacing: -0.005em; }
 
 /* ---- scrolling: thin scrollbars, no layout jump when one appears ---- */
 html { scrollbar-gutter: stable; }
