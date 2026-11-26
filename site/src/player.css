@@ -147,8 +147,9 @@
 .present-card > h2 { margin: 0 0 var(--space-3); font-size: var(--type-title-size); }
 .present-prose { max-inline-size: var(--measure); }
 .present-inspired-title { margin: 0 0 var(--space-2); font-weight: 600; }
-.present-files { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
-.present-file { display: grid; grid-template-columns: minmax(12rem, max-content) minmax(0, 1fr); gap: var(--space-3); align-items: baseline; }
+/* one grid for all rows (rows are display: contents), so paths and descriptions line up in two columns */
+.present-files { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-2) var(--space-5); align-items: baseline; }
+.present-file { display: contents; }
 .present-file-path { font-size: var(--type-small-size); color: var(--text-1); }
 .present-file-desc { color: var(--text-2); font-size: var(--type-small-size); }
 .present-stages { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: var(--space-3); }
@@ -156,21 +157,26 @@
 .present-stage-n { margin: 0; font-size: var(--type-label-size); font-weight: 600; color: var(--accent-text); }
 .present-stage-name { margin: var(--space-1) 0; font-weight: 600; }
 .present-stage-goal { margin: 0; color: var(--text-2); font-size: var(--type-small-size); }
-@media (max-width: 640px) { .present-file { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); } }
+@media (max-width: 640px) { .present-files { grid-template-columns: minmax(0, 1fr); } .present-file-desc { margin-block-end: var(--space-2); } }
 
-.present-deck { display: flex; flex-direction: column; gap: var(--space-4); min-block-size: calc(100dvh - var(--space-8) * 2); }
+/* the deck fills the content area (fit layout): no page scroll; a slide that still overflows scrolls inside */
+.present-deck { flex: 1; min-block-size: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 .present-deck-bar { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-2); }
 .slide {
-  flex: 1; display: flex; flex-direction: column; justify-content: center; gap: var(--space-4);
-  padding: clamp(var(--space-5), 5vw, var(--space-8)); border-radius: var(--radius-card); background: var(--level-1); box-shadow: var(--surface-lift);
+  flex: 1; min-block-size: 0; overflow: auto; overscroll-behavior: contain; display: flex;
+  padding: clamp(var(--space-5), 4vw, var(--space-7)); border-radius: var(--radius-card); background: var(--level-1); box-shadow: var(--surface-lift);
 }
+/* one centred block per slide; margin: auto centres it both ways and still scrolls when taller than the slide */
+.slide-inner { margin: auto; inline-size: min(100%, 64rem); display: flex; flex-direction: column; gap: var(--space-4); }
 .slide-kicker { margin: 0; font-size: clamp(1rem, 0.8rem + 0.8vw, 1.5rem); font-weight: 600; color: var(--accent-text); }
 .slide-title { margin: 0; font-size: clamp(2rem, 1.2rem + 3vw, 4rem); line-height: 1.1; letter-spacing: var(--type-display-track); }
-.slide-lead { margin: 0; max-inline-size: 40ch; font-size: clamp(1.25rem, 0.9rem + 1.4vw, 2.25rem); line-height: 1.35; color: var(--text-1); }
-.slide-prose { max-inline-size: 60ch; font-size: clamp(1.0625rem, 0.85rem + 0.8vw, 1.5rem); }
+.slide-lead { margin: 0; max-inline-size: 48ch; font-size: clamp(1.25rem, 0.9rem + 1.4vw, 2.25rem); line-height: 1.35; color: var(--text-1); }
+.slide-prose { max-inline-size: none; font-size: clamp(1.0625rem, 0.85rem + 0.7vw, 1.375rem); }
+.slide-prose > :first-child { margin-block-start: 0; }
+.slide-prose > :last-child { margin-block-end: 0; }
 .slide .page-meta { font-size: clamp(1rem, 0.85rem + 0.5vw, 1.25rem); margin-block-start: var(--space-3); }
 .slide-files .present-file-path, .slide-files .present-file-desc { font-size: clamp(0.9375rem, 0.8rem + 0.4vw, 1.125rem); }
-.present-deck-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.present-deck-foot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .slide-pos-wrap { text-align: center; }
 .slide-pos { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
 .slide-pos-wrap .small { margin: 0; }

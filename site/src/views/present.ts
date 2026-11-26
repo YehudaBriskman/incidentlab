@@ -39,20 +39,44 @@ function stageList(c: Case, cls: string): HTMLElement {
         { class: "present-stage" },
         h("p", { class: "present-stage-n" }, TR().stageN(i + 1)),
         h("p", { class: "present-stage-name", dir: "auto" }, q.stage?.name ?? q.title),
-        q.stage?.goal ? html("p", { class: "present-stage-goal", dir: "auto" }, mdInline(q.stage.goal)) : null,
+        q.stage?.goal ? html("p", { class: "present-stage-goal" }, mdInline(q.stage.goal)) : null,
       ),
     ),
   );
 }
 
-function evidenceList(c: Case, cls: string): HTMLElement {
+function evidenceList(files: Case["evidence"], cls: string): HTMLElement {
+  // One grid for every row (rows are display: contents), so the path and description columns line up.
   return h(
     "ul",
     { class: cls },
-    c.evidence.map((f) =>
-      h("li", { class: "present-file" }, h("code", { class: "present-file-path", dir: "ltr" }, f.path), html("span", { class: "present-file-desc", dir: "auto" }, mdInline(f.description))),
-    ),
+    files.map((f) => h("li", { class: "present-file" }, h("code", { class: "present-file-path", dir: "ltr" }, f.path), html("span", { class: "present-file-desc" }, mdInline(f.description)))),
   );
+}
+
+/** Splits markdown into slide-sized pages: whole paragraphs, about `budget` characters each. */
+function pages(source: string, budget: number): string[] {
+  const paras = source.split(/\n\s*\n/).map((p) => p.trim()).filter((p) => p.length > 0);
+  const out: string[] = [];
+  let cur: string[] = [];
+  let size = 0;
+  for (const p of paras) {
+    if (cur.length > 0 && size + p.length > budget) {
+      out.push(cur.join("\n\n"));
+      cur = [];
+      size = 0;
+    }
+    cur.push(p);
+    size += p.length;
+  }
+  if (cur.length > 0) out.push(cur.join("\n\n"));
+  return out;
+}
+
+function chunks<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
 }
 
 function section(title: string, ...children: (HTMLElement | null)[]): HTMLElement {
@@ -87,13 +111,13 @@ export function renderInstructorPreview(root: HTMLElement, c: Case): void {
         ),
       ),
       h("p", { class: "muted small" }, TR().previewNote),
-      section(TR().story, html("div", { class: "prose present-prose", dir: "auto" }, md(c.briefing))),
+      section(TR().story, html("div", { class: "prose present-prose" }, md(c.briefing))),
       section(
         TR().inspired,
         h("p", { class: "present-inspired-title", dir: "auto" }, `${c.inspiredBy.title} (${c.inspiredBy.year})`),
-        html("p", { class: "present-prose", dir: "auto" }, mdInline(c.inspiredBy.summary)),
+        html("p", { class: "present-prose" }, mdInline(c.inspiredBy.summary)),
       ),
-      section(`${TR().evidence} · ${TR().evidenceCount(c.evidence.length)}`, evidenceList(c, "present-files")),
+      section(`${TR().evidence} · ${TR().evidenceCount(c.evidence.length)}`, evidenceList(c.evidence, "present-files")),
       section(TR().stages, stageList(c, "present-stages")),
     ),
   );
@@ -101,16 +125,21 @@ export function renderInstructorPreview(root: HTMLElement, c: Case): void {
 
 type Slide = { title: string; body: HTMLElement | null; kicker?: string };
 
+/** "2 / 3" after a kicker when a topic spans several slides. */
+const part = (i: number, n: number): string | undefined => (n > 1 ? TR().slideOf(i + 1, n) : undefined);
+
 function slidesFor(c: Case): Slide[] {
+  const story = pages(c.briefing, 520);
+  const files = chunks(c.evidence, 5);
   return [
-    { title: c.title, kicker: TR().eyebrow, body: h("div", {}, h("p", { class: "slide-lead", dir: "auto" }, c.subtitle), metaLine(c)) },
-    { title: TR().story, body: html("div", { class: "prose slide-prose", dir: "auto" }, md(c.briefing)) },
-    { title: TR().inspired, body: h("div", {}, h("p", { class: "slide-lead", dir: "auto" }, `${c.inspiredBy.title} (${c.inspiredBy.year})`), html("p", { class: "slide-prose", dir: "auto" }, mdInline(c.inspiredBy.summary))) },
-    { title: `${TR().evidence} · ${TR().evidenceCount(c.evidence.length)}`, body: evidenceList(c, "present-files slide-files") },
+    { title: c.title, kicker: TR().eyebrow, body: h("div", {}, h("p", { class: "slide-lead" }, c.subtitle), metaLine(c)) },
+    ...story.map((page, i): Slide => ({ title: TR().story, kicker: part(i, story.length), body: html("div", { class: "prose slide-prose" }, md(page)) })),
+    { title: TR().inspired, body: h("div", {}, h("p", { class: "slide-lead" }, `${c.inspiredBy.title} (${c.inspiredBy.year})`), html("p", { class: "slide-prose" }, mdInline(c.inspiredBy.summary))) },
+    ...files.map((group, i): Slide => ({ title: `${TR().evidence} · ${TR().evidenceCount(c.evidence.length)}`, kicker: part(i, files.length), body: evidenceList(group, "present-files slide-files") })),
     ...c.questions.map((q, i): Slide => ({
       kicker: TR().stageN(i + 1),
       title: q.stage?.name ?? q.title,
-      body: q.stage?.goal ? html("p", { class: "slide-lead", dir: "auto" }, mdInline(q.stage.goal)) : null,
+      body: q.stage?.goal ? html("p", { class: "slide-lead" }, mdInline(q.stage.goal)) : null,
     })),
     { title: TR().goSlideTitle, body: h("div", {}, h("p", { class: "slide-lead" }, TR().goSlideBody), metaLine(c)) },
   ];
@@ -137,7 +166,8 @@ export function presentView(c: Case): ViewResult {
       const draw = (): void => {
         const s = slides[at];
         if (s === undefined) return;
-        setChildren(stage, s.kicker ? h("p", { class: "slide-kicker" }, s.kicker) : null, h("h1", { class: "slide-title", dir: "auto" }, s.title), s.body);
+        setChildren(stage, h("div", { class: "slide-inner" }, s.kicker ? h("p", { class: "slide-kicker" }, s.kicker) : null, h("h1", { class: "slide-title" }, s.title), s.body));
+        stage.scrollTop = 0;
         pos.textContent = TR().slideOf(at + 1, slides.length);
         prev.disabled = at === 0;
         next.disabled = at === slides.length - 1;
@@ -184,5 +214,5 @@ export function presentView(c: Case): ViewResult {
       draw();
     });
   };
-  return { main, nav: nav.section, start };
+  return { main, nav: nav.section, start, layout: "fit" };
 }
