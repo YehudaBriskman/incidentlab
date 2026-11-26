@@ -100,6 +100,9 @@ input.admin-input[type="search"] {
 .admin-updated { font-size: var(--type-label-size); color: var(--text-muted); font-variant-numeric: tabular-nums; cursor: default; }
 .admin-updated.is-stale { color: var(--warning-fg); }
 /* Full-timestamp tooltip triggers (tipped() in admin.ts): focusable so the tooltip opens from the keyboard. */
+/* position: relative keeps the absolutely placed hidden timestamp inside its scrolling table, so rows below the
+   fold cannot stretch the document (fit pages must not scroll). */
+.admin-tipped { position: relative; }
 .admin-tipped:focus-visible { border-radius: var(--radius-control); }
 
 /* ---- tiles ---- */
