@@ -753,26 +753,29 @@ function renderQuestionStage(
   );
   const nextHint = q.hints[s.hintsRevealed];
   const hintError = h("p", { class: "form-error", role: "alert" });
+  // A hint costs more than a full command, so it gets the same two-step confirm (Cancel focused, Escape cancels).
   const hintBtn = nextHint
-    ? h(
-        "button",
-        { type: "button", class: "btn btn-ghost" },
-        TP().revealHint(s.hintsRevealed + 1, q.hints.length, nextHint.cost, SCORING.CLEAN_BONUS, cleanOpen),
-      )
-    : null;
-  hintBtn?.addEventListener("click", () => {
-    if (hintBtn.getAttribute("aria-disabled") === "true") return;
-    hintBtn.setAttribute("aria-disabled", "true");
-    revealHint(c.id, id)
-      .then((p) => {
-        announce(TP().hintAnnounce(s.hintsRevealed + 1, nextHint?.cost ?? 0));
-        update(p, id, { kind: "hint", index: s.hintsRevealed });
+    ? confirmButton({
+        label: TP().revealHint(s.hintsRevealed + 1, q.hints.length, nextHint.cost, SCORING.CLEAN_BONUS, cleanOpen),
+        prompt: TP().hintPrompt(s.hintsRevealed + 1, nextHint.cost, SCORING.CLEAN_BONUS, cleanOpen),
+        confirmLabel: TP().cmdConfirm(nextHint.cost),
+        className: "btn btn-ghost hint-trigger",
+        tone: "accent",
+        onConfirm: () => {
+          for (const b of hintBtn?.querySelectorAll("button") ?? []) b.disabled = true;
+          hintError.textContent = "";
+          revealHint(c.id, id)
+            .then((p) => {
+              announce(TP().hintAnnounce(s.hintsRevealed + 1, nextHint.cost));
+              update(p, id, { kind: "hint", index: s.hintsRevealed });
+            })
+            .catch((err: unknown) => {
+              for (const b of hintBtn?.querySelectorAll("button") ?? []) b.disabled = false;
+              hintError.textContent = errorMessage(err);
+            });
+        },
       })
-      .catch((err: unknown) => {
-        hintError.textContent = errorMessage(err);
-        hintBtn.removeAttribute("aria-disabled");
-      });
-  });
+    : null;
 
   const revealError = h("p", { class: "form-error", role: "alert" });
   const reveal = confirmButton({
