@@ -220,8 +220,13 @@ function formatDateTime(iso: string | null): string {
   return new Intl.DateTimeFormat(locale(), { dateStyle: "medium", timeStyle: "short" }).format(t);
 }
 
-/** Puts a secondary detail (a full timestamp, an ID) into the shared tooltip instead of on screen. */
+/** Puts a secondary detail (a full timestamp) into the shared tooltip instead of on screen. The trigger takes
+ * keyboard focus, which opens the tooltip too, and carries the detail as visually hidden text so screen readers
+ * get the full value whether or not the tooltip is open (#114). */
 function tipped<E extends HTMLElement>(el: E, detail: string): E {
+  el.tabIndex = 0;
+  el.classList.add("admin-tipped");
+  el.append(h("span", { class: "visually-hidden" }, `, ${detail}`));
   tooltip(el, detail);
   return el;
 }
@@ -1024,11 +1029,13 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
 
   // ---- shell: header, tabs, banner (built once; tab regions re-rendered) ------------------
 
-  const updatedEl = h("span", { class: "admin-updated", "aria-live": "off" });
+  // Focusable so keyboard users can open the full-time tooltip; renderUpdated() adds the time as hidden text.
+  const updatedEl = h("span", { class: "admin-updated admin-tipped", "aria-live": "off", tabindex: "0" });
   tooltip(updatedEl, () => updatedEl.dataset.full ?? "");
   const pauseBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admPause);
   const refreshBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admRefresh);
-  const boardBtn = h("button", { type: "button", class: "btn btn-primary btn-sm admin-quick-board", "data-sidebar-close": "" }, TS().adminProjector);
+  // Tinted, not amber: each view keeps the accent fill for its one primary action (DESIGN.md accent budget).
+  const boardBtn = h("button", { type: "button", class: "btn btn-sm admin-quick-board", "data-sidebar-close": "" }, TS().adminProjector);
   const logoutBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admSignOut);
   // Connection problems and failed actions: one dismissible banner under the tabs (lib/overlay.ts).
   const statusBanner = banner({ tone: "warning", text: "", dismissible: true, className: "admin-banner", onDismiss: () => void (state.banner = null) });
@@ -1239,8 +1246,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       return;
     }
     const sec = Math.max(0, Math.round((Date.now() - state.lastUpdated) / 1000));
-    updatedEl.textContent = T().admUpdated(state.paused, relativeAgo(new Date(state.lastUpdated).toISOString(), Date.now()));
-    updatedEl.dataset.full = formatDateTime(new Date(state.lastUpdated).toISOString());
+    const full = formatDateTime(new Date(state.lastUpdated).toISOString());
+    setChildren(updatedEl, T().admUpdated(state.paused, relativeAgo(new Date(state.lastUpdated).toISOString(), Date.now())), h("span", { class: "visually-hidden" }, `, ${full}`));
+    updatedEl.dataset.full = full;
     updatedEl.classList.toggle("is-stale", sec > 20);
   }
 
@@ -1635,7 +1643,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     state.settings.error = null;
     renderInvite();
   });
-  const inviteSetBtn = h("button", { type: "submit", class: "btn btn-primary btn-sm" }, T().admInviteSave);
+  const inviteSetBtn = h("button", { type: "submit", class: "btn btn-outline btn-sm" }, T().admInviteSave);
   const inviteGenBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admInviteGenerate);
   const inviteClearBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admInviteClear);
   const inviteMsgEl = h("p", { class: "small invite-msg", role: "status" });
@@ -2022,7 +2030,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     return [
       h(
         "button",
-        { type: "button", class: "btn btn-primary btn-sm", disabled: busy, "aria-label": T().admApproveLabel(a.username), onclick: () => void changeStatus(a, "approve") },
+        { type: "button", class: "btn btn-sm", disabled: busy, "aria-label": T().admApproveLabel(a.username), onclick: () => void changeStatus(a, "approve") },
         T().admApprove,
       ),
       h(
@@ -2092,7 +2100,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       h("span", { class: "muted small", role: "status" }, T().admSelectedN(sel)),
       h(
         "button",
-        { type: "button", class: "btn btn-primary btn-sm", id: "pending-bulk-approve", disabled: anyBusy, onclick: () => void bulkStatus("approve") },
+        { type: "button", class: "btn btn-sm", id: "pending-bulk-approve", disabled: anyBusy, onclick: () => void bulkStatus("approve") },
         T().admApproveSelected(sel),
       ),
       h(
@@ -3296,7 +3304,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         "div",
         { class: "cal-head" },
         h("button", { type: "button", class: "btn btn-ghost btn-sm", id: "cal-prev", "aria-label": T().admPrevMonth, onclick: () => shift(-1) }, rtl ? "→" : "←"),
-        h("h2", { class: "admin-h2 cal-title", "aria-live": "polite" }, monthLabel),
+        headWithHint(h("h2", { class: "admin-h2 cal-title", "aria-live": "polite" }, monthLabel), T().admCalendarHint),
         h("button", { type: "button", class: "btn btn-ghost btn-sm", id: "cal-next", "aria-label": T().admNextMonth, onclick: () => shift(1) }, rtl ? "←" : "→"),
         h(
           "button",
@@ -3312,7 +3320,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
           T().admThisMonth,
         ),
       ),
-      h("p", { class: "muted small admin-hint" }, T().admCalendarHint),
+      h("p", { class: "muted small admin-hint is-touch-only" }, T().admCalendarHint),
       h("div", { class: "cal-grid" }, cells),
     );
   }
@@ -3502,7 +3510,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     h("option", { value: "warning" }, T().admLevel("warning")),
   );
   const evAnnClear = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admAnnClear);
-  const evStartNow = h("button", { type: "button", class: "btn btn-primary btn-sm" }, T().admStartNow);
+  const evStartNow = h("button", { type: "button", class: "btn btn-sm" }, T().admStartNow);
   const evEndNow = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admEndNow);
   const evFreezeBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admFreezeNow);
   const evSave = h("button", { type: "button", class: "btn btn-primary", id: "ev-save" }, T().admSaveEvent);
