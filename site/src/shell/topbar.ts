@@ -92,7 +92,10 @@ function createStatusChip(): HTMLElement {
   const label = h("span", { class: "status-label" });
   const title = h("bdi", { class: "status-title" });
   const time = h("span", { class: "status-time" });
-  const chip = h("a", { class: "status-chip", hidden: true }, dot, label, title, time);
+  // The chip's name is its visible text plus this hidden context, so it always contains what is on screen
+  // (Label in Name, WCAG 2.5.3): speech users say what they see, screen readers still hear the full sentence.
+  const context = h("span", { class: "visually-hidden" });
+  const chip = h("a", { class: "status-chip", hidden: true }, dot, label, title, time, context);
   let rolling = false;
   const tick = (): void => {
     const event = cachedEvent();
@@ -109,7 +112,8 @@ function createStatusChip(): HTMLElement {
       title.hidden = event.name.length === 0;
       time.textContent = eventText;
       chip.title = [event.name, eventText].filter((p) => p.length > 0).join(" · ");
-      chip.setAttribute("aria-label", chip.title);
+      chip.removeAttribute("aria-label");
+      context.textContent = "";
       return;
     }
     const today = cachedToday();
@@ -130,7 +134,8 @@ function createStatusChip(): HTMLElement {
     time.hidden = ms === null;
     const full = TS().statusTodayTitle(summary.title, time.textContent);
     chip.title = full;
-    chip.setAttribute("aria-label", full);
+    chip.removeAttribute("aria-label");
+    context.textContent = ` (${full})`;
     // The day rolled over: ask the server for the new schedule (once per rollover).
     if (ms !== null && ms <= 1000 && !rolling) {
       rolling = true;
