@@ -24,7 +24,7 @@ const setup = () => {
   const chunks = new EvidenceChunkRepository(bytes);
   const evidence = new EvidenceService({ cases, chunks });
   const service = new CaseService({ cases, evidence });
-  const app = createApp({ store: kv, bytes, secrets: SECRETS, adminKey: () => ADMIN_KEY });
+  const app = createApp({ store: kv, bytes, staticSecrets: SECRETS, adminKey: () => ADMIN_KEY });
   const get = (path: string, headers: Record<string, string> = {}, method = "GET"): Promise<Response> =>
     app.handle(new Request(`http://localhost/api${path}`, { method, headers }), "10.0.0.1");
   const fetchEvidence = (path: string, headers: Record<string, string> = {}, method = "GET"): Promise<Response> =>
@@ -151,8 +151,11 @@ test("a newer draft on top of a published version: public routes keep serving pu
   const content = CaseContentResponseSchema.parse(await (await s.get("/cases/live-case/content")).json());
   assert.equal(content.version, 1);
   assert.equal(content.content.title, "Case live-case");
+  // The evidence location follows the published version (#68): the browser fetches only these URLs.
+  assert.deepEqual(content.evidence, { filesBase: "/evidence/db/live-case/v1/files/", zip: "/evidence/db/live-case/v1.zip" });
   const catalog = CasesResponseSchema.parse(await (await s.get("/cases")).json());
   assert.equal(catalog.cases[0]?.en.title, "Case live-case");
+  assert.equal(catalog.cases[0]?.version, 1, "the catalog names the published version, not the draft");
   assert.equal((await s.fetchEvidence("live-case/v1/files/a.log")).status, 200);
   assert.equal((await s.fetchEvidence("live-case/v2/files/b.log")).status, 404, "a draft is never public");
   await assert.rejects(s.service.evidenceIndex("live-case", 2), { status: 404 });
@@ -296,7 +299,7 @@ test("evidence: the zip route, unknown files and a missing chunk", async () => {
   const res = await s.fetchEvidence("zip-case/v1.zip");
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("content-type"), "application/zip");
-  assert.equal(res.headers.get("content-disposition"), 'attachment; filename="zip-case-v1-evidence.zip"');
+  assert.equal(res.headers.get("content-disposition"), 'attachment; filename="zip-case-evidence.zip"');
   assert.deepEqual(await bodyBytes(res), zip);
   assert.equal((await s.fetchEvidence("zip-case/v1/files/small.pcap")).headers.get("content-type"), "application/vnd.tcpdump.pcap");
   const empty = await s.fetchEvidence("zip-case/v1/files/empty.log");

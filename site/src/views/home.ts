@@ -4,7 +4,7 @@
 // statement and the sign-up call to action. Filters, search and sort live in the URL query (#/?difficulty=hard).
 import "../home.css";
 import type { CaseStats, TodayResponse } from "../../shared/contract";
-import { caseSummaries, caseSummary } from "../content/load";
+import { caseSummaries, caseSummary, catalogFailed, catalogReady, reloadCatalog } from "../content/load";
 import type { CaseSummary } from "../content/catalog-schema";
 import { dataTable, type Column, type DataTable } from "../components/dataTable";
 import type { SortState } from "../components/table-core";
@@ -420,6 +420,8 @@ export function renderHome(root: HTMLElement): void {
 
   let table: DataTable<Row> | null = null;
   let tableFor: boolean | null = null;
+  /** how many cases the toolbar and empty text were built for: they are rebuilt once the catalog arrives */
+  let tableCases = -1;
   let filter: FilterButtonHandle | null = null;
 
   /** Still the page on screen? (A late answer must not redraw, or rewrite the URL of, the next route.) */
@@ -509,9 +511,10 @@ export function renderHome(root: HTMLElement): void {
   };
 
   const buildTable = (): DataTable<Row> => {
-    if (tableFor === state.isPlayer && table !== null) return table;
+    if (tableFor === state.isPlayer && tableCases === caseSummaries().length && table !== null) return table;
     table?.destroy();
     tableFor = state.isPlayer;
+    tableCases = caseSummaries().length;
     if (!state.isPlayer && filters.sort === "score") filters = { ...filters, sort: "" };
     if (!state.isPlayer && filters.status.size > 0) filters = { ...filters, status: new Set() };
     buildToolbar();
@@ -570,6 +573,9 @@ export function renderHome(root: HTMLElement): void {
     if (state.loading) {
       // Keep rows already shown (a retry): only the first load draws skeleton rows.
       if (table === null) buildTable().setState({ kind: "loading", label: TH().loadingCases, rows: Math.min(6, Math.max(3, caseSummaries().length)) });
+    } else if (catalogFailed()) {
+      // The case list comes only from the content API (GET /api/cases): say so, and offer a retry.
+      buildTable().setState({ kind: "error", message: T().pageFailed, retry: { label: TH().retry, run: reload } });
     } else {
       buildTable().setState({ kind: "ready" });
       applyRows();
@@ -629,7 +635,9 @@ export function renderHome(root: HTMLElement): void {
           : { cases: [], failed: false, player: false },
       () => ({ cases: [], failed: false, player: false }),
     );
-    void Promise.all([today, stats]).then(([t, s]) => {
+    // The case list (GET /api/cases) arrives with the other two; a failed fetch is retried by reload().
+    const catalog = catalogFailed() ? reloadCatalog() : catalogReady;
+    void Promise.all([today, stats, catalog]).then(([t, s]) => {
       if (!onHome()) return; // navigated away
       state = {
         loading: false,

@@ -18,7 +18,7 @@ export const localDate = (date: Date, timezone: string): string =>
 
 export class ScheduleService {
   private readonly repository: ScheduleRepository;
-  /** read per call: DB-published cases (#68) join the bundled ones without a redeploy */
+  /** read per call: the DB-published cases (#68), so a publish releases a case without a redeploy */
   private readonly releasedCaseIds: () => readonly string[];
   private readonly now: () => Date;
 

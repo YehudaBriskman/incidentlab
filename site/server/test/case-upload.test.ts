@@ -36,7 +36,7 @@ const BIG = 2 * EVIDENCE_CHUNK_BYTES + 777; // three chunks, the last one partia
 const setup = (options: { now?: () => Date } = {}) => {
   const kv = new InMemoryKvStore();
   const bytes = new InMemoryByteStore();
-  const app = createApp({ store: kv, bytes, secrets: SECRETS, adminKey: () => ADMIN_KEY, now: options.now });
+  const app = createApp({ store: kv, bytes, staticSecrets: SECRETS, adminKey: () => ADMIN_KEY, now: options.now });
   const cases = new CaseRepository(kv);
   const evidence = new EvidenceService({ cases, chunks: new EvidenceChunkRepository(bytes) });
 

@@ -26,8 +26,22 @@ check("CSP header present", (home.headers.get("content-security-policy") ?? "").
 check("no secrets reference in html", !(await (await fetch(base + "/")).text()).includes("secrets.json"));
 const today = await admin.call("GET", "/api/today");
 check("today lists the case as released", today.status === 200 && today.json?.releasedCaseIds?.includes(caseId), JSON.stringify(today.json?.releasedCaseIds));
-check("evidence zip served", (await fetch(`${base}/evidence/${caseId}-evidence.zip`, { method: "HEAD" })).status === 200);
-check("explorer README served", (await fetch(`${base}/evidence/${caseId}/files/README_FIRST.txt`)).status === 200);
+// Case content and evidence come only from the content API and the location it names (#68).
+const catalog = await (await fetch(`${base}/api/cases`)).json();
+check("catalog lists the case", catalog?.cases?.some((c) => c.en?.id === caseId), JSON.stringify(catalog?.cases?.map((c) => c.en?.id)));
+const contentRes = await fetch(`${base}/api/cases/${caseId}/content?lang=en`);
+const content = contentRes.status === 200 ? await contentRes.json() : null;
+check("case content served", content?.id === caseId && Array.isArray(content?.content?.questions), String(contentRes.status));
+const hintTexts = (content?.content?.questions ?? []).flatMap((q) => (q.hints ?? []).filter((h) => "text" in h));
+const commands = (content?.content?.toolbox ?? []).flatMap((s) => (s.items ?? []).filter((it) => "command" in it || "powershell" in it));
+check("case content carries no paid content (hint texts, commands)", content !== null && hintTexts.length === 0 && commands.length === 0, `${hintTexts.length} hint texts, ${commands.length} commands`);
+const location = content?.evidence;
+check("content names its evidence location", typeof location?.filesBase === "string" && typeof location?.zip === "string", JSON.stringify(location));
+const abs = (url) => new URL(url, base + "/").toString();
+const zipHead = location ? await fetch(abs(location.zip), { method: "HEAD" }) : null;
+check("evidence zip served", zipHead?.status === 200 && (zipHead.headers.get("content-disposition") ?? "").includes(`${caseId}-evidence.zip`), String(zipHead?.status));
+check("explorer README served", location ? (await fetch(abs(location.filesBase + "README_FIRST.txt"))).status === 200 : false);
+check("no static evidence on the site", (await fetch(`${base}/evidence/${caseId}-evidence.zip`, { method: "HEAD" })).headers.get("content-type")?.includes("zip") !== true);
 
 // Accounts
 const player = createSession(base);

@@ -29,9 +29,9 @@ both the browser and the function import it.
 
 ## Paid content and scoring
 
-Hint texts and full toolbox commands are stripped from the site bundle at build time
-(`site/vite.config.ts`, verified by `scripts/check-bundle.mjs`). The browser only has each command's
-`syntax`. The server returns paid content in `progress.unlocked` only after charging for it, and
+Hint texts and full toolbox commands are never in the public case content (`GET /api/cases/:id/content`
+serves the package's `content.<lang>.json`, which has them removed), and the site bundle carries no case at all
+(`scripts/check-bundle.mjs` fails the build otherwise). The browser only has each command's `syntax`. The server returns paid content in `progress.unlocked` only after charging for it, and
 everything once the case is completed.
 
 Per stage: `max(0, base − hints − 5×commands − min(20, 2×wrong))` + time bonus (+30 within the stage's
@@ -67,19 +67,25 @@ at base + 30 + 10, plus 50); first blood can push a score above par. Each solved
 
 ### DB-stored case content (#64)
 
-Served only from the `case:` records (see Storage). Until #68 imports the bundled cases the store is
-empty, so `GET /api/cases` returns `{cases: []}` and the client still uses the build-time content.
-Only a case's `publishedVersion`, and only while its status is `published`, is visible; drafts, older
-versions and trashed cases are 404.
+Served only from the `case:` records (see Storage). Since #68 this is the only source of case content:
+the browser loads the catalog and every case from here, and the router treats an id that is not in
+`GET /api/cases` as unknown. Only a case's `publishedVersion`, and only while its status is `published`, is
+visible; drafts, older versions and trashed cases are 404.
 
 | Method | Path | Auth | Response |
 |---|---|---|---|
-| GET | `/api/cases` | none | `{cases: CatalogEntry[]}` (`site/shared/catalog.ts`; `file` is the case id). `ETag` = hash of the body. |
-| GET | `/api/cases/:caseId/content?lang=en\|he` | none | `{id, version, lang, content: CaseContent}` (`CaseContentResponseSchema` in `site/shared/case-records.ts`). `lang` is the one served: `he` falls back to `en`. `ETag` = `"<contentSha>-v<version>-<lang>"`. 400 for another `lang`, 404 unless published. |
+| GET | `/api/cases` | none | `{cases: CatalogEntry[]}` (`site/shared/catalog.ts`; `file` is the case id, `version` the published version). `ETag` = hash of the body. |
+| GET | `/api/cases/:caseId/content?lang=en\|he` | none | `{id, version, lang, content: CaseContent, evidence: {filesBase, zip}}` (`CaseContentResponseSchema` in `site/shared/case-records.ts`). `lang` is the one served: `he` falls back to `en`. `evidence` says where this version's evidence lives (below). The browser adds `&v=<version>` (ignored by the server) so its HTTP cache keeps one entry per version. `ETag` = `"<contentSha>-v<version>-<lang>"`. 400 for another `lang`, 404 unless published. |
 
 Both send `Cache-Control: public, max-age=60, stale-while-revalidate=600` and answer `If-None-Match`
 with 304. Errors (404, 400) stay `no-store`. These routes share the `/api/cases/:caseId/*` space with the
 per-player routes above; `content` is the only action there that needs no session.
+
+**Evidence location.** `evidence.filesBase` (ends in `/`; a file is `filesBase` + its URL-encoded path) and
+`evidence.zip` come from `evidenceLocation()` in `site/server/services/evidenceStream.ts`, the one place that
+decides where a published version's evidence is served. The browser follows these URLs only
+(`site/src/content/evidence.ts`), so evidence can move to another host by changing that function; each file's
+sha256 is in the version's evidence index.
 
 **Evidence files** are not under `/api`: a Netlify Edge Function (`site/netlify/edge-functions/evidence.ts`,
 logic in `site/server/services/evidenceStream.ts`) serves
@@ -87,7 +93,7 @@ logic in `site/server/services/evidenceStream.ts`) serves
 | Path | Body |
 |---|---|
 | `/evidence/db/<caseId>/v<n>/files/<path>` | one evidence file (any size; 40 MB today) |
-| `/evidence/db/<caseId>/v<n>.zip` | the prebuilt evidence zip (`content-disposition: attachment`) |
+| `/evidence/db/<caseId>/v<n>.zip` | the prebuilt evidence zip (`content-disposition: attachment; filename="<caseId>-evidence.zip"`, the name the toolbox commands unzip) |
 
 GET and HEAD. `Range: bytes=a-b` / `a-` / `-n` gives 206 with `Content-Range` (one range; a multi-range
 or malformed header gets the whole file; past the end is 416). `ETag` is the file's SHA-256 and
@@ -109,7 +115,8 @@ Contract: `site/shared/author-contract.ts`. Every `/api/author/*` route takes th
 header, as the CLI sends it, or the admin session) or an approved author session (`requireAuthor`:
 `403 not-author` for players, `401` signed out). An author acts only on cases whose `createdBy` is their
 account id (`403 not-owner`); the admin acts on any case. A new case id becomes the uploader's; an
-author cannot claim a bundled case id (`409 id-taken`). Every mutation except the single chunk and part
+author cannot upload a version of a case they do not own (`403 not-owner`; the original cases are owned by
+`admin`). (`409 id-taken` guards ids of the test-only static cases, see `createApp`'s `staticSecrets`.) Every mutation except the single chunk and part
 PUTs is audited (`case.upload`, `case.draft`, `case.publish`, `case.rollback`, `case.delete`,
 `case.restore`; the detail names the author).
 
@@ -134,10 +141,10 @@ evidence files and `evidence.zip` as content-addressed chunks, the small entries
 **Answer drift.** The answer fingerprint (`site/shared/answer-fingerprint.ts`, identical to
 `answer_fingerprint()` in `scripts/make_flags.py`) hashes the answers, points, hint costs and target
 times. Publishing a version whose fingerprint differs from the published one (before a case's first DB
-publish: from the bundled case's answer key) while any `progress:<caseId>:*` record exists is refused with
+publish: from a test-only static answer key, if any) while any `progress:<caseId>:*` record exists is refused with
 409 `answer-drift`, unless `acceptAnswerChanges` is true. This is the rule `deploy.sh` enforces. It
-matters because a published version is what the game checks answers against: `CaseSecretsProvider` overlays
-published DB cases on the bundled answer keys, and a publish, rollback, delete or restore reloads it at once
+matters because a published version is what the game checks answers against: `CaseSecretsProvider` reads
+the answer keys of the published DB cases only (since #68), and a publish, rollback, delete or restore reloads it at once
 on the instance that served it (other instances within a minute).
 
 Unfinished uploads expire after 24 h; starting an upload sweeps expired `upload:` records. Evidence chunks
@@ -201,10 +208,10 @@ still parse (new fields have defaults); stages solved before it keep their point
 | `ADMIN_KEY` | Admin secret. If it is unset or shorter than 16 chars, every admin route returns 503 `admin disabled`. |
 | `INCIDENTLAB_STORE` | Set to `memory` to use the in-process stores, JSON and bytes (tests and local work; data is lost on restart). Otherwise Netlify Blobs. |
 
-Answers, debriefs and points are read from `site/server/generated/secrets.json` (written by the pipeline; `{cases: {<id>: …}}`). Never import it from `site/src`.
+Answers, debriefs, hint texts, commands and points are read from the published case versions in Blobs (`case:<id>:v<n>:sealed`), refreshed at most once a minute per instance and at once after a publish on the instance that served it. `site/server/generated/secrets.json` (written by the pipeline) is a build artefact for the checks only: no runtime code imports it (`server/test/handler.test.ts` checks), and it must never be imported from `site/src`.
 
 ## Tests
 
 - `cd site && npm run test:server`: node:test over the real router with the in-memory store.
-- `node --experimental-strip-types tests/local-server.ts`: the built site + API on http://localhost:8888 (in-memory store).
+- `node --experimental-strip-types tests/local-server.ts [port] [--seed-db-case] [--no-cases]`: the built site + API on http://localhost:8888 (in-memory store). At startup it uploads and publishes every `build/packages/*.case.zip` through the upload API, so the local store has every case; `--seed-db-case` adds the `db-demo` fixture case.
 - `node tests/smoke-api.mjs <baseUrl> [adminKeyFile] [caseId]` and `node tests/load.mjs <baseUrl> [players] [adminKeyFile] [caseId]` against a running deployment.

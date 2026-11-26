@@ -53,7 +53,7 @@ test("backup -> wipe -> restore round-trips the store exactly (sessions excluded
   const harness = createHarness();
   // reach into the harness store through a fresh app sharing one KV
   const kv = new InMemoryKvStore();
-  const app = createApp({ store: kv, secrets: SECRETS, adminKey: () => ADMIN_KEY });
+  const app = createApp({ store: kv, staticSecrets: SECRETS, adminKey: () => ADMIN_KEY });
   const call = (path: string, body?: unknown, cookie?: string) =>
     app.handle(new Request(`http://localhost/api${path}`, { method: body === undefined ? "GET" : "POST", headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...(cookie ? { cookie } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) }), "10.0.0.1");
   const reg = await call("/auth/register", { username: "Backup", password: "password1" });

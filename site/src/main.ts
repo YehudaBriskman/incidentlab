@@ -1,7 +1,7 @@
 import "./styles.css";
 import { applyLang, isRelabel, noteRoute } from "./i18n/i18n";
 import { T } from "./i18n/strings-player";
-import { caseSummary, catalogReady, loadAllCases, loadCase, onCatalogChange } from "./content/load";
+import { caseSummary, catalogFailed, catalogLoading, catalogReady, loadAllCases, loadCase } from "./content/load";
 import { h, setChildren } from "./lib/dom";
 import type { View, ViewResult } from "./shell/types";
 import { closeOverlays, toast } from "./lib/overlay";
@@ -128,8 +128,8 @@ const loadCaseViews = (): Promise<CaseViews> =>
   Promise.all([import("./views/case"), import("./views/toolbox"), loadAuthView()]).then(([caseView, toolbox]) => (caseViews = { ...caseView, ...toolbox }));
 
 /**
- * Does `id` name a case this site can show (bundled, or DB-published and already merged into the catalog)?
- * The router asks before loading any case chunk. Kept as its own function so the catalog check has one home.
+ * Does `id` name a case this site can show? The content API's catalog (GET /api/cases) is the only list of
+ * cases; the router asks before loading any case content. Kept as its own function so the check has one home.
  */
 function isKnownCase(id: string): boolean {
   return caseSummary(id) !== undefined;
@@ -192,11 +192,13 @@ function route(): void {
       return;
     }
     if (parts[0] === "leaderboard" && parts.length === 1) {
-      mount(legacy((root) => renderLeaderboard(root, query))());
+      // The case picker and titles come from the catalog: wait for it on a cold load (instant afterwards).
+      if (catalogLoading()) lazyView(() => catalogReady.then(() => legacy((root) => renderLeaderboard(root, query))));
+      else mount(legacy((root) => renderLeaderboard(root, query))());
       return;
     }
     if (parts[0] === "me" && parts.length === 1) {
-      lazyView(() => Promise.all([import("./views/stats"), loadAuthView()]).then(([m]) => legacy(m.renderStats)));
+      lazyView(() => Promise.all([import("./views/stats"), loadAuthView(), catalogReady]).then(([m]) => legacy(m.renderStats)));
       return;
     }
     if (parts[0] === "author" && parts.length === 1) {
@@ -216,17 +218,20 @@ function route(): void {
         notFound(TO().notOnRunbook);
         return;
       }
-      if (!isKnownCase(id)) {
-        // It may be a DB-published case the catalog fetch hasn't merged yet: wait for it once, then decide.
+      if (catalogLoading()) {
+        // Cold deep link: the catalog has not answered yet. Wait for it once, then decide.
+        loadingView();
         const token = routeToken;
         void catalogReady.then(() => {
-          if (token !== routeToken) return;
-          if (!isKnownCase(id)) notFound(T().caseMissing(id));
-          else route();
+          if (token === routeToken) route();
         });
         return;
       }
-      // The case's content is its own chunk (per language), fetched only now.
+      if (!isKnownCase(id)) {
+        notFound(catalogFailed() ? T().pageFailed : T().caseMissing(id));
+        return;
+      }
+      // The case's content comes from the content API (per language), fetched only now.
       const missing: View = () => ({ main: h("div", { class: "view" }), start: () => notFound(T().caseMissing(id)) });
       if (sub === "present") {
         lazyView(() => Promise.all([loadCase(id), import("./views/present")]).then(([c, m]): View => (c === undefined ? missing : () => m.presentView(c))));
@@ -256,6 +261,4 @@ document.querySelector(".skip-link")?.addEventListener("click", (ev) => {
 });
 
 window.addEventListener("hashchange", route);
-// DB-published cases that add to (or retitle) the bundled catalog: redraw the current page once with them.
-onCatalogChange(route);
 route();

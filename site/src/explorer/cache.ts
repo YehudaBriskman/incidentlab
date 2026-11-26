@@ -4,7 +4,8 @@
 //
 // Freshness: when the server sent an ETag or Last-Modified, a hit is revalidated with a conditional GET (304 =
 // use the stored body, no transfer). Without a validator, a stored body is only reused inside the page session
-// that stored it, so a later deploy can never serve stale evidence.
+// that stored it, so a later deploy can never serve stale evidence. A response marked `immutable` (the
+// versioned DB evidence URLs since #68: a new version is a new URL) is reused without asking the server again.
 
 export const CACHE_NAME = "il-evidence-v1";
 export const MAX_ENTRIES = 6;
@@ -13,6 +14,7 @@ const H_ETAG = "x-il-etag";
 const H_LASTMOD = "x-il-last-modified";
 const H_SESSION = "x-il-session";
 const H_STORED = "x-il-stored";
+const H_IMMUTABLE = "x-il-immutable";
 
 export interface CacheDeps {
   caches: CacheStorage | undefined;
@@ -55,6 +57,7 @@ function storable(res: Response, body: ReadableStream<Uint8Array> | null, sessio
   const lastMod = res.headers.get("last-modified");
   if (etag) headers.set(H_ETAG, etag);
   if (lastMod) headers.set(H_LASTMOD, lastMod);
+  if (/\bimmutable\b/i.test(res.headers.get("cache-control") ?? "")) headers.set(H_IMMUTABLE, "1");
   headers.set(H_SESSION, session);
   headers.set(H_STORED, String(now));
   return new Response(body, { status: 200, headers });
@@ -93,6 +96,7 @@ export async function cachedFetch(url: string, signal: AbortSignal, session: str
   }
   let res: Response;
   if (hit) {
+    if (hit.headers.get(H_IMMUTABLE) === "1") return { res: hit, fromCache: true };
     const cond = conditionalHeaders(hit.headers);
     if (cond === null) {
       if (hit.headers.get(H_SESSION) === session) return { res: hit, fromCache: true };

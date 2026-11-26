@@ -10,7 +10,7 @@ import { h, html, setChildren } from "../lib/dom";
 import { cachedEvent, formatCountdown, onEventChange, serverNow, startEventPolling } from "../lib/event";
 import { popover } from "../lib/overlay";
 import { cachedAccount, isAdmin, loadAccount, onAccountChange, signOut } from "../lib/session";
-import { caseSummary } from "../content/load";
+import { caseSummary, onCatalogChange } from "../content/load";
 import { eventDisplayPhase, eventLine, eventWhen } from "../views/leaderboard";
 import { ICONS } from "./icons";
 import { createLangToggle } from "./lang";
@@ -80,6 +80,7 @@ function createCrumbs(): HTMLElement {
     drawCrumbs();
   });
   window.addEventListener("popstate", () => drawCrumbs());
+  onCatalogChange(() => drawCrumbs()); // case titles arrive with the catalog (GET /api/cases)
   drawCrumbs();
   return nav;
 }
@@ -142,6 +143,7 @@ function createStatusChip(): HTMLElement {
   onTodayChange(tick);
   onEventChange(tick);
   onAccountChange(tick);
+  onCatalogChange(tick);
   window.addEventListener("hashchange", tick); // re-label on language change
   window.setInterval(tick, 1000);
   tick();

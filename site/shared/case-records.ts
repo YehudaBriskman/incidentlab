@@ -266,11 +266,27 @@ export type CasePackageManifest = z.infer<typeof CasePackageManifestSchema>;
 // ---------------------------------------------------------------------------------------------------------
 // GET /api/cases/:caseId/content?lang=en|he (see the endpoint list in ./contract.ts).
 
+/**
+ * Where a published case version's evidence is downloaded from (#68). The one place that decides it is
+ * `evidenceLocation()` in server/services/evidenceStream.ts; the browser only follows these URLs, so the
+ * evidence can move (another host, a CDN, a release asset) without a client change. Files are fetched as
+ * `filesBase + <evidence path>`; their sha256 is in the case's evidence index.
+ */
+export const EvidenceLocationSchema = z.object({
+  /** absolute path or URL ending in `/`: an evidence file is `filesBase` + its path (segments URL-encoded) */
+  filesBase: z.string().min(1).refine((s) => s.endsWith("/"), "filesBase must end with /"),
+  /** the prebuilt evidence zip; downloads as `<caseId>-evidence.zip` */
+  zip: z.string().min(1),
+});
+export type EvidenceLocation = z.infer<typeof EvidenceLocationSchema>;
+
 export const CaseContentResponseSchema = z.object({
   id: CaseIdSchema,
   version: z.number().int().min(1),
   /** the language served: `he` falls back to `en` */
   lang: CaseLangSchema,
   content: CaseContentSchema,
+  /** added in #68; older responses lack it and the browser derives the Edge Function path */
+  evidence: EvidenceLocationSchema.optional(),
 });
 export type CaseContentResponse = z.infer<typeof CaseContentResponseSchema>;

@@ -1,5 +1,6 @@
-// The answer keys and paid content the game reads: the bundled generated/secrets.json, overlaid with every case
-// published in the DB (#64/#66). A DB case wins over a bundled case with the same id. Services read it
+// The answer keys and paid content the game reads: every case published in the DB (#64/#66/#68). `bundled`
+// is a fixed base layer that only tests pass (createApp's `staticSecrets`); production passes an empty one,
+// so released case ids and answers come from the DB alone. A DB case wins over a base case with the same id. Services read it
 // synchronously (`.cases`, the same shape as `Secrets`); the router calls `refresh()` before each request, which
 // reloads from the DB at most once per TTL and keeps the last good copy when the DB can't be read.
 import type { CaseSecrets, Secrets } from "../domain/types.ts";

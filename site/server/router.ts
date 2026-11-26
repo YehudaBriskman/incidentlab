@@ -6,7 +6,6 @@ import { AuthController } from "./controllers/AuthController.ts";
 import { ContentController } from "./controllers/ContentController.ts";
 import { GameController } from "./controllers/GameController.ts";
 import { errorResponse, toErrorResponse } from "./controllers/http.ts";
-import { loadSecrets } from "./domain/config.ts";
 import type { Secrets } from "./domain/types.ts";
 import { AuditRepository, EventRepository, FirstBloodRepository, SettingsRepository } from "./repositories/config-repositories.ts";
 import { InMemoryByteStore } from "./repositories/ByteStore.ts";
@@ -37,7 +36,12 @@ export type AppDeps = {
   readonly store: KvStore;
   /** evidence bytes on the same Blobs store; api.mts always passes one, tests may leave it out */
   readonly bytes?: ByteStore;
-  readonly secrets?: Secrets;
+  /**
+   * Answer keys served next to the DB cases. Tests only: production passes none, so every released case,
+   * answer key, hint text and command comes from the DB (#68). The pipeline's generated/secrets.json is a
+   * build artefact for the checks and is never imported by the function.
+   */
+  readonly staticSecrets?: Secrets;
   readonly adminKey: () => string | undefined; // read per request so env changes apply
   readonly now?: () => Date;
 };
@@ -49,15 +53,15 @@ type MethodTable = Partial<Record<string, Handler>>;
 
 export const createApp = (deps: AppDeps): App => {
   const now = deps.now ?? (() => new Date());
-  const bundledSecrets = deps.secrets ?? loadSecrets();
+  const staticSecrets: Secrets = deps.staticSecrets ?? { cases: {} };
   const repos = createRepositories(deps.store);
   const caseRepo = new CaseRepository(deps.store);
   const bytes = deps.bytes ?? new InMemoryByteStore();
   const chunkRepo = new EvidenceChunkRepository(bytes);
   const evidence = new EvidenceService({ cases: caseRepo, chunks: chunkRepo });
   const cases = new CaseService({ cases: caseRepo, evidence });
-  // Answer keys: bundled secrets.json overlaid with DB-published cases (refreshed before each request, see handle).
-  const secrets = new CaseSecretsProvider({ bundled: bundledSecrets, source: cases, now });
+  // Answer keys: the DB-published cases (refreshed before each request, see handle), plus test fixtures if any.
+  const secrets = new CaseSecretsProvider({ bundled: staticSecrets, source: cases, now });
   const settingsRepo = new SettingsRepository(deps.store);
   const firstBlood = new FirstBloodRepository(deps.store);
 
@@ -72,17 +76,18 @@ export const createApp = (deps: AppDeps): App => {
   const accounts = new AccountAdminService({ repos, firstBlood, game, stats, trash, trashRepo, now });
   const audit = new AuditService({ repository: new AuditRepository(deps.store), now });
 
-  // Bundled (pre-DB) cases: only the admin may upload their ids, and their answer key is the drift
-  // baseline until a DB version of the case is published.
+  // Static (test-fixture) cases: only the admin may upload their ids, and their answer key is the drift
+  // baseline until a DB version of the case is published. Empty in production: ownership of the DB meta
+  // protects every stored case id, and the published version is the drift baseline.
   const bundledFingerprints = new Map<string, Promise<string>>();
   const bundledFingerprint = (caseId: string): Promise<string | null> => {
-    const sealed = Object.entries(bundledSecrets.cases).find(([id]) => id === caseId)?.[1];
+    const sealed = Object.entries(staticSecrets.cases).find(([id]) => id === caseId)?.[1];
     if (!sealed) return Promise.resolve(null);
     let found = bundledFingerprints.get(caseId);
     if (!found) bundledFingerprints.set(caseId, (found = answerFingerprint(sealed)));
     return found;
   };
-  const reservedIds = new Set(Object.keys(bundledSecrets.cases));
+  const reservedIds = new Set(Object.keys(staticSecrets.cases));
   const caseUploads = new CaseUploadService({
     uploads: new UploadRepository({ kv: deps.store, bytes }), cases: caseRepo, chunks: chunkRepo, limiter, bundledFingerprint, reservedIds: () => reservedIds, now,
   });

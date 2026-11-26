@@ -19,8 +19,18 @@ are binary and are left out of the JSON snapshots too (see below).
 
 Written through `CaseRepository` / `EvidenceChunkRepository` (`site/server/repositories/case-repository.ts`)
 with the schemas in `site/shared/case-records.ts`. Every read is validated; a corrupt record is logged and
-treated as missing, never thrown. The author upload routes (#66, `docs/API.md`) write them; the import of
-the bundled cases is #68.
+treated as missing, never thrown. The author upload routes (#66, `docs/API.md`) write them.
+
+**Since #68 these records are the only source of case content.** The five original cases were uploaded to
+production as v1 with `scripts/data.ts upload --publish` (each answer fingerprint equal to the old bundled key),
+and the site and the function no longer carry any case: released case ids and answer keys come from the published
+versions, and the browser reads content and evidence only through the content API. So:
+- a deploy never changes a case; a new case or a content fix is a new package version, uploaded and published;
+- trashing a published case takes it off the site and out of play at once (nothing falls back to a bundle);
+- a restore of a JSON snapshot restores `case:` records but not `evidence:` chunks, so re-upload the packages of
+  any case whose chunks are gone (uploads skip chunks that are already stored);
+- local and CI stores are filled the same way: `tests/local-server.ts` uploads every `build/packages/*.case.zip`
+  through the upload API at startup.
 
 | Key | Holds | Notes |
 |---|---|---|
@@ -133,7 +143,7 @@ node --experimental-strip-types scripts/data.ts migrate --apply
 - the backup → wipe → restore round trip (with and without prune);
 - daily rotation;
 - soft delete and restore, including conflict and expiry;
-- the shared case schemas against the real case files and `secrets.json`, and answer normalization against
-  the shared vectors.
+- the shared case schemas against the real case files and `secrets.json` (a build artefact; the function never
+  imports it, which `handler.test.ts` checks), and answer normalization against the shared vectors.
 
 CI runs them on every PR.

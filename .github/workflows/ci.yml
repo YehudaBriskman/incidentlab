@@ -62,7 +62,8 @@ jobs:
           # Throwaway key for the in-memory local server only (never a real secret).
           ADMIN_KEY: ci-admin-key-0123456789abcdef
         run: |
-          # --seed-db-case: one published DB case (db-demo) for tests/e2e/db-cases.spec.ts (#68)
+          # The server uploads and publishes every build/packages/*.case.zip at startup (the site has no bundled
+          # cases since #68). --seed-db-case adds db-demo for tests/e2e/db-cases.spec.ts.
           node --experimental-strip-types tests/local-server.ts "$E2E_PORT" --seed-db-case > local-server.log 2>&1 &
           for _ in $(seq 1 60); do
             if curl -fsS "$E2E_BASE_URL/api/today" > /dev/null; then

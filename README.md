@@ -24,12 +24,14 @@ PowerShell version), or entirely in the browser with the built-in **Evidence Exp
 
 ## Architecture
 
-- **Static site** (`site/dist`, Vite): case content, Toolbox, the Evidence Explorer (reads each case's loose
-  evidence files from `/evidence/<case-id>/files/`), and the evidence zips (`/evidence/<case-id>-evidence.zip`).
-- **One Netlify Function** (`site/netlify/functions`, served at `/api/*`): accounts and sessions, answer
-  checking, hints/reveals, debriefs, the incident-of-the-day schedule, stats and the admin API. The answer keys
-  and debriefs (`site/server/generated/secrets.json`, gitignored) are bundled into the function only; they are
-  never published as static files. See `docs/API.md`.
+- **Static site** (`site/dist`, Vite): the app only. It carries no case: the catalog and each case's content
+  come from the content API, and the Evidence Explorer and the zip download read evidence from the location the
+  API names (today the Edge Function at `/evidence/db/<case-id>/v<n>/...`).
+- **One Netlify Function** (`site/netlify/functions`, served at `/api/*`): accounts and sessions, the case
+  content API, answer checking, hints/reveals, debriefs, the incident-of-the-day schedule, stats, case upload
+  and the admin API. Answer keys, hint texts, commands and debriefs live in Netlify Blobs (the published case
+  versions), never in the site or the function bundle. See `docs/API.md`.
+- **One Edge Function** (`site/netlify/edge-functions/evidence.ts`): streams evidence files and zips from Blobs.
 - **Accounts:** unique username + password (scrypt). New sign-ups wait for the instructor's approval in
   `#/admin`. The session is an HttpOnly cookie, so progress follows the account across reloads and devices.
 - **Netlify Blobs** (store `incidentlab-v2`): accounts, sessions, per-account-per-case progress, the schedule.
@@ -57,11 +59,12 @@ generator/               Python 3 (stdlib) generators that build the evidence pa
   gen_support.py         metrics, DB log, deploy log, chat export, README for players
 scripts/
   make_flags.py          writes the server answer key: site/server/generated/secrets.json (gitignored)
-  package.sh             exports repo/git-log.txt, zips the evidence pack into site/public/evidence/,
-                         and copies loose files to site/public/evidence/files/ for the Explorer
+  package.sh             exports repo/git-log.txt, zips the evidence pack into build/evidence-zips/
+  make_package.py        builds the case packages build/packages/<id>-v<n>.case.zip (contain answers)
   build-all.sh           runs the whole pipeline + tests (solver, then server tests)
   deploy.sh              build-all.sh + ADMIN_KEY setup + backup + netlify deploy (site + function)
-  data.ts                production data: backup, list-backups, restore, migrate (dry run by default)
+  data.ts                production data: backup, list-backups, restore, migrate (dry run by default),
+                         and upload/publish of case packages
 site/                    the player-facing web app (Vite) + server code (site/server, site/netlify/functions)
 solutions/               SPOILERS: reference solutions
 build/                   generated output (git-ignored); build/truth/ holds the plaintext answers
@@ -81,7 +84,7 @@ cd site && npm run dev            # local dev server (the /api function needs `n
 **Local preview with the real API and demo data** (after `build-all.sh` once):
 
 ```bash
-node --experimental-strip-types tests/local-server.ts   # http://localhost:8888, in-memory store
+node --experimental-strip-types tests/local-server.ts   # http://localhost:8888, in-memory store; uploads every case package
 node tests/seed-demo.mjs http://localhost:8888          # in another terminal: players, schedule, event, class code
 ```
 
@@ -136,12 +139,15 @@ Rules for changing stored records, the runbook and how to recover from a bad dep
 ## How answer checking works
 
 Answers never reach the browser. `scripts/make_flags.py` normalizes each answer (trim, lowercase,
-collapse whitespace) into `site/server/generated/secrets.json`, which is bundled into the Netlify
-Function only. The browser POSTs a guess to `/api/*`; the function normalizes it the same way, compares,
-and records progress in Netlify Blobs. Hints, reveals and the debrief are also served by the function.
+collapse whitespace); `scripts/make_package.py` puts them in the sealed part of the case package, and
+uploading the package stores them in Netlify Blobs. The browser POSTs a guess to `/api/*`; the function
+normalizes it the same way, compares it with the published version's answer, and records progress in Blobs.
+Hints, reveals and the debrief are also served by the function. `site/server/generated/secrets.json` is a
+build artefact for the checks only; the function does not import it.
 
-`build/truth/answers.json` (plaintext, instructor only) and `secrets.json` are gitignored and must never
-be committed or copied into `site/dist`.
+`build/truth/answers.json` (plaintext, instructor only), `secrets.json` and `build/packages/` are gitignored
+and must never be committed or copied into `site/dist` (`scripts/check-bundle.mjs` fails the build if any case
+content or answer gets there).
 
 ## Adding a new case
 
@@ -150,7 +156,9 @@ the generator `generator/cases/<id>/build.py` (writes `build/evidence/<id>/` and
 `build/truth/<id>.answers.json`), the sealed debriefs `content-sealed/<id>.debrief(.he).md`, the content
 `site/src/content/cases/<id>(.he).json`, and the solver `solutions/<id>/solve.sh`. The pipeline discovers it
 automatically: no edits to `make_flags.py`, `package.sh` or `build-all.sh`. Run `./scripts/build-all.sh`, solve
-it yourself end to end, then schedule it in `#/admin`.
+it yourself end to end on the local server (it loads every package), then upload and publish the package to the
+site (`scripts/data.ts upload build/packages/<id>-v1.case.zip --publish --url <site>`, see `docs/CASE_CONTRACT.md`)
+and schedule it in `#/admin`.
 
 ## Spoilers: keep the repo private
 
@@ -174,7 +182,7 @@ Run locally (after `./scripts/build-all.sh` once, so `build/truth/` exists):
 
 ```bash
 cd site && npx vite build && cd ..                      # build site/dist
-node --experimental-strip-types tests/local-server.ts   # http://localhost:8888, in-memory store
+node --experimental-strip-types tests/local-server.ts --seed-db-case   # http://localhost:8888, in-memory store, every case package
 # in another terminal:
 cd tests/e2e && npm install
 CHROMIUM_PATH=/usr/bin/chromium npx playwright test     # or: npx playwright install chromium, then npx playwright test

@@ -1,6 +1,6 @@
 // The case catalog entry: the few fields the home page, leaderboard and stats need for every case.
-// Shared by the build-time catalog (vite.config.ts, virtual:case-catalog) and the server's
-// GET /api/cases, so both produce the same shape. Zod only: the browser imports this module.
+// Built by the server's GET /api/cases from the published DB cases; the browser validates it with the same
+// schema. Zod only: the browser imports this module.
 import { z } from "zod";
 import type { Case } from "./case.ts";
 
@@ -15,9 +15,10 @@ export const CaseSummarySchema = z.object({
 });
 
 export const CatalogEntrySchema = z.object({
-  /** file stem under content/cases (`3am-outage`, `_dev-sample`); the Hebrew file is `<file>.he.json`.
-   *  For a DB-stored case (GET /api/cases) it is the case id. */
+  /** the case id (the field predates #68, when it named a bundled file) */
   file: z.string(),
+  /** the published version (#68): the browser caches a case's content per version */
+  version: z.number().int().min(1).optional(),
   en: CaseSummarySchema,
   he: CaseSummarySchema.optional(),
 });

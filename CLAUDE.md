@@ -23,10 +23,11 @@ cd site && npm run test:client     # Explorer core, components and overlay rules
 bash solutions/solve.sh                         # 3am-outage solver (compares to build/truth/answers.json)
 bash solutions/<case-id>/solve.sh               # other cases
 python3 scripts/check_commands.py [case-id]     # runs every toolbox command, hint block and solver with stock tools only
-node scripts/check-bundle.mjs                   # fails if hint texts/full commands leak into site/dist
+node scripts/check-bundle.mjs                   # fails if case content, paid content or answers reach site/dist
 
-# Local stack: built site + real API on an in-memory store (admin key local-admin-key-0123456789)
-node --experimental-strip-types tests/local-server.ts 8888
+# Local stack: built site + real API on an in-memory store (admin key local-admin-key-0123456789).
+# At startup it uploads and publishes every build/packages/*.case.zip (--no-cases: empty store).
+node --experimental-strip-types tests/local-server.ts 8888 [--seed-db-case]
 node tests/seed-demo.mjs http://localhost:8888  # demo players (password demo-password-1), schedule, event
 
 # E2E (Playwright) against a running local server
@@ -37,9 +38,10 @@ node tests/smoke-api.mjs <baseUrl> <adminKeyFile> <case-id>   # API smoke test a
 ./scripts/deploy.sh [--migrate] [--accept-answer-changes]     # production deploy (see Data safety)
 ```
 
-Gitignored build inputs: `build/` (evidence, `build/truth/*.json` plaintext answers), `site/public/evidence/`,
-`site/server/generated/secrets.json`. Run `build-all.sh` once before the site builds or tests; in a fresh
-git worktree, copy them from the main checkout instead.
+Gitignored build inputs: `build/` (evidence, evidence zips, case packages, `build/truth/*.json` plaintext answers)
+and `site/server/generated/secrets.json` (a build artefact for the checks; the function never imports it). Run
+`build-all.sh` once before the site builds or tests; in a fresh git worktree, copy them from the main checkout
+instead. `site/public/evidence/` is no longer used (#68); `package.sh` deletes it if it is there.
 
 ## Architecture
 
@@ -49,20 +51,24 @@ git worktree, copy them from the main checkout instead.
 - Repositories sit on a small `KvStore` interface (`repositories/KvStore.ts`): `BlobsKvStore` in production,
   `InMemoryKvStore` in tests and the local server. One Blobs store, `incidentlab-v2`, with key prefixes:
   `account:`, `username:`, `session:`, `progress:<case>:<account>`, `config:*`, `firstblood:`, `audit:`,
-  `trash:`, `legacy:`, `ratelimit:`.
+  `trash:`, `legacy:`, `ratelimit:`, and for cases `case:`, `evidence:`, `upload:`.
+- **Cases live in the DB only (#68).** Released case ids, answers, hint texts and commands come from the
+  published case versions (`CaseSecretsProvider`); the public content from `GET /api/cases(/:id/content)`;
+  evidence from the Edge Function at `/evidence/db/<id>/v<n>/...`, at the location the content API names.
 - Auth: an HttpOnly session cookie. Signing in as `admin` with `ADMIN_KEY` gives an admin session; admin routes
   also accept the `X-Admin-Key` header.
 - Scoring lives in `services/scoring.ts`, with constants (`SCORING`) in the contract. Hint texts and full
-  toolbox commands are *paid content*: `site/vite.config.ts` strips them from the bundle, and the API returns them
-  in `progress.unlocked` only after charging for them.
+  toolbox commands are *paid content*: they are never in the case content the API serves, and the game API returns
+  them in `progress.unlocked` only after charging for them.
 
 **Client** (`site/src/`): framework-free TypeScript with hash routing in `main.ts`, built with the `h()` helper in
 `lib/dom.ts`.
-- Views load lazily per route. Case content is code-split per case and language (`content/load.ts`), with a
-  build-time catalog module for home, stats and leaderboard.
+- Views load lazily per route. Nothing about a case is bundled: `content/load.ts` fetches the catalog
+  (`GET /api/cases`) and each case per language (`GET /api/cases/:id/content`), cached per published version;
+  the router checks case ids against that catalog.
 - i18n: EN + HE (RTL) through `defineStrings`, split across several `i18n/strings-*.ts` files.
-- The Evidence Explorer (`views/explorer.ts`, `explorer/*`) is a web worker plus a virtual list over the files in
-  `/evidence/<case>/files/`.
+- The Evidence Explorer (`views/explorer.ts`, `explorer/*`) is a web worker plus a virtual list over the case's
+  evidence files. Every evidence URL goes through `content/evidence.ts` (the location from the content API).
 - Dialogs, confirms, sheets, popovers, menus, toasts and banners come from `lib/overlay.ts`; never build them inline.
 - Styling: plain CSS on a token system. Use the tokens and components recorded in `DESIGN.md`, not raw colours or px values.
 
@@ -70,12 +76,16 @@ git worktree, copy them from the main checkout instead.
 `docs/CASE_CONTRACT.md`:
 - `generator/cases/<id>/build.py` (stdlib Python, deterministic) writes `build/evidence/<id>/` and
   `build/truth/<id>.answers.json`;
-- content goes in `site/src/content/cases/<id>(.he).json`, with no answers;
+- content goes in `site/src/content/cases/<id>(.he).json`, with no answers (the authoring source for the case
+  package; the site never imports it);
 - the sealed debriefs in `content-sealed/`;
 - an evidence-only solver in `solutions/<id>/solve.sh`.
 
-`scripts/make_flags.py` merges every case into the server secrets, and `scripts/package.sh` zips the evidence
-and copies the Explorer files. `build-all.sh` discovers new cases automatically.
+`scripts/make_flags.py` merges every case into the server secrets, `scripts/package.sh` zips the evidence into
+`build/evidence-zips/`, and `scripts/make_package.py` builds `build/packages/<id>-v<n>.case.zip`. `build-all.sh`
+discovers new cases automatically. A case (or a content fix) reaches a site only when its package is uploaded and
+published: `node --experimental-strip-types scripts/data.ts upload build/packages/<id>-v<n>.case.zip --publish --url <site>`.
+A deploy does not change any case.
 
 ## Rules specific to this repo
 

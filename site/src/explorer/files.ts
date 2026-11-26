@@ -1,5 +1,5 @@
-import { englishEvidenceFormats } from "../content/evidence-formats";
-import { dbCaseVersion, dbEnglishFormats } from "../content/db-cases";
+import { dbEnglishFormats } from "../content/db-cases";
+import { evidenceFileUrl } from "../content/evidence";
 import type { Case } from "../../shared/case";
 import { T } from "../i18n/strings-tools";
 import type { StepKind } from "./core";
@@ -97,18 +97,18 @@ export function evidenceFilesFor(c: Case): EvidenceFile[] {
   return files.sort((a, b) => Number(b.path === "README_FIRST.txt") - Number(a.path === "README_FIRST.txt"));
 }
 
-/** Where an evidence file is served: the versioned DB path for DB cases, the bundled static path otherwise. */
+/**
+ * Where an evidence file is served: whatever location the content API gave this case's published version
+ * (content/evidence.ts). The Explorer only opens after its case loaded, so the location is known.
+ */
 export function evidenceUrl(caseId: string, path: string): string {
-  const file = path.split("/").map(encodeURIComponent).join("/");
-  const version = dbCaseVersion(caseId);
-  return version === undefined
-    ? `${import.meta.env.BASE_URL}evidence/${encodeURIComponent(caseId)}/files/${file}`
-    : `${import.meta.env.BASE_URL}evidence/db/${encodeURIComponent(caseId)}/v${version}/files/${file}`;
+  const url = evidenceFileUrl(caseId, path);
+  if (url === undefined) throw new Error(`[explorer] evidence location of ${caseId} is not known yet`);
+  return url;
 }
 
-/** English format labels (they pick each file's parser), from the bundle or from the DB case's English content. */
-const englishFormatsOf = (caseId: string): ReadonlyArray<{ path: string; format: string }> | undefined =>
-  dbEnglishFormats(caseId) ?? englishEvidenceFormats(caseId);
+/** English format labels (they pick each file's parser), from the case's English content. */
+const englishFormatsOf = (caseId: string): ReadonlyArray<{ path: string; format: string }> | undefined => dbEnglishFormats(caseId);
 
 /** Zones a case's evidence is written in, from its English format labels (UTC is always offered first). */
 export function caseZones(c: Case): string[] {

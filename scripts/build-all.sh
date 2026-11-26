@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Full IncidentLab build: generators (3am-outage + generator/cases/*) -> server answer keys -> evidence zip + Explorer files
+# Full IncidentLab build: generators (3am-outage + generator/cases/*) -> server answer keys -> evidence zips
 # -> case packages (build/packages/, checked) -> solver test -> site -> server tests.
 # Usage: ./scripts/build-all.sh [--no-site]
 set -euo pipefail
@@ -46,7 +46,7 @@ done
 banner "Answer keys -> server secrets (scripts/make_flags.py)"
 "$PYTHON" scripts/make_flags.py
 
-banner "Package evidence + Explorer  (scripts/package.sh)"
+banner "Package evidence zips         (scripts/package.sh -> build/evidence-zips/)"
 "$ROOT/scripts/package.sh"
 
 banner "Package cases                (scripts/make_package.py -> build/packages/)"
@@ -76,7 +76,7 @@ if [[ "$BUILD_SITE" -eq 1 ]]; then
   )
   banner "Check: colour contrast, WCAG 2 + APCA (scripts/check-contrast.mts)"
   node --experimental-strip-types scripts/check-contrast.mts
-  banner "Check: no paid content in the bundle (scripts/check-bundle.mjs)"
+  banner "Check: no case content, paid content or answers in the bundle (scripts/check-bundle.mjs)"
   node scripts/check-bundle.mjs
   if (cd site && node -e 'process.exit(require("./package.json").scripts?.["test:server"] ? 0 : 1)'); then
     banner "Test: server                 (site: npm run test:server)"

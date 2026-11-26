@@ -7,6 +7,7 @@ import { CaseLangSchema } from "../../shared/case-records.ts";
 import { AppError } from "../domain/types.ts";
 import { sha256Hex } from "../repositories/case-repository.ts";
 import type { CaseService } from "../services/CaseService.ts";
+import { evidenceLocation } from "../services/evidenceStream.ts";
 import { json } from "./http.ts";
 
 export const PUBLIC_CONTENT_CACHE = "public, max-age=60, stale-while-revalidate=600";
@@ -40,13 +41,16 @@ export class ContentController {
     return cacheable(req, etag, body);
   }
 
-  /** GET /api/cases/:id/content?lang=en|he -> {id, version, lang, content}. ETag: contentSha + version + served lang. */
+  /** GET /api/cases/:id/content?lang=en|he -> {id, version, lang, content, evidence}. ETag: contentSha + version + served lang. */
   async content(req: Request, caseId: string): Promise<Response> {
     if (!CaseIdSchema.safeParse(caseId).success) throw new AppError(404, "case not found", { code: "not-found" });
     const lang = CaseLangSchema.safeParse(new URL(req.url).searchParams.get("lang") ?? "en");
     if (!lang.success) throw new AppError(400, "lang must be en or he");
     const published = await this.cases.getContent(caseId, lang.data);
     const etag = `"${published.meta.contentSha}-v${published.version}-${published.lang}"`;
-    return cacheable(req, etag, { id: caseId, version: published.version, lang: published.lang, content: published.content });
+    return cacheable(req, etag, {
+      id: caseId, version: published.version, lang: published.lang, content: published.content,
+      evidence: evidenceLocation(caseId, published.version),
+    });
   }
 }

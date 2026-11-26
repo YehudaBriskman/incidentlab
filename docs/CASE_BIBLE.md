@@ -178,14 +178,15 @@ python3 generator/build_repo.py      -> build/repo/shipfast-checkout (repo), bui
 python3 generator/gen_logs.py        -> nginx/access.log, nginx/nginx.conf.snippet, app/checkout-service.log, build/truth/logs.json
 python3 generator/gen_support.py     -> metrics, db, deploys (reads build/truth/repo.json), slack, README_FIRST.txt
 python3 scripts/make_flags.py        -> site/server/generated/secrets.json (server-only answer key + debrief), build/truth/answers.json
-scripts/package.sh                   -> repo/git-log.txt, site/public/evidence/3am-outage-evidence.zip, site/public/evidence/files/ (Explorer)
+scripts/package.sh                   -> repo/git-log.txt, build/evidence-zips/3am-outage-evidence.zip
+python3 scripts/make_package.py      -> build/packages/3am-outage-v1.case.zip (uploaded with scripts/data.ts upload --publish)
 cd site && npm run build             -> site/dist (Netlify publish dir)
 ```
 All generators: Python 3 stdlib only, `random.Random(SEED)`, import constants from `generator/timeline.py`,
 output root `build/evidence/3am-outage/`, and run from the repo root.
 
 ## 6. Site contract
-- `site/src/content/cases/3am-outage.json`: case content (schema in `site/shared/case.ts`). It contains NO answers.
+- `site/src/content/cases/3am-outage.json`: case content (schema in `site/shared/case.ts`), the authoring source of the case package; the site loads it from the content API. It contains NO answers.
 - `site/src/content/teasers.json`: the 4 "coming soon" cases.
-- `site/server/generated/secrets.json`: `{"caseId","answers":{qN: normalized},"debrief"}`, bundled into the Netlify Function only (gitignored).
-- Evidence zip served from `/evidence/3am-outage-evidence.zip`.
+- `site/server/generated/secrets.json`: the sealed answer key per case (gitignored), a build artefact for the checks; the game reads the published DB version (#68).
+- Evidence zip served from the content API's evidence location (`/evidence/db/3am-outage/v<n>.zip`), downloading as `3am-outage-evidence.zip`.

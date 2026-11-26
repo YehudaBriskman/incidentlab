@@ -6,7 +6,7 @@
 // I/O, not CPU, so it fits the edge CPU budget. The URL carries the version, so responses are immutable.
 //
 // All logic is in server/services/evidenceStream.ts (web APIs only), shared with the node tests and
-// tests/local-server.ts. The static /evidence/* files are untouched until #68 switches the client over.
+// tests/local-server.ts. Since #68 this is the only evidence the site serves (no static /evidence/ files).
 import { BlobsByteStore } from "../../server/repositories/ByteStore.ts";
 import { CaseRepository, EvidenceChunkRepository } from "../../server/repositories/case-repository.ts";
 import { BlobsKvStore } from "../../server/repositories/KvStore.ts";

@@ -214,7 +214,7 @@ test("explorer cache: a worker restart reloads a big file without downloading it
   test.setTimeout(150_000);
   const fetched: string[] = [];
   page.on("request", (req) => {
-    if (req.url().includes("/evidence/3am-outage/files/nginx/access.log")) fetched.push(req.url());
+    if (req.url().includes("/evidence/db/3am-outage/v1/files/nginx/access.log")) fetched.push(req.url());
   });
   await page.goto(ROUTE);
   await openFile(page, "nginx/access.log");
