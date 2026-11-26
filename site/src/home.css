@@ -14,7 +14,7 @@
 /* signed-out intro: value statement + one primary action, one row on desktop */
 .home-intro {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--gap-related) var(--gap-stack);
-  padding: var(--space-3) var(--space-4); background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+  padding: var(--space-3) var(--space-4); background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift);
 }
 .home-intro-text { min-inline-size: 0; flex: 1 1 32rem; }
 .home-intro-title { margin: 0; font-size: var(--type-body-size); font-weight: 600; line-height: var(--type-body-lh); }
@@ -25,7 +25,7 @@
 .home-top { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--gap-stack); flex: none; }
 .home-card {
   display: flex; flex-direction: column; min-inline-size: 0; block-size: 13.5rem;
-  background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden;
+  background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift); overflow: hidden;
 }
 .home-card-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: var(--gap-related);
@@ -99,7 +99,7 @@ a.home-row:hover { background: var(--hover); }
 /* the cases panel: header + toolbar, then the table scrolling inside */
 .home-cases {
   display: flex; flex-direction: column; flex: 0 1 auto; min-block-size: 0;
-  background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: clip;
+  background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift); overflow: clip;
 }
 .home-cases-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-related) var(--gap-stack); padding: var(--space-3) var(--space-4); }
 .home-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-related); flex: 1 1 auto; justify-content: flex-end; }
@@ -123,7 +123,8 @@ a.home-row:hover { background: var(--hover); }
 .home-filter-summary { margin: 0; color: var(--text-2); font-size: var(--type-label-size); }
 
 .home-table-slot { display: flex; flex-direction: column; flex: 0 1 auto; min-block-size: 0; }
-.home-table.dt-wrap { flex: 0 1 auto; min-block-size: 0; overflow: auto; overscroll-behavior: contain; border: 0; border-radius: 0; }
+.home-table.dt-wrap { flex: 0 1 auto; min-block-size: 0; overflow: auto; overscroll-behavior: contain; border: 0; border-radius: 0; box-shadow: none; }
+.home-col-nowrap { white-space: nowrap; }
 .home-cases-table th, .home-cases-table td { padding-block: var(--space-2); }
 .home-cases-table th:first-child, .home-cases-table td:first-child { padding-inline-start: var(--space-4); }
 .home-cases-table th:last-child, .home-cases-table td:last-child { padding-inline-end: var(--space-4); }
@@ -156,7 +157,7 @@ a.home-row:hover { background: var(--hover); }
 @media (max-width: 600px) {
   .home-cases { overflow: visible; background: transparent; box-shadow: none; }
   .home-cases-head { padding-inline: 0; }
-  .home-cases-table.dt-stack tr { background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); margin-block-end: var(--space-2); }
+  .home-cases-table.dt-stack tr { background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift); margin-block-end: var(--space-2); }
   .home-cases-table th:first-child, .home-cases-table td:first-child { padding-inline-start: 0; }
 }
 @media (forced-colors: active) {
