@@ -119,3 +119,17 @@ test("no horizontal overflow at 390px in Hebrew; navigation folds behind a menu 
   const headerHeight = await page.evaluate(() => document.querySelector("header.navbar")?.getBoundingClientRect().height ?? 0);
   expect(headerHeight).toBeLessThan(140);
 });
+
+test("reflow: at 320px with 200% text the navbar wraps instead of scrolling sideways", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 700 });
+  for (const lang of ["en", "he"]) {
+    await page.addInitScript((l) => localStorage.setItem("il.lang", l), lang);
+    await page.goto("/#/login");
+    await page.evaluate(() => (document.documentElement.style.fontSize = "200%"));
+    await expect(ui.settingsButton(page)).toBeVisible();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow, `${lang}: horizontal overflow`).toBeLessThanOrEqual(0);
+    const box = await ui.settingsButton(page).boundingBox();
+    expect(box && box.x >= 0 && box.x + box.width <= 320, `${lang}: settings button on screen`).toBe(true);
+  }
+});

@@ -456,8 +456,10 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 .shell-main { grid-area: main; padding-block-start: var(--space-4); min-block-size: 100dvh; }
 .shell > .footer { grid-area: footer; }
 /* 56px row: a 44px control plus 12px */
+/* flex-wrap: at 320px with 200% text the logo and the two buttons don't fit one line; the buttons wrap to a
+   second row instead of pushing the page sideways (WCAG 1.4.10 reflow). At normal sizes it never wraps. */
 .navbar-row {
-  display: flex; align-items: center; gap: var(--space-3);
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3);
   max-inline-size: var(--page); margin-inline: auto; padding-inline: var(--gutter);
   min-block-size: calc(var(--control-md) + var(--space-3));
 }
