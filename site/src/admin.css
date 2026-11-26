@@ -26,11 +26,11 @@
 .admin-h2-row > .admin-h2 { margin: 0; }
 .admin-table-head .admin-h2-row { margin: 0; }
 .admin-info {
-  flex: none; display: inline-grid; place-items: center; inline-size: 20px; block-size: 20px; padding: 0;
+  /* --target-min: 24px (the WCAG 2.5.8 floor), 44px on coarse pointers and in the admin below 900px (#126). */
+  flex: none; display: inline-grid; place-items: center; inline-size: var(--target-min); block-size: var(--target-min); padding: 0;
   border: 0; border-radius: var(--radius-pill); background: var(--fill-inset); color: var(--text-2);
-  font: 600 12px/1 var(--font-sans); cursor: help; position: relative;
+  font: 600 var(--type-label-size)/1 var(--font-sans); cursor: help;
 }
-.admin-info::after { content: ""; position: absolute; inset: -4px; }
 .admin-info:hover { background: var(--fill-track); color: var(--text-1); }
 .admin-hint.is-touch-only { display: none; }
 @media (hover: none) {
