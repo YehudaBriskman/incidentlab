@@ -82,6 +82,17 @@ export const TS = defineStrings({
     filterClear: "Clear filters",
     filterShown: (n: number, total: number): string => `${n} of ${total} cases shown`,
     filterNoCases: "No case matches these filters.",
+
+    // admin sidebar (views/admin.ts)
+    adminSide: "Dashboard menu",
+    adminSideTrigger: "Sections",
+    adminSideTriggerOn: (section: string): string => `Sections: ${section}`,
+    adminQuick: "Quick actions",
+    adminGroupPeople: "People",
+    adminGroupLive: "Live",
+    adminGroupEvent: "Event",
+    adminGroupAudit: "Audit",
+    adminProjector: "Projector board",
   },
   he: {
     navMain: "ראשי",
@@ -151,5 +162,15 @@ export const TS = defineStrings({
     filterClear: "ניקוי הסינון",
     filterShown: (n: number, total: number): string => `מוצגים ${n} מתוך ${total} תיקים`,
     filterNoCases: "אין תיק שמתאים לסינון.",
+
+    adminSide: "תפריט לוח הבקרה",
+    adminSideTrigger: "אזורים",
+    adminSideTriggerOn: (section: string): string => `אזורים: ${section}`,
+    adminQuick: "פעולות מהירות",
+    adminGroupPeople: "אנשים",
+    adminGroupLive: "בזמן אמת",
+    adminGroupEvent: "אירוע",
+    adminGroupAudit: "ביקורת",
+    adminProjector: "לוח למקרן",
   },
 });

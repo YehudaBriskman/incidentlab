@@ -134,12 +134,14 @@ function isKnownCase(id: string): boolean {
 }
 
 /**
- * Routes whose view has a sidebar: home, a case, its toolbox and its Explorer. Their column is reserved
+ * Routes whose view has a sidebar: home, a case, its toolbox and its Explorer, and admin. Their column is reserved
  * while the view loads (a DB case may not be in the catalog yet; an unknown id releases it on the 404).
  * public/settings-boot.js runs the same test before first paint; keep them in step.
  */
 function sidebarRoute(parts: readonly string[]): boolean {
   if (parts.length === 0) return true;
+  // Admin: its sign-in gate releases the column again (views/admin.ts); the signed-in dashboard doesn't shift.
+  if (parts.length === 1 && parts[0] === "admin") return true;
   const [section, id, sub] = parts;
   return section === "case" && id !== undefined && parts.length <= 3 && (sub === undefined || sub === "toolbox" || sub === "explorer");
 }
@@ -203,8 +205,8 @@ function route(): void {
     }
     if (parts[0] === "admin" && parts.length === 1) {
       // Admin shows titles and question names of every case: load them all (in parallel with its code).
-      // Admin is not on the sidebar yet: its tabs become sidebar sections in a follow-up (#60, after #62).
-      lazyView(() => Promise.all([import("./views/admin"), loadAllCases()]).then(([m]) => legacy(m.renderAdmin)));
+      // Its sections are sidebar navigation (#60); the view re-attaches the same dashboard on #/admin?tab=… changes.
+      lazyView(() => Promise.all([import("./views/admin"), loadAllCases()]).then(([m]): View => m.adminView));
       return;
     }
     if (parts[0] === "case" && parts[1] !== undefined) {
