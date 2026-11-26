@@ -38,6 +38,12 @@ test("Lab tab only where a lab variant exists; paid lab command only after the r
     await expect(page.getByRole("radio", { name: "Lab", exact: true })).toHaveCount(1);
   });
 
+  await test.step("the side panel says how to open the lab: docker run and the Codespaces template", async () => {
+    const box = page.locator(".lab-open");
+    await expect(box).toContainText(`docker run -it --rm ghcr.io/incidentslab/lab-${CASE_ID}:v1`);
+    await expect(box.getByRole("link", { name: "Codespaces template" })).toHaveAttribute("href", `https://github.com/IncidentsLab/lab-${CASE_ID}`);
+  });
+
   await test.step("before the reveal: free syntax only, paid lab command absent", async () => {
     await tab(page, "tcpdump-read", "Lab").click();
     const code = card(page, "tcpdump-read").locator("pre code");

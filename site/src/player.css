@@ -238,3 +238,9 @@
   .slide-title { font-size: var(--type-page-title-size); }
   .present-deck-foot .btn { padding-inline: var(--space-3); }
 }
+
+/* ---- toolbox: "Open the lab" box under the Lab switch (#146) ---- */
+.lab-open { display: grid; gap: var(--space-2); margin-block-start: var(--space-3); }
+.lab-open .side-h, .lab-open p { margin: 0; }
+.lab-open-cmd { display: flex; align-items: flex-start; gap: var(--space-2); }
+.lab-open-cmd code { flex: 1; min-inline-size: 0; padding: var(--space-2); border-radius: var(--radius-control); background: var(--fill-inset); font-size: var(--type-label-size); overflow-wrap: anywhere; }

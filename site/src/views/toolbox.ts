@@ -14,7 +14,8 @@ import "../player.css";
 import { playErrorText } from "../lib/errors";
 import { md } from "../lib/markdown";
 import { isAdmin, loadAccount, loadToday } from "../lib/session";
-import { caseSummary } from "../content/load";
+import { caseSummary, caseVersion } from "../content/load";
+import { labRunCommand, labTemplate } from "../lib/labs";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { T } from "../i18n/strings-player";
@@ -476,5 +477,28 @@ function shellSwitch(c: Case, state: PageState, redraw: () => void): HTMLElement
     h("legend", { class: "side-h" }, TS().tbShellLegend),
     h("div", { class: "side-options" }, radios.map((r) => r.el)),
     hasLab ? h("p", { class: "muted small" }, TG().labNote) : null,
+    hasLab ? labOpenBox(c) : null,
+  );
+}
+
+/** How to open this case's lab (#146): the docker command, and the Codespaces template when the case has one. */
+function labOpenBox(c: Case): HTMLElement {
+  const command = labRunCommand(c.id, caseVersion(c.id) ?? 1);
+  const template = labTemplate(c.id);
+  return h(
+    "div",
+    { class: "lab-open" },
+    h("p", { class: "side-h" }, TG().labOpenTitle),
+    h("p", { class: "muted small" }, TG().labOpenDocker),
+    h("div", { class: "lab-open-cmd" }, h("code", { class: "mono", dir: "ltr" }, command), copyButton(() => command)),
+    template === null
+      ? null
+      : h(
+          "p",
+          { class: "muted small" },
+          TG().labOpenCodespaces,
+          " ",
+          h("a", { href: template, target: "_blank", rel: "noopener noreferrer" }, TG().labOpenTemplate),
+        ),
   );
 }

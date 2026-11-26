@@ -72,6 +72,11 @@ export function onCatalogChange(fn: () => void): void {
 const summaryIn = (entry: CatalogEntry, lang: Lang): CaseSummary => (lang === "he" ? (entry.he ?? entry.en) : entry.en);
 
 /** A case's catalog card in the active language, or undefined for an unknown id (or before the catalog loaded). */
+/** The published version of a case (from the catalog), or undefined before the catalog has it. */
+export function caseVersion(id: string): number | undefined {
+  return catalog.get(id)?.version;
+}
+
 export function caseSummary(id: string): CaseSummary | undefined {
   const entry = catalog.get(id);
   return entry === undefined ? undefined : summaryIn(entry, getLang());

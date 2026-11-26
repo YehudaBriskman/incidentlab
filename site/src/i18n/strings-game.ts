@@ -28,6 +28,10 @@ export const TG = defineStrings({
     // command cards
     syntaxLabel: "Syntax",
     labTab: "Lab",
+    labOpenTitle: "Open the lab",
+    labOpenDocker: "With Docker (the shell starts in /case):",
+    labOpenCodespaces: "No Docker? Use the Codespaces template: create your own copy, then open a Codespace in it (it uses your free GitHub quota).",
+    labOpenTemplate: "Codespaces template",
     labNote: "Lab: for the lab image, a Linux shell with tcpdump, dig, jq and gawk and this case's evidence at /case. Run it from /case.",
     syntaxHelp: "Fill in the <placeholders> yourself, or reveal the exact command.",
     revealCommand: (cost: number): string => `Reveal full command (−${cost} pts)`,
@@ -158,6 +162,10 @@ export const TG = defineStrings({
 
     syntaxLabel: "תחביר",
     labTab: "מעבדה",
+    labOpenTitle: "פתיחת המעבדה",
+    labOpenDocker: "עם Docker (המעטפת נפתחת ב-/case):",
+    labOpenCodespaces: "אין Docker? השתמשו בתבנית ה-Codespaces: צרו עותק משלכם, ופתחו בו Codespace (הוא משתמש במכסה החינמית שלכם ב-GitHub).",
+    labOpenTemplate: "תבנית Codespaces",
     labNote: "מעבדה: לאימג' המעבדה, מעטפת לינוקס עם tcpdump, dig, jq ו-gawk והראיות של התיק ב-/case. מריצים מתוך /case.",
     syntaxHelp: "השלימו את ה-<placeholders> בעצמכם, או חשפו את הפקודה המדויקת.",
     revealCommand: (cost: number): string => `חשיפת הפקודה המלאה (−${cost} נק')`,
