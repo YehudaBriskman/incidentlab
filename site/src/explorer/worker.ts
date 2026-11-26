@@ -1,7 +1,8 @@
 // Heavy lifting for the explorer. File contents live ONLY here; the UI asks for
 // windows of rows and aggregate results.
-import { applyFilters, countUnique, FilterTimeout, histogram, looksLikeJsonLines, yearHint } from "./core";
-import { MAX_COPY_LINES, MAX_FILES_IN_WORKER, MAX_UNIQUE_ROWS } from "./protocol";
+import { cachedFetch } from "./cache";
+import { applyFilters, countUnique, csvColumnWidths, FilterTimeout, histogram, jsonFieldPaths, looksLikeJsonLines, sortIndices, yearHint } from "./core";
+import { MAX_COPY_LINES, MAX_DETAIL_CHARS, MAX_FILES_IN_WORKER, MAX_UNIQUE_ROWS } from "./protocol";
 import type { WorkerErrorCode, WorkerRequest, WorkerResponse } from "./protocol";
 
 const TIME_BUDGET_MS = 1500;
@@ -9,6 +10,8 @@ const TIME_BUDGET_MS = 1500;
 interface LoadedFile {
   lines: string[];
   view: Uint32Array | null; // null = all lines
+  /** the view is in a column's order, not file order, so `locate` cannot binary-search it */
+  sorted: boolean;
 }
 
 const files = new Map<string, LoadedFile>();
@@ -53,6 +56,7 @@ function lineAt(f: LoadedFile, row: number): number {
 /** View row of file line `line`, or -1 when the filter hides it. The view is sorted, so binary search. */
 function locate(f: LoadedFile, line: number): number {
   if (!f.view) return line >= 0 && line < f.lines.length ? line : -1;
+  if (f.sorted) return f.view.indexOf(line);
   let lo = 0;
   let hi = f.view.length - 1;
   while (lo <= hi) {
@@ -65,12 +69,12 @@ function locate(f: LoadedFile, line: number): number {
   return -1;
 }
 
-async function load(job: number, path: string, url: string): Promise<void> {
+async function load(job: number, path: string, url: string, mode: "text" | "json" | "csv", session: string): Promise<void> {
   loads.get(path)?.abort();
   const ac = new AbortController();
   loads.set(path, ac);
   try {
-    const res = await fetch(url, { signal: ac.signal });
+    const { res, fromCache } = await cachedFetch(url, ac.signal, session);
     if (!res.ok || !res.body) throw new HttpError(res.status);
     // With gzip/br, content-length is the compressed size while `loaded` counts decoded bytes, so the
     // total is unknown and the UI shows an indeterminate bar instead of one that lies.
@@ -98,8 +102,20 @@ async function load(job: number, path: string, url: string): Promise<void> {
     }
     rest += decoder.decode();
     if (rest !== "") lines.push(rest.endsWith("\r") ? rest.slice(0, -1) : rest);
-    store(path, { lines, view: null });
-    post({ type: "loaded", job, path, lineCount: lines.length, bytes: loaded, isJson: looksLikeJsonLines(lines), year: yearHint(lines) });
+    store(path, { lines, view: null, sorted: false });
+    const isJson = looksLikeJsonLines(lines);
+    post({
+      type: "loaded",
+      job,
+      path,
+      lineCount: lines.length,
+      bytes: loaded,
+      isJson,
+      year: yearHint(lines),
+      fields: isJson ? jsonFieldPaths(lines) : [],
+      widths: mode === "csv" ? csvColumnWidths(lines) : [],
+      fromCache,
+    });
   } catch (err) {
     if (ac.signal.aborted) post({ type: "error", job, code: "cancelled" });
     else post(errorFor(job, err));
@@ -142,7 +158,7 @@ function rangeView(from: number, to: number): Uint32Array {
 function handle(msg: WorkerRequest): void {
   switch (msg.type) {
     case "load":
-      void load(msg.job, msg.path, msg.url);
+      void load(msg.job, msg.path, msg.url, msg.mode, msg.session);
       return;
     case "cancelLoad":
       loads.get(msg.path)?.abort();
@@ -150,10 +166,16 @@ function handle(msg: WorkerRequest): void {
     case "filter": {
       const f = need(msg.job, msg.path);
       if (!f) return;
-      const active = msg.steps.some((s) => s.text !== "") || msg.json !== null;
+      const active = msg.steps.some((s) => s.text !== "") || msg.json.length > 0 || msg.time !== null;
       const skip = msg.skipHeader && f.lines.length > 0;
-      if (active) f.view = applyFilters(f.lines, msg.steps, msg.json, Date.now() + TIME_BUDGET_MS, skip);
+      const deadline = Date.now() + TIME_BUDGET_MS;
+      if (active) f.view = applyFilters(f.lines, msg.steps, msg.json, deadline, skip, { time: msg.time });
       else f.view = skip ? rangeView(1, f.lines.length) : null;
+      f.sorted = false;
+      if (msg.sort) {
+        f.view = sortIndices(f.lines, f.view ?? rangeView(0, f.lines.length), msg.sort.key, msg.sort.desc, deadline + TIME_BUDGET_MS);
+        f.sorted = true;
+      }
       post({ type: "filtered", job: msg.job, path: msg.path, total: f.lines.length - (skip ? 1 : 0), count: viewLength(f) });
       return;
     }
@@ -208,6 +230,18 @@ function handle(msg: WorkerRequest): void {
       const f = need(msg.job, msg.path);
       if (!f) return;
       post({ type: "located", job: msg.job, line: msg.line, row: locate(f, msg.line) });
+      return;
+    }
+    case "detail": {
+      const f = need(msg.job, msg.path);
+      if (!f) return;
+      if (msg.row < 0 || msg.row >= viewLength(f)) {
+        post({ type: "detail", job: msg.job, row: msg.row, line: -1, text: "", truncated: false });
+        return;
+      }
+      const line = lineAt(f, msg.row);
+      const text = f.lines[line] ?? "";
+      post({ type: "detail", job: msg.job, row: msg.row, line, text: text.slice(0, MAX_DETAIL_CHARS), truncated: text.length > MAX_DETAIL_CHARS });
       return;
     }
   }
