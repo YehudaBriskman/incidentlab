@@ -863,7 +863,7 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 .chip-frozen { font-weight: 700; }
 
 /* ============ table: one header style ============ */
-.stats-table thead th, .admin-table th, .prose thead th, .ex-table th {
+.stats-table thead th, .admin-table thead th, .prose thead th, .ex-table th {
   color: var(--text-muted); font-size: var(--step--2); text-transform: uppercase; letter-spacing: 0.06em;
   font-weight: 600; text-align: start; background: var(--surface-2); border-bottom: 1px solid var(--border-strong);
 }
@@ -1605,6 +1605,26 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
 .stat-sub.is-down { color: var(--danger-fg); }
 @media (max-width: 640px) {
   .data-table:not(.dt-stack) .dt-opt { display: none; }
+}
+/* selection column, detail rows, virtualized scroller, caller-built cards, column picker */
+.dt-select { inline-size: var(--target-min); text-align: center; }
+.dt-select-box { inline-size: 18px; block-size: 18px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.data-table tr.is-selected > * { background: var(--accent-soft); }
+.data-table tr.dt-detail > td { background: var(--surface-2); }
+.dt-spacer, .dt-spacer > td { padding: 0; border: 0; }
+.dt-wrap.dt-virtual { max-block-size: min(70vh, 48rem); overflow: auto; overscroll-behavior: contain; }
+.dt-wrap.dt-wrap-cards { border: 0; overflow: visible; }
+.dt-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.dt-card-select { display: inline-flex; align-items: center; justify-content: center; min-inline-size: var(--target-min); min-block-size: var(--target-min); }
+.dt-picker-wrap { display: inline-flex; }
+.dt-picker { padding: var(--space-3); min-inline-size: 14rem; display: grid; gap: var(--space-2); }
+.dt-picker-set { border: 0; margin: 0; padding: 0; display: grid; }
+.dt-picker-legend { padding: 0; margin-block-end: var(--space-1); font-size: var(--step--1); color: var(--text-2); }
+.dt-check { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--target-min); cursor: pointer; font-size: var(--step--1); }
+.dt-check input { inline-size: 18px; block-size: 18px; margin: 0; accent-color: var(--accent); }
+.dt-picker-reset { justify-self: start; }
+@media (forced-colors: active) {
+  .data-table tr.is-selected > * { forced-color-adjust: none; background: Highlight; color: HighlightText; }
 }
 /* phones: a stacking table becomes one card per row, each value labelled by its column */
 @media (max-width: 600px) {
