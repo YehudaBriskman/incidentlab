@@ -1,11 +1,14 @@
 // Local stand-in for Netlify: serves site/dist plus the real /api handler on the in-memory store.
-// Usage: node --experimental-strip-types tests/local-server.ts [port=8888] [--seed-db-case]
+// Usage: node --experimental-strip-types tests/local-server.ts [port=8888] [--seed-db-case] [--no-cases]
 //   ADMIN_KEY defaults to "local-admin-key-0123456789" (16+ chars required).
 //   /evidence/db/* goes through the same EvidenceService as the Edge Function, on the same memory store.
-//   --seed-db-case (dev only) stores a published DB case `db-demo` v1 with a 9 MiB file, for Range checks.
+//   Every case package in build/packages/ (scripts/build-all.sh writes them) is uploaded and published at
+//   startup, through the same upload API as `scripts/data.ts upload --publish`: since #68 the site has no
+//   bundled cases, so this is how the local store gets them. --no-cases starts with an empty store.
+//   --seed-db-case (dev only) also stores a published DB case `db-demo` v1 with a 9 MiB file, for Range checks.
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
-import { readFile, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 
 process.env.INCIDENTLAB_STORE = "memory";
@@ -31,6 +34,24 @@ if (args.includes("--seed-db-case")) {
   });
   console.log("seeded DB case db-demo v1: /evidence/db/db-demo/v1/files/logs/big.log (9 MiB + 123 B)");
 }
+if (!args.includes("--no-cases")) {
+  const { uploadCommand } = await import("../scripts/upload-case.ts");
+  const packagesDir = new URL("../build/packages/", import.meta.url).pathname;
+  const packages = (await readdir(packagesDir).catch(() => [] as string[])).filter((f) => f.endsWith(".case.zip"));
+  // Oldest version first, so the highest version of each case ends up published.
+  const version = (f: string): number => Number(/-v(\d+)\.case\.zip$/.exec(f)?.[1] ?? 0);
+  packages.sort((a, b) => version(a) - version(b) || a.localeCompare(b));
+  if (packages.length === 0) console.warn(`[local] no case packages in ${packagesDir}: the site will list no cases (run scripts/build-all.sh)`);
+  const inProcess = (input: string, init: RequestInit): Promise<Response> => handler(new Request(input, init), { ip: "127.0.0.1" });
+  for (const file of packages) {
+    await uploadCommand({
+      file: join(packagesDir, file), url: `http://localhost:${PORT}`, publish: true, acceptAnswerChanges: false,
+      adminKey: process.env.ADMIN_KEY ?? "", fetch: inProcess, log: () => undefined,
+    });
+    console.log(`[local] published ${file}`);
+  }
+}
+
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml",
   ".json": "application/json", ".zip": "application/zip", ".txt": "text/plain; charset=utf-8", ".log": "text/plain; charset=utf-8",
