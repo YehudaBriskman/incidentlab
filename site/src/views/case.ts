@@ -333,6 +333,26 @@ function lockedCard(c: Case, locked: LockedToday): HTMLElement {
   );
 }
 
+/**
+ * Every gain and cost, stated before the player starts: the bonuses a hint, command, wrong answer or
+ * revealed answer forfeits are otherwise first met mid-stage. Open until the player has started.
+ */
+function scoringRules(player: ProgressView): HTMLElement {
+  return h(
+    "details",
+    { class: "briefing scoring-rules", open: player.setupDoneAt === null },
+    h("summary", {}, TP().scoringHead),
+    h(
+      "ul",
+      {},
+      h("li", {}, TP().scoringGain(SCORING.TIME_BONUS_MAX, SCORING.CLEAN_BONUS, SCORING.FIRST_BLOOD_BONUS)),
+      h("li", {}, TP().scoringCost(SCORING.COMMAND_COST, SCORING.WRONG_COST, SCORING.WRONG_CAP, SCORING.CLEAN_BONUS)),
+      h("li", {}, TP().scoringReveal(SCORING.COMPLETION_BONUS)),
+      h("li", {}, TP().scoringPar(formatNumber(player.maxScore))),
+    ),
+  );
+}
+
 function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) => void, locked: LockedToday | null, recheck: () => void): HTMLElement {
   const done = player.setupDoneAt !== null;
   const briefing = h(
@@ -419,6 +439,7 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
         ),
       ),
     ),
+    scoringRules(player),
     done
       ? h("p", { class: "done-note" }, T().setupComplete)
       : locked

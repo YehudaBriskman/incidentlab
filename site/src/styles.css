@@ -1383,3 +1383,7 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
   .dt-stack tbody tr:last-child > * { border: 0; }
   [dir=rtl] .dt-stack td.num { direction: rtl; text-align: start; }
 }
+
+/* ===== case play (wave 4): upfront scoring rules, finished-stage context, debrief next steps ===== */
+.scoring-rules ul { margin: 0; padding-inline-start: 1.2em; color: var(--text-2); }
+.scoring-rules li + li { margin-block-start: var(--space-2); }

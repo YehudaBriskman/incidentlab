@@ -81,6 +81,37 @@ export const TP = defineStrings({
     revealConfirm: "Yes, reveal the answer",
     keepTrying: "Keep trying",
 
+    // setup: every gain and cost, stated before the clock starts
+    scoringHead: "How scoring works",
+    scoringGain: (time: number, clean: number, first: number): string =>
+      `Each stage pays its base points, a time bonus of up to +${time} for a quick solve, +${clean} for a clean solve (no hints, commands or wrong answers) and +${first} if you are the first player to solve it.`,
+    scoringCost: (cmd: number, wrong: number, cap: number, clean: number): string =>
+      `Hints cost what their button says. A full command costs ${cmd} pts. A wrong answer costs ${wrong} pts (at most −${cap} per stage); an answer in the wrong format is free. Your first hint, command or wrong answer on a stage also ends its +${clean} clean bonus.`,
+    scoringReveal: (completion: number): string =>
+      `If you're stuck you can reveal a stage's answer: that stage scores 0, and you lose the +${completion} completion bonus for solving every stage yourself.`,
+    scoringPar: (par: string): string =>
+      `Par (${par}) is every stage solved quickly and cleanly, plus the completion bonus. First-solver bonuses can take you above it.`,
+
+    // finished stage
+    hintsUsedHead: "Hints you used",
+    cleanLost: (hint: boolean, command: boolean, wrong: boolean): string =>
+      `lost: ${[hint ? "hint" : null, command ? "command" : null, wrong ? "wrong answer" : null].filter((x) => x !== null).join(", ")}`,
+    firstTaken: "another player solved it first",
+
+    // hint confirm
+    hintPrompt: (i: number, cost: number, clean: number, cleanOpen: boolean): string =>
+      `Spend ${cost} pts on hint ${i}?${cleanOpen ? ` It's your first spend on this stage, so it also ends the +${clean} clean bonus.` : ""}`,
+
+    // debrief per-stage detail
+    stageCosts: (hints: number, commands: number, wrong: number): string => {
+      const parts = [
+        hints > 0 ? `${hints} ${plural(hints, "hint", "hints")}` : null,
+        commands > 0 ? `${commands} ${plural(commands, "command", "commands")}` : null,
+        wrong > 0 ? `${wrong} wrong` : null,
+      ].filter((x) => x !== null);
+      return parts.length === 0 ? "clean" : parts.join(" · ");
+    },
+
     // debrief share line
     shareHints: (n: number): string => (n === 0 ? "no hints" : `${n} ${plural(n, "hint", "hints")}`),
     sharePts: (score: number): string => `${num(score)} pts`,
@@ -156,6 +187,33 @@ export const TP = defineStrings({
         : `לחשוף את התשובה לשלב ${stage}? השלב יקבל 0 (בונוס הסיום כבר אבד).`,
     revealConfirm: "כן, לחשוף את התשובה",
     keepTrying: "להמשיך לנסות",
+
+    scoringHead: "איך מחשבים את הניקוד",
+    scoringGain: (time: number, clean: number, first: number): string =>
+      `כל שלב נותן את ניקוד הבסיס שלו, בונוס זמן של עד ${ltr(`+${time}`)} על פתרון מהיר, ${ltr(`+${clean}`)} על פתרון נקי (בלי רמזים, פקודות או תשובות שגויות) ו־${ltr(`+${first}`)} למי שפותר אותו ראשון.`,
+    scoringCost: (cmd: number, wrong: number, cap: number, clean: number): string =>
+      `רמז עולה את מה שכתוב על הכפתור שלו. פקודה מלאה עולה ${cmd} נק'. תשובה שגויה עולה ${wrong} נק' (עד ${ltr(`−${cap}`)} לשלב); תשובה בפורמט לא נכון לא עולה כלום. הרמז, הפקודה או התשובה השגויה הראשונים בשלב מבטלים גם את בונוס הפתרון הנקי (${ltr(`+${clean}`)}).`,
+    scoringReveal: (completion: number): string =>
+      `נתקעתם? אפשר לחשוף את התשובה של שלב: השלב יקבל 0 ותאבדו את בונוס הסיום (${ltr(`+${completion}`)}) על פתרון כל השלבים בעצמכם.`,
+    scoringPar: (par: string): string =>
+      `היעד (${par}) הוא כל השלבים פתורים מהר ונקי, ועוד בונוס הסיום. בונוסי "ראשונים לפתור" יכולים להעלות אתכם מעליו.`,
+
+    hintsUsedHead: "הרמזים שפתחתם",
+    cleanLost: (hint: boolean, command: boolean, wrong: boolean): string =>
+      `אבד בגלל: ${[hint ? "רמז" : null, command ? "פקודה" : null, wrong ? "תשובה שגויה" : null].filter((x) => x !== null).join(", ")}`,
+    firstTaken: "שחקן אחר פתר ראשון",
+
+    hintPrompt: (i: number, cost: number, clean: number, cleanOpen: boolean): string =>
+      `להוציא ${cost} נק' על רמז ${i}?${cleanOpen ? ` זו ההוצאה הראשונה בשלב, ולכן היא מבטלת גם את בונוס הפתרון הנקי (${ltr(`+${clean}`)}).` : ""}`,
+
+    stageCosts: (hints: number, commands: number, wrong: number): string => {
+      const parts = [
+        hints > 0 ? heCount(hints, "רמז אחד", "שני רמזים", "רמזים") : null,
+        commands > 0 ? heCount(commands, "פקודה אחת", "שתי פקודות", "פקודות") : null,
+        wrong > 0 ? heCount(wrong, "שגיאה אחת", "שתי שגיאות", "שגיאות") : null,
+      ].filter((x) => x !== null);
+      return parts.length === 0 ? "נקי" : parts.join(" · ");
+    },
 
     shareHints: (n: number): string => (n === 0 ? "ללא רמזים" : heCount(n, "רמז אחד", "שני רמזים", "רמזים")),
     sharePts: (score: number): string => `${num(score)} נק'`,
