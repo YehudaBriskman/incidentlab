@@ -79,6 +79,18 @@ test("a changed file (200 on revalidation) replaces the stored copy", async () =
   assert.equal(await next.res.text(), "body 2");
 });
 
+test("an immutable (versioned) file is reused without a request, in any session", async () => {
+  const { storage } = fakeCaches();
+  const net = fakeFetch(() => new Response("v1 body", { headers: { etag: '"sha"', "cache-control": "public, max-age=31536000, immutable" } }));
+  const deps = { caches: storage, fetch: net.fetch, now: () => 1 };
+  await (await mod.cachedFetch("http://x/evidence/db/c/v1/files/a.log", signal, "s1", deps)).res.text();
+  await settle();
+  const again = await mod.cachedFetch("http://x/evidence/db/c/v1/files/a.log", signal, "s2", deps);
+  assert.equal(again.fromCache, true);
+  assert.equal(await again.res.text(), "v1 body");
+  assert.equal(net.calls.length, 1, "no revalidation for an immutable URL");
+});
+
 test("without a validator, a stored body is reused only in the same page session", async () => {
   const { storage } = fakeCaches();
   const net = fakeFetch(() => new Response("x"));
