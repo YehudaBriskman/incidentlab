@@ -144,7 +144,9 @@ function draw(root: HTMLElement, stats: UserStats, board: LeaderboardResponse | 
       : ranked !== null
         ? TO().rankOfN(stats.rank, Math.max(ranked, stats.rank))
         : TO().rankAlone(stats.rank);
-  const detail = (label: string, value: Child): HTMLElement[] => [h("dt", {}, label), h("dd", {}, value)];
+  // Each pair in its own <div> (valid inside <dl>): the grid places whole pairs, so a label can never wrap away
+  // from its value onto another row.
+  const detail = (label: string, value: Child): HTMLElement => h("div", { class: "detail-pair" }, h("dt", {}, label), h("dd", {}, value));
 
   setChildren(
     root,

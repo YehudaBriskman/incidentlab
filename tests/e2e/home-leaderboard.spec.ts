@@ -40,3 +40,28 @@ test("live strip: a reload draws the remembered announcement before /api/event a
     await request.put("/api/admin/event", { headers: adminHeaders, data: original });
   }
 });
+
+test("My stats: every detail label sits above its own value (pairs never split across rows)", async ({ page, request }) => {
+  const { approveAccount, randomUsername } = await import("./support");
+  const username = randomUsername("e2epairs");
+  const reg = await page.request.post("/api/auth/register", { data: { username, password: "e2e-password-123" } });
+  expect(reg.status(), await reg.text()).toBe(201);
+  await approveAccount(request, username);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/#/me");
+    await expect(page.locator(".detail-list dt").first()).toBeVisible();
+    const split = await page.evaluate(() =>
+      [...document.querySelectorAll(".detail-list dt")]
+        .filter((dt) => {
+          const dd = dt.nextElementSibling;
+          if (!(dd instanceof HTMLElement) || dd.tagName !== "DD") return true;
+          const a = dt.getBoundingClientRect();
+          const b = dd.getBoundingClientRect();
+          return Math.abs(a.left - b.left) > 2 || b.top < a.top;
+        })
+        .map((dt) => dt.textContent),
+    );
+    expect(split, `${width}px`).toEqual([]);
+  }
+});
