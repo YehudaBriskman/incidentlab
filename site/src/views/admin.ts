@@ -3304,7 +3304,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         "div",
         { class: "cal-head" },
         h("button", { type: "button", class: "btn btn-ghost btn-sm", id: "cal-prev", "aria-label": T().admPrevMonth, onclick: () => shift(-1) }, rtl ? "→" : "←"),
-        h("h2", { class: "admin-h2 cal-title", "aria-live": "polite" }, monthLabel),
+        headWithHint(h("h2", { class: "admin-h2 cal-title", "aria-live": "polite" }, monthLabel), T().admCalendarHint),
         h("button", { type: "button", class: "btn btn-ghost btn-sm", id: "cal-next", "aria-label": T().admNextMonth, onclick: () => shift(1) }, rtl ? "←" : "→"),
         h(
           "button",
@@ -3320,7 +3320,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
           T().admThisMonth,
         ),
       ),
-      h("p", { class: "muted small admin-hint" }, T().admCalendarHint),
+      h("p", { class: "muted small admin-hint is-touch-only" }, T().admCalendarHint),
       h("div", { class: "cal-grid" }, cells),
     );
   }
