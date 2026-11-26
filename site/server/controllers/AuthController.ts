@@ -5,7 +5,18 @@ import type { AuthService } from "../services/AuthService.ts";
 import type { EventService } from "../services/EventService.ts";
 import type { ScheduleService } from "../services/ScheduleService.ts";
 import type { StatsService } from "../services/StatsService.ts";
-import { json, noContent, parseBody, sessionCookie, sessionToken, withCookie } from "./http.ts";
+import { json, noContent, parseBody, publicJson, sessionCookie, sessionToken, withCookie } from "./http.ts";
+
+/**
+ * CDN windows for the public GETs (seconds). Every open tab polls /api/event and the leaderboard, so each cached
+ * window costs one function call however many players are watching. Instructor writes purge by tag at once;
+ * these bounds only apply to changes nobody purges (answers moving the leaderboard, a case being published).
+ */
+export const PUBLIC_CACHE = {
+  event: { maxAgeSeconds: 10, staleSeconds: 20 },
+  leaderboard: { maxAgeSeconds: 10, staleSeconds: 20 },
+  today: { maxAgeSeconds: 60, staleSeconds: 60 },
+} as const;
 
 const EmptyBodySchema = z.object({}).strict();
 
@@ -69,18 +80,25 @@ export class AuthController {
     return json(200, { stats: await this.stats.forAccount(principal.account) });
   }
 
+  // The three public GETs below never read the session: the CDN may serve them to everyone (publicJson).
   async today(): Promise<Response> {
-    return json(200, await this.schedule.today());
+    const today = await this.schedule.today();
+    // Never let a cached "today" outlive its day: cap both windows at the seconds left until midnight there.
+    const left = this.schedule.secondsUntilNextDay(today.timezone);
+    const maxAgeSeconds = Math.min(PUBLIC_CACHE.today.maxAgeSeconds, left);
+    const staleSeconds = Math.min(PUBLIC_CACHE.today.staleSeconds, Math.max(0, left - maxAgeSeconds));
+    return publicJson(today, { maxAgeSeconds, staleSeconds, tags: ["today"] });
   }
 
   async event(): Promise<Response> {
-    return json(200, await this.events.get());
+    return publicJson(await this.events.get(), { ...PUBLIC_CACHE.event, tags: ["event"] });
   }
 
   async leaderboard(req: Request): Promise<Response> {
     const raw = new URL(req.url).searchParams.get("caseId");
     const parsed = raw === null || raw === "" ? null : CaseIdSchema.safeParse(raw);
     if (parsed && !parsed.success) throw new AppError(400, "invalid caseId");
-    return json(200, await this.stats.leaderboard({ caseId: parsed ? parsed.data : null, frozenAt: await this.events.freezeMoment() }));
+    const board = await this.stats.leaderboard({ caseId: parsed ? parsed.data : null, frozenAt: await this.events.freezeMoment() });
+    return publicJson(board, { ...PUBLIC_CACHE.leaderboard, tags: ["leaderboard"] });
   }
 }

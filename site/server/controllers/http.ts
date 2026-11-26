@@ -11,6 +11,23 @@ export const json = (status: number, body: unknown, extraHeaders: Record<string,
 
 export const noContent = (): Response => new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
 
+/** How long Netlify's CDN may serve a public response before asking the function again, and which tags purge it. */
+export type PublicCache = { readonly maxAgeSeconds: number; readonly staleSeconds: number; readonly tags: readonly string[] };
+
+/**
+ * A 200 for a public, non-personalised GET that the CDN may cache: cached hits never reach the function, which is
+ * what keeps the 30 s polls of every open tab off the monthly function-call budget. ONLY for responses that
+ * don't read or set the session: browsers always revalidate (max-age=0), the CDN keys on the URL and its query
+ * string only (never the cookie), and admin writes purge by tag (services/CachePurger.ts).
+ */
+export const publicJson = (body: unknown, cache: PublicCache): Response =>
+  json(200, body, {
+    "cache-control": "public, max-age=0, must-revalidate",
+    "netlify-cdn-cache-control": `public, durable, max-age=${cache.maxAgeSeconds}, stale-while-revalidate=${cache.staleSeconds}`,
+    "netlify-cache-tag": cache.tags.join(","),
+    "netlify-vary": "query",
+  });
+
 export const errorResponse = (
   status: number,
   error: string,

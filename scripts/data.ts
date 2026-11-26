@@ -9,6 +9,7 @@
 //   node --experimental-strip-types scripts/data.ts migrate --check        (exit 3 when migrations are pending)
 //   node --experimental-strip-types scripts/data.ts upload <package.case.zip> [--publish] [--accept-answer-changes] [--url <base>]
 //   node --experimental-strip-types scripts/data.ts publish <case-id> <version> [--accept-answer-changes] [--url <base>]
+//   node --experimental-strip-types scripts/data.ts usage      (read-only: monthly bandwidth and counters vs the free plan)
 //     upload/publish go through the HTTP API (scripts/upload-case.ts), not Blobs: the URL defaults to the
 //     local server, production needs an explicit --url.
 //
@@ -24,6 +25,7 @@ import type { BlobsCredentials } from "../site/server/repositories/KvStore.ts";
 import { SnapshotSchema, diffSnapshot, restoreSnapshot, takeSnapshot } from "../site/server/services/BackupService.ts";
 import type { Snapshot, SnapshotDiff } from "../site/server/services/BackupService.ts";
 import { runPublishCli, runUploadCli } from "./upload-case.ts";
+import { fetchUsage, formatUsage } from "../site/server/ops/netlify-usage.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const args = process.argv.slice(2);
@@ -130,8 +132,15 @@ const main = async (): Promise<void> => {
       await runPublishCli(args.slice(1));
       return;
     }
+    case "usage": {
+      // Read-only: this month's bandwidth and counters against the legacy Free plan limits (#142).
+      const { siteID, token } = credentials();
+      const report = await fetchUsage(token, siteID);
+      for (const line of formatUsage(report, new Date())) console.log(line);
+      return;
+    }
     default:
-      die("commands: backup | list-backups | restore <src> [--apply] [--prune] | migrate [--apply|--check] | upload <package> [--publish] [--accept-answer-changes] [--url <base>] | publish <case-id> <version> [--accept-answer-changes] [--url <base>]", 2);
+      die("commands: backup | list-backups | restore <src> [--apply] [--prune] | migrate [--apply|--check] | upload <package> [--publish] [--accept-answer-changes] [--url <base>] | publish <case-id> <version> [--accept-answer-changes] [--url <base>] | usage", 2);
   }
 };
 

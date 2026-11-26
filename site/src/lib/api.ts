@@ -22,6 +22,7 @@ import {
   type UserStats,
 } from "../../shared/contract";
 import { getLang } from "../i18n/i18n";
+import { isCacheHit, type ClockSample } from "./clock";
 
 const rawBase: unknown = import.meta.env["VITE_API_BASE"];
 const API_BASE = typeof rawBase === "string" ? rawBase.replace(/\/$/, "") : "";
@@ -67,6 +68,18 @@ function emitConnectivity(state: Connectivity): void {
   for (const fn of connectivityListeners) fn(state);
 }
 
+/** Server-clock readings from responses the origin answered (not the CDN), taken from their `Date` header. */
+const clockListeners = new Set<(sample: ClockSample) => void>();
+export function onServerClock(fn: (sample: ClockSample) => void): void {
+  clockListeners.add(fn);
+}
+function reportClock(res: Response, sentAt: number, receivedAt: number): void {
+  if (clockListeners.size === 0 || isCacheHit(res.headers.get("cache-status"))) return;
+  const date = Date.parse(res.headers.get("date") ?? "");
+  // `Date` has whole seconds: +500 ms puts the reading in the middle of its second.
+  if (Number.isFinite(date)) for (const fn of clockListeners) fn({ serverMs: date + 500, sentAt, receivedAt });
+}
+
 const TIMEOUT_MS = 10_000;
 const MAX_RETRIES = 2;
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -97,7 +110,9 @@ async function send(method: "GET" | "POST", path: string, body?: unknown): Promi
   // Retries: GET on network errors and 5xx; POST only when no response was received at all.
   for (let attempt = 0; ; attempt++) {
     try {
+      const sentAt = Date.now();
       const res = await fetchOnce(`${API_BASE}${path}`, init);
+      reportClock(res, sentAt, Date.now());
       if (method === "GET" && res.status >= 500 && attempt < MAX_RETRIES) {
         emitConnectivity("retrying");
         await sleep(600 * 2 ** attempt);
@@ -126,6 +141,16 @@ async function readJson(res: Response): Promise<unknown> {
 }
 
 async function request<S extends z.ZodType>(method: "GET" | "POST", path: string, schema: S, body?: unknown): Promise<z.infer<S>> {
+  return (await requestWithHeaders(method, path, schema, body)).data;
+}
+
+/** `request`, plus the response headers (the event poll reads `Cache-Status` and `Age`). */
+async function requestWithHeaders<S extends z.ZodType>(
+  method: "GET" | "POST",
+  path: string,
+  schema: S,
+  body?: unknown,
+): Promise<{ data: z.infer<S>; headers: Headers }> {
   const res = await send(method, path, body);
   const json = await readJson(res);
   if (!res.ok) {
@@ -143,7 +168,7 @@ async function request<S extends z.ZodType>(method: "GET" | "POST", path: string
     console.error(`[api] ${path} returned an unexpected shape`, parsed.error.issues);
     throw new ApiError(res.status, "The server sent an unexpected response.");
   }
-  return parsed.data;
+  return { data: parsed.data, headers: res.headers };
 }
 
 async function requestNoContent(path: string, body: unknown): Promise<void> {
@@ -202,9 +227,13 @@ export async function fetchToday(): Promise<TodayResponse> {
   return request("GET", "/api/today", TodayResponseSchema);
 }
 
-/** The live event (public). `serverTime` lets the client correct its clock for countdowns. */
-export async function fetchEvent(): Promise<{ event: LiveEvent; serverTime: string }> {
-  return request("GET", "/api/event", EventResponseSchema);
+/**
+ * The live event (public, CDN-cached for a few seconds). `serverTime` lets the client correct its clock for
+ * countdowns; `cacheHit` and `age` say how old that time is (see lib/clock.ts responseServerMs).
+ */
+export async function fetchEvent(): Promise<{ event: LiveEvent; serverTime: string; cacheHit: boolean; age: string | null }> {
+  const { data, headers } = await requestWithHeaders("GET", "/api/event", EventResponseSchema);
+  return { ...data, cacheHit: isCacheHit(headers.get("cache-status")), age: headers.get("age") };
 }
 
 /** Public leaderboard: overall when `caseId` is null, else for that case. */

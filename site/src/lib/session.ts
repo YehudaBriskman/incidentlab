@@ -68,9 +68,15 @@ export async function signOut(): Promise<void> {
 }
 
 let today: Promise<TodayResponse> | null = null;
+let todayAt = 0;
+/** A forced refresh within this window reuses the last answer (or the request still in flight). */
+const TODAY_REUSE_MS = 10_000;
 /** Today's scheduled case (cached for the page load; refreshed on demand). */
 export function loadToday(refresh = false): Promise<TodayResponse> {
-  if (!today || refresh) {
+  // A cold home load asks twice in a row (top bar, then home's refresh): one request serves both.
+  const fresh = today !== null && Date.now() - todayAt < TODAY_REUSE_MS;
+  if (!today || (refresh && !fresh)) {
+    todayAt = Date.now();
     today = fetchToday().catch((err: unknown) => {
       today = null;
       throw err;

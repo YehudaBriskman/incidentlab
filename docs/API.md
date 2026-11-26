@@ -9,7 +9,34 @@ both the browser and the function import it.
 
 - Request and response bodies are JSON. POST/PUT bodies must send `content-type: application/json` (otherwise 415) and be at most 4 KB (64 KB for the schedule, 512 KB to start an upload; otherwise 413). The upload chunk and part PUTs are the exception: raw `application/octet-stream` bodies.
 - Every response carries `cache-control: no-store`, except the two public DB-content routes below
-  (`GET /api/cases`, `GET /api/cases/:caseId/content`), which carry no account data and are cacheable.
+  (`GET /api/cases`, `GET /api/cases/:caseId/content`), which carry no account data and are cacheable, and the
+  three public polling routes in "CDN-cached public GETs".
+
+## CDN-cached public GETs (#140)
+
+`GET /api/event`, `GET /api/today` and `GET /api/leaderboard[?caseId=]` return the same body to every caller
+and never read or set the session. Every open tab polls them, so Netlify's CDN serves them
+(`controllers/http.ts` `publicJson`) and cached hits never invoke the function. That matters because the free
+plan allows 125,000 function calls a month.
+
+| Route | `Netlify-CDN-Cache-Control` | Tag | Purged by |
+|---|---|---|---|
+| `/api/event` | `public, durable, max-age=10, stale-while-revalidate=20` | `event` | `PUT /api/admin/event` |
+| `/api/leaderboard` | `public, durable, max-age=10, stale-while-revalidate=20` | `leaderboard` | `PUT /api/admin/event` (freeze) |
+| `/api/today` | `max-age` and `stale-while-revalidate` up to 60 s each, capped at the seconds left until midnight in the schedule's time zone | `today` | `PUT /api/admin/schedule` |
+
+- Browsers get `Cache-Control: public, max-age=0, must-revalidate`, so they always ask the CDN.
+- `Netlify-Vary: query`: the cache key is the URL and its query string, never the cookie.
+- Purges go through `services/CachePurger.ts`. In production that is Netlify's `purgeCache`; tests and the local
+  server use a no-op. A failed purge is logged, and the old copy lives until its max-age.
+- Changes nobody purges (answers moving the leaderboard, a case being published) show within 10 s for the
+  leaderboard and 60 s for today.
+- **Clock:** a cached `serverTime` can be up to about 30 s old. The client (`src/lib/clock.ts`) takes the server
+  clock from responses the origin answered: their `Date` header, or `/api/event`'s `serverTime` when its
+  `Cache-Status` is not a hit. A cached `/api/event` counts only when its `Age` header is present.
+- **Event poll:** the client (`src/lib/event.ts`) polls `/api/event` every 30 s while an event is running or
+  starts within an hour, every 2 minutes otherwise. It doesn't poll at all while the tab is hidden, and polls
+  once when the tab comes back.
 - Errors are non-2xx with body `{ "error": string, "code"?: string, "retryAfterSeconds"?: number, "details"?: string[] }` (`details` lists every failed check of a rejected upload). Status codes: 400 validation, 401 signed out, 403 forbidden (see codes), 404, 405, 409 conflict (username taken, already finished, no more hints, concurrent update: retry), 413, 415, 429 rate limit (also sends `Retry-After`), 500 `{"error":"internal"}`, 503 admin disabled.
 - Error codes the UI acts on: `signed-out`, `bad-credentials`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `not-today`, `event-closed`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`.
 
