@@ -1,228 +1,234 @@
-import type { AccountView, CaseStats, LeaderboardResponse, TodayResponse } from "../../shared/contract";
-import { caseSummaries, caseSummary, teasers } from "../content/load";
-import type { CaseSummary, Teaser } from "../content/catalog-schema";
-import { fetchLeaderboard, fetchMyStats } from "../lib/api";
+// Home: a dashboard in the Cloudflare-console sense. Two fixed-height cards on top ("Continue" at the start edge,
+// "Today's case" at the end edge; RTL mirrors them), then the cases table, which scrolls inside its own panel so
+// the page itself fits the viewport on desktop. Signed out, a compact intro above the cards carries the value
+// statement and the sign-up call to action. Filters, search and sort live in the URL query (#/?difficulty=hard).
+import "../home.css";
+import type { CaseStats, TodayResponse } from "../../shared/contract";
+import { caseSummaries, caseSummary } from "../content/load";
+import type { CaseSummary } from "../content/catalog-schema";
+import { dataTable, type Column, type DataTable } from "../components/dataTable";
+import type { SortState } from "../components/table-core";
+import { fetchMyStats } from "../lib/api";
 import { h, setChildren, type Child } from "../lib/dom";
 import { cachedAccount, isAccountKnown, loadAccount, loadToday } from "../lib/session";
-import { getLang } from "../i18n/i18n";
 import { cachedEvent, isEventActive, onEventChange } from "../lib/event";
+import { popover } from "../lib/overlay";
+import { recentVisits, visitHref, type Visit } from "../lib/recent";
+import {
+  activeFilterCount,
+  matchesFilters,
+  parseFilters,
+  serializeFilters,
+  topTags,
+  DIFFICULTIES,
+  STATUSES,
+  type CaseFilters,
+  type CaseStatus,
+  type Difficulty,
+} from "../lib/caseFilters";
+import { getLang } from "../i18n/i18n";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
+import { TH } from "../i18n/strings-home";
 import { TO } from "../i18n/strings-onboard";
+import { T } from "../i18n/strings-player";
 import { TS } from "../i18n/strings-shell";
 import type { ViewResult } from "../shell/types";
 import { eventDisplayPhase, eventWhen } from "./leaderboard";
-import { T } from "../i18n/strings-player";
-
-const steps = (): ReadonlyArray<{ title: string; body: string }> => [
-  { title: T().step1Title, body: T().step1Body },
-  { title: T().step2Title, body: T().step2Body },
-  { title: T().step3Title, body: T().step3Body },
-];
 
 type HomeState = {
-  /** true until /api/today and the player's stats have both answered: draw skeletons, no CTAs */
+  /** true until /api/today and the player's stats have both answered */
   loading: boolean;
   today: TodayResponse | null;
+  todayFailed: boolean;
   stats: ReadonlyMap<string, CaseStats>;
-  isSignedIn: boolean;
-  /** public overall board, for the signed-out proof line (null until it answers or when it fails) */
-  board: LeaderboardResponse | null;
+  statsFailed: boolean;
+  /** an approved player whose stats we asked for: status and score columns apply */
+  isPlayer: boolean;
 };
 
-/** Placeholders with the real cards' footprint, so nothing jumps when today's case and the catalog arrive. */
-function todaySkeleton(): HTMLElement {
-  return h(
-    "div",
-    { class: "featured-card today-card skeleton-card", "aria-hidden": "true" },
-    h("span", { class: "skeleton-line w-40" }),
-    h("span", { class: "skeleton-line w-30" }),
-    h("span", { class: "skeleton-line skeleton-title w-60" }),
-    h("span", { class: "skeleton-line w-90" }),
-    h("span", { class: "skeleton-line w-70" }),
-    h("span", { class: "skeleton-btn" }),
-  );
-}
+type Row = { readonly c: CaseSummary; readonly stats: CaseStats | undefined; readonly isToday: boolean; readonly locked: boolean };
 
-function caseSkeleton(): HTMLElement {
-  return h(
-    "div",
-    { class: "case-card skeleton-card", "aria-hidden": "true" },
-    h("span", { class: "skeleton-line w-40" }),
-    h("span", { class: "skeleton-line skeleton-title w-70" }),
-    h("span", { class: "skeleton-line w-90" }),
-    h("span", { class: "skeleton-line w-60" }),
-  );
-}
+/* ================= small helpers ================= */
 
-const formatDate = (isoDate: string): string => {
-  const [y, m, d] = isoDate.split("-").map(Number);
-  if (y === undefined || m === undefined || d === undefined) return isoDate;
-  return new Intl.DateTimeFormat(getLang() === "he" ? "he-IL" : "en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }).format(
-    new Date(Date.UTC(y, m - 1, d)),
-  );
-};
+/** Hebrew prefixes glued to a Latin word ("ה-commit") keep a non-breaking hyphen, so "ה-" is never orphaned. */
+const keepPrefix = (text: string): string => text.replace(/([֐-׿])-(?=[A-Za-z0-9])/g, "$1‑");
 
-function statusLine(stats: CaseStats | undefined): string | null {
-  if (!stats || stats.status === "not-started") return null;
-  const scorePar = TG().scorePar(stats.score, stats.maxScore);
-  return stats.status === "completed" ? TA().caseStatusDone(scorePar) : TA().caseStatusProgress(scorePar);
-}
-
-/**
- * Hebrew prefixes glued to a Latin word ("ה-commit", "ל-27") must not break after the hyphen and leave
- * "ה-" orphaned at a line end: use a non-breaking hyphen (U+2011) there.
- */
-function keepPrefix(text: string): string {
-  return text.replace(/([\u0590-\u05FF])-(?=[A-Za-z0-9])/g, "$1\u2011");
-}
-
-/**
- * A case title as bidi-isolated segments: mixed titles ("The 3 AM Outage – התקלה של 3 לפנות בוקר") keep each
- * language's run in order instead of the Unicode bidi algorithm reordering words across the dash.
- */
+/** A case title as bidi-isolated segments, so mixed-language titles keep each run in order. */
 function titleNode(title: string): Child[] {
   const parts = keepPrefix(title).split(" – ");
   return parts.flatMap((part, i) => (i === 0 ? [h("bdi", {}, part)] : [" – ", h("bdi", {}, part)]));
 }
 
-/** "Hard · ~60 min · 6 stages", translated, with the duration isolated so "~60" and its unit stay together. */
-function caseMeta(c: CaseSummary): HTMLElement {
-  return h("p", { class: "featured-meta" }, TO().difficulty(c.difficulty), " · ", h("bdi", {}, TO().minutes(c.estMinutes)), " · ", TO().stages(c.questionCount));
+const locale = (): string => (getLang() === "he" ? "he-IL" : "en-GB");
+
+function formatDay(isoDate: string): string {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  if (y === undefined || m === undefined || d === undefined) return isoDate;
+  return new Intl.DateTimeFormat(locale(), { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(Date.UTC(y, m - 1, d)));
 }
 
-/** Can this case be opened right now? (lock-to-today hides the button for other unstarted cases) */
-function isOpenToday(c: CaseSummary, state: HomeState): boolean {
-  const today = state.today;
-  if (!today?.lockToToday) return true;
-  const started = state.stats.get(c.id);
-  return today.caseId === c.id || (started !== undefined && started.status !== "not-started");
+function timeAgo(at: number, now = Date.now()): string {
+  const rtf = new Intl.RelativeTimeFormat(locale(), { numeric: "auto", style: "short" });
+  const s = Math.round((at - now) / 1000);
+  if (Math.abs(s) < 60) return rtf.format(0, "minute");
+  const m = Math.round(s / 60);
+  if (Math.abs(m) < 60) return rtf.format(m, "minute");
+  const hr = Math.round(m / 60);
+  if (Math.abs(hr) < 24) return rtf.format(hr, "hour");
+  return rtf.format(Math.round(hr / 24), "day");
 }
 
-/**
- * The case's action. Amber is spent once per view: on the hero CTA (signed out), the resume card, or (when
- * there is nothing to resume) today's incident. Everything else is a neutral button.
- */
-function caseCta(c: CaseSummary, state: HomeState, opts: { primary: boolean; today: boolean }): HTMLElement {
-  if (!isOpenToday(c, state)) return h("span", { class: "chip chip-muted" }, TA().lockedToday);
-  const stats = state.stats.get(c.id);
-  const label = !state.isSignedIn
-    ? opts.today
-      ? TA().signInToPlay
-      : TO().openCase
-    : stats?.status === "completed"
-      ? TO().reviewDebrief
-      : stats?.status === "in-progress"
-        ? T().resumeInvestigation
-        : opts.today
-          ? T().startInvestigation
-          : TO().openCase;
-  const size = opts.today ? " btn-lg" : " btn-sm";
-  return h("a", { class: `btn${opts.primary ? " btn-primary" : opts.today ? "" : " btn-ghost"}${size}`, href: `#/case/${c.id}` }, label);
+const exactTime = (at: number): string => new Intl.DateTimeFormat(locale(), { dateStyle: "medium", timeStyle: "short" }).format(new Date(at));
+
+const DIFF_RANK: Readonly<Record<Difficulty, number>> = { easy: 1, medium: 2, hard: 3 };
+const STATUS_RANK: Readonly<Record<CaseStatus, number>> = { "in-progress": 0, "not-started": 1, completed: 2 };
+
+const done = (s: CaseStats | undefined): number => (s === undefined ? 0 : s.solved + s.revealed);
+const statusOf = (s: CaseStats | undefined): CaseStatus => s?.status ?? "not-started";
+
+/** A muted em dash read as "No data" (a missing value never shows as 0). */
+const missing = (): HTMLElement => h("span", { class: "home-none" }, h("span", { "aria-hidden": "true" }, "—"), h("span", { class: "visually-hidden" }, TH().noData));
+
+/** Three bars, filled up to the difficulty: a shape cue next to the word (never colour alone). */
+function difficultyCell(d: Difficulty): HTMLElement {
+  const rank = DIFF_RANK[d];
+  return h(
+    "span",
+    { class: `home-diff is-${d}` },
+    h("span", { class: "home-diff-bars", "aria-hidden": "true" }, [1, 2, 3].map((i) => h("span", { class: i <= rank ? "is-on" : "" }))),
+    TO().difficulty(d),
+  );
 }
 
-/** The player's most recently started, unfinished case (the "resume" focal point). */
-function resumeCase(state: HomeState): { c: CaseSummary; stats: CaseStats } | null {
-  const open = [...state.stats.values()]
+function statusLabel(st: CaseStatus): string {
+  return st === "not-started" ? TS().statusNew : st === "in-progress" ? TS().statusProgress : TS().statusDone;
+}
+
+function statusChip(row: Row): HTMLElement {
+  if (row.locked) return h("span", { class: "home-status is-locked" }, TA().lockedToday);
+  const st = statusOf(row.stats);
+  if (st === "not-started") return h("span", { class: "home-status is-new" }, statusLabel(st));
+  return h("span", { class: `chip home-status ${st === "completed" ? "pill-success" : ""}` }, st === "completed" ? h("span", { "aria-hidden": "true" }, "✓") : null, statusLabel(st));
+}
+
+/* ================= the "Continue" card ================= */
+
+type Place = { readonly key: string; readonly href: string; readonly kind: string; readonly name: Child; readonly meta: Child; readonly title: string; readonly at?: number };
+
+function inProgressPlaces(state: HomeState): Place[] {
+  return [...state.stats.values()]
     .filter((s) => s.status === "in-progress")
-    .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
-  for (const stats of open) {
-    const c = caseSummary(stats.caseId);
-    if (c !== undefined) return { c, stats };
-  }
-  return null;
+    .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""))
+    .flatMap((s): Place[] => {
+      const c = caseSummary(s.caseId);
+      if (c === undefined) return [];
+      return [
+        {
+          key: `p:${c.id}`,
+          href: `#/case/${c.id}`,
+          kind: TH().inProgress,
+          name: titleNode(c.title),
+          meta: h("span", { class: "home-row-num" }, TH().stageCount(done(s), c.questionCount), h("span", { class: "home-row-sep" }, " · "), TG().scorePar(s.score, s.maxScore)),
+          title: `${c.title} · ${TH().stagesDone(done(s), c.questionCount)} · ${TG().scorePar(s.score, s.maxScore)}`,
+        },
+      ];
+    });
 }
 
-function resumeCard(c: CaseSummary, stats: CaseStats): HTMLElement {
-  const done = stats.solved + stats.revealed;
-  const stage = done >= c.questionCount ? TO().allSolved(c.questionCount) : TO().stageOf(done + 1, c.questionCount);
+function visitPlace(v: Visit): Place | null {
+  const c = caseSummary(v.caseId);
+  if (c === undefined) return null;
+  const kind = v.kind === "toolbox" ? TH().placeToolbox : v.kind === "explorer" ? TH().placeExplorer : TH().placeCase;
+  const name: Child = v.kind === "explorer" && v.file !== null ? h("bdi", { class: "mono home-row-file", dir: "ltr" }, v.file) : titleNode(c.title);
+  return { key: `v:${v.kind}:${v.caseId}`, href: visitHref(v), kind, name, meta: h("span", { title: exactTime(v.at) }, timeAgo(v.at)), title: `${kind} · ${c.title}${v.file ? ` · ${v.file}` : ""}`, at: v.at };
+}
+
+function placeRow(p: Place): HTMLElement {
   return h(
-    "article",
-    { class: "resume-card", "aria-labelledby": "resume-title" },
-    h("p", { class: "resume-kicker" }, TO().resumeKicker),
-    h("h2", { id: "resume-title", class: "resume-title" }, titleNode(c.title)),
-    h("p", { class: "resume-meta" }, stage, " · ", TG().scorePar(stats.score, stats.maxScore)),
+    "li",
+    {},
     h(
-      "span",
-      { class: "resume-track", "aria-hidden": "true" },
-      Array.from({ length: c.questionCount }, (_, i) => h("span", { class: `resume-seg${i < done ? " is-done" : ""}` })),
+      "a",
+      { class: "home-row", href: p.href, title: p.title },
+      h("span", { class: "home-row-kind" }, p.kind),
+      h("span", { class: "home-row-name" }, p.name),
+      h("span", { class: "home-row-meta" }, p.meta),
+      h("span", { class: "home-row-go", "aria-hidden": "true" }, "›"),
     ),
-    h("a", { class: "btn btn-primary btn-lg", href: `#/case/${c.id}` }, TO().resume, h("bdi", {}, c.title)),
   );
 }
 
-function todayCard(c: CaseSummary, state: HomeState, date: string, primary: boolean): HTMLElement {
-  const line = statusLine(state.stats.get(c.id));
+function cardHead(id: string, title: string, aside: Child = null): HTMLElement {
+  return h("header", { class: "home-card-head" }, h("h2", { id, class: "home-card-title" }, title), aside);
+}
+
+function skeletonRows(n: number): HTMLElement {
+  return h("ul", { class: "home-rows", "aria-hidden": "true" }, Array.from({ length: n }, () => h("li", {}, h("span", { class: "home-row is-skeleton" }, h("span", { class: "dt-skeleton" })))));
+}
+
+function continueCard(state: HomeState, signedIn: boolean): HTMLElement {
+  const body = ((): Child => {
+    if (!isAccountKnown() || (signedIn && state.loading)) return skeletonRows(3);
+    if (!signedIn) {
+      const steps = [
+        [T().step1Title, T().step1Body],
+        [T().step2Title, T().step2Body],
+        [T().step3Title, T().step3Body],
+      ] as const;
+      return h(
+        "ol",
+        { class: "home-steps" },
+        steps.map(([title, text], i) => h("li", {}, h("span", { class: "home-step-n", "aria-hidden": "true" }, String(i + 1)), h("span", {}, h("strong", {}, title), " ", h("span", { class: "muted" }, text)))),
+      );
+    }
+    const progress = inProgressPlaces(state).slice(0, 3);
+    const listed = new Set(progress.map((p) => p.key.slice(2)));
+    const visits = recentVisits()
+      .filter((v) => !(v.kind === "case" && listed.has(v.caseId)))
+      .map(visitPlace)
+      .filter((p): p is Place => p !== null)
+      .slice(0, Math.max(3, 6 - progress.length));
+    return [
+      state.statsFailed ? h("p", { class: "home-card-note", role: "alert" }, TH().statsError) : null,
+      progress.length > 0 ? h("ul", { class: "home-rows", "aria-label": TH().inProgress }, progress.map(placeRow)) : null,
+      visits.length > 0
+        ? [h("h3", { class: "home-rows-h", id: "home-recent-h" }, TH().recent), h("ul", { class: "home-rows", "aria-labelledby": "home-recent-h" }, visits.map(placeRow))]
+        : progress.length === 0
+          ? h("p", { class: "home-card-empty" }, TH().recentNone)
+          : null,
+    ];
+  })();
   return h(
-    "article",
-    { class: "featured-card today-card", "aria-labelledby": "today-title" },
-    h("p", { class: "today-kicker" }, h("span", { class: "dot", "aria-hidden": "true" }), TA().todayKicker(formatDate(date))),
-    caseMeta(c),
-    h("h2", { id: "today-title", class: "featured-title" }, titleNode(c.title)),
-    h("p", { class: "featured-sub" }, keepPrefix(c.subtitle)),
-    line ? h("p", { class: "case-status" }, line) : null,
-    caseCta(c, state, { primary, today: true }),
-  );
-}
-
-function caseCard(c: CaseSummary, state: HomeState): HTMLElement {
-  const line = statusLine(state.stats.get(c.id));
-  const isToday = state.today?.caseId === c.id;
-  return h(
-    "article",
-    {
-      class: `case-card${isToday ? " is-today" : ""}`,
-      // read by the sidebar filters (applyFilters)
-      "data-case": c.id,
-      "data-status": state.stats.get(c.id)?.status ?? "not-started",
-    },
-    h("div", { class: "case-card-top" }, caseMeta(c), isToday ? h("span", { class: "chip today-chip" }, TO().todayTag) : null),
-    h("h3", { class: "case-card-title" }, titleNode(c.title)),
-    h("p", { class: "muted case-card-sub" }, keepPrefix(c.subtitle)),
-    h("div", { class: "tag-row" }, c.tags.slice(0, 4).map((tag) => h("span", { class: "chip mono" }, tag))),
-    h("div", { class: "case-card-foot" }, line ? h("span", { class: "case-status" }, line) : h("span", { class: "muted small" }, TA().caseStatusNew), caseCta(c, state, { primary: false, today: false })),
-  );
-}
-
-/**
- * Event strip: phase-aware kicker ("Upcoming event" / "● Live event" / "Event ended"), name and countdown,
- * ticking every second; it removes its own timers once detached. Only a running event gets the live dot.
- */
-function eventStrip(): HTMLElement {
-  const name = h("p", { class: "event-strip-name" });
-  const when = h("p", { class: "event-strip-when mono" });
-  const dot = h("span", { class: "dot", "aria-hidden": "true" });
-  const kickerText = h("span", {});
-  const strip = h(
     "section",
-    { class: "event-strip", hidden: true },
-    h("p", { class: "today-kicker mono" }, dot, kickerText),
-    name,
-    when,
-    h("a", { class: "btn btn-sm", href: "#/leaderboard" }, TG().homeLeaderboard),
+    { class: "home-card home-continue", "aria-labelledby": "home-continue-h", "aria-busy": state.loading ? "true" : null },
+    cardHead("home-continue-h", signedIn || !isAccountKnown() ? TH().continueTitle : TH().howTitle),
+    h("div", { class: "home-card-body" }, body),
   );
+}
+
+/* ================= the "Today's case" card ================= */
+
+/** "Live event · ends in 36:20", ticking every second; removes its own timer once detached. */
+function eventLine(): HTMLElement {
+  const text = h("span", { class: "home-event-when" });
+  const name = h("bdi", { class: "home-event-name" });
+  const el = h("p", { class: "home-event" }, h("span", { class: "dot", "aria-hidden": "true" }), name, text);
   const draw = (): void => {
     const event = cachedEvent();
     if (!isEventActive(event)) {
-      strip.hidden = true;
+      el.hidden = true;
       return;
     }
     const phase = eventDisplayPhase();
-    const kicker = phase === "before" ? TG().eventKickerBefore : phase === "over" ? TG().eventKickerOver : TG().eventKicker;
-    strip.hidden = false;
-    strip.className = `event-strip is-${phase}`;
-    strip.setAttribute("aria-label", kicker);
-    kickerText.textContent = kicker;
-    dot.hidden = phase !== "live";
-    name.textContent = event.name;
-    name.hidden = event.name.length === 0;
-    when.textContent = phase === "over" ? TG().eventFinal : eventWhen();
-    when.classList.toggle("mono", phase !== "over"); // a sentence, not a clock
-    when.hidden = when.textContent.length === 0;
+    el.hidden = false;
+    el.className = `home-event is-${phase}`;
+    name.textContent = event.name.length > 0 ? event.name : phase === "before" ? TG().eventKickerBefore : phase === "over" ? TG().eventKickerOver : TG().eventKicker;
+    text.textContent = phase === "over" ? "" : eventWhen();
   };
   const unsubscribe = onEventChange(draw);
   const timer = window.setInterval(() => {
-    if (!strip.isConnected) {
+    if (!el.isConnected) {
       window.clearInterval(timer);
       unsubscribe();
       return;
@@ -230,291 +236,515 @@ function eventStrip(): HTMLElement {
     draw();
   }, 1000);
   draw();
-  return strip;
+  return el;
 }
 
-function teaserCard(t: Teaser): HTMLElement {
-  return h("article", { class: "teaser-card" }, h("h3", { class: "teaser-title" }, t.title), h("p", { class: "muted" }, t.tagline));
+function todayAction(c: CaseSummary, state: HomeState, signedIn: boolean): HTMLElement {
+  if (!signedIn) return h("a", { class: "btn btn-sm", href: `#/login` }, TH().signInToPlay);
+  const st = statusOf(state.stats.get(c.id));
+  const label = st === "completed" ? TO().reviewDebrief : st === "in-progress" ? TH().resume : TH().start;
+  return h("a", { class: "btn btn-primary btn-sm", href: `#/case/${c.id}` }, label);
 }
 
-function learnSection(): HTMLElement {
-  const items = [
-    { title: TO().learn1Title, body: TO().learn1Body },
-    { title: TO().learn2Title, body: TO().learn2Body },
-    { title: TO().learn3Title, body: TO().learn3Body },
-  ];
+function todayCard(state: HomeState, signedIn: boolean, retry: () => void): HTMLElement {
+  const today = state.today;
+  const c = today?.caseId ? caseSummary(today.caseId) : undefined;
+  const body = ((): Child => {
+    if (state.loading) return [h("span", { class: "dt-skeleton home-skel-title" }), h("span", { class: "dt-skeleton" }), h("span", { class: "dt-skeleton home-skel-btn" })];
+    if (state.todayFailed) return h("div", { class: "home-card-note", role: "alert" }, h("p", {}, TH().todayError), h("button", { type: "button", class: "btn btn-sm", onclick: retry }, TH().retry));
+    if (c === undefined) return h("p", { class: "home-card-empty" }, TH().todayNone);
+    const stats = state.stats.get(c.id);
+    const st = statusOf(stats);
+    return [
+      h("a", { class: "home-today-title", href: `#/case/${c.id}`, title: c.subtitle }, titleNode(c.title)),
+      h("p", { class: "home-today-sub" }, keepPrefix(c.subtitle)),
+      h(
+        "p",
+        { class: "home-today-meta" },
+        difficultyCell(c.difficulty),
+        h("span", { class: "home-row-sep" }, "·"),
+        h("bdi", {}, TO().minutes(c.estMinutes)),
+        h("span", { class: "home-row-sep" }, "·"),
+        TO().stages(c.questionCount),
+      ),
+      h(
+        "div",
+        { class: "home-today-foot" },
+        todayAction(c, state, signedIn),
+        state.isPlayer && st !== "not-started"
+          ? h("span", { class: "home-today-progress" }, statusChip({ c, stats, isToday: true, locked: false }), h("span", { class: "home-row-num" }, TH().stageCount(done(stats), c.questionCount)))
+          : null,
+        eventLine(),
+      ),
+    ];
+  })();
   return h(
     "section",
-    { class: "section learn", "aria-labelledby": "learn-h" },
-    h("h2", { id: "learn-h", class: "section-title" }, TO().learnTitle),
-    h("ul", { class: "learn-list" }, items.map((it) => h("li", {}, h("h3", {}, it.title), h("p", { class: "muted" }, it.body)))),
+    { class: "home-card home-today", "aria-labelledby": "home-today-h", "aria-busy": state.loading ? "true" : null },
+    cardHead("home-today-h", TH().todayTitle, today ? h("span", { class: "home-card-aside" }, formatDay(today.date)) : null),
+    h("div", { class: "home-card-body" }, body),
   );
 }
 
-/** Live proof from the public board ("12 investigators on the leaderboard · 48 stages solved"). */
-function proofLine(board: LeaderboardResponse | null): HTMLElement | null {
-  if (board === null || board.entries.length === 0) return null;
-  const stages = board.entries.reduce((sum, e) => sum + e.stagesSolved, 0);
-  return h("p", { class: "hero-proof" }, h("a", { href: "#/leaderboard" }, TO().proofLine(board.entries.length, stages)));
-}
+/* ================= filter button (local stand-in for the shell's filterButton()) ================= */
+
+type FilterGroup = { readonly key: "difficulty" | "tag" | "status"; readonly legend: string; readonly options: readonly { value: string; label: Child }[] };
+type FilterControl = { readonly element: HTMLElement; sync: (filters: CaseFilters) => void };
 
 /**
- * The first screen. Signed out: what this is and for whom, then one primary CTA ("Create account") with
- * "Sign in" beside it. Signed in: a welcome and the case to resume. Until the account is known, the
- * signed-out hero holds the space invisibly (no flash of the wrong CTA).
+ * A "Filter (n)" button with a popover of checkbox groups and a Clear button. Built on popover() from
+ * lib/overlay.ts; swap it for the frame's filterButton() once that lands (same groups, same onChange).
  */
-function hero(account: AccountView | null, state: HomeState, resume: { c: CaseSummary; stats: CaseStats } | null): HTMLElement {
-  const known = isAccountKnown();
-  if (known && account !== null && account.status === "approved") {
-    return h(
-      "section",
-      { class: "hero hero-in" },
-      h("h1", { class: "hero-title hero-welcome" }, TO().welcome, h("bdi", {}, account.username)),
-      resume ? resumeCard(resume.c, resume.stats) : null,
-    );
-  }
-  const signedOut = known && account === null;
-  return h(
-    "section",
-    { class: `hero${known ? "" : " is-pending"}`, "aria-hidden": known ? null : "true" },
-    h("h1", { class: "hero-title" }, TO().heroTitle),
-    h("p", { class: "hero-sub" }, TO().heroSub),
-    signedOut || !known
-      ? [
-          h(
-            "div",
-            { class: "hero-ctas" },
-            h("a", { class: "btn btn-primary btn-lg", href: "#/signup", tabindex: known ? null : "-1" }, TO().ctaCreate),
-            h("a", { class: "btn btn-ghost btn-lg", href: "#/login", tabindex: known ? null : "-1" }, TO().ctaSignIn),
-          ),
-          h("p", { class: "muted small hero-note" }, TO().ctaNote),
-        ]
-      : null,
-    proofLine(state.board),
+function filterButton(opts: { groups: readonly FilterGroup[]; onChange: (key: FilterGroup["key"], values: Set<string>) => void; onClear: () => void }): FilterControl {
+  const count = h("span", { class: "home-filter-count" });
+  const button = h(
+    "button",
+    { type: "button", class: "btn btn-sm home-filter-btn" },
+    funnelIcon(),
+    TH().filter,
+    count,
   );
-}
-
-function draw(root: HTMLElement, state: HomeState): void {
-  drawPage(root, state);
-  sidebarOf?.(state);
-}
-
-function drawPage(root: HTMLElement, state: HomeState): void {
-  const released = state.today?.releasedCaseIds;
-  const playable = caseSummaries().filter((c) => released === undefined || released.includes(c.id));
-  const todayCase = state.today?.caseId ? caseSummary(state.today.caseId) : undefined;
-  const account = cachedAccount();
-  const signedOut = isAccountKnown() && account === null;
-  const resume = state.loading ? null : resumeCase(state);
-  // Today's incident takes the amber CTA only when the hero doesn't already have it.
-  const todayPrimary = state.isSignedIn && resume === null;
-
-  setChildren(
-    root,
-    hero(account, state, resume),
-    eventStrip(),
+  const boxes: { key: FilterGroup["key"]; input: HTMLInputElement }[] = [];
+  const summary = h("p", { class: "home-filter-summary", role: "status" });
+  const groups = opts.groups.map((g) =>
     h(
-      "section",
-      { class: "section", "aria-label": T().featuredCase, "aria-busy": state.loading ? "true" : null },
-      state.loading
-        ? todaySkeleton()
-        : todayCase && state.today
-          ? todayCard(todayCase, state, state.today.date, todayPrimary)
-          : state.today
-            ? h("p", { class: "muted" }, TA().todayNone)
-            : null,
-    ),
-    signedOut ? learnSection() : null,
-    h(
-      "section",
-      { class: "section", "aria-labelledby": "cases-h", "aria-busy": state.loading ? "true" : null },
-      h("h2", { id: "cases-h", class: "section-title" }, TA().allCases),
-      state.today?.lockToToday ? h("p", { class: "muted small" }, TA().casesLockedToday) : null,
-      state.loading
-        ? h("div", { class: "case-grid" }, caseSummaries().map(() => caseSkeleton()))
-        : playable.length > 0
-          ? [h("div", { class: "case-grid" }, playable.map((c) => caseCard(c, state))), h("p", { class: "muted case-filter-none", hidden: true }, TS().filterNoCases)]
-          : h("p", { class: "muted" }, T().noCases),
-    ),
-    h(
-      "section",
-      { class: "section", "aria-labelledby": "how-h" },
-      h("h2", { id: "how-h", class: "section-title" }, T().howItWorks),
+      "fieldset",
+      { class: "home-filter-group" },
+      h("legend", {}, g.legend),
       h(
-        "ol",
-        { class: "how" },
-        // The <ol> already numbers the steps for screen readers: the visual digit is decorative.
-        steps().map((s, i) => h("li", {}, h("span", { class: "how-n mono", "aria-hidden": "true" }, String(i + 1)), h("div", {}, h("h3", {}, s.title), h("p", { class: "muted" }, s.body)))),
+        "div",
+        { class: "home-filter-options" },
+        g.options.map((o) => {
+          const input = h("input", { type: "checkbox", name: `home-f-${g.key}`, value: o.value });
+          input.addEventListener("change", () => opts.onChange(g.key, new Set(boxes.filter((b) => b.key === g.key && b.input.checked).map((b) => b.input.value))));
+          boxes.push({ key: g.key, input });
+          return h("label", { class: "home-filter-option" }, input, h("span", {}, o.label));
+        }),
       ),
     ),
-    teasers.length > 0
-      ? h(
-          "section",
-          { class: "section", "aria-labelledby": "soon-h" },
-          h("h2", { id: "soon-h", class: "section-title" }, T().comingSoon),
-          h("div", { class: "teaser-grid" }, teasers.map(teaserCard)),
-        )
-      : null,
   );
-}
-
-/* ================= sidebar: filters by difficulty, topic and status ================= */
-
-type Difficulty = CaseSummary["difficulty"];
-type StatusFilter = "any" | CaseStats["status"];
-const DIFFICULTIES: readonly Difficulty[] = ["easy", "medium", "hard"];
-const STATUSES: readonly StatusFilter[] = ["any", "not-started", "in-progress", "completed"];
-
-/** The filters survive redraws, language switches and visits to a case and back (this page load only). */
-const filters: { difficulty: Set<Difficulty>; tags: Set<string>; status: StatusFilter } = { difficulty: new Set(), tags: new Set(), status: "any" };
-
-/** Hides the case cards the filters rule out and says how many are left. */
-function applyFilters(root: HTMLElement, side: HomeSidebar): void {
-  const cards = [...root.querySelectorAll<HTMLElement>(".case-card[data-case]")];
-  let shown = 0;
-  for (const card of cards) {
-    const c = caseSummary(card.dataset.case ?? "");
-    const ok =
-      c !== undefined &&
-      (filters.difficulty.size === 0 || filters.difficulty.has(c.difficulty)) &&
-      (filters.tags.size === 0 || c.tags.some((tag) => filters.tags.has(tag))) &&
-      (filters.status === "any" || !side.statusShown() || card.dataset.status === filters.status);
-    card.hidden = !ok;
-    if (ok) shown += 1;
-  }
-  const none = root.querySelector<HTMLElement>(".case-filter-none");
-  if (none !== null) none.hidden = cards.length === 0 || shown > 0;
-  side.count(cards.length === 0 ? null : TS().filterShown(shown, cards.length));
-}
-
-type HomeSidebar = { content: HTMLElement; count: (text: string | null) => void; showStatus: (on: boolean) => void; statusShown: () => boolean };
-
-/** Tags across the catalog, most used first (ties alphabetical), at most 12. */
-function catalogTags(): string[] {
-  const counts = new Map<string, number>();
-  for (const c of caseSummaries()) for (const tag of c.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
-  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 12).map(([tag]) => tag);
-}
-
-function homeSidebar(onChange: () => void): HomeSidebar {
-  const check = (name: string, value: string, label: Child, checked: boolean, change: (on: boolean) => void): HTMLElement => {
-    const input = h("input", { type: "checkbox", name, value, checked });
-    input.addEventListener("change", () => {
-      change(input.checked);
-      onChange();
-    });
-    return h("label", { class: "side-option" }, input, h("span", {}, label));
-  };
-  const present = new Set(caseSummaries().map((c) => c.difficulty));
-  const difficulty = h(
-    "fieldset",
-    { class: "side-group" },
-    h("legend", { class: "side-h" }, TS().filterDifficulty),
-    DIFFICULTIES.filter((d) => present.has(d)).map((d) =>
-      check("f-difficulty", d, TO().difficulty(d), filters.difficulty.has(d), (on) => (on ? filters.difficulty.add(d) : filters.difficulty.delete(d))),
-    ),
-  );
-  const tags = catalogTags();
-  const topics =
-    tags.length > 0
-      ? h(
-          "fieldset",
-          { class: "side-group" },
-          h("legend", { class: "side-h" }, TS().filterTags),
-          h(
-            "div",
-            { class: "side-chips" },
-            tags.map((tag) => check("f-tag", tag, h("bdi", { class: "mono" }, tag), filters.tags.has(tag), (on) => (on ? filters.tags.add(tag) : filters.tags.delete(tag)))),
-          ),
-        )
-      : null;
-  const statusLabel = (st: StatusFilter): string =>
-    st === "any" ? TS().statusAny : st === "not-started" ? TS().statusNew : st === "in-progress" ? TS().statusProgress : TS().statusDone;
-  const statusRadios = STATUSES.map((st) => {
-    const input = h("input", { type: "radio", name: "f-status", value: st, checked: filters.status === st });
-    input.addEventListener("change", () => {
-      if (!input.checked) return;
-      filters.status = st;
-      onChange();
-    });
-    return { st, input, el: h("label", { class: "side-option" }, input, h("span", {}, statusLabel(st))) };
-  });
-  const status = h("fieldset", { class: "side-group", hidden: true }, h("legend", { class: "side-h" }, TS().filterStatus), statusRadios.map((r) => r.el));
-  const count = h("p", { class: "side-meta", role: "status" });
-  const clear = h("button", { type: "button", class: "link-btn small" }, TS().filterClear);
+  const clear = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, TS().filterClear);
   clear.addEventListener("click", () => {
-    filters.difficulty.clear();
-    filters.tags.clear();
-    filters.status = "any";
-    for (const input of content.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) input.checked = false;
-    for (const r of statusRadios) r.input.checked = r.st === "any";
-    onChange();
+    opts.onClear();
+    boxes[0]?.input.focus();
   });
-  const content = h("div", { class: "side-stack home-side" }, difficulty, topics, status, h("div", { class: "side-foot" }, count, clear));
+  const panel = h("div", { class: "home-filter-panel", role: "dialog", "aria-label": TH().filterTitle }, groups, h("div", { class: "home-filter-foot" }, summary, clear));
+  const ctl = popover(button, panel, { align: "start", onOpen: () => panel.querySelector<HTMLInputElement>("input")?.focus() });
+  // Escape closes even when the browser's close watcher skips it (no fresh user activation since it opened).
+  panel.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape" || !ctl.isOpen()) return;
+    ev.preventDefault();
+    ctl.close();
+    button.focus();
+  });
   return {
-    content,
-    count: (text) => {
-      count.textContent = text ?? "";
-      count.hidden = text === null;
+    element: h("span", { class: "home-filter" }, button, panel),
+    sync(filters) {
+      const n = activeFilterCount(filters);
+      count.textContent = n > 0 ? ` ${TH().filterCount(n)}` : "";
+      button.classList.toggle("is-active", n > 0);
+      summary.textContent = n > 0 ? TH().filterActive(n) : "";
+      clear.disabled = n === 0;
+      for (const b of boxes) {
+        const set: ReadonlySet<string> = b.key === "difficulty" ? filters.difficulty : b.key === "tag" ? filters.tags : filters.status;
+        b.input.checked = set.has(b.input.value);
+      }
     },
-    showStatus: (on) => {
-      status.hidden = !on;
-    },
-    statusShown: () => !status.hidden,
   };
 }
 
-/** Home as a shell view: the page in main, the case filters in the sidebar. */
+function funnelIcon(): SVGSVGElement {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("class", "home-icon");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", "M2 3h12l-4.5 5.5V13l-3 1.5V8.5Z");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "1.4");
+  path.setAttribute("stroke-linejoin", "round");
+  svg.append(path);
+  return svg;
+}
+
+/* ================= the cases table ================= */
+
+const SORT_OF: Readonly<Record<string, SortState | null>> = {
+  "": null,
+  title: { id: "case", dir: "asc" },
+  easy: { id: "difficulty", dir: "asc" },
+  hard: { id: "difficulty", dir: "desc" },
+  short: { id: "minutes", dir: "asc" },
+  score: { id: "score", dir: "desc" },
+};
+
+const sortFromParam = (param: string): SortState | null => {
+  if (param in SORT_OF) return SORT_OF[param] ?? null;
+  const [id, dir] = param.split(":");
+  return id !== undefined && (dir === "asc" || dir === "desc") ? { id, dir } : null;
+};
+
+const sortToParam = (sort: SortState | null): string => {
+  if (sort === null) return "";
+  const preset = Object.entries(SORT_OF).find(([, s]) => s !== null && s.id === sort.id && s.dir === sort.dir);
+  return preset ? preset[0] : `${sort.id}:${sort.dir}`;
+};
+
+function columns(isPlayer: boolean): Column<Row>[] {
+  const cols: Column<Row>[] = [
+    {
+      id: "case",
+      header: TH().colCase,
+      rowHeader: true,
+      className: "home-col-case",
+      cell: (r) =>
+        h(
+          "span",
+          { class: "home-case" },
+          h("a", { class: "home-case-link", href: `#/case/${r.c.id}`, title: r.c.subtitle }, titleNode(r.c.title)),
+          r.isToday ? h("span", { class: "chip pill-info home-today-chip" }, TO().todayTag) : null,
+        ),
+      sortValue: (r) => r.c.title.toLocaleLowerCase(),
+    },
+    { id: "difficulty", header: TH().colDifficulty, cell: (r) => difficultyCell(r.c.difficulty), sortValue: (r) => DIFF_RANK[r.c.difficulty] },
+    { id: "minutes", header: TH().colMinutes, numeric: true, cell: (r) => h("bdi", {}, TO().minutes(r.c.estMinutes)), sortValue: (r) => r.c.estMinutes },
+    {
+      id: "stages",
+      header: TH().colStages,
+      numeric: true,
+      cell: (r) => (isPlayer ? TH().stageCount(done(r.stats), r.c.questionCount) : String(r.c.questionCount)),
+      sortValue: (r) => (isPlayer ? done(r.stats) / r.c.questionCount : r.c.questionCount),
+      sortFirst: "desc",
+    },
+  ];
+  if (isPlayer) {
+    cols.push(
+      { id: "status", header: TH().colStatus, cell: statusChip, sortValue: (r) => STATUS_RANK[statusOf(r.stats)] },
+      {
+        id: "score",
+        header: TH().colScore,
+        numeric: true,
+        cell: (r) => (r.stats === undefined || r.stats.status === "not-started" ? missing() : TH().scorePar(r.stats.score, r.stats.maxScore)),
+        sortValue: (r) => (r.stats === undefined || r.stats.status === "not-started" ? null : r.stats.score),
+        sortFirst: "desc",
+      },
+    );
+  }
+  cols.push({
+    id: "tags",
+    header: TH().colTags,
+    optional: true,
+    className: "home-col-tags",
+    cell: (r) => h("span", { class: "home-tags" }, r.c.tags.slice(0, 4).map((t, i) => [i > 0 ? ", " : "", h("bdi", {}, t)])),
+  });
+  return cols;
+}
+
+/** Recommended order: today's case, then cases in progress (latest first), then new ones, then finished ones. */
+function recommended(rows: readonly Row[]): Row[] {
+  return rows
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => {
+      if (a.r.isToday !== b.r.isToday) return a.r.isToday ? -1 : 1;
+      const sa = STATUS_RANK[statusOf(a.r.stats)];
+      const sb = STATUS_RANK[statusOf(b.r.stats)];
+      if (sa !== sb) return sa - sb;
+      if (sa === 0) return (b.r.stats?.startedAt ?? "").localeCompare(a.r.stats?.startedAt ?? "");
+      return a.i - b.i;
+    })
+    .map((x) => x.r);
+}
+
+/* ================= the page ================= */
+
+const queryOfHash = (): URLSearchParams => new URLSearchParams(window.location.hash.split("?")[1] ?? "");
+
+/** Home as a shell view: no sidebar (the filters sit in the table's toolbar). */
 export function homeView(): ViewResult {
   const main = h("div", { class: "view" });
-  const side = homeSidebar(() => applyFilters(main, side));
-  sidebarOf = (state) => {
-    side.showStatus(state.isSignedIn && !state.loading);
-    applyFilters(main, side);
-  };
-  return { main, sidebar: { label: TS().homeSide, content: side.content }, start: () => renderHome(main) };
+  return { main, start: () => renderHome(main) };
 }
-
-/** Set by homeView: keeps the filters in step after every draw. */
-let sidebarOf: ((state: HomeState) => void) | null = null;
 
 export function renderHome(root: HTMLElement): void {
   document.title = T().homeTitle;
   const token = Symbol("home");
   activeRender = token;
-  const state: HomeState = { loading: true, today: null, stats: new Map(), isSignedIn: cachedAccount() !== null, board: null };
-  draw(root, state);
+  let filters: CaseFilters = parseFilters(queryOfHash());
+  let state: HomeState = { loading: true, today: null, todayFailed: false, stats: new Map(), statsFailed: false, isPlayer: false };
 
-  // Today's case and (when signed in and approved) per-case status fill in as they arrive.
-  const today = loadToday().then(
-    (value) => value,
-    () => null,
+  const intro = h("div", { class: "home-intro-slot" });
+  const top = h("div", { class: "home-top" });
+  const search = h("input", { type: "search", class: "input home-search", "aria-label": TH().search, placeholder: TH().searchPlaceholder, autocomplete: "off", enterkeyhint: "search", value: filters.q });
+  const shown = h("p", { class: "home-shown", role: "status" });
+  const sortSelect = h("select", { class: "input home-sort", "aria-label": TH().sort });
+  const toolbar = h("div", { class: "home-toolbar" });
+  const tableSlot = h("div", { class: "home-table-slot" });
+  const cases = h(
+    "section",
+    { class: "home-cases", "aria-labelledby": "home-cases-h" },
+    h("header", { class: "home-cases-head" }, h("h2", { id: "home-cases-h", class: "home-card-title" }, TH().casesTitle), toolbar),
+    tableSlot,
   );
-  const account = loadAccount();
-  let settled = false;
-  // Once we know who is signed in, put the right hero line up while the cards are still loading.
-  if (!isAccountKnown()) {
-    void account.then(
-      () => {
-        if (activeRender === token && !settled) draw(root, { ...state, isSignedIn: cachedAccount() !== null });
+  const dash = h("div", { class: "home-dash" }, h("h1", { class: "visually-hidden" }, TH().pageHeading), intro, top, cases);
+  setChildren(root, dash);
+
+  let table: DataTable<Row> | null = null;
+  let tableFor: boolean | null = null;
+  let filter: FilterControl | null = null;
+
+  /** Still the page on screen? (A late answer must not redraw, or rewrite the URL of, the next route.) */
+  const onHome = (): boolean => activeRender === token && dash.isConnected && window.location.hash.replace(/^#\/?/, "").split("?")[0] === "";
+
+  const writeUrl = (): void => {
+    if (!onHome()) return;
+    const qs = serializeFilters(filters);
+    const next = `#/${qs ? `?${qs}` : ""}`;
+    if (window.location.hash !== next && window.location.hash !== (qs ? next : "")) history.replaceState(null, "", next);
+  };
+
+  const allRows = (): Row[] => {
+    const released = state.today?.releasedCaseIds;
+    const lock = state.today?.lockToToday === true;
+    return caseSummaries()
+      .filter((c) => released === undefined || released.includes(c.id))
+      .map((c) => {
+        const stats = state.stats.get(c.id);
+        const isToday = state.today?.caseId === c.id;
+        return { c, stats, isToday, locked: lock && !isToday && statusOf(stats) === "not-started" };
+      });
+  };
+
+  const syncSortSelect = (): void => {
+    const param = sortToParam(table?.getSort() ?? null);
+    const custom = sortSelect.querySelector<HTMLOptionElement>('option[value="custom"]');
+    if (param in SORT_OF && (param !== "score" || state.isPlayer)) {
+      custom?.remove();
+      sortSelect.value = param;
+      return;
+    }
+    const sort = table?.getSort() ?? null;
+    const col = columns(state.isPlayer).find((c) => c.id === sort?.id);
+    const label = `${col?.header ?? ""} ${sort?.dir === "asc" ? "↑" : "↓"}`;
+    if (custom) custom.textContent = label;
+    else sortSelect.append(h("option", { value: "custom" }, label));
+    sortSelect.value = "custom";
+  };
+
+  const applyRows = (): void => {
+    if (table === null) return;
+    const rows = allRows();
+    const visible = recommended(rows).filter((r) => matchesFilters(r.c, state.isPlayer ? statusOf(r.stats) : null, filters));
+    table.update(visible);
+    shown.textContent = rows.length === 0 ? "" : TH().shown(visible.length, rows.length);
+    filter?.sync(filters);
+    writeUrl();
+    fit();
+  };
+
+  const buildToolbar = (): void => {
+    const present = new Set(caseSummaries().map((c) => c.difficulty));
+    filter = filterButton({
+      groups: [
+        { key: "difficulty", legend: TS().filterDifficulty, options: DIFFICULTIES.filter((d) => present.has(d)).map((d) => ({ value: d, label: TO().difficulty(d) })) },
+        { key: "tag", legend: TS().filterTags, options: topTags(caseSummaries()).map((t) => ({ value: t, label: h("bdi", {}, t) })) },
+        ...(state.isPlayer ? [{ key: "status" as const, legend: TS().filterStatus, options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) }] : []),
+      ],
+      onChange: (key, values) => {
+        filters =
+          key === "difficulty"
+            ? { ...filters, difficulty: new Set([...values].filter((v): v is Difficulty => (DIFFICULTIES as readonly string[]).includes(v))) }
+            : key === "tag"
+              ? { ...filters, tags: values }
+              : { ...filters, status: new Set([...values].filter((v): v is CaseStatus => (STATUSES as readonly string[]).includes(v))) };
+        applyRows();
       },
-      () => undefined,
+      onClear: () => {
+        filters = { ...filters, difficulty: new Set(), tags: new Set(), status: new Set() };
+        applyRows();
+      },
+    });
+    const presets: [string, string][] = [
+      ["", TH().sortDefault],
+      ["title", TH().sortTitle],
+      ["easy", TH().sortEasy],
+      ["hard", TH().sortHard],
+      ["short", TH().sortShort],
+      ...(state.isPlayer ? ([["score", TH().sortScore]] as [string, string][]) : []),
+    ];
+    setChildren(sortSelect, presets.map(([value, label]) => h("option", { value }, label)));
+    setChildren(
+      toolbar,
+      h("span", { class: "home-search-wrap" }, search),
+      filter.element,
+      h("label", { class: "home-sort-wrap" }, h("span", { class: "home-sort-label" }, TH().sort), sortSelect),
+      shown,
     );
-  }
-  const stats = account.then(
-    (acc) => (acc?.status === "approved" ? fetchMyStats().then((s) => s.cases, () => []) : []),
-    () => [],
-  );
-  // Public board for the signed-out proof line; a failure just drops the line.
-  const board = account.then(
-    (acc) => (acc === null ? fetchLeaderboard(null).catch(() => null) : null),
-    () => null,
-  );
-  void Promise.all([today, stats, board]).then(([todayValue, caseStats, boardValue]) => {
-    if (activeRender !== token) return; // user navigated away
-    settled = true;
-    draw(root, { loading: false, today: todayValue, stats: new Map(caseStats.map((c) => [c.caseId, c])), isSignedIn: cachedAccount() !== null, board: boardValue });
+  };
+
+  const buildTable = (): DataTable<Row> => {
+    if (tableFor === state.isPlayer && table !== null) return table;
+    table?.destroy();
+    tableFor = state.isPlayer;
+    if (!state.isPlayer && filters.sort === "score") filters = { ...filters, sort: "" };
+    if (!state.isPlayer && filters.status.size > 0) filters = { ...filters, status: new Set() };
+    buildToolbar();
+    table = dataTable<Row>({
+      columns: columns(state.isPlayer),
+      rows: [],
+      caption: TA().allCases,
+      labelledBy: "home-cases-h",
+      regionLabel: TH().casesTitle,
+      wrapClass: "home-table",
+      className: "home-cases-table",
+      stackOnPhone: true,
+      rowKey: (r) => r.c.id,
+      rowSig: (r) => JSON.stringify([r.stats, r.isToday, r.locked, getLang()]),
+      rowAttrs: (r) => ({ "data-case": r.c.id, class: `home-case-row${r.isToday ? " is-today" : ""}` }),
+      initialSort: sortFromParam(filters.sort) ?? undefined,
+      empty: h("p", {}, caseSummaries().length === 0 ? T().noCases : TS().filterNoCases),
+      onSortChange: (sort) => {
+        filters = { ...filters, sort: sortToParam(sort) };
+        syncSortSelect();
+        writeUrl();
+      },
+    });
+    setChildren(tableSlot, table.element);
+    syncSortSelect();
+    return table;
+  };
+
+  sortSelect.addEventListener("change", () => {
+    if (sortSelect.value === "custom") return;
+    filters = { ...filters, sort: sortSelect.value };
+    table?.setSort(sortFromParam(sortSelect.value));
+    syncSortSelect();
+    writeUrl();
   });
+  search.addEventListener("input", () => {
+    filters = { ...filters, q: search.value };
+    applyRows();
+  });
+
+  // Row click opens the case (the title link is the keyboard path: Tab to it, Enter).
+  tableSlot.addEventListener("click", (ev) => {
+    const t = ev.target;
+    if (!(t instanceof Element) || t.closest("a, button, input, label") !== null) return;
+    const row = t.closest<HTMLElement>("[data-case]");
+    if (row?.dataset.case) window.location.hash = `#/case/${row.dataset.case}`;
+  });
+
+  const draw = (): void => {
+    if (!onHome()) return;
+    const account = cachedAccount();
+    const known = isAccountKnown();
+    const signedIn = account !== null;
+    setChildren(intro, known && !signedIn ? introStrip() : null);
+    setChildren(top, continueCard(state, signedIn), todayCard(state, signedIn, reload));
+    if (state.loading) {
+      // Keep rows already shown (a retry): only the first load draws skeleton rows.
+      if (table === null) buildTable().setState({ kind: "loading", label: TH().loadingCases, rows: Math.min(6, Math.max(3, caseSummaries().length)) });
+    } else {
+      buildTable().setState({ kind: "ready" });
+      applyRows();
+    }
+    fit();
+  };
+
+  // Fit the dashboard to the viewport on desktop: the table panel scrolls inside, the page doesn't.
+  const fit = (): void => {
+    if (activeRender !== token || !dash.isConnected) return;
+    dash.style.maxBlockSize = "";
+    if (window.matchMedia("(max-width: 640px)").matches) return;
+    const doc = document.documentElement;
+    if (doc.scrollHeight <= window.innerHeight) return;
+    const rect = dash.getBoundingClientRect();
+    const topDoc = rect.top + window.scrollY;
+    const below = doc.scrollHeight - (topDoc + rect.height);
+    const avail = window.innerHeight - topDoc - below;
+    dash.style.maxBlockSize = `${Math.max(MIN_DASH_PX, Math.floor(avail))}px`;
+  };
+  let fitFrame = 0;
+  const queueFit = (): void => {
+    if (fitFrame !== 0) return;
+    fitFrame = window.requestAnimationFrame(() => {
+      fitFrame = 0;
+      fit();
+    });
+  };
+  window.addEventListener("resize", queueFit);
+  const navbar = document.querySelector("header.navbar");
+  const ro = typeof ResizeObserver === "function" ? new ResizeObserver(queueFit) : null;
+  if (navbar !== null) ro?.observe(navbar);
+  const announce = document.querySelector(".announce");
+  if (announce !== null) ro?.observe(announce);
+  const stopWatch = window.setInterval(() => {
+    if (activeRender === token && dash.isConnected) return;
+    window.clearInterval(stopWatch);
+    window.removeEventListener("resize", queueFit);
+    ro?.disconnect();
+    table?.destroy();
+  }, 2000);
+
+  function load(): void {
+    const today = loadToday(true).then(
+      (value): { value: TodayResponse | null; failed: boolean } => ({ value, failed: false }),
+      () => ({ value: null, failed: true }),
+    );
+    const account = loadAccount();
+    if (!isAccountKnown()) void account.then(draw, () => undefined);
+    const stats = account.then(
+      (acc) =>
+        acc?.status === "approved" && acc.role !== "admin"
+          ? fetchMyStats().then(
+              (s) => ({ cases: s.cases, failed: false, player: true }),
+              () => ({ cases: [], failed: true, player: true }),
+            )
+          : { cases: [], failed: false, player: false },
+      () => ({ cases: [], failed: false, player: false }),
+    );
+    void Promise.all([today, stats]).then(([t, s]) => {
+      if (!onHome()) return; // navigated away
+      state = {
+        loading: false,
+        today: t.value,
+        todayFailed: t.failed,
+        stats: new Map(s.cases.map((c) => [c.caseId, c])),
+        statsFailed: s.failed,
+        isPlayer: s.player,
+      };
+      draw();
+    });
+  }
+  function reload(): void {
+    state = { ...state, loading: true };
+    draw();
+    load();
+  }
+
+  draw();
+  load();
+}
+
+/** Below this the dashboard stops shrinking and the page scrolls instead (short laptop windows). */
+const MIN_DASH_PX = 420;
+
+/** Signed out: what this is, for whom, and one primary action. Compact, not a marketing hero. */
+function introStrip(): HTMLElement {
+  return h(
+    "section",
+    { class: "home-intro", "aria-label": TH().introLabel },
+    h("div", { class: "home-intro-text" }, h("p", { class: "home-intro-title" }, TO().heroTitle), h("p", { class: "home-intro-sub" }, TO().heroSub)),
+    h(
+      "div",
+      { class: "home-intro-actions" },
+      h("a", { class: "btn btn-primary btn-sm", href: "#/signup" }, TO().ctaCreate),
+      h("a", { class: "btn btn-ghost btn-sm", href: "#/login" }, TO().ctaSignIn),
+    ),
+  );
 }
 
 let activeRender: symbol | null = null;
