@@ -10,7 +10,7 @@
 /* The evidence files and the time converter live in the shell sidebar (.ex-side, #60): the layout is one column. */
 .ex-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); align-items: start; }
 .ex-side { display: flex; flex-direction: column; }
-.ex-side-h { font-size: var(--step--2); text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted); margin: var(--space-1) 0 var(--space-2); }
+.ex-side-h { font-size: var(--step--2); text-transform: var(--label-case); letter-spacing: var(--type-label-track); color: var(--text-muted); margin: var(--space-1) 0 var(--space-2); }
 .ex-file-search { width: 100%; margin: 0 0 var(--space-2); }
 .ex-no-files { margin: 0 0 var(--space-4); font-size: var(--step--1); }
 .ex-match-nav { display: inline-flex; align-items: center; gap: var(--space-2); }
@@ -232,7 +232,7 @@ th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
 .ex-drawer-tools { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 .ex-detail-body { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
 .ex-detail-body > .ex-muted { margin: 0; }
-.ex-detail-sub { margin: var(--space-2) 0 0; font-size: var(--step--2); text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted); }
+.ex-detail-sub { margin: var(--space-2) 0 0; font-size: var(--step--2); text-transform: var(--label-case); letter-spacing: var(--type-label-track); color: var(--text-muted); }
 .ex-detail-fields { max-height: 300px; }
 .ex-detail-fields .ex-table th, .ex-detail-fields .ex-table td { vertical-align: top; }
 .ex-detail-fields thead th { padding: var(--space-1) var(--space-2); text-align: start; }

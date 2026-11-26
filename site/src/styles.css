@@ -99,7 +99,7 @@
   --space-6: 32px;
   --space-7: 48px;
   --space-8: 64px;
-  --gutter: var(--space-4);
+  --gutter: var(--space-4);         /* 16 below 600px; 24 from 600; 32 from 1056 (media rules below) */
 
   /* radius: one 4px base, five steps (x0.5 / 0.75 / 1 / 1.5 / 2). Controls, panels and code panes md 4; cards
      and floating surfaces lg 6; dialogs and sheets xl 8; pills full. */
@@ -119,23 +119,67 @@
   --edge-width: 1px;
   --stripe-width: 3px;
 
-  /* type: reading scale (deviation D3), 7 steps; body 17px at the default 16px root */
+  /* type: ten roles (#89), each a size, line-height, weight and tracking. Nothing renders below 12px.
+     Sizes are rem, so the browser default and [data-text-scale] scale them. Hebrew overrides: :lang(he) below. */
   /* Hebrew sits right after the Latin face in every stack: Hebrew names and labels render in Plex Sans Hebrew
      on every OS, also inside mono-styled text. */
   --font-sans: "IBM Plex Sans", "IBM Plex Sans Hebrew", "Plex Sans Fallback", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-sans-he: "IBM Plex Sans Hebrew", "IBM Plex Sans", "Plex Sans Fallback", system-ui, "Segoe UI", Arial, sans-serif;
   --font-mono: "IBM Plex Mono", "IBM Plex Sans Hebrew", "Plex Mono Fallback", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --step--2: 0.75rem;
-  --step--1: 0.875rem;
-  --step-0: 1.0625rem;
-  --step-1: 1.25rem;
-  --step-2: 1.5rem;
-  --step-3: clamp(1.75rem, 4vw, 2.4rem);
-  --step-4: clamp(2rem, 6vw, 3.2rem);
-  --leading-body: 1.65;
-  --leading-tight: 1.25;
-  --track-display: -0.02em;
-  --track-label: 0.08em;
+  --type-display-size: clamp(2rem, 1.6rem + 1.6vw, 2.5rem);   /* home welcome only */
+  --type-display-lh: 1.1;
+  --type-display-weight: 600;
+  --type-display-track: -0.02em;
+  --type-page-title-size: clamp(1.75rem, 1.5rem + 1vw, 2rem); /* every page h1 */
+  --type-page-title-lh: 1.2;
+  --type-page-title-weight: 600;
+  --type-page-title-track: -0.015em;
+  --type-headline-size: 1.375rem;                              /* 22: h2, stage question, section titles */
+  --type-headline-lh: 1.3;
+  --type-headline-weight: 600;
+  --type-headline-track: -0.01em;
+  --type-title-size: 1.125rem;                                 /* 18: h3, card, command and panel titles */
+  --type-title-lh: 1.35;
+  --type-title-weight: 600;
+  --type-title-track: 0;
+  --type-prose-size: 1.0625rem;                                /* 17: case prompt, debrief, hints (max --measure) */
+  --type-prose-lh: 1.65;
+  --type-prose-weight: 400;
+  --type-prose-track: 0;
+  --type-body-size: 1rem;                                      /* 16: UI copy, card blurbs, forms */
+  --type-body-lh: 1.5;
+  --type-body-weight: 400;
+  --type-body-track: 0;
+  --type-small-size: 0.875rem;                                 /* 14: meta, table cells, buttons, nav */
+  --type-small-lh: 1.45;
+  --type-small-weight: 400;
+  --type-small-track: 0;
+  --type-label-size: 0.75rem;                                  /* 12: labels and table headers, sentence case */
+  --type-label-lh: 1.35;
+  --type-label-weight: 500;
+  --type-label-track: 0;
+  --label-case: none;                                          /* labels are sentence case (#97) */
+  --type-kpi-size: 2rem;                                       /* 32: player and admin stat values, tabular */
+  --type-kpi-lh: 1.1;
+  --type-kpi-weight: 600;
+  --type-kpi-track: -0.02em;
+  --type-code-size: 0.875rem;                                  /* code blocks; inline code is 0.9em */
+  --type-code-inline: 0.9em;
+  --type-code-lh: 1.55;
+  --type-code-weight: 400;
+  --type-code-track: 0;
+  /* deprecated steps -> roles (the views still use them until the sweeps) */
+  --step--2: var(--type-label-size);
+  --step--1: var(--type-small-size);
+  --step-0: var(--type-prose-size);
+  --step-1: var(--type-title-size);
+  --step-2: var(--type-headline-size);
+  --step-3: var(--type-page-title-size);
+  --step-4: var(--type-display-size);
+  --leading-body: var(--type-body-lh);
+  --leading-tight: var(--type-headline-lh);
+  --track-display: var(--type-display-track);
+  --track-label: 0.06em;                                       /* only for the remaining uppercase Latin labels */
 
   /* controls: one height scale shared by buttons, inputs, tabs and toggles */
   --target-min: 24px;
@@ -156,11 +200,21 @@
   --motion-ease-standard: cubic-bezier(0.2, 0, 0.38, 0.9);
   --motion-ease-enter: cubic-bezier(0, 0, 0.38, 0.9);
 
-  /* layout */
-  --read: 760px;
-  --page: 1080px;
-  --page-narrow: 900px;
-  --page-wide: 1280px;
+  /* spacing roles (#89): components pick a role, not a raw step. Inside a group < between groups, at every level. */
+  --gap-tight: var(--space-1);      /* 4: label to control, title to its meta, icon to text */
+  --gap-related: var(--space-2);    /* 8: items of one group: chips, meta rows, button clusters */
+  --gap-stack: var(--space-4);      /* 16: blocks inside a card or section, cards in a grid */
+  --gap-section: var(--space-6);    /* 32 (24 on phones): between sections of a page */
+  --gap-region: var(--space-7);     /* 48 (32 on phones): hero to content, content to footer */
+  --pad-card: var(--space-5);       /* 24 (16 on phones): every card, panel, tile and dialog body */
+  --pad-card-lg: var(--space-6);    /* 32 (20 on phones): the one hero card of a page */
+
+  /* layout. The page gutter (16 / 24 / 32) belongs to the shell; views never add their own inline padding. */
+  --read: 760px;                    /* the reading column: case stage and debrief */
+  --measure: 68ch;                  /* every paragraph container */
+  --page: 1120px;                   /* player pages */
+  --page-narrow: 900px;             /* deprecated: narrow pages move to --page with --measure */
+  --page-wide: 1440px;              /* admin and Explorer */
   /* overlay widths (lib/overlay.ts): dialog sm/md/lg and side sheets */
   --dialog-sm: 30rem;
   --dialog-md: 40rem;
@@ -183,6 +237,25 @@
   --dir: 1;
 }
 [dir=rtl] { --dir: -1; }
+
+@media (max-width: 599.98px) {
+  :root { --gap-section: var(--space-5); --gap-region: var(--space-6); --pad-card: var(--space-4); --pad-card-lg: 20px; }
+}
+@media (min-width: 600px) { :root { --gutter: var(--space-5); } }
+@media (min-width: 1056px) { :root { --gutter: var(--space-6); } }
+
+/* Hebrew: no case, no tracking, looser leading, and a 13px label (Hebrew letters run small at 12px). */
+:root:lang(he) {
+  --type-display-track: 0; --type-page-title-track: 0; --type-headline-track: 0; --type-kpi-track: 0;
+  --track-label: 0;
+  --type-display-lh: 1.25; --type-page-title-lh: 1.3; --type-headline-lh: 1.4; --type-title-lh: 1.45;
+  --type-prose-lh: 1.75; --type-body-lh: 1.6; --type-small-lh: 1.55; --type-label-lh: 1.45; --type-kpi-lh: 1.2;
+  --type-label-size: 0.8125rem;
+}
+/* Hebrew has no case and tracking only damages it, so no component rule can force either (W3C hlreq). The
+   text-spacing setting keeps its 0.12em, which is a reading aid, not tracking. */
+:root:lang(he) * { text-transform: none !important; }
+:root:lang(he):not([data-spacing="wide"]) * { letter-spacing: 0 !important; }
 
 @media (pointer: coarse) {
   :root {
@@ -418,7 +491,11 @@
 /* high contrast on request: the @tokens:hc-attr block above */
 /* text spacing (WCAG 1.4.12, dyslexia-friendly): line height 1.5x+, letter 0.12em, word 0.16em, paragraphs 2em.
    Code and log text keep their metrics: columns must line up and the explorer rows have a fixed height (D4). */
-:root[data-spacing="wide"] { --leading-body: 1.9; --leading-tight: 1.5; }
+:root[data-spacing="wide"] {
+  --type-display-lh: 1.5; --type-page-title-lh: 1.5; --type-headline-lh: 1.5; --type-title-lh: 1.5; --type-kpi-lh: 1.5;
+  --type-prose-lh: 1.9; --type-body-lh: 1.9; --type-small-lh: 1.9; --type-label-lh: 1.9;
+  --leading-body: 1.9; --leading-tight: 1.5;
+}
 :root[data-spacing="wide"] body { letter-spacing: 0.12em; word-spacing: 0.16em; }
 :where(:root[data-spacing="wide"]) p { margin-block-end: 2em; }
 :root[data-spacing="wide"] :is(code, pre, kbd, samp, .mono, .code-block, .ex-viewport) { letter-spacing: normal; word-spacing: normal; }
@@ -585,7 +662,7 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 }
 .settings-title { font-size: var(--step-0); margin: 0 0 var(--space-3); }
 .settings-group { border: 0; margin: 0 0 var(--space-3); padding: 0; min-inline-size: 0; }
-.settings-legend { padding: 0; margin-block-end: var(--space-1); font-size: var(--step--2); font-weight: 600; text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted); }
+.settings-legend { padding: 0; margin-block-end: var(--space-1); font-size: var(--step--2); font-weight: 600; text-transform: var(--label-case); letter-spacing: var(--type-label-track); color: var(--text-muted); }
 .settings-legend:lang(he) { text-transform: none; letter-spacing: normal; }
 .settings-options { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .settings-option {
@@ -686,12 +763,12 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 .side-group { display: flex; flex-direction: column; gap: var(--space-1); min-inline-size: 0; margin: 0; padding: 0; border: 0; }
 .side-h {
   margin: 0; padding: 0; font-size: var(--step--2); font-weight: 600; line-height: var(--leading-tight);
-  text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted);
+  text-transform: var(--label-case); letter-spacing: var(--type-label-track); color: var(--text-muted);
 }
 .side-h { margin-block-end: var(--space-1); }
 .side-stack .tb-filter .answer-label {
   font-size: var(--step--2); font-weight: 600; line-height: var(--leading-tight);
-  text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted);
+  text-transform: var(--label-case); letter-spacing: var(--type-label-track); color: var(--text-muted);
 }
 .side-h:lang(he), .side-stack .tb-filter .answer-label:lang(he) { text-transform: none; letter-spacing: normal; }
 .side-meta { margin: 0; font-size: var(--step--1); color: var(--text-2); overflow-wrap: anywhere; }
@@ -919,7 +996,7 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 
 /* ============ table: one header style ============ */
 .stats-table thead th, .admin-table thead th, .prose thead th, .ex-table th {
-  color: var(--text-muted); font-size: var(--step--2); text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-muted); font-size: var(--step--2); text-transform: var(--label-case); letter-spacing: var(--type-label-track);
   font-weight: 600; text-align: start; background: var(--surface-2); border-bottom: 1px solid var(--border-strong);
 }
 
@@ -928,9 +1005,9 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 .hero-title { font-size: var(--step-4); letter-spacing: -0.03em; }
 .hero-sub { font-size: var(--step-1); color: var(--text-2); margin: 0; }
 .section { margin-top: var(--space-7); }
-.section-title { font-size: var(--step--1); text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted); font-weight: 600; }
+.section-title { font-size: var(--step--1); text-transform: var(--label-case); letter-spacing: var(--type-label-track); color: var(--text-muted); font-weight: 600; }
 .featured-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: clamp(20px, 4vw, 36px); max-width: var(--read); }
-.featured-meta { color: var(--text-muted); font-size: var(--step--1); margin: 0 0 var(--space-2); text-transform: uppercase; letter-spacing: 0.06em; }
+.featured-meta { color: var(--text-muted); font-size: var(--step--1); margin: 0 0 var(--space-2); text-transform: var(--label-case); letter-spacing: var(--type-label-track); }
 .featured-title { font-size: clamp(1.6rem, 4vw, 2.2rem); }
 .featured-sub { color: var(--text-2); margin: 0 0 var(--space-5); }
 .how { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--space-5); grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
@@ -948,7 +1025,7 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 .center-card.gate { text-align: start; display: flex; flex-direction: column; gap: var(--space-3); }
 .center-card h1 { font-size: 1.8rem; margin: 0; overflow-wrap: break-word; hyphens: auto; }
 .center-card p { margin: 0; }
-.eyebrow { color: var(--text-muted); font-size: var(--step--2); text-transform: uppercase; letter-spacing: var(--track-label); }
+.eyebrow { color: var(--text-muted); font-size: var(--step--2); text-transform: var(--label-case); letter-spacing: var(--type-label-track); }
 
 /* ============ case header ============ */
 .case-head { padding: var(--space-2) 0 var(--space-5); border-bottom: 1px solid var(--border); margin-bottom: var(--space-6); }
@@ -994,9 +1071,9 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 /* design-review-ignore LU-OUTLINE-NONE: tabindex=-1 route focus target (focused by script after navigation), never a Tab stop */
 .stage-wrap:focus { outline: none; }
 .stage { display: flex; flex-direction: column; gap: var(--space-6); }
-.stage-kicker { color: var(--accent-text); font-size: var(--step--1); text-transform: uppercase; letter-spacing: var(--track-label); margin: 0 0 calc(-1 * var(--space-5)); }
+.stage-kicker { color: var(--accent-text); font-size: var(--step--1); text-transform: var(--label-case); letter-spacing: var(--type-label-track); margin: 0 0 calc(-1 * var(--space-5)); }
 .stage-goal { font-size: clamp(1.45rem, 3.6vw, 1.9rem); margin: 0; letter-spacing: var(--track-display); }
-.stage h3 { font-size: var(--step--1); text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted); margin: 0 0 var(--space-3); }
+.stage h3 { font-size: var(--step--1); text-transform: var(--label-case); letter-spacing: var(--type-label-track); color: var(--text-muted); margin: 0 0 var(--space-3); }
 .block h2 { font-size: var(--step-1); }
 .look-for ul { margin: 0; padding-inline-start: 1.2em; color: var(--text-2); }
 .look-for li + li { margin-top: var(--space-1); }
@@ -1125,7 +1202,7 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 
 /* ============ home: today + catalog ============ */
 .today-card { border-color: var(--edge-selected); box-shadow: 0 0 0 1px var(--accent-soft), 0 20px 60px -30px var(--accent); }
-.today-kicker { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--accent-text); font-size: var(--step--2); text-transform: uppercase; letter-spacing: var(--track-label); margin: 0 0 var(--space-3); font-weight: 700; }
+.today-kicker { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--accent-text); font-size: var(--step--2); text-transform: var(--label-case); letter-spacing: var(--type-label-track); margin: 0 0 var(--space-3); font-weight: 700; }
 .today-kicker .dot { background: var(--accent); animation: pulse 2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .today-kicker .dot { animation: none; } }
@@ -1158,7 +1235,7 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 .stats-page h1 { margin: var(--space-3) 0 var(--space-1); }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--space-3); margin: var(--space-5) 0 var(--space-2); }
 .stat-tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4); }
-.stat-label { margin: 0; color: var(--text-muted); font-size: var(--step--2); text-transform: uppercase; letter-spacing: 0.06em; }
+.stat-label { margin: 0; color: var(--text-muted); font-size: var(--step--2); text-transform: var(--label-case); letter-spacing: var(--type-label-track); }
 .stat-value { margin: var(--space-1) 0 0; font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); }
 .stats-table { width: 100%; border-collapse: collapse; font-size: var(--step--1); }
@@ -1179,7 +1256,7 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 [dir=rtl] .stat-value, [dir=rtl] .case-status, [dir=rtl] .today-kicker { direction: rtl; }
 
 /* ============ commands (syntax vs revealed) ============ */
-.syntax-label { margin: var(--space-3) 0 -2px; font-size: var(--step--2); text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted); }
+.syntax-label { margin: var(--space-3) 0 -2px; font-size: var(--step--2); text-transform: var(--label-case); letter-spacing: var(--type-label-track); color: var(--text-muted); }
 .code-block.syntax-block {
   padding: var(--space-3) var(--space-4); background: transparent; color: var(--text-2);
   border: 1px dashed var(--border-strong); white-space: pre-wrap; overflow-wrap: anywhere;
@@ -1214,7 +1291,7 @@ p.notice.form-error { display: block; }
 @media (prefers-reduced-motion: reduce) { .meter-fill { transition: none; } }
 
 .breakdown { width: 100%; max-width: 420px; border-collapse: collapse; margin: var(--space-1) 0 var(--space-4); font-size: var(--step--1); }
-.breakdown caption { text-align: start; font-size: var(--step--2); text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted); padding-bottom: var(--space-2); }
+.breakdown caption { text-align: start; font-size: var(--step--2); text-transform: var(--label-case); letter-spacing: var(--type-label-track); color: var(--text-muted); padding-bottom: var(--space-2); }
 .breakdown th, .breakdown td { padding: var(--space-1) 0; border-bottom: 1px solid var(--border); text-align: start; font-weight: 500; vertical-align: baseline; }
 .breakdown td.num { text-align: end; font-variant-numeric: tabular-nums; white-space: nowrap; padding-inline-start: var(--space-4); }
 .breakdown .bd-detail { display: block; font-size: var(--step--2); font-weight: 400; }
@@ -1433,7 +1510,7 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
 /* Stage: compact "Look for" and a phone-only jump to the answer field. */
 .look-for > summary {
   display: list-item; cursor: pointer; min-block-size: var(--target-min); padding-block: var(--space-1);
-  font-size: var(--step--1); font-weight: 600; text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted);
+  font-size: var(--step--1); font-weight: 600; text-transform: var(--label-case); letter-spacing: var(--type-label-track); color: var(--text-muted);
 }
 [dir=rtl] .look-for > summary { text-transform: none; letter-spacing: 0; }
 .look-for[open] > summary { margin-block-end: var(--space-2); }
@@ -1525,7 +1602,7 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
 .hero-welcome { font-size: var(--step-3); }
 .hero-in { padding-block-end: 0; }
 .resume-card { margin-top: var(--space-4); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: clamp(var(--space-4), 4vw, var(--space-6)); display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
-.resume-kicker { margin: 0; font-size: var(--step--2); text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted); font-weight: 600; }
+.resume-kicker { margin: 0; font-size: var(--step--2); text-transform: var(--label-case); letter-spacing: var(--type-label-track); color: var(--text-muted); font-weight: 600; }
 :lang(he) .resume-kicker, :lang(he) .featured-meta { text-transform: none; letter-spacing: 0; }
 .resume-title { font-size: var(--step-2); margin: 0; }
 .resume-meta { margin: 0; color: var(--text-2); font-variant-numeric: tabular-nums; }
