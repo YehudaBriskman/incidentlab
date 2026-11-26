@@ -3,7 +3,7 @@
 import { PasswordSchema, UsernameSchema, type AccountView } from "../../shared/contract";
 import { ApiError, changePassword, login, register } from "../lib/api";
 import { h, setChildren, type Child } from "../lib/dom";
-import { getLang } from "../i18n/i18n";
+import { getLang, isRelabel } from "../i18n/i18n";
 import { isAdmin, loadAccount, setAccount, signOut } from "../lib/session";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
@@ -36,6 +36,43 @@ export function stopAuthTimers(): void {
 }
 
 type Mode = "sign-in" | "sign-up";
+
+/**
+ * What the player had typed into a gate form, captured when the language switch re-renders the route, so
+ * EN/עב re-labels the form instead of wiping it. Kept in memory for that one re-render only.
+ */
+type Draft = { values: ReadonlyMap<string, string>; focusId: string | null; mode: Mode | null };
+let draft: Draft | null = null;
+
+function captureDraft(root: HTMLElement): Draft | null {
+  const form = root.querySelector("form");
+  if (form === null) return null;
+  const values = new Map<string, string>();
+  for (const input of form.querySelectorAll("input")) if (input.id !== "" && input.value !== "") values.set(input.id, input.value);
+  const active = document.activeElement;
+  const mode = form.dataset.mode;
+  return {
+    values,
+    focusId: active instanceof HTMLInputElement && form.contains(active) ? active.id : null,
+    mode: mode === "sign-in" || mode === "sign-up" ? mode : null,
+  };
+}
+
+/**
+ * Put a captured draft back into a freshly rendered form (once). Returns true when it restored one, so the
+ * caller keeps focus where it was (on the language toggle, or the field being typed in) instead of moving it.
+ */
+function restoreDraft(form: HTMLElement): boolean {
+  const saved = draft;
+  draft = null;
+  if (saved === null) return false;
+  for (const input of form.querySelectorAll("input")) {
+    const value = saved.values.get(input.id);
+    if (value !== undefined) input.value = value;
+  }
+  if (saved.focusId !== null) form.querySelector<HTMLInputElement>(`#${CSS.escape(saved.focusId)}`)?.focus();
+  return true;
+}
 
 export type GateOptions = {
   /** What the instructor's session sees (default: the "sign in as a player" card). */
@@ -73,6 +110,8 @@ export function withApprovedAccount(
 ): void {
   stopAuthTimers();
   const again = (): void => withApprovedAccount(root, context, onReady, options);
+  // A language switch re-renders this route: keep what was typed (the loading card below would wipe it).
+  draft = isRelabel() ? captureDraft(root) : null;
   setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, T().loading)));
   loadAccount()
     .then((account) => {
@@ -80,7 +119,7 @@ export function withApprovedAccount(
         carriedTempPassword = null;
         renderAuthForm(root, {
           context,
-          mode: options.signedOutMode ?? "sign-in",
+          mode: draft?.mode ?? options.signedOutMode ?? "sign-in",
           onSignedIn: again,
           inviteCode: options.inviteCode,
           titled: options.titled,
@@ -90,7 +129,10 @@ export function withApprovedAccount(
       else if (account.status === "pending") renderPending(root, account, again);
       else if (account.status === "rejected") renderRejected(root, account.username, again);
       else if (account.mustChangePassword) renderForcedPasswordChange(root, context, again);
-      else onReady(account);
+      else {
+        draft = null;
+        onReady(account);
+      }
     })
     .catch((err: unknown) => {
       setChildren(
@@ -157,13 +199,18 @@ function makeField(opts: { input: HTMLInputElement; label: string; help?: string
     label: opts.label,
     setError,
     hasError: () => !errorEl.hidden,
+    // One group per field, so the label sits closer to its own input than to the previous field.
     nodes: [
-      h("label", { class: "field-label", for: id }, opts.label),
-      opts.help ? h("p", { id: helpId, class: "field-help muted small" }, opts.help) : null,
-      errorEl,
-      opts.input,
-      // After the input, so Tab goes username → password → submit without stopping on the toggle first.
-      opts.toggle ?? null,
+      h(
+        "div",
+        { class: "field" },
+        h("label", { class: "field-label", for: id }, opts.label),
+        opts.help ? h("p", { id: helpId, class: "field-help muted small" }, opts.help) : null,
+        errorEl,
+        opts.input,
+        // After the input, so Tab goes username → password → submit without stopping on the toggle first.
+        opts.toggle ?? null,
+      ),
     ],
   };
 }
@@ -338,7 +385,8 @@ export function renderAuthForm(
         }),
       })
     : null;
-  if (invite !== null && opts.inviteCode !== undefined) invite.input.value = opts.inviteCode;
+  const prefilled = invite !== null && opts.inviteCode !== undefined && opts.inviteCode.length > 0;
+  if (invite !== null && prefilled) invite.input.value = opts.inviteCode ?? "";
   const fields: Field[] = [user, pw, ...(invite ? [invite] : [])];
   const summary = errorSummary(baseTitle);
   const submitLabel = isSignUp ? TA().signUpBtn : TA().signInBtn;
@@ -355,14 +403,16 @@ export function renderAuthForm(
 
   const form = h(
     "form",
-    { class: "center-card gate", novalidate: true },
+    { class: "center-card gate", novalidate: true, "data-mode": opts.mode },
     summary.el,
     h("p", { class: "eyebrow mono" }, opts.context),
     h("h1", {}, isSignUp ? TA().authTitleSignUp : (opts.signInTitle ?? TA().authTitleSignIn)),
     h("p", { class: "muted" }, isSignUp ? TA().authHelpSignUp : TA().authHelpSignIn),
+    // A class link (`?code=`) leads with the prefilled code: it is why this student skips the approval wait.
+    prefilled && invite ? invite.nodes : null,
     user.nodes,
     pw.nodes,
-    invite ? invite.nodes : null,
+    invite && !prefilled ? invite.nodes : null,
     submit,
     switchMode,
     isSignUp ? null : h("p", { class: "muted small auth-forgot" }, TG().forgotPassword),
@@ -467,7 +517,7 @@ export function renderAuthForm(
   });
 
   setChildren(root, form);
-  user.input.focus();
+  if (!restoreDraft(form)) user.input.focus();
 }
 
 /* ================= password change ================= */
@@ -580,7 +630,7 @@ function renderForcedPasswordChange(root: HTMLElement, context: string, onDone: 
       ),
     ),
   );
-  form.querySelector("input")?.focus();
+  if (!restoreDraft(form)) form.querySelector("input")?.focus();
 }
 
 /* ================= other gate screens ================= */
