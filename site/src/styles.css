@@ -1294,17 +1294,8 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
 .ach.is-locked .ach-icon { opacity: 1; filter: grayscale(1) contrast(1.2); border: 1px solid var(--border-strong); }
 .ach.is-locked .ach-desc, .ach.is-locked .ach-when { color: var(--text-muted); }
 
-/* phones: the per-case table becomes one card per case, each value labelled */
+/* phones: the per-case table stacks into cards through .dt-stack (data table section); only its extras live here */
 @media (max-width: 600px) {
-  .per-case-wrap { border: 0; overflow: visible; }
-  .per-case-table, .per-case-table tbody { display: block; }
-  .per-case-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .per-case-table tr { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-1) var(--space-3); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
-  .per-case-table th, .per-case-table td { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0; border: 0; text-align: start; white-space: normal; }
-  .per-case-table .case-cell { grid-column: 1 / -1; font-size: var(--step-0); font-weight: 700; }
-  .per-case-table td::before { content: attr(data-label); color: var(--text-muted); font-size: var(--step--2); font-weight: 600; font-family: var(--font-sans); }
-  .per-case-table tbody tr:last-child > * { border: 0; }
-  [dir=rtl] .per-case-table td.num { direction: rtl; text-align: start; }
   .per-case-table .bar { margin-inline-start: 0; }
 }
 

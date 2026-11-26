@@ -3,6 +3,8 @@ import { ACHIEVEMENT_IDS, type CaseStats, type LeaderboardResponse, type UserSta
 import { caseSummary } from "../content/load";
 import { ApiError, fetchLeaderboard, fetchMyStats } from "../lib/api";
 import { h, setChildren, type Child } from "../lib/dom";
+import { dataTable, type Column } from "../components/dataTable";
+import { statGrid, statTile } from "../components/statGrid";
 import { formatElapsed } from "../lib/time";
 import { formatNumber, getLang } from "../i18n/i18n";
 import { setAccount } from "../lib/session";
@@ -16,13 +18,7 @@ const locale = (): string => (getLang() === "he" ? "he-IL" : "en-GB");
 
 /** A KPI card: label, value (+ unit), then comparison lines that give the number its context. */
 function kpi(label: string, value: string, unit: string | null, subs: ReadonlyArray<string | null>): HTMLElement {
-  return h(
-    "div",
-    { class: "stat-tile kpi" },
-    h("p", { class: "stat-label" }, label),
-    h("p", { class: "stat-value-row" }, h("span", { class: "stat-value" }, value), unit ? h("span", { class: "stat-unit" }, unit) : null),
-    subs.filter((s): s is string => s !== null).map((s) => h("p", { class: "stat-sub muted small" }, s)),
-  );
+  return statTile({ label, value, unit, subs });
 }
 
 /** Missing is never zero: a muted dash, with "No data" for screen readers. */
@@ -34,35 +30,59 @@ function statusText(c: CaseStats): string {
   return c.status === "completed" ? TA().statusDone : c.status === "in-progress" ? TA().statusProgress : TA().statusNew;
 }
 
-function caseRow(c: CaseStats): HTMLElement {
-  const title = caseSummary(c.caseId)?.title ?? c.caseId;
-  const played = c.status !== "not-started";
-  // maxScore is par, not a ceiling: bonuses (first blood, time, clean) can beat it. Cap the bar and say so.
-  const pct = c.maxScore > 0 ? Math.min(100, Math.round((c.score / c.maxScore) * 100)) : 0;
-  const abovePar = c.maxScore > 0 && c.score > c.maxScore;
-  const count = (n: number): Child => (played ? formatNumber(n) : none());
-  // data-label: the column name shown beside each value when the table stacks into cards on phones.
-  return h(
-    "tr",
-    { class: `status-${c.status}` },
-    h("th", { scope: "row", class: "case-cell" }, h("bdi", {}, played ? h("a", { href: `#/case/${c.caseId}` }, title) : title)),
-    h("td", { "data-label": TA().colStatus }, h("span", { class: `chip chip-${c.status}` }, statusText(c))),
-    h(
-      "td",
-      { class: "num", "data-label": TA().colScore },
-      played
-        ? [
-            h("span", { class: "score-val", dir: "auto" }, TG().scorePts(c.score)), // not .mono: RTL forces mono LTR and splits "נק'"
-            h("span", { class: `bar${abovePar ? " is-above-par" : ""}`, "aria-hidden": "true" }, h("span", { class: "bar-fill", style: `width:${pct}%` })),
-            h("span", { class: "score-par muted small" }, TG().parOf(c.maxScore), abovePar ? h("span", { class: "above-par" }, ` · ▲ ${TG().abovePar}`) : null),
-          ]
-        : none(),
-    ),
-    h("td", { class: "num mono", "data-label": TA().colTime }, c.durationSeconds === null || !played ? none() : formatElapsed(c.durationSeconds * 1000)),
-    h("td", { class: "num mono", "data-label": TA().colHints }, count(c.hintsUsed)),
-    h("td", { class: "num mono", "data-label": TG().colCommands }, count(c.commandsRevealed)),
-    h("td", { class: "num mono", "data-label": TA().colWrong }, count(c.wrongAttempts)),
-  );
+/** The per-case table's columns. Unplayed cases show a muted dash, never a zero. */
+function caseColumns(): Column<CaseStats>[] {
+  const played = (c: CaseStats): boolean => c.status !== "not-started";
+  const count = (c: CaseStats, n: number): Child => (played(c) ? formatNumber(n) : none());
+  const statusOrder = { "completed": 0, "in-progress": 1, "not-started": 2 } as const;
+  return [
+    {
+      id: "case",
+      header: TA().colCase,
+      rowHeader: true,
+      className: "case-cell",
+      sortValue: (c) => caseSummary(c.caseId)?.title ?? c.caseId,
+      cell: (c) => {
+        const title = caseSummary(c.caseId)?.title ?? c.caseId;
+        return h("bdi", {}, played(c) ? h("a", { href: `#/case/${c.caseId}` }, title) : title);
+      },
+    },
+    {
+      id: "status",
+      header: TA().colStatus,
+      sortValue: (c) => statusOrder[c.status],
+      cell: (c) => h("span", { class: `chip chip-${c.status}` }, statusText(c)),
+    },
+    {
+      id: "score",
+      header: TA().colScore,
+      numeric: true,
+      sortFirst: "desc",
+      sortValue: (c) => (played(c) ? c.score : null),
+      cell: (c) => {
+        if (!played(c)) return none();
+        // maxScore is par, not a ceiling: bonuses (first blood, time, clean) can beat it. Cap the bar and say so.
+        const pct = c.maxScore > 0 ? Math.min(100, Math.round((c.score / c.maxScore) * 100)) : 0;
+        const abovePar = c.maxScore > 0 && c.score > c.maxScore;
+        return [
+          h("span", { class: "score-val", dir: "auto" }, TG().scorePts(c.score)), // not .mono: RTL forces mono LTR and splits "נק'"
+          h("span", { class: `bar${abovePar ? " is-above-par" : ""}`, "aria-hidden": "true" }, h("span", { class: "bar-fill", style: `width:${pct}%` })),
+          h("span", { class: "score-par muted small" }, TG().parOf(c.maxScore), abovePar ? h("span", { class: "above-par" }, ` · ▲ ${TG().abovePar}`) : null),
+        ];
+      },
+    },
+    {
+      id: "time",
+      header: TA().colTime,
+      numeric: true,
+      className: "mono",
+      sortValue: (c) => (played(c) ? c.durationSeconds : null),
+      cell: (c) => (c.durationSeconds === null || !played(c) ? none() : formatElapsed(c.durationSeconds * 1000)),
+    },
+    { id: "hints", header: TA().colHints, numeric: true, className: "mono", sortValue: (c) => (played(c) ? c.hintsUsed : null), cell: (c) => count(c, c.hintsUsed) },
+    { id: "commands", header: TG().colCommands, numeric: true, className: "mono", sortValue: (c) => (played(c) ? c.commandsRevealed : null), cell: (c) => count(c, c.commandsRevealed) },
+    { id: "wrong", header: TA().colWrong, numeric: true, className: "mono", sortValue: (c) => (played(c) ? c.wrongAttempts : null), cell: (c) => count(c, c.wrongAttempts) },
+  ];
 }
 
 function achievementsGrid(stats: UserStats): HTMLElement {
@@ -135,9 +155,7 @@ function draw(root: HTMLElement, stats: UserStats, board: LeaderboardResponse | 
       h("h1", {}, TA().statsTitle),
       h("p", { class: "muted" }, h("strong", {}, h("bdi", {}, stats.username)), " · ", TA().memberSince(since)),
       h("p", { class: "muted small" }, TO().statsSub),
-      h(
-        "div",
-        { class: "kpi-grid" },
+      statGrid([
         kpi(TO().kpiScore, formatNumber(stats.totalScore), TO().ptsUnit, [
           classMedian !== null ? TO().vsMedian(stats.totalScore - classMedian, classMedian) : null,
           parDiff !== null ? TO().vsPar(parDiff) : null,
@@ -145,7 +163,7 @@ function draw(root: HTMLElement, stats: UserStats, board: LeaderboardResponse | 
         kpi(TO().kpiRank, rankValue, null, [stats.rank === null || stats.totalScore === 0 ? TO().unrankedSub : null]),
         kpi(TO().kpiCases, TO().casesOf(stats.casesCompleted, released), null, [inProgress > 0 ? TO().inProgress(inProgress) : null]),
         kpi(TO().kpiStreak, TO().streakDays(stats.streak.current), null, [TO().streakBest(stats.streak.best)]),
-      ),
+      ]),
       h(
         "section",
         { class: "stat-details", "aria-labelledby": "detail-h" },
@@ -164,30 +182,16 @@ function draw(root: HTMLElement, stats: UserStats, board: LeaderboardResponse | 
       ),
       achievementsGrid(stats),
       h("h2", { id: "per-case-h", class: "section-title" }, TA().perCase),
-      h(
-        "div",
-        { class: "table-wrap per-case-wrap", role: "region", "aria-label": TO().perCaseRegion, tabindex: "0" },
-        h(
-          "table",
-          { class: "stats-table per-case-table", "aria-labelledby": "per-case-h" },
-          h(
-            "thead",
-            {},
-            h(
-              "tr",
-              {},
-              h("th", { scope: "col" }, TA().colCase),
-              h("th", { scope: "col" }, TA().colStatus),
-              h("th", { scope: "col", class: "num" }, TA().colScore),
-              h("th", { scope: "col", class: "num" }, TA().colTime),
-              h("th", { scope: "col", class: "num" }, TA().colHints),
-              h("th", { scope: "col", class: "num" }, TG().colCommands),
-              h("th", { scope: "col", class: "num" }, TA().colWrong),
-            ),
-          ),
-          h("tbody", {}, stats.cases.map(caseRow)),
-        ),
-      ),
+      dataTable({
+        columns: caseColumns(),
+        rows: stats.cases,
+        rowAttrs: (c) => ({ class: `status-${c.status}` }),
+        labelledBy: "per-case-h",
+        className: "per-case-table",
+        wrapClass: "per-case-wrap",
+        regionLabel: TO().perCaseRegion,
+        stackOnPhone: true,
+      }).element,
       h(
         "details",
         { class: "pw-section" },

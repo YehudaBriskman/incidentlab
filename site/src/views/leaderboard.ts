@@ -3,6 +3,7 @@
 import { usernameKey, type LeaderboardResponse } from "../../shared/contract";
 import { caseSummaries, caseSummary } from "../content/load";
 import { fetchLeaderboard } from "../lib/api";
+import { dataTable, type Column } from "../components/dataTable";
 import { h, setChildren } from "../lib/dom";
 import { cachedEvent, eventPhase, formatCountdown, isEventActive, onEventChange } from "../lib/event";
 import { cachedAccount, loadAccount } from "../lib/session";
@@ -206,32 +207,32 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): vo
     }
     const scope = caseId === null ? TO().lbCaptionOverall : TO().lbCaptionCase(scopeTitle());
     const caption = `${scope}${data.frozen && data.frozenAt ? TO().lbCaptionFrozen(timeFmt().format(new Date(data.frozenAt))) : ""}`;
+    // Ranked order is the point of this table, so its columns don't sort. lb-opt (not "optional") keeps the
+    // projector showing every column while phones drop the extras.
+    const cols: Column<LeaderboardEntry>[] = [
+      { id: "rank", header: TG().lbRank, numeric: true, className: "lb-rank", cell: (e) => formatNumber(e.rank) },
+      {
+        id: "player",
+        header: TG().lbPlayer,
+        rowHeader: true,
+        className: "lb-name",
+        cell: (e) => [h("bdi", {}, e.username), myKey !== null && usernameKey(e.username) === myKey ? h("span", { class: "chip lb-you" }, TG().lbYou) : null],
+      },
+      { id: "score", header: TG().lbScore, numeric: true, className: "lb-score", cell: (e) => formatNumber(e.score) },
+      { id: "stages", header: TG().lbStages, numeric: true, className: "lb-opt", cell: (e) => formatNumber(e.stagesSolved) },
+      ...(overall ? [{ id: "cases", header: TG().lbCases, numeric: true, className: "lb-opt", cell: (e: LeaderboardEntry) => formatNumber(e.casesCompleted) }] : []),
+      { id: "firstBloods", header: TG().lbFirstBloods, numeric: true, className: "lb-opt", cell: (e) => formatNumber(e.firstBloods) },
+    ];
     setChildren(
       body,
-      h(
-        "div",
-        { class: "table-wrap" },
-        h(
-          "table",
-          { class: "stats-table lb-table" },
-          h("caption", { class: "visually-hidden" }, projector ? `${caption} · ${TG().lbTop(PROJECTOR_ROWS)}` : caption),
-          h(
-            "thead",
-            {},
-            h(
-              "tr",
-              {},
-              h("th", { scope: "col", class: "num lb-rank" }, TG().lbRank),
-              h("th", { scope: "col" }, TG().lbPlayer),
-              h("th", { scope: "col", class: "num" }, TG().lbScore),
-              h("th", { scope: "col", class: "num lb-opt" }, TG().lbStages),
-              overall ? h("th", { scope: "col", class: "num lb-opt" }, TG().lbCases) : null,
-              h("th", { scope: "col", class: "num lb-opt" }, TG().lbFirstBloods),
-            ),
-          ),
-          h("tbody", {}, rows.map((e) => row(e, overall)), mine),
-        ),
-      ),
+      dataTable({
+        columns: cols,
+        rows,
+        rowAttrs: (e) => ({ class: `rank-${Math.min(e.rank, 4)}${myKey !== null && usernameKey(e.username) === myKey ? " is-me" : ""}` }),
+        caption: projector ? `${caption} · ${TG().lbTop(PROJECTOR_ROWS)}` : caption,
+        className: "lb-table",
+        extraRows: mine,
+      }).element,
     );
   };
 
