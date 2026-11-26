@@ -31,7 +31,7 @@ export type Client = {
 };
 
 export const createHarness = (options: { now?: () => Date; ip?: string; store?: InMemoryKvStore } = {}) => {
-  const app = createApp({ store: options.store ?? new InMemoryKvStore(), secrets: SECRETS, adminKey: () => ADMIN_KEY, now: options.now });
+  const app = createApp({ store: options.store ?? new InMemoryKvStore(), staticSecrets: SECRETS, adminKey: () => ADMIN_KEY, now: options.now });
 
   /** A browser-like client that keeps its own cookie jar. */
   const client = (ip = options.ip ?? "10.0.0.1"): Client & { cookie(): string | null } => {

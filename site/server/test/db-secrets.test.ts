@@ -76,7 +76,7 @@ test("provider: a failing DB keeps the last good copy, and no source means bundl
 test("a case published only in the DB is released, scheduled and playable through the API", async () => {
   const store = new InMemoryKvStore();
   const bytes = new InMemoryByteStore();
-  const app = createApp({ store, bytes, secrets: SECRETS, adminKey: () => ADMIN_KEY });
+  const app = createApp({ store, bytes, staticSecrets: SECRETS, adminKey: () => ADMIN_KEY });
   await seedCase({ cases: new CaseRepository(store), chunks: new EvidenceChunkRepository(bytes) }, { id: "gamma" });
 
   const today = TodayResponseSchema.parse(await (await call(app, "/today")).json());

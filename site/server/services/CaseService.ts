@@ -1,6 +1,6 @@
 // DB-stored cases: the published catalog, public content, server-only sealed material and evidence.
 // Only `publishedVersion` of a case is visible here (isPublicVersion); drafts, older versions and trashed
-// cases are invisible to every public route. Nothing switches GameService over yet (#68).
+// cases are invisible to every public route. GameService reads its answer keys from here (#68).
 import { summarize } from "../../shared/catalog.ts";
 import type { CatalogEntry } from "../../shared/catalog.ts";
 import type { CaseContent, CaseLang, CaseMeta, CaseSealed, EvidenceEntry } from "../../shared/case-records.ts";
@@ -47,7 +47,7 @@ export class CaseService {
     return meta ? live(meta) : null;
   }
 
-  /** Ids of every published case (the game overlays their sealed parts on the bundled answer keys). */
+  /** Ids of every published case (the game's answer keys, CaseSecretsProvider). */
   async publishedIds(): Promise<string[]> {
     return (await this.cases.listMetas()).map(live).filter((l): l is Live => l !== null).map((l) => l.meta.id);
   }
@@ -59,7 +59,7 @@ export class CaseService {
       const en = await this.cases.getContent(meta.id, version, "en");
       if (!en) return null;
       const he = meta.langs.includes("he") ? await this.cases.getContent(meta.id, version, "he") : null;
-      return { file: meta.id, en: summarize(en), ...(he ? { he: summarize(he) } : {}) };
+      return { file: meta.id, version, en: summarize(en), ...(he ? { he: summarize(he) } : {}) };
     });
     return entries.filter((e): e is CatalogEntry => e !== null);
   }

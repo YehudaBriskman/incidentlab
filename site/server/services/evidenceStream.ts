@@ -6,10 +6,22 @@
 // Web APIs only (no node: imports, no Buffer): the Edge Function runs on Deno.
 import { CaseIdSchema } from "../../shared/contract.ts";
 import { EVIDENCE_CHUNK_BYTES, EvidencePathSchema } from "../../shared/case-records.ts";
-import type { CaseMeta, EvidenceEntry } from "../../shared/case-records.ts";
+import type { CaseMeta, EvidenceEntry, EvidenceLocation } from "../../shared/case-records.ts";
 import type { CaseRepository, EvidenceChunkRepository } from "../repositories/case-repository.ts";
 
 export const EVIDENCE_DB_PREFIX = "/evidence/db/";
+
+/**
+ * Where a published case version's evidence is served from: today the Edge Function on this site. This is
+ * the single switch point for moving evidence elsewhere (the content API hands it to the browser).
+ */
+export const evidenceLocation = (caseId: string, version: number): EvidenceLocation => {
+  const base = `${EVIDENCE_DB_PREFIX}${encodeURIComponent(caseId)}/v${version}`;
+  return { filesBase: `${base}/files/`, zip: `${base}.zip` };
+};
+
+/** The name a case's evidence zip downloads as. Toolbox commands say `unzip <caseId>-evidence.zip`. */
+export const evidenceZipName = (caseId: string): string => `${caseId}-evidence.zip`;
 
 /** Public routes see only `publishedVersion`, and only while the case is published (not a draft, not trashed). */
 export const isPublicVersion = (meta: CaseMeta, version: number): boolean => meta.status === "published" && meta.publishedVersion === version;
@@ -151,7 +163,7 @@ export class EvidenceService {
     if (!meta || !isPublicVersion(meta.data, target.version)) return null;
     if (target.kind === "zip") {
       const entry = await this.cases.getEvidenceZip(target.caseId, target.version);
-      return entry ? { entry, downloadName: `${target.caseId}-v${target.version}-evidence.zip` } : null;
+      return entry ? { entry, downloadName: evidenceZipName(target.caseId) } : null;
     }
     const index = await this.cases.getEvidenceIndex(target.caseId, target.version);
     const entry = index?.find((e) => e.path === target.path);
