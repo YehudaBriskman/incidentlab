@@ -246,7 +246,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
   const announcer = h("p", { class: "ex-sr", role: "status", "aria-live": "polite", "aria-atomic": "true" });
   const notice = h("div", { class: "ex-notice", hidden: true });
   const fileList = h("ul", { class: "ex-files", id: "ex-files" });
-  const fileSearch = h("input", { class: "ex-input ex-file-search", id: "ex-file-search", type: "search", placeholder: T().exFileSearchPh, spellcheck: "false", autocomplete: "off", "aria-controls": "ex-files" });
+  const fileSearch = h("input", { class: "input ex-input ex-file-search", id: "ex-file-search", type: "search", placeholder: T().exFileSearchPh, spellcheck: "false", autocomplete: "off", "aria-controls": "ex-files" });
   const noFiles = h("p", { class: "ex-muted ex-no-files", role: "status", hidden: true }, T().exNoFiles);
   const fileCount = h("p", { class: "ex-muted ex-file-count", role: "status", hidden: true });
   sidebar.replaceChildren();
@@ -269,7 +269,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
   const fieldList = h("datalist", { id: "ex-json-fields" });
   const condList = h("div", { class: "ex-conds" });
   const addCondBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exAddCond);
-  const colsInput = h("input", { class: "ex-input mono", id: "ex-cols", placeholder: T().exColsPh, spellcheck: "false", autocomplete: "off" });
+  const colsInput = h("input", { class: "input ex-input mono", id: "ex-cols", placeholder: T().exColsPh, spellcheck: "false", autocomplete: "off" });
   const jsonBar = h("div", { class: "ex-jsonbar", hidden: true },
     h("div", { class: "ex-json-conds", role: "group", "aria-labelledby": "ex-json-h", "aria-describedby": "ex-json-help" },
       h("span", { class: "ex-json-h", id: "ex-json-h" }, T().exJsonConds),
@@ -306,14 +306,16 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
   const rowsLayer = h("div", { class: "ex-rows", role: "list", "aria-label": T().exFileLines });
   viewport.append(headEl, spacer, rowsLayer);
   const staleStrip = h("p", { class: "ex-stale-strip", hidden: true }, T().exStaleRows);
-  const view = h("div", { class: "ex-view" }, staleStrip, viewport, progress);
+  // The log pane is a "terminal window": a soft card whose slim title bar names the file and its line counts,
+  // over the always-dark code surface. The loading overlay covers only the code surface, never the title bar.
+  const view = h("div", { class: "ex-view" }, h("div", { class: "ex-screen" }, staleStrip, viewport, progress));
 
   // Row detail drawer: a non-modal panel beside the log (a bottom sheet on narrow screens). It follows the
   // line cursor, so arrow keys in the log and Previous/Next here both update it. Self-contained, so the shared
   // Sheet primitive (#61) can replace the narrow-screen presentation without touching the content.
   const detailHeading = h("h3", { class: "ex-detail-h", id: "ex-detail-h", tabindex: "-1" }, T().exDetails);
   const detailPos = h("p", { class: "ex-detail-pos" });
-  const detailClose = h("button", { class: "btn btn-sm btn-ghost ex-detail-close", type: "button", "aria-label": T().exDetailClose, "aria-keyshortcuts": "Escape" }, "×");
+  const detailClose = h("button", { class: "btn btn-sm btn-ghost btn-icon ex-detail-close", type: "button", "aria-label": T().exDetailClose, "aria-keyshortcuts": "Escape" }, "×");
   const detailPrev = h("button", { class: "btn btn-sm", type: "button", "aria-keyshortcuts": "Shift+N" }, T().exPrevLine);
   const detailNext = h("button", { class: "btn btn-sm", type: "button", "aria-keyshortcuts": "N" }, T().exNextLine);
   const detailCopy = h("button", { class: "btn btn-sm", type: "button", "aria-keyshortcuts": "C" }, T().exCopyLine);
@@ -324,19 +326,20 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     h("p", { class: "ex-sr", id: "ex-detail-keys" }, T().exDetailKeys),
     h("div", { class: "ex-drawer-tools", role: "group", "aria-label": T().exMatchNav }, detailPrev, detailNext, detailCopy, detailLink),
     detailBody);
-  const detailBtn = h("button", { class: "btn btn-sm", type: "button", "aria-expanded": "false", "aria-controls": "ex-drawer", "aria-keyshortcuts": "Enter" }, T().exDetails);
+  const detailBtn = h("button", { class: "btn btn-sm btn-outline", type: "button", "aria-expanded": "false", "aria-controls": "ex-drawer", "aria-keyshortcuts": "Enter" }, T().exDetails);
+  view.prepend(h("div", { class: "ex-head" }, h("div", { class: "ex-head-title" }, title, fileFormat), countEl));
   const work = h("div", { class: "ex-work" }, view, drawer);
 
-  const firstBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exFirst);
-  const lastBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exLast);
-  const copyBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exCopyLines);
+  const firstBtn = h("button", { class: "btn btn-sm btn-outline", type: "button" }, T().exFirst);
+  const lastBtn = h("button", { class: "btn btn-sm btn-outline", type: "button" }, T().exLast);
+  const copyBtn = h("button", { class: "btn btn-sm btn-outline", type: "button" }, T().exCopyLines);
   const shareBtn = h("button", { class: "btn btn-sm btn-ghost", type: "button" }, T().exCopyLink);
-  const copyLineBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exCopyLine);
+  const copyLineBtn = h("button", { class: "btn btn-sm btn-outline", type: "button" }, T().exCopyLine);
   const linkLineBtn = h("button", { class: "btn btn-sm btn-ghost", type: "button" }, T().exLinkLine);
   const wrapCb = h("input", { type: "checkbox", id: "ex-wrap" });
   wrapCb.checked = wrap;
-  const prevMatchBtn = h("button", { class: "btn btn-sm", type: "button", "aria-keyshortcuts": "Shift+N" }, T().exPrevMatch);
-  const nextMatchBtn = h("button", { class: "btn btn-sm", type: "button", "aria-keyshortcuts": "N" }, T().exNextMatch);
+  const prevMatchBtn = h("button", { class: "btn btn-sm btn-outline", type: "button", "aria-keyshortcuts": "Shift+N" }, T().exPrevMatch);
+  const nextMatchBtn = h("button", { class: "btn btn-sm btn-outline", type: "button", "aria-keyshortcuts": "N" }, T().exNextMatch);
   const matchPos = h("span", { class: "ex-match-pos", "aria-live": "polite", "aria-atomic": "true" });
   const matchNav = h("div", { class: "ex-match-nav", role: "group", "aria-label": T().exMatchNav, hidden: true }, prevMatchBtn, matchPos, nextMatchBtn);
   const actionButtons = [firstBtn, lastBtn, prevMatchBtn, nextMatchBtn, copyBtn, shareBtn, copyLineBtn, linkLineBtn, detailBtn];
@@ -345,7 +348,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     const id = `ex-${kind}`;
     return {
       kind,
-      input: h("input", { class: "ex-input mono", id, spellcheck: "false", autocomplete: "off", "aria-label": label, placeholder, "aria-describedby": `${id}-err` }),
+      input: h("input", { class: "input ex-input mono", id, spellcheck: "false", autocomplete: "off", "aria-label": label, placeholder, "aria-describedby": `${id}-err` }),
       err: h("p", { class: "ex-err", id: `${id}-err`, role: "alert", hidden: true }),
       strip: h("p", { class: "ex-agg-strip", hidden: true }),
       out: h("div", { class: "ex-agg-out" }),
@@ -362,9 +365,9 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
   const aggs: Agg[] = [uniq, hist];
   const histDetails = h("details", { class: "ex-agg" });
 
-  const timeInput = h("input", { class: "ex-input mono", id: "ex-time", placeholder: "epoch / ISO / 13/Nov/2026:00:00:00 +0000 / Nov 18 07:00:07", spellcheck: "false", autocomplete: "off" });
-  const yearInput = h("input", { class: "ex-input mono ex-year", id: "ex-year", type: "number", min: "1970", max: "2100", inputmode: "numeric" });
-  const zoneSel = h("select", { class: "ex-select", id: "ex-zone" }, ...ZONES.map((z) => h("option", { value: z }, zoneLabel(z))));
+  const timeInput = h("input", { class: "input ex-input mono", id: "ex-time", placeholder: "epoch / ISO / 13/Nov/2026:00:00:00 +0000 / Nov 18 07:00:07", spellcheck: "false", autocomplete: "off" });
+  const yearInput = h("input", { class: "input ex-input mono ex-year", id: "ex-year", type: "number", min: "1970", max: "2100", inputmode: "numeric" });
+  const zoneSel = h("select", { class: "input ex-select", id: "ex-zone" }, ...ZONES.map((z) => h("option", { value: z }, zoneLabel(z))));
   const timeNote = h("p", { class: "ex-muted ex-time-note" });
   const timeOut = h("dl", { class: "ex-time-out", dir: "ltr" });
 
@@ -657,10 +660,12 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
       h("span", { class: "ex-file-name mono", dir: "ltr", "aria-hidden": "true" }, breakablePath(base)),
       loaded ? h("span", { class: "ex-dot", "aria-hidden": "true" }) : null,
     );
-    const meta = [f.format, size !== "" ? num(size) : "", loaded ? T().exLoadedTag : ""].filter((v) => v !== "").join(" · ");
+    // num() returns an element (an LTR-isolated number), so the parts are joined as nodes, not as a string
+    const metaParts: (string | Node)[] = [f.format, size !== "" ? num(size) : "", loaded ? T().exLoadedTag : ""].filter((v) => v !== "");
+    const meta = metaParts.flatMap((part, i) => (i === 0 ? [part] : [" · ", part]));
     tooltip(btn, () => [
       h("span", { class: "tip-title mono", dir: "ltr" }, f.path),
-      meta !== "" ? h("span", { class: "tip-meta" }, meta) : null,
+      meta.length > 0 ? h("span", { class: "tip-meta" }, ...meta) : null,
       f.description !== "" ? h("span", { dir: "auto" }, f.description) : null,
     ]);
     btn.addEventListener("click", () => selectFile(f));
@@ -926,13 +931,13 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
       ...steps.map((step, idx) => {
         const n = String(idx + 1);
         const errId = `ex-step-${n}-err`;
-        const kind = h("select", { class: "ex-select", "aria-label": fillText(t.exStepType, { n }) },
+        const kind = h("select", { class: "input ex-select", "aria-label": fillText(t.exStepType, { n }) },
           h("option", { value: "contains" }, t.exContains),
           h("option", { value: "not" }, t.exNotContains),
           h("option", { value: "regex" }, "regex"));
         kind.value = step.kind;
         const input = h("input", {
-          class: "ex-input mono",
+          class: "input ex-input mono",
           placeholder: idx === 0 ? t.exTypeToFilter : t.exAndThen,
           spellcheck: "false",
           autocomplete: "off",
@@ -966,7 +971,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
           step.ci = ci.checked;
           edited(step);
         });
-        const remove = h("button", { class: "btn btn-sm btn-ghost ex-remove", type: "button", "aria-label": fillText(t.exRemoveStep, { n }) }, "×");
+        const remove = h("button", { class: "btn btn-sm btn-ghost btn-icon ex-remove", type: "button", "aria-label": fillText(t.exRemoveStep, { n }) }, "×");
         remove.addEventListener("click", () => {
           steps.splice(idx, 1);
           if (steps.length === 0) steps.push({ kind: "contains", text: "", ci: true });
@@ -1020,14 +1025,14 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     if (conds.length === 0) conds.push({ field: "", op: "eq", value: "" });
     condList.replaceChildren(...conds.map((cond, idx) => {
       const n = String(idx + 1);
-      const field = h("input", { class: "ex-input mono ex-cond-field", list: "ex-json-fields", placeholder: t.exFieldPh, spellcheck: "false", autocomplete: "off", "aria-label": fillText(t.exCondField, { n }) });
+      const field = h("input", { class: "input ex-input mono ex-cond-field", list: "ex-json-fields", placeholder: t.exFieldPh, spellcheck: "false", autocomplete: "off", "aria-label": fillText(t.exCondField, { n }) });
       field.value = cond.field;
-      const op = h("select", { class: "ex-select", "aria-label": fillText(t.exCondOp, { n }) }, ...OPS.map(([v, label]) => h("option", { value: v }, label())));
+      const op = h("select", { class: "input ex-select", "aria-label": fillText(t.exCondOp, { n }) }, ...OPS.map(([v, label]) => h("option", { value: v }, label())));
       op.value = cond.op;
-      const value = h("input", { class: "ex-input mono ex-cond-value", placeholder: t.exValuePh, spellcheck: "false", autocomplete: "off", "aria-label": fillText(t.exCondValue, { n }) });
+      const value = h("input", { class: "input ex-input mono ex-cond-value", placeholder: t.exValuePh, spellcheck: "false", autocomplete: "off", "aria-label": fillText(t.exCondValue, { n }) });
       value.value = cond.value;
       value.hidden = cond.op === "exists";
-      const remove = h("button", { class: "btn btn-sm btn-ghost ex-remove", type: "button", "aria-label": fillText(t.exRemoveCond, { n }) }, "×");
+      const remove = h("button", { class: "btn btn-sm btn-ghost btn-icon ex-remove", type: "button", "aria-label": fillText(t.exRemoveCond, { n }) }, "×");
       field.addEventListener("input", () => {
         cond.field = field.value.trim();
         scheduleFilter();
@@ -1067,7 +1072,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
       timeRow.replaceChildren();
       return;
     }
-    const remove = h("button", { class: "btn btn-sm btn-ghost ex-remove", type: "button", "aria-label": T().exRemoveTime }, "×");
+    const remove = h("button", { class: "btn btn-sm btn-ghost btn-icon ex-remove", type: "button", "aria-label": T().exRemoveTime }, "×");
     remove.addEventListener("click", () => {
       setTimeRange(null);
       pipeline.querySelector<HTMLInputElement>(".ex-input")?.focus();
@@ -2055,7 +2060,6 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     histDetails);
 
   const main = h("section", { class: "ex-main", "aria-label": T().exTitle },
-    h("div", { class: "ex-head" }, h("div", { class: "ex-head-title" }, title, fileFormat), countEl),
     controls,
     notice,
     h("div", { class: "ex-actions" }, firstBtn, lastBtn, matchNav, detailBtn, copyLineBtn, linkLineBtn, copyBtn, shareBtn,
