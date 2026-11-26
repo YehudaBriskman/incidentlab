@@ -14,7 +14,7 @@ const ui = {
   signInSubmit: (p: Page) => p.locator("form").getByRole("button", { name: /^sign in$/i }),
   pendingTitle: (p: Page) => p.getByText(/waiting for approval/i),
   checkNow: (p: Page) => p.getByRole("button", { name: /check now/i }),
-  todayCard: (p: Page) => p.locator(".today-card"),
+  todayCard: (p: Page) => p.getByRole("region", { name: "Today's case" }),
   openTodayCase: (p: Page) => ui.todayCard(p).locator(`a[href^="#/case/"]`).first(),
   readyButton: (p: Page) => p.getByRole("button", { name: /ready/i }),
   answerInput: (p: Page) => p.locator(".answer-form input"),
@@ -65,7 +65,7 @@ test("player walkthrough: sign up to first solved stage, then admin sign-in", as
     await ui.checkNow(page).click();
     await page.goto("/#/");
     await expect(ui.todayCard(page)).toBeVisible();
-    await expect(ui.todayCard(page)).toContainText(/incident of the day/i);
+    await expect(ui.todayCard(page)).toContainText(/ghost in the network/i);
   });
 
   await test.step("open the case and finish setup", async () => {
