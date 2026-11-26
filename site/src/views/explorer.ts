@@ -660,10 +660,12 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
       h("span", { class: "ex-file-name mono", dir: "ltr", "aria-hidden": "true" }, breakablePath(base)),
       loaded ? h("span", { class: "ex-dot", "aria-hidden": "true" }) : null,
     );
-    const meta = [f.format, size !== "" ? num(size) : "", loaded ? T().exLoadedTag : ""].filter((v) => v !== "").join(" · ");
+    // num() returns an element (an LTR-isolated number), so the parts are joined as nodes, not as a string
+    const metaParts: (string | Node)[] = [f.format, size !== "" ? num(size) : "", loaded ? T().exLoadedTag : ""].filter((v) => v !== "");
+    const meta = metaParts.flatMap((part, i) => (i === 0 ? [part] : [" · ", part]));
     tooltip(btn, () => [
       h("span", { class: "tip-title mono", dir: "ltr" }, f.path),
-      meta !== "" ? h("span", { class: "tip-meta" }, meta) : null,
+      meta.length > 0 ? h("span", { class: "tip-meta" }, ...meta) : null,
       f.description !== "" ? h("span", { dir: "auto" }, f.description) : null,
     ]);
     btn.addEventListener("click", () => selectFile(f));
