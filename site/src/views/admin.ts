@@ -36,7 +36,7 @@ import { clickClosedDrawer, navSubLink, refreshNav, showSubNav } from "../shell/
 import { setPageCrumb } from "../shell/topbar";
 import { scrollerOf } from "../shell/scroll";
 import type { NavSection, ViewResult } from "../shell/types";
-import { banner, closeMenu, confirm, menu, openDialog, showDialog, toast, type ConfirmOptions, type DialogHandle, type MenuItem } from "../lib/overlay";
+import { banner, closeMenu, confirm, menu, openDialog, showDialog, toast, tooltip, type ConfirmOptions, type DialogHandle, type MenuItem } from "../lib/overlay";
 import {
   AdminApiError,
   approveAll,
@@ -218,6 +218,20 @@ function formatDateTime(iso: string | null): string {
   const t = ms(iso);
   if (t === null) return "—";
   return new Intl.DateTimeFormat(locale(), { dateStyle: "medium", timeStyle: "short" }).format(t);
+}
+
+/** Puts a secondary detail (a full timestamp, an ID) into the shared tooltip instead of on screen. */
+function tipped<E extends HTMLElement>(el: E, detail: string): E {
+  tooltip(el, detail);
+  return el;
+}
+
+/** A section heading with its help text in a tooltip on an "i" button. The paragraph stays for touch screens,
+ * where hover tooltips don't open (admin.css shows one or the other). */
+function headWithHint(heading: HTMLElement, hint: string): HTMLElement {
+  const btn = h("button", { type: "button", class: "admin-info", "aria-label": hint }, "i");
+  tooltip(btn, hint);
+  return h("div", { class: "admin-h2-row" }, heading, btn);
 }
 
 /** Date and time to the second ("25 Nov 2026, 14:04:11"), for the audit log. */
@@ -1011,6 +1025,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   // ---- shell: header, tabs, banner (built once; tab regions re-rendered) ------------------
 
   const updatedEl = h("span", { class: "admin-updated", "aria-live": "off" });
+  tooltip(updatedEl, () => updatedEl.dataset.full ?? "");
   const pauseBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admPause);
   const refreshBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admRefresh);
   const boardBtn = h("button", { type: "button", class: "btn btn-primary btn-sm admin-quick-board", "data-sidebar-close": "" }, TS().adminProjector);
@@ -1225,7 +1240,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     }
     const sec = Math.max(0, Math.round((Date.now() - state.lastUpdated) / 1000));
     updatedEl.textContent = T().admUpdated(state.paused, relativeAgo(new Date(state.lastUpdated).toISOString(), Date.now()));
-    updatedEl.title = formatDateTime(new Date(state.lastUpdated).toISOString());
+    updatedEl.dataset.full = formatDateTime(new Date(state.lastUpdated).toISOString());
     updatedEl.classList.toggle("is-stale", sec > 20);
   }
 
@@ -1422,7 +1437,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       header: T().admColSeen,
       hideable: true,
       className: "col-seen muted",
-      cell: (a) => h("span", { title: formatDateTime(a.lastSeenAt) }, relativeAgo(a.lastSeenAt, acctNow)),
+      cell: (a) => tipped(h("span", {}, relativeAgo(a.lastSeenAt, acctNow)), formatDateTime(a.lastSeenAt)),
       sortValue: (a) => ms(a.lastSeenAt),
       sortFirst: "desc",
       csv: (a) => a.lastSeenAt,
@@ -1725,8 +1740,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   const trashTable = dataTable<TrashEntry>({
     columns: [
       { id: "item", header: T().admColItem, rowHeader: true, className: "trash-label", cell: (e) => h("span", { dir: "auto" }, e.label), sortValue: (e) => e.label },
-      { id: "deleted", header: T().admColDeletedAt, className: "col-seen", cell: (e) => h("span", { title: e.deletedAt }, formatDateTime(e.deletedAt)), sortValue: (e) => ms(e.deletedAt), sortFirst: "desc" },
-      { id: "expires", header: T().admColExpires, className: "col-seen", cell: (e) => h("span", { title: formatDateTime(e.expiresAt) }, relativeIn(e.expiresAt, trashNow)), sortValue: (e) => ms(e.expiresAt) },
+      { id: "deleted", header: T().admColDeletedAt, className: "col-seen", cell: (e) => tipped(h("span", {}, formatDateTime(e.deletedAt)), e.deletedAt), sortValue: (e) => ms(e.deletedAt), sortFirst: "desc" },
+      { id: "expires", header: T().admColExpires, className: "col-seen", cell: (e) => tipped(h("span", {}, relativeIn(e.expiresAt, trashNow)), formatDateTime(e.expiresAt)), sortValue: (e) => ms(e.expiresAt) },
       { id: "records", header: T().admColRecords, numeric: true, cell: (e) => fmtInt(e.records), sortValue: (e) => e.records, sortFirst: "desc" },
       {
         id: "actions",
@@ -1829,27 +1844,27 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         h(
           "div",
           { class: "admin-table-head" },
-          h("h2", { class: "admin-h2", id: "admin-accounts-title" }, T().admAccountsTitle, " ", acctCountEl),
+          headWithHint(h("h2", { class: "admin-h2", id: "admin-accounts-title" }, T().admAccountsTitle, " ", acctCountEl), T().admAccountsHint),
           h("div", { class: "admin-controls" }, acctFilterSelect, acctSortSelect, acctTable.pickerButton, exportBtn),
         ),
         // Search stays in view while the list scrolls (sticky under the tab bar).
         h("div", { class: "acct-searchbar" }, acctSearchInput),
-        h("p", { class: "muted small admin-hint" }, T().admAccountsHint),
+        h("p", { class: "muted small admin-hint is-touch-only" }, T().admAccountsHint),
         acctTableEl,
       ),
       h(
         "section",
         { class: "panel admin-panel trash-panel", "aria-labelledby": "admin-trash-title" },
-        h("h2", { class: "admin-h2", id: "admin-trash-title" }, T().admTrashTitle),
-        h("p", { class: "muted small admin-hint" }, T().admTrashHelp(TRASH_RETENTION_DAYS)),
+        headWithHint(h("h2", { class: "admin-h2", id: "admin-trash-title" }, T().admTrashTitle), T().admTrashHelp(TRASH_RETENTION_DAYS)),
+        h("p", { class: "muted small admin-hint is-touch-only" }, T().admTrashHelp(TRASH_RETENTION_DAYS)),
         trashMsgEl,
         trashBodyEl,
       ),
       h(
         "section",
         { class: "panel admin-panel invite-panel" },
-        h("h2", { class: "admin-h2" }, T().admInviteTitle),
-        h("p", { class: "muted small admin-hint" }, T().admInviteHelp),
+        headWithHint(h("h2", { class: "admin-h2" }, T().admInviteTitle), T().admInviteHelp),
+        h("p", { class: "muted small admin-hint is-touch-only" }, T().admInviteHelp),
         inviteCurrentEl,
         inviteForm,
         inviteMsgEl,
@@ -2017,7 +2032,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       ),
     ];
   }
-  const signedUp = (a: UserStats): HTMLElement => h("span", { title: formatDateTime(a.createdAt) }, T().admSignedUp(relativeAgo(a.createdAt, pendingNow)));
+  const signedUp = (a: UserStats): HTMLElement => tipped(h("span", {}, T().admSignedUp(relativeAgo(a.createdAt, pendingNow))), formatDateTime(a.createdAt));
   const pendingTable = dataTable<UserStats>({
     columns: [
       { id: "name", header: T().admColUser, rowHeader: true, className: "col-name", cell: (a) => h("span", { class: "player-name", dir: "auto" }, a.username), sortValue: (a) => a.username },
@@ -2305,7 +2320,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         { class: `acct-card is-${a.status}${expanded ? " is-expanded" : ""}`, "data-id": a.accountId },
         h("div", { class: "pc-head" }, acctToggle(a, detailId), acctMenu(a)),
         h("p", { class: "ac-facts" }, statusPill(a.status), rolePill(a), " ", facts.join(" · ")),
-        h("p", { class: "muted small ac-seen", title: formatDateTime(a.lastSeenAt) }, T().admSeenLine(relativeAgo(a.lastSeenAt, now))),
+        tipped(h("p", { class: "muted small ac-seen" }, T().admSeenLine(relativeAgo(a.lastSeenAt, now))), formatDateTime(a.lastSeenAt)),
         expanded ? h("div", { class: "ac-detail", id: detailId }, caseStatsList(a.cases), h("p", { class: "muted small" }, acctExtras(a))) : null,
       );
   }
@@ -2534,7 +2549,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       id: "seen",
       header: T().admColSeen,
       className: "col-seen muted",
-      cell: (p) => h("span", { title: formatDateTime(p.lastSeenAt) }, relativeAgo(p.lastSeenAt, liveNow)),
+      cell: (p) => tipped(h("span", {}, relativeAgo(p.lastSeenAt, liveNow)), formatDateTime(p.lastSeenAt)),
       sortValue: (p) => ms(p.lastSeenAt),
       sortFirst: "desc",
       csv: (p) => p.lastSeenAt,
@@ -3851,8 +3866,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       h(
         "section",
         { class: "panel admin-panel" },
-        h("h2", { class: "admin-h2" }, T().admQuickActions),
-        h("p", { class: "muted small admin-hint" }, T().admQuickHelp),
+        headWithHint(h("h2", { class: "admin-h2" }, T().admQuickActions), T().admQuickHelp),
+        h("p", { class: "muted small admin-hint is-touch-only" }, T().admQuickHelp),
         h("div", { class: "adm-ev-quick" }, evStartNow, evEndNow, evFreezeBtn),
       ),
       h(
@@ -3978,7 +3993,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         header: T().admColTime,
         className: "col-seen",
         // Seconds matter here: a class's approvals land within the same minute.
-        cell: (e) => h("time", { datetime: e.at, title: formatDateTime(e.at) }, formatDateTimeSec(e.at)),
+        cell: (e) => tipped(h("time", { datetime: e.at }, formatDateTimeSec(e.at)), e.at),
         sortValue: (e) => ms(e.at),
         sortFirst: "desc",
         csv: (e) => e.at,
@@ -4014,10 +4029,10 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         h(
           "div",
           { class: "admin-table-head" },
-          h("h2", { class: "admin-h2", id: "admin-audit-title" }, T().admAuditTitle, " ", auditCountEl),
+          headWithHint(h("h2", { class: "admin-h2", id: "admin-audit-title" }, T().admAuditTitle, " ", auditCountEl), T().admAuditHint),
           h("div", { class: "admin-controls" }, auditSearch, auditKindSelect, auditExportBtn),
         ),
-        h("p", { class: "muted small admin-hint" }, T().admAuditHint),
+        h("p", { class: "muted small admin-hint is-touch-only" }, T().admAuditHint),
         auditBodyEl,
       ),
     );
