@@ -210,37 +210,46 @@ def discover_contract_cases() -> list[str]:
     return sorted(p.parent.name for p in CASE_GENERATORS.glob("*/build.py"))
 
 
-def main() -> int:
+def collect_answers() -> dict[str, dict[str, str]]:
+    """Every case's plaintext answers (3am-outage first, then the contract cases in id order)."""
     check_normalize_vectors()
     all_answers: dict[str, dict[str, str]] = {}
-
     repo = load_json(TRUTH_DIR / "repo.json")
     logs = load_json(TRUTH_DIR / "logs.json")
     all_answers[timeline.CASE_ID] = build_answers(repo, logs)
     for case_id in discover_contract_cases():
         all_answers[case_id] = contract_case_answers(case_id)
+    return all_answers
 
-    cases: dict[str, dict] = {}
-    for case_id, answers in all_answers.items():
-        debrief_en, debrief_he = debriefs(case_id)
-        cases[case_id] = {
-            **case_config(case_id),
-            "answers": {qid: normalize_answer(a) for qid, a in answers.items()},
-            "debrief": debrief_en,
-            "debriefHe": debrief_he,
-        }
+
+def sealed_case(case_id: str, answers: dict[str, str]) -> dict:
+    """One case's server-only record (CaseSealedSchema in site/shared/case-records.ts)."""
+    debrief_en, debrief_he = debriefs(case_id)
+    return {
+        **case_config(case_id),
+        "answers": {qid: normalize_answer(a) for qid, a in answers.items()},
+        "debrief": debrief_en,
+        "debriefHe": debrief_he,
+    }
+
+
+def answer_fingerprint(sealed: dict) -> str:
+    """What scoring depends on (answers, points, hint costs). deploy.sh refuses a deploy that changes it."""
+    return hashlib.sha256(
+        json.dumps({"answers": sealed["answers"], "questions": sealed["questions"]}, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def main() -> int:
+    all_answers = collect_answers()
+    cases = {case_id: sealed_case(case_id, answers) for case_id, answers in all_answers.items()}
 
     SECRETS_OUT.parent.mkdir(parents=True, exist_ok=True)
     SECRETS_OUT.write_text(json.dumps({"cases": cases}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     # Fingerprint of what scoring depends on, per case: answers, points, hint costs. deploy.sh compares it
     # with the last deployed one, because changing these under players who are mid-case breaks their runs.
-    fingerprints = {
-        case_id: hashlib.sha256(
-            json.dumps({"answers": c["answers"], "questions": c["questions"]}, sort_keys=True).encode("utf-8")
-        ).hexdigest()
-        for case_id, c in cases.items()
-    }
+    fingerprints = {case_id: answer_fingerprint(c) for case_id, c in cases.items()}
     (TRUTH_DIR / "fingerprints.json").write_text(json.dumps(fingerprints, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     legacy = all_answers[timeline.CASE_ID]
