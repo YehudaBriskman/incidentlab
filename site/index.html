@@ -33,15 +33,30 @@
   </head>
   <body>
     <a class="skip-link" href="#app">Skip to content</a>
-    <header class="topbar">
-      <a class="logo mono" href="#/" aria-label="IncidentLab home"><span class="logo-mark" aria-hidden="true">▲</span> incident<span class="accent">lab</span></a>
-      <span class="topbar-status mono is-off" aria-hidden="true"><span class="dot"></span> on-call: you</span>
-    </header>
-    <main id="app" tabindex="-1">
-      <!-- Static first paint until main.ts renders the route (replaced on the first render). -->
-      <section class="center-card" aria-busy="true"><p class="muted mono">Loading…</p></section>
-    </main>
-    <footer class="footer mono"><span class="footer-tagline">IncidentLab · fictional companies, real failure modes · built for engineers who like a good outage</span> · <a href="/accessibility.html">Accessibility · <span lang="he" dir="rtl">נגישות</span></a></footer>
+    <!-- App shell grid: navbar, announcement, [sidebar column reserved for #60], main, footer. -->
+    <div class="shell">
+      <header class="navbar">
+        <div class="navbar-row">
+          <a class="logo mono" href="#/" aria-label="IncidentLab home"><span class="logo-mark" aria-hidden="true">▲</span> incident<span class="accent">lab</span></a>
+          <!-- src/shell/navbar.ts adds: menu button, navigation, account menu, language toggle, ⚙ settings -->
+        </div>
+        <div class="live-strip" role="group" hidden>
+          <div class="live-strip-inner">
+            <span class="topbar-status mono is-off" aria-hidden="true"><span class="dot"></span> on-call: you</span>
+            <!-- src/shell/liveStrip.ts adds: today's case and countdown, event clock, connectivity -->
+          </div>
+        </div>
+      </header>
+      <main class="shell-main">
+        <!-- Page header slot (breadcrumb, title, brief, actions); views fill it as they move onto the shell. -->
+        <div class="page-header" hidden></div>
+        <div id="app" tabindex="-1">
+          <!-- Static first paint until main.ts renders the route (replaced on the first render). -->
+          <section class="center-card" aria-busy="true"><p class="muted mono">Loading…</p></section>
+        </div>
+      </main>
+      <footer class="footer mono"><span class="footer-tagline">IncidentLab · fictional companies, real failure modes · built for engineers who like a good outage</span> · <a href="/accessibility.html">Accessibility · <span lang="he" dir="rtl">נגישות</span></a></footer>
+    </div>
     <noscript>IncidentLab needs JavaScript to run.</noscript>
     <script type="module" src="/src/main.ts"></script>
   </body>
