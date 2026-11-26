@@ -333,6 +333,26 @@ function lockedCard(c: Case, locked: LockedToday): HTMLElement {
   );
 }
 
+/**
+ * Every gain and cost, stated before the player starts: the bonuses a hint, command, wrong answer or
+ * revealed answer forfeits are otherwise first met mid-stage. Open until the player has started.
+ */
+function scoringRules(player: ProgressView): HTMLElement {
+  return h(
+    "details",
+    { class: "briefing scoring-rules", open: player.setupDoneAt === null },
+    h("summary", {}, TP().scoringHead),
+    h(
+      "ul",
+      {},
+      h("li", {}, TP().scoringGain(SCORING.TIME_BONUS_MAX, SCORING.CLEAN_BONUS, SCORING.FIRST_BLOOD_BONUS)),
+      h("li", {}, TP().scoringCost(SCORING.COMMAND_COST, SCORING.WRONG_COST, SCORING.WRONG_CAP, SCORING.CLEAN_BONUS)),
+      h("li", {}, TP().scoringReveal(SCORING.COMPLETION_BONUS)),
+      h("li", {}, TP().scoringPar(formatNumber(player.maxScore))),
+    ),
+  );
+}
+
 function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) => void, locked: LockedToday | null, recheck: () => void): HTMLElement {
   const done = player.setupDoneAt !== null;
   const briefing = h(
@@ -404,9 +424,10 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
       h(
         "div",
         { class: "paths" },
+        // Both paths are links with the same affordance: the terminal path opens the full command list.
         h(
-          "div",
-          { class: "path-card" },
+          "a",
+          { class: "path-card path-link", href: `#/case/${c.id}/toolbox` },
           h("h4", {}, T().pathTerminal),
           h("p", { class: "muted" }, T().pathTerminalBody),
         ),
@@ -418,6 +439,7 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
         ),
       ),
     ),
+    scoringRules(player),
     done
       ? h("p", { class: "done-note" }, T().setupComplete)
       : locked
@@ -557,6 +579,9 @@ function renderQuestionStage(
   /* finished stage: read-only */
   if (s.status === "solved" || s.status === "revealed") {
     const solved = s.status === "solved";
+    // The hints were paid for, so they stay readable after the stage is over.
+    const usedHints = player.unlocked.hints[id] ?? [];
+    const answer = s.revealedAnswer;
     return h(
       "div",
       { class: "stage" },
@@ -570,10 +595,26 @@ function renderQuestionStage(
         // Focus target after a solve or a reveal; the result itself is announced through the shared region.
         h("p", { class: "result-title", tabindex: "-1" }, solved ? T().solvedPts(s.points) : T().revealedPts),
         solved && s.breakdown !== null ? breakdownTable(s.breakdown) : null,
-        !solved && s.revealedAnswer !== null ? h("p", {}, T().answerLabel, h("code", { class: "answer-code" }, s.revealedAnswer)) : null,
+        !solved && answer !== null
+          ? h("p", { class: "answer-line" }, T().answerLabel, h("code", { class: "answer-code" }, answer), copyButton(() => answer))
+          : null,
         prose("prose", q.successNote),
         currentStage(player) !== id ? continueBtn() : null,
       ),
+      usedHints.length > 0
+        ? h(
+            "div",
+            { class: "block hints hints-used" },
+            h("h3", {}, TP().hintsUsedHead),
+            h(
+              "ol",
+              { class: "hint-list" },
+              usedHints.map((text, i) =>
+                h("li", { class: "hint" }, h("span", { class: "hint-label mono" }, TP().hintLabel(i + 1, q.hints[i]?.cost ?? 0)), prose("prose", text)),
+              ),
+            ),
+          )
+        : null,
     );
   }
 
@@ -731,26 +772,29 @@ function renderQuestionStage(
   );
   const nextHint = q.hints[s.hintsRevealed];
   const hintError = h("p", { class: "form-error", role: "alert" });
+  // A hint costs more than a full command, so it gets the same two-step confirm (Cancel focused, Escape cancels).
   const hintBtn = nextHint
-    ? h(
-        "button",
-        { type: "button", class: "btn btn-ghost" },
-        TP().revealHint(s.hintsRevealed + 1, q.hints.length, nextHint.cost, SCORING.CLEAN_BONUS, cleanOpen),
-      )
-    : null;
-  hintBtn?.addEventListener("click", () => {
-    if (hintBtn.getAttribute("aria-disabled") === "true") return;
-    hintBtn.setAttribute("aria-disabled", "true");
-    revealHint(c.id, id)
-      .then((p) => {
-        announce(TP().hintAnnounce(s.hintsRevealed + 1, nextHint?.cost ?? 0));
-        update(p, id, { kind: "hint", index: s.hintsRevealed });
+    ? confirmButton({
+        label: TP().revealHint(s.hintsRevealed + 1, q.hints.length, nextHint.cost, SCORING.CLEAN_BONUS, cleanOpen),
+        prompt: TP().hintPrompt(s.hintsRevealed + 1, nextHint.cost, SCORING.CLEAN_BONUS, cleanOpen),
+        confirmLabel: TP().cmdConfirm(nextHint.cost),
+        className: "btn btn-ghost hint-trigger",
+        tone: "accent",
+        onConfirm: () => {
+          for (const b of hintBtn?.querySelectorAll("button") ?? []) b.disabled = true;
+          hintError.textContent = "";
+          revealHint(c.id, id)
+            .then((p) => {
+              announce(TP().hintAnnounce(s.hintsRevealed + 1, nextHint.cost));
+              update(p, id, { kind: "hint", index: s.hintsRevealed });
+            })
+            .catch((err: unknown) => {
+              for (const b of hintBtn?.querySelectorAll("button") ?? []) b.disabled = false;
+              hintError.textContent = errorMessage(err);
+            });
+        },
       })
-      .catch((err: unknown) => {
-        hintError.textContent = errorMessage(err);
-        hintBtn.removeAttribute("aria-disabled");
-      });
-  });
+    : null;
 
   const revealError = h("p", { class: "form-error", role: "alert" });
   const reveal = confirmButton({
@@ -901,6 +945,13 @@ function renderDebrief(c: Case, player: ProgressView): HTMLElement {
       shareLine(c, player),
       copyButton(() => shareText(c, player), T().copyResult),
     ),
+    // Not a dead end: the leaderboard and the case list are one tap away.
+    h(
+      "div",
+      { class: "row-actions debrief-next" },
+      h("a", { class: "btn btn-primary", href: "#/leaderboard" }, TG().homeLeaderboard),
+      h("a", { class: "btn", href: "#/" }, T().backToCases),
+    ),
     body,
   );
 }
@@ -929,8 +980,9 @@ function breakdownTable(b: ScoreBreakdown): HTMLElement {
       row(TG().bdCommands, b.commands),
       row(TG().bdWrong, b.wrong),
       row(TG().bdTime, b.time, TG().bdTimeDetail(mmss(b.solveSeconds), mmss(b.targetSeconds))),
-      row(TG().bdClean, b.clean),
-      row(TG().bdFirstBlood, b.firstBlood),
+      // A bonus that scored 0 says why, so the table explains itself.
+      row(TG().bdClean, b.clean, b.clean === 0 && (b.hints < 0 || b.commands < 0 || b.wrong < 0) ? TP().cleanLost(b.hints < 0, b.commands < 0, b.wrong < 0) : undefined),
+      row(TG().bdFirstBlood, b.firstBlood, b.firstBlood === 0 ? TP().firstTaken : undefined),
     ),
     h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().bdTotal), h("td", { class: "num mono" }, formatNumber(b.total)))),
   );
@@ -1025,7 +1077,17 @@ function stageTotals(c: Case, player: ProgressView): HTMLElement {
         return h(
           "tr",
           { class: revealed || (s?.points ?? 0) === 0 ? "is-zero" : "is-plus" },
-          h("th", { scope: "row" }, h("bdi", {}, `${i + 1}.`), " ", contentText("bdi", {}, stageLabel(c, id)), revealed ? h("span", { class: "bd-detail muted" }, TG().revealedShort) : null),
+          h(
+            "th",
+            { scope: "row" },
+            h("bdi", {}, `${i + 1}.`),
+            " ",
+            contentText("bdi", {}, stageLabel(c, id)),
+            // Where the points went: revealed, or the help bought on this stage.
+            s === undefined
+              ? null
+              : h("span", { class: "bd-detail muted" }, revealed ? TG().revealedShort : TP().stageCosts(s.hintsRevealed, s.commandsRevealed, s.wrongAttempts)),
+          ),
           h("td", { class: "num mono" }, String(s?.points ?? 0)),
         );
       }),
