@@ -1,17 +1,23 @@
 // Tiny router: maps method + path to controller calls. Every dispatch is wrapped so nothing escapes as a crash.
 import { AdminController } from "./controllers/AdminController.ts";
 import { AuthController } from "./controllers/AuthController.ts";
+import { ContentController } from "./controllers/ContentController.ts";
 import { GameController } from "./controllers/GameController.ts";
 import { errorResponse, toErrorResponse } from "./controllers/http.ts";
 import { loadSecrets } from "./domain/config.ts";
 import type { Secrets } from "./domain/types.ts";
 import { AuditRepository, EventRepository, FirstBloodRepository, SettingsRepository } from "./repositories/config-repositories.ts";
+import { InMemoryByteStore } from "./repositories/ByteStore.ts";
+import type { ByteStore } from "./repositories/ByteStore.ts";
+import { CaseRepository, EvidenceChunkRepository } from "./repositories/case-repository.ts";
 import type { KvStore } from "./repositories/KvStore.ts";
 import { createRepositories } from "./repositories/repositories.ts";
 import { AccountAdminService } from "./services/AccountAdminService.ts";
 import { AdminAuthService } from "./services/AdminAuthService.ts";
 import { AuditService } from "./services/AuditService.ts";
 import { AuthService } from "./services/AuthService.ts";
+import { CaseService } from "./services/CaseService.ts";
+import { EvidenceService } from "./services/evidenceStream.ts";
 import { EventService } from "./services/EventService.ts";
 import { GameService } from "./services/GameService.ts";
 import { RateLimiter } from "./services/RateLimiter.ts";
@@ -22,6 +28,8 @@ import { TrashRepository } from "./repositories/trash-repository.ts";
 
 export type AppDeps = {
   readonly store: KvStore;
+  /** evidence bytes on the same Blobs store; api.mts always passes one, tests may leave it out */
+  readonly bytes?: ByteStore;
   readonly secrets?: Secrets;
   readonly adminKey: () => string | undefined; // read per request so env changes apply
   readonly now?: () => Date;
@@ -49,9 +57,13 @@ export const createApp = (deps: AppDeps): App => {
   const trash = new TrashService({ trash: trashRepo, repos, now });
   const accounts = new AccountAdminService({ repos, firstBlood, game, stats, trash, trashRepo, now });
   const audit = new AuditService({ repository: new AuditRepository(deps.store), now });
+  const caseRepo = new CaseRepository(deps.store);
+  const evidence = new EvidenceService({ cases: caseRepo, chunks: new EvidenceChunkRepository(deps.bytes ?? new InMemoryByteStore()) });
+  const cases = new CaseService({ cases: caseRepo, evidence });
 
   const authController = new AuthController({ auth, schedule, stats, events });
   const gameController = new GameController({ auth, game });
+  const contentController = new ContentController({ cases });
   const adminController = new AdminController({
     accounts, schedule, stats, events, audit, trash, guard: new AdminAuthService({ adminKey: deps.adminKey, auth }), now,
   });
@@ -69,6 +81,7 @@ export const createApp = (deps: AppDeps): App => {
       "/api/today": { GET: () => authController.today() },
       "/api/event": { GET: () => authController.event() },
       "/api/leaderboard": { GET: () => authController.leaderboard(req) },
+      "/api/cases": { GET: () => contentController.catalog(req) },
       "/api/admin/accounts": { GET: () => adminController.listAccounts(req) },
       "/api/admin/accounts/approve-all": { POST: () => adminController.approveAll(req) },
       "/api/admin/progress": { GET: () => adminController.progress(req) },
@@ -91,6 +104,8 @@ export const createApp = (deps: AppDeps): App => {
     if (area === "cases" && first !== undefined && segments.length === 4) {
       const caseId = first;
       const table: Record<string, MethodTable> = {
+        // public and cacheable (no session); every other action here needs an approved player
+        content: { GET: () => contentController.content(req, caseId) },
         progress: { GET: () => gameController.progress(req, caseId) },
         "setup-done": { POST: () => gameController.setupDone(req, caseId) },
         answer: { POST: () => gameController.answer(req, caseId) },

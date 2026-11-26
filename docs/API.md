@@ -8,7 +8,8 @@ both the browser and the function import it.
 ## Conventions
 
 - Request and response bodies are JSON. POST/PUT bodies must send `content-type: application/json` (otherwise 415) and be at most 4 KB (64 KB for the schedule; otherwise 413).
-- Every response carries `cache-control: no-store`.
+- Every response carries `cache-control: no-store`, except the two public DB-content routes below
+  (`GET /api/cases`, `GET /api/cases/:caseId/content`), which carry no account data and are cacheable.
 - Errors are non-2xx with body `{ "error": string, "code"?: string, "retryAfterSeconds"?: number }`. Status codes: 400 validation, 401 signed out, 403 forbidden (see codes), 404, 405, 409 conflict (username taken, already finished, no more hints, concurrent update: retry), 413, 415, 429 rate limit (also sends `Retry-After`), 500 `{"error":"internal"}`, 503 admin disabled.
 - Error codes the UI acts on: `signed-out`, `bad-credentials`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `not-today`, `event-closed`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`.
 
@@ -64,6 +65,44 @@ at base + 30 + 10, plus 50); first blood can push a score above par. Each solved
 | GET | `/api/event` | none | | `{event, serverTime}` |
 | GET | `/api/leaderboard?caseId=` | none | | `{caseId, frozen, frozenAt, generatedAt, entries}` (approved players; overall without caseId) |
 
+### DB-stored case content (#64)
+
+Served only from the `case:` records (see Storage). Until #68 imports the bundled cases the store is
+empty, so `GET /api/cases` returns `{cases: []}` and the client still uses the build-time content.
+Only the version a case's meta points at, and only while it is `published`, is visible; drafts and
+trashed cases are 404.
+
+| Method | Path | Auth | Response |
+|---|---|---|---|
+| GET | `/api/cases` | none | `{cases: CatalogEntry[]}` (`site/shared/catalog.ts`; `file` is the case id). `ETag` = hash of the body. |
+| GET | `/api/cases/:caseId/content?lang=en\|he` | none | `{id, version, lang, content: CaseContent}` (`CaseContentResponseSchema` in `site/shared/case-records.ts`). `lang` is the one served: `he` falls back to `en`. `ETag` = `"<contentSha>-v<version>-<lang>"`. 400 for another `lang`, 404 unless published. |
+
+Both send `Cache-Control: public, max-age=60, stale-while-revalidate=600` and answer `If-None-Match`
+with 304. Errors (404, 400) stay `no-store`. These routes share the `/api/cases/:caseId/*` space with the
+per-player routes above; `content` is the only action there that needs no session.
+
+**Evidence files** are not under `/api`: a Netlify Edge Function (`site/netlify/edge-functions/evidence.ts`,
+logic in `site/server/services/evidenceStream.ts`) serves
+
+| Path | Body |
+|---|---|
+| `/evidence/db/<caseId>/v<n>/files/<path>` | one evidence file (any size; 40 MB today) |
+| `/evidence/db/<caseId>/v<n>.zip` | the prebuilt evidence zip (`content-disposition: attachment`) |
+
+GET and HEAD. `Range: bytes=a-b` / `a-` / `-n` gives 206 with `Content-Range` (one range; a multi-range
+or malformed header gets the whole file; past the end is 416). `ETag` is the file's SHA-256 and
+`If-None-Match` gives 304; `If-Range` is honoured. `Cache-Control: public, max-age=31536000, immutable`
+(the URL carries the version), `Content-Type` from the extension (text types are `text/plain`, so a file
+never renders as a page), `X-Content-Type-Options: nosniff` and a sandbox CSP. Unknown, unpublished or
+non-current versions are 404 `no-store`. The function is not bound by the Function payload limits (about
+6 MB buffered, 20 MB streamed): it streams the 4 MiB chunks from Blobs in order, one read ahead.
+
+**Caching and `netlify.toml`.** Netlify applies `[[headers]]` rules only to files it serves itself, not to
+Function or Edge Function responses. So the `/api/*` `no-store` rule never reached function responses;
+each route sets its own `Cache-Control` (`http.ts` defaults to `no-store`). The CDN may cache the two
+content routes for 60 s (they vary only by URL, including `?lang`). The Edge Function does not opt in
+to CDN caching (`cache = "manual"` is unset), so its responses are cached by browsers only.
+
 ### Admin (`X-Admin-Key: <ADMIN_KEY>` or the `admin` session cookie)
 
 | Method | Path | Body | Response |
@@ -109,7 +148,8 @@ Rules for changing stored data, backups, restores and migrations: see `docs/DATA
 
 One Netlify Blobs store, `incidentlab-v2`, with key prefixes: `account:`, `username:` (index),
 `session:`, `progress:<caseId>:<accountId>`, `config:schedule`, `config:settings`, `config:event`,
-`firstblood:<caseId>:<questionId>`, `audit:<iso>:<rand>`, `ratelimit:`. Records written before scoring v2
+`firstblood:<caseId>:<questionId>`, `audit:<iso>:<rand>`, `ratelimit:`, and for DB-stored cases `case:`
+and `evidence:` (shapes in `docs/DATA.md`). Records written before scoring v2
 still parse (new fields have defaults); stages solved before it keep their points. The pre-accounts store
 `incidentlab-players` is no longer read.
 
@@ -118,7 +158,7 @@ still parse (new fields have defaults); stages solved before it keep their point
 | Var | Meaning |
 |---|---|
 | `ADMIN_KEY` | Admin secret. If it is unset or shorter than 16 chars, every admin route returns 503 `admin disabled`. |
-| `INCIDENTLAB_STORE` | Set to `memory` to use the in-process store (tests and local work; data is lost on restart). Otherwise Netlify Blobs. |
+| `INCIDENTLAB_STORE` | Set to `memory` to use the in-process stores, JSON and bytes (tests and local work; data is lost on restart). Otherwise Netlify Blobs. |
 
 Answers, debriefs and points are read from `site/server/generated/secrets.json` (written by the pipeline; `{cases: {<id>: …}}`). Never import it from `site/src`.
 

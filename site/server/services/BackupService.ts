@@ -5,9 +5,15 @@ import { z } from "zod";
 import { mapWithConcurrency } from "../repositories/KvStore.ts";
 import type { KvStore } from "../repositories/KvStore.ts";
 
-/** Ephemeral keys: rate-limit windows and login sessions are never backed up or restored. */
-const EPHEMERAL_PREFIXES = ["ratelimit:", "session:"];
-const isDurable = (key: string): boolean => !EPHEMERAL_PREFIXES.some((p) => key.startsWith(p));
+/**
+ * Keys a JSON snapshot never holds:
+ * - ephemeral: rate-limit windows and login sessions are never backed up or restored;
+ * - binary: `evidence:` chunks are raw bytes (ByteStore), not JSON. They are content-addressed and rebuilt
+ *   from the case package, so a snapshot skips them (and a restore with --prune leaves them alone).
+ */
+const SKIPPED_PREFIXES = ["ratelimit:", "session:", "evidence:"];
+export const isSnapshotKey = (key: string): boolean => !SKIPPED_PREFIXES.some((p) => key.startsWith(p));
+const isDurable = isSnapshotKey;
 
 export const SnapshotSchema = z.object({
   format: z.literal("incidentlab-backup"),

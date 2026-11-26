@@ -7,17 +7,33 @@ click may lose it. This document is the contract for anyone changing stored reco
 
 | Store | What | Notes |
 |---|---|---|
-| `incidentlab-v2` | Live data: `account:`, `username:`, `session:`, `progress:<case>:<account>`, `config:*` (schedule, settings, event, migrations ledger), `firstblood:`, `audit:`, `trash:`, `legacy:`, `ratelimit:` | Never rename. A new name means an empty store. That's how round-1 players were orphaned. |
+| `incidentlab-v2` | Live data: `account:`, `username:`, `session:`, `progress:<case>:<account>`, `config:*` (schedule, settings, event, migrations ledger), `firstblood:`, `audit:`, `trash:`, `legacy:`, `ratelimit:`, `case:`, `evidence:` (binary) | Never rename. A new name means an empty store. That's how round-1 players were orphaned. |
 | `incidentlab-backups` | `daily/<YYYY-MM-DD>.json` snapshots, 30 days | Written by the scheduled function `backup-daily` |
 | `incidentlab-players` | Round-1 anonymous players (pre-accounts) | Read-only. Migration 002 copies it to `legacy:<id>` |
 | `~/.incidentlab-backups/` (your machine) | Pre-deploy, pre-migrate, pre-restore and manual snapshots | Mode 600, never in the repo |
 
-`session:` and `ratelimit:` keys are ephemeral and never backed up or restored.
+`session:` and `ratelimit:` keys are ephemeral and never backed up or restored. `evidence:` keys are binary
+and are left out of the JSON snapshots too (see below).
 
-**Planned in #64** (not written yet): DB-stored cases add the prefixes `case:` (case records, `CaseMetaSchema`,
-plus public and sealed content), `evidence:` (evidence files in 4 MiB chunks, `EvidenceEntrySchema`) and
-`upload:` (in-progress chunked uploads) to `incidentlab-v2`. The schemas live in `site/shared/case-records.ts`
-and follow the rules below.
+### DB-stored cases (`case:` and `evidence:`, in use since #64)
+
+Written through `CaseRepository` / `EvidenceChunkRepository` (`site/server/repositories/case-repository.ts`)
+with the schemas in `site/shared/case-records.ts`. Every read is validated; a corrupt record is logged and
+treated as missing, never thrown. Nothing writes these keys in production yet: the upload routes are #66
+and the import of the bundled cases is #68.
+
+| Key | Holds | Notes |
+|---|---|---|
+| `case:<id>:meta` | `CaseMeta` | The current `version` and its `status` (`draft`, `published`, `trashed`). Written with `setIfMatch`. Public routes see only `version` while `status` is `published`. |
+| `case:<id>:v<n>:content:<lang>` | `CaseContent` | Public content per language (`en`, `he`); no hint texts or runnable commands. |
+| `case:<id>:v<n>:sealed` | `CaseSealed` | Server-only: answers, hint texts, commands, debriefs, scoring. |
+| `case:<id>:v<n>:evidence-index` | `EvidenceEntry[]` | Every evidence file: path, size, sha256, chunk count. |
+| `case:<id>:v<n>:evidence-zip` | `EvidenceEntry` | The prebuilt evidence zip. |
+| `evidence:<sha256>:<chunk#>` | raw bytes | 4 MiB chunks (`EVIDENCE_CHUNK_BYTES`), the last one shorter. Content-addressed: identical files share chunks across cases and versions. Binary, through `ByteStore` (`site/server/repositories/ByteStore.ts`), not `KvStore`. |
+
+Versioned keys are immutable once written: a change is a new version. `evidence:` chunks are **not** in
+JSON snapshots (they are binary, and rebuilt from the case package), so a restore never touches them,
+even with `--prune`. Still planned, for #66: `upload:` (in-progress chunked uploads).
 
 Their input is the **case package** (`build/packages/<id>-v<n>.case.zip`, format in `docs/CASE_CONTRACT.md`).
 Packages are build artefacts: `scripts/build-all.sh` writes and validates them under the gitignored `build/`.

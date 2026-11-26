@@ -1,23 +1,39 @@
 // Netlify Functions v2 entry point for /api/*. All logic lives in site/server (Controller -> Service -> Repository).
 import type { Context } from "@netlify/functions";
 import { errorResponse } from "../../server/controllers/http.ts";
+import { BlobsByteStore, InMemoryByteStore } from "../../server/repositories/ByteStore.ts";
+import type { ByteStore } from "../../server/repositories/ByteStore.ts";
 import { BlobsKvStore, InMemoryKvStore } from "../../server/repositories/KvStore.ts";
 import type { KvStore } from "../../server/repositories/KvStore.ts";
 import { createApp } from "../../server/router.ts";
 import type { App } from "../../server/router.ts";
 
+type Stores = { readonly kv: KvStore; readonly bytes: ByteStore };
+
+let stores: Stores | null = null;
 let app: App | null = null;
 
-const selectStore = (): KvStore => (process.env.INCIDENTLAB_STORE === "memory" ? new InMemoryKvStore() : new BlobsKvStore());
+const selectStores = (): Stores =>
+  process.env.INCIDENTLAB_STORE === "memory"
+    ? { kv: new InMemoryKvStore(), bytes: new InMemoryByteStore() }
+    : { kv: new BlobsKvStore(), bytes: new BlobsByteStore() };
+
+/** The stores behind the app. tests/local-server.ts uses them to serve /evidence/db/ from the same memory. */
+export const appStores = (): Stores => {
+  stores ??= selectStores();
+  return stores;
+};
 
 const getApp = (): App => {
-  app ??= createApp({ store: selectStore(), adminKey: () => process.env.ADMIN_KEY });
+  const { kv, bytes } = appStores();
+  app ??= createApp({ store: kv, bytes, adminKey: () => process.env.ADMIN_KEY });
   return app;
 };
 
-/** Test hook: drop the cached app (and its in-memory store). */
+/** Test hook: drop the cached app (and its in-memory stores). */
 export const resetAppForTests = (): void => {
   app = null;
+  stores = null;
 };
 
 export default async (req: Request, context: Pick<Context, "ip">): Promise<Response> => {
