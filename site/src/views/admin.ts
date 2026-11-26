@@ -1217,7 +1217,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
           h("p", { class: "eyebrow" }, T().admInstructorLive),
           h("h1", { class: "admin-title" }, T().admClassDashboard),
         ),
-        // The page's quick actions: freshness, pause/refresh, the projector board, then the session.
+        // The page's quick actions: freshness, pause/refresh, the projector board (and Sign out for a typed key).
         h(
           "div",
           { class: "admin-head-actions" },
@@ -1225,8 +1225,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
           pauseBtn,
           refreshBtn,
           boardBtn,
-          state.auth === "session" ? h("span", { class: "admin-session-tag" }, T().admSignedInAsAdmin) : null,
-          logoutBtn,
+          // A session admin signs out from the account menu in the top bar; a typed key has no account there.
+          state.auth === "key" ? logoutBtn : null,
         ),
       ),
       statusBanner.el,
@@ -1961,8 +1961,22 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     const key = `acct:${a.accountId}`;
     const items: MenuItem[] = [];
     if (a.status !== "approved") items.push({ label: T().admApprove, run: () => void changeStatus(a, "approve") });
-    if (a.status === "approved") items.push({ label: T().admRevoke, run: () => void changeStatus(a, "reject") });
-    else if (a.status === "pending") items.push({ label: T().admReject, run: () => void changeStatus(a, "reject") });
+    // Revoke signs the player out at once, so it asks first: approving again later can't bring the session back.
+    if (a.status === "approved") {
+      items.push({
+        label: T().admRevoke,
+        run: () =>
+          void askConfirm({
+            title: T().admRevokeTitle(a.username),
+            body: T().admRevokeBody,
+            confirmLabel: T().admRevokeConfirm,
+            tone: "danger",
+            returnFocus: () => menuTriggerEl(key),
+          }).then((ok) => {
+            if (ok) void changeStatus(a, "reject");
+          }),
+      });
+    } else if (a.status === "pending") items.push({ label: T().admReject, run: () => void changeStatus(a, "reject") });
     items.push(a.role === "author" ? { label: T().admRemoveAuthor, run: () => void changeRole(a, "player") } : { label: T().admMakeAuthor, run: () => void changeRole(a, "author") });
     items.push({
       label: T().admResetPwItem,

@@ -209,6 +209,34 @@ test("row menu: author role, password reset guard, delete with undo", async ({ p
   });
 });
 
+test("row menu: Revoke asks first, and Cancel changes nothing (#128)", async ({ page, request }) => {
+  const username = await register(request, "e2erevoke");
+  await approveAccount(request, username);
+  await signInAdmin(page);
+  await page.goto("/#/admin?tab=accounts");
+  await ui.search(page).fill(username);
+  // The account menu in the top bar carries Sign out; the page header no longer repeats it.
+  await expect(page.locator(".admin-head").getByRole("button", { name: /^sign out$/i })).toHaveCount(0);
+  await expect(page.locator(".admin-head")).not.toContainText(/signed in as admin/i);
+
+  await test.step("Cancel keeps the account approved", async () => {
+    await ui.actionsFor(page, username).click();
+    await ui.menuItems(page).filter({ hasText: /^revoke$/i }).click();
+    await expect(ui.confirm(page)).toContainText(username);
+    await ui.confirm(page).getByRole("button", { name: /^cancel$/i }).click();
+    await expect(ui.confirm(page)).toHaveCount(0);
+    await expect(ui.actionsFor(page, username)).toBeFocused();
+    expect(await accountStatus(request, username)).toBe("approved");
+  });
+
+  await test.step("confirming revokes it", async () => {
+    await ui.actionsFor(page, username).click();
+    await ui.menuItems(page).filter({ hasText: /^revoke$/i }).click();
+    await ui.confirm(page).getByRole("button", { name: /^revoke access$/i }).click();
+    await expect.poll(() => accountStatus(request, username)).toBe("rejected");
+  });
+});
+
 test.describe("HE 390", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
