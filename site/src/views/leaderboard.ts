@@ -37,6 +37,9 @@ export function stopLeaderboard(): void {
   document.body.classList.remove("projector");
 }
 
+/** How long the projector's exit link stays visible after the pointer stops moving. */
+const PROJECTOR_CONTROLS_MS = 3000;
+
 function listen<K extends keyof DocumentEventMap>(type: K, fn: (ev: DocumentEventMap[K]) => void): void {
   document.addEventListener(type, fn);
   detachers.push(() => document.removeEventListener(type, fn));
@@ -291,6 +294,17 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): vo
     // The big screen has no visible controls: Esc (or the small corner link) leaves projector mode.
     listen("keydown", (ev) => {
       if (ev.key === "Escape") window.location.hash = hashFor(caseId, false);
+    });
+    // The exit link shows only while the pointer moves (and on keyboard focus), so the room sees no chrome.
+    let pointerTimer: number | null = null;
+    listen("pointermove", () => {
+      document.body.classList.add("projector-pointer");
+      if (pointerTimer !== null) window.clearTimeout(pointerTimer);
+      pointerTimer = window.setTimeout(() => document.body.classList.remove("projector-pointer"), PROJECTOR_CONTROLS_MS);
+    });
+    detachers.push(() => {
+      if (pointerTimer !== null) window.clearTimeout(pointerTimer);
+      document.body.classList.remove("projector-pointer");
     });
   }
 
