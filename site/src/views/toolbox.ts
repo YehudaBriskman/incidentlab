@@ -1,7 +1,9 @@
 // Command cards and the per-case Toolbox page.
 // The free part of a command is its `syntax` (a template with <placeholders>). The runnable command is paid
 // for (SCORING.COMMAND_COST on the active stage) and comes from `progress.unlocked.commands`, never from the
-// bundled content: production builds strip `command` / `powershell` from the case JSON.
+// bundled content: production builds strip `command` / `powershell` / `lab` from the case JSON.
+// A card has up to three shells: Bash (always), PowerShell and Lab (the lab image, lab/README.md, #149), each
+// shown only when the item has that variant.
 import { QUESTION_ORDER, SCORING, type ProgressView, type StageProgress, type TodayResponse } from "../../shared/contract";
 import type { Case } from "../../shared/case";
 import { getProgress, revealCommand } from "../lib/api";
@@ -24,7 +26,9 @@ import { createCaseNav } from "./caseNav";
 import { withApprovedAccount } from "./auth";
 
 type ToolItem = Case["toolbox"][number]["items"][number];
-type Shell = "bash" | "powershell";
+type Shell = "bash" | "powershell" | "lab";
+const SHELLS: readonly Shell[] = ["bash", "powershell", "lab"];
+const shellLabel = (k: Shell): string => (k === "bash" ? "Bash" : k === "powershell" ? "PowerShell" : TG().labTab);
 
 /** What a command card needs to know about the player. `progress: null` = signed out (or the admin). */
 export type CommandContext = {
@@ -37,7 +41,8 @@ export type CommandContext = {
 
 function readShell(): Shell {
   try {
-    return window.localStorage.getItem("il.pref.shell") === "powershell" ? "powershell" : "bash";
+    const stored = window.localStorage.getItem("il.pref.shell");
+    return SHELLS.find((k) => k === stored) ?? "bash";
   } catch {
     return "bash";
   }
@@ -90,7 +95,7 @@ function syntaxNodes(text: string): Child[] {
 
 let cardSeq = 0;
 
-/** One command: syntax (free) with Bash | PowerShell tabs, or the full command once revealed. */
+/** One command: syntax (free) with Bash | PowerShell | Lab tabs, or the full command once revealed. */
 export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
   const uid = `cmd-${++cardSeq}`;
   const progress = ctx.progress;
@@ -98,20 +103,27 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
   const full = toolId !== undefined ? progress?.unlocked.commands[toolId] : undefined;
   const paidOn = toolId !== undefined ? progress?.commandsRevealed[toolId] : undefined;
 
-  const bashText = full?.command ?? item.syntax ?? "";
+  const texts = new Map<Shell, string>([["bash", full?.command ?? item.syntax ?? ""]]);
   const psText = full ? full.powershell : (item.syntaxPowershell ?? null);
-  let shell: Shell = psText !== null ? readShell() : "bash";
+  const labText = full ? full.lab : (item.syntaxLab ?? null);
+  if (psText !== null) texts.set("powershell", psText);
+  if (labText !== null) texts.set("lab", labText);
+  const shells = SHELLS.filter((k) => texts.has(k));
+  const hasTabs = shells.length > 1;
+  const preferred = readShell();
+  let shell: Shell = texts.has(preferred) ? preferred : "bash";
 
   const code = h("code", {});
   const pre = h("pre", {
     class: full ? "code-block" : "code-block syntax-block",
     id: `${uid}-panel`,
-    role: psText !== null ? "tabpanel" : null,
+    role: hasTabs ? "tabpanel" : null,
     "aria-label": full ? null : TG().syntaxLabel,
   });
   pre.append(code);
-  const current = (): string => (shell === "powershell" && psText !== null ? psText : bashText);
+  const current = (): string => texts.get(shell) ?? texts.get("bash") ?? "";
   const tabs = new Map<Shell, HTMLButtonElement>();
+  const labNote = labText !== null ? h("p", { class: "muted small lab-note", id: `${uid}-lab` }, TG().labNote) : null;
   const sync = (): void => {
     if (full) code.textContent = current();
     else setChildren(code, syntaxNodes(current()));
@@ -119,6 +131,9 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
       btn.setAttribute("aria-selected", String(k === shell));
       btn.tabIndex = k === shell ? 0 : -1;
     }
+    if (labNote !== null) labNote.hidden = shell !== "lab";
+    if (shell === "lab" && labNote !== null) pre.setAttribute("aria-describedby", labNote.id);
+    else pre.removeAttribute("aria-describedby");
   };
   const tab = (k: Shell, label: string): HTMLButtonElement => {
     const btn = h("button", { type: "button", role: "tab", class: "shell-tab", "aria-controls": `${uid}-panel` }, label);
@@ -128,9 +143,15 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
       sync();
     });
     btn.addEventListener("keydown", (ev) => {
-      if (!(ev instanceof KeyboardEvent) || (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight")) return;
+      if (!(ev instanceof KeyboardEvent)) return;
+      // Arrow keys move along the tab bar in reading order (so they flip in RTL); Home and End jump to the ends.
+      const rtl = window.getComputedStyle(btn).direction === "rtl";
+      const step = ev.key === "ArrowRight" ? (rtl ? -1 : 1) : ev.key === "ArrowLeft" ? (rtl ? 1 : -1) : 0;
+      const i = shells.indexOf(shell);
+      const next = ev.key === "Home" ? shells[0] : ev.key === "End" ? shells[shells.length - 1] : step !== 0 ? shells[(i + step + shells.length) % shells.length] : undefined;
+      if (next === undefined) return;
       ev.preventDefault();
-      shell = shell === "bash" ? "powershell" : "bash";
+      shell = next;
       writeShell(shell);
       sync();
       tabs.get(shell)?.focus();
@@ -138,7 +159,7 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
     tabs.set(k, btn);
     return btn;
   };
-  const tabBar = psText !== null ? h("div", { class: "shell-tabs", role: "tablist", "aria-label": T().shell }, tab("bash", "Bash"), tab("powershell", "PowerShell")) : null;
+  const tabBar = hasTabs ? h("div", { class: "shell-tabs", role: "tablist", "aria-label": T().shell }, shells.map((k) => tab(k, shellLabel(k)))) : null;
   sync();
 
   const tag = full
@@ -195,6 +216,7 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
     h("div", { class: "cmd-head" }, h("h4", {}, item.title), tag, tabBar),
     full ? null : h("p", { class: "syntax-label" }, TG().syntaxLabel),
     h("div", { class: "code-wrap" }, pre, full ? copyButton(current, T().copy) : null),
+    labNote,
     html("div", { class: "prose small" }, md(item.explain)),
     action !== null ? h("div", { class: "cmd-actions" }, action, errorEl) : null,
   );
@@ -211,7 +233,7 @@ type PageState =
 /** The toolbox page's panel content (contents, shell switch, filter), set by toolboxView. */
 let sideEl: HTMLElement | null = null;
 
-/** The toolbox as a frame view: commands in main; contents, the Bash/PowerShell switch and the filter in the page panel. */
+/** The toolbox as a frame view: commands in main; contents, the Bash/PowerShell/Lab switch and the filter in the page panel. */
 export function toolboxView(c: Case): ViewResult {
   const main = h("div", { class: "view" });
   const side = h("div", { class: "side-stack tb-side" });
@@ -262,7 +284,15 @@ function toolboxNote(c: Case, root: HTMLElement, state: PageState): HTMLElement 
     );
   }
   if (state.kind === "admin") return h("p", { class: "notice muted" }, TG().toolboxAdmin);
-  if (state.kind === "error") return h("p", { class: "notice form-error", role: "alert" }, state.message);
+  if (state.kind === "error") {
+    // The progress load failed (offline, server error): say why and let the player try again in place.
+    return h(
+      "div",
+      { class: "notice", role: "alert" },
+      h("p", { class: "form-error" }, state.message),
+      h("button", { type: "button", class: "btn btn-sm", onclick: () => renderToolbox(root, c) }, TG().toolboxRetry),
+    );
+  }
   const p = state.progress;
   if (state.locked !== null) {
     const todayCase = state.locked.todayCaseId !== null ? caseSummary(state.locked.todayCaseId) : undefined;
@@ -303,7 +333,7 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
     const heading = h("h2", { id: `tb-${i}-h`, tabindex: "-1" }, sec.category);
     const cards = sec.items.map((item) => {
       const card = commandCard(item, ctx);
-      card.dataset.search = [item.title, item.syntax ?? "", item.syntaxPowershell ?? "", item.explain, sec.category].join(" ").toLowerCase();
+      card.dataset.search = [item.title, item.syntax ?? "", item.syntaxPowershell ?? "", item.syntaxLab ?? "", item.explain, sec.category].join(" ").toLowerCase();
       return card;
     });
     const el = h("section", { class: "block tb-section", id: `tb-${i}`, "aria-labelledby": `tb-${i}-h` }, heading, h("div", { class: "tool-list" }, cards));
@@ -417,22 +447,34 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
   );
 }
 
-/** One switch for every card: Bash or PowerShell. Cards keep their own tabs; both write the same preference. */
+/**
+ * One switch for every card: Bash, PowerShell or Lab, each offered when some item has it. Cards keep their own
+ * tabs; both write the same preference. A card without the chosen variant shows Bash.
+ */
 function shellSwitch(c: Case, state: PageState, redraw: () => void): HTMLElement | null {
   const unlocked = state.kind === "player" ? Object.values(state.progress.unlocked.commands) : [];
-  const hasPowershell = c.toolbox.some((sec) => sec.items.some((it) => it.syntaxPowershell !== undefined)) || unlocked.some((cmd) => cmd.powershell !== null);
-  if (!hasPowershell) return null;
-  const radios = (["bash", "powershell"] as const).map((value) => {
+  const items = c.toolbox.flatMap((sec) => sec.items);
+  const hasPowershell = items.some((it) => it.syntaxPowershell !== undefined) || unlocked.some((cmd) => cmd.powershell !== null);
+  const hasLab = items.some((it) => it.syntaxLab !== undefined) || unlocked.some((cmd) => cmd.lab !== null);
+  const offered = SHELLS.filter((k) => k === "bash" || (k === "powershell" && hasPowershell) || (k === "lab" && hasLab));
+  if (offered.length < 2) return null;
+  const radios = offered.map((value) => {
     const input = h("input", { type: "radio", name: "tb-shell", value, checked: readShell() === value });
     input.addEventListener("change", () => {
       if (!input.checked) return;
       writeShell(value);
       redraw();
     });
-    return { value, input, el: h("label", { class: "side-option" }, input, h("span", {}, value === "bash" ? "Bash" : "PowerShell")) };
+    return { value, input, el: h("label", { class: "side-option" }, input, h("span", {}, shellLabel(value))) };
   });
   onShellWritten = (shell) => {
     for (const r of radios) r.input.checked = r.value === shell;
   };
-  return h("fieldset", { class: "side-group" }, h("legend", { class: "side-h" }, TS().tbShellLegend), h("div", { class: "side-options" }, radios.map((r) => r.el)));
+  return h(
+    "fieldset",
+    { class: "side-group" },
+    h("legend", { class: "side-h" }, TS().tbShellLegend),
+    h("div", { class: "side-options" }, radios.map((r) => r.el)),
+    hasLab ? h("p", { class: "muted small" }, TG().labNote) : null,
+  );
 }

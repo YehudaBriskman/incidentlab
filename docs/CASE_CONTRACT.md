@@ -72,6 +72,10 @@ Evidence rules:
 - `setupChecklist`: 4–5 items (get the pack or open the Explorer, read README_FIRST, time zones, pick bash/PowerShell/browser).
 - `rules`: reuse the 3am-outage rules, adapted.
 - `toolbox`: 6–10 categories; **every item has both `command` (bash) and `powershell`**. Ids are unique and referenced by `stage.tools`.
+  Optional lab track (#149): `syntaxLab` (free, with `<placeholders>`) and `lab` (paid), a command for the lab
+  image's shell (`lab/README.md`), run from `/case`, that may use its tools (tcpdump, dig, jq, gawk, git). The
+  item's single reveal unlocks it with the others. `scripts/check_commands.py` runs it inside the image when
+  `LAB_IMAGE_CHECK=1`.
 - `debrief`: one line: `"_Sealed._ Finish all six stages to unlock the debrief."` (the real one is served by the server).
 - `inspiredBy`: the real public incident, year and a factual 2–3 sentence summary.
 - Writing style: plain, direct, no em dashes.
@@ -83,7 +87,7 @@ The zod schemas are the source of truth for every case shape (there is no separa
 | Schema | File | What |
 |---|---|---|
 | `CaseSchema` | `site/shared/case.ts` | The authored case JSON above, paid fields included. The browser bundle gets it with the paid fields stripped. |
-| `CaseContentSchema` | `site/shared/case-records.ts` | The public form: hints are `{cost}` only, toolbox items have no `command`/`powershell`. Derived from `CaseSchema`; `stripPaidContent()` turns one into the other. |
+| `CaseContentSchema` | `site/shared/case-records.ts` | The public form: hints are `{cost}` only, toolbox items have no `command`/`powershell`/`lab`. Derived from `CaseSchema`; `stripPaidContent()` turns one into the other. |
 | `CaseSealedSchema` | `site/shared/case-records.ts` | The server-only half: normalized answers, hint texts, commands, debriefs, points and hint costs. Each case in `site/server/generated/secrets.json` has this shape. |
 | `EvidenceEntrySchema`, `CasePackageManifestSchema` | `site/shared/case-records.ts` | The case package manifest (below), evidence in `EVIDENCE_CHUNK_BYTES` = 4 MiB chunks. |
 | `CaseMetaSchema` | `site/shared/case-records.ts` | The stored case record. Planned in #64; nothing stores it yet. |
@@ -107,10 +111,10 @@ or committed.
 | Entry | What | Schema |
 |---|---|---|
 | `manifest.json` | `schemaVersion` (1), `id`, `version`, `langs` (unique, includes `en`), and `evidence`: one entry per file with `path`, `format`, `size`, `sha256`, `chunks` and `explorer` | `CasePackageManifestSchema` |
-| `content.<lang>.json` | Public content, one per manifest language: the case JSON with hint texts and `command`/`powershell` removed (`stripPaidContent`) | `CaseContentSchema` |
+| `content.<lang>.json` | Public content, one per manifest language: the case JSON with hint texts and `command`/`powershell`/`lab` removed (`stripPaidContent`) | `CaseContentSchema` |
 | `sealed/answers.json` | `{qN: answer}`, normalized with `normalizeAnswer` | `CaseSealedSchema.answers` |
 | `sealed/hints.json` | `{qN: [{en, he}]}`, hint texts in order (`he` is `null` without a translation) | `CaseSealedSchema.hints` |
-| `sealed/commands.json` | `{toolId: {command, powershell}}` | `CaseSealedSchema.tools` |
+| `sealed/commands.json` | `{toolId: {command, powershell, lab}}` (`lab` may be null or absent) | `CaseSealedSchema.tools` |
 | `sealed/scoring.json` | `{title, estMinutes, questions: {qN: {points, hintCosts, targetSeconds}}}` | the rest of `CaseSealedSchema` |
 | `sealed/debrief.en.md`, `sealed/debrief.he.md` | The sealed debriefs (Hebrew only when `content-sealed/<id>.debrief.he.md` exists) | `debrief`, `debriefHe` |
 | `evidence.zip` | The player download, exactly as `scripts/package.sh` built it (one top-level folder `<id>/`), stored uncompressed | |

@@ -170,6 +170,7 @@ async function checkLeaks(parts: PackageParts, publicFiles: string[], sealed: Ca
   for (const [id, tool] of Object.entries(sealed.tools)) {
     paid.push({ label: `command of tool ${id}`, text: tool.command });
     if (tool.powershell) paid.push({ label: `PowerShell command of tool ${id}`, text: tool.powershell });
+    if (tool.lab) paid.push({ label: `lab command of tool ${id}`, text: tool.lab });
   }
   for (const name of publicFiles) {
     let haystack: string;

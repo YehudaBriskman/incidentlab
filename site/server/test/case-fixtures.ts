@@ -45,7 +45,7 @@ export const sealedFixture = (id: string): CaseSealed => ({
   debriefHe: null,
   questions: perQuestion(() => ({ points: 100, hintCosts: [10, 20], targetSeconds: 600 })),
   hints: perQuestion((qid) => [{ en: `${qid} first hint`, he: null }, { en: `${qid} second hint`, he: null }]),
-  tools: { "grep-errors": { command: "grep ERROR app.log", powershell: null } },
+  tools: { "grep-errors": { command: "grep ERROR app.log", powershell: null, lab: null } },
   estMinutes: 45,
 });
 

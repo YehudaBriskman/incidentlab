@@ -12,6 +12,7 @@ export const ANSWERS: Record<string, string> = {
 };
 export const HINT = (qid: string, n: number): string => `Fixture hint ${n} for ${qid}: grep the made-up log for it`;
 export const COMMAND = "grep -c 'fixture pattern' fixture/app.log | sort -u";
+export const LAB_COMMAND = "jq -r 'select(.fixture == \"lab\") | .line' logs/app.jsonl";
 
 export type Json = Record<string, unknown>;
 export const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
@@ -83,7 +84,7 @@ export async function build(f: Fixture): Promise<Uint8Array> {
     { name: "content.en.json", data: json(f.content) },
     { name: "sealed/answers.json", data: json(f.answers ?? ANSWERS) },
     { name: "sealed/hints.json", data: json(hints) },
-    { name: "sealed/commands.json", data: json({ count: { command: COMMAND, powershell: null } }) },
+    { name: "sealed/commands.json", data: json({ count: { command: COMMAND, powershell: null, lab: LAB_COMMAND } }) },
     { name: "sealed/scoring.json", data: json({ title: f.content["title"], estMinutes: 30, questions: sealedQuestions }) },
     { name: "sealed/debrief.en.md", data: "# Debrief\n\nThe fixture story.\n" },
     { name: "evidence.zip", data: evidenceZip, method: 0 },

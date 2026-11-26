@@ -16,7 +16,7 @@ import { CaseIdSchema, QuestionIdSchema } from "./contract.ts";
 // drift apart. Strict where paid fields used to be, so a leaked hint text or command fails validation.
 
 export const PublicHintSchema = z.strictObject(HintSchema.omit({ text: true }).shape);
-export const PublicToolItemSchema = z.strictObject(ToolItemSchema.omit({ command: true, powershell: true }).shape);
+export const PublicToolItemSchema = z.strictObject(ToolItemSchema.omit({ command: true, powershell: true, lab: true }).shape);
 export const PublicQuestionSchema = QuestionSchema.extend({
   hints: z.array(PublicHintSchema).min(1).max(4),
 });
@@ -33,7 +33,7 @@ type JsonObject = Record<string, unknown>;
 const isObject = (value: unknown): value is JsonObject => typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
- * Removes the paid fields (hint texts, toolbox `command`/`powershell`) from an authored case file, keeping
+ * Removes the paid fields (hint texts, toolbox `command`/`powershell`/`lab`) from an authored case file, keeping
  * every free field. Works on unparsed JSON on purpose: the Vite plugin strips files before validation, and
  * leaves anything it does not recognise alone. A valid `CaseSchema` input gives a valid `CaseContentSchema`
  * output.
@@ -54,7 +54,7 @@ export function stripPaidContent(raw: unknown): unknown {
         ...section,
         items: section["items"].map((item: unknown) => {
           if (!isObject(item)) return item;
-          const { command: _command, powershell: _powershell, ...free } = item;
+          const { command: _command, powershell: _powershell, lab: _lab, ...free } = item;
           return free;
         }),
       };
@@ -86,8 +86,8 @@ export const CaseSealedSchema = z.object({
   questions: z.record(QuestionIdSchema, SealedQuestionConfigSchema),
   /** hint texts, in order, per question */
   hints: z.record(QuestionIdSchema, z.array(LocalizedTextSchema)),
-  /** full runnable commands by toolbox item id */
-  tools: z.record(z.string(), z.object({ command: z.string(), powershell: z.string().nullable() })),
+  /** full runnable commands by toolbox item id; `lab` (#149) is the lab image variant, absent in older records */
+  tools: z.record(z.string(), z.object({ command: z.string(), powershell: z.string().nullable(), lab: z.string().nullable().default(null) })),
   estMinutes: z.number().int().positive(),
 });
 export type CaseSealed = z.infer<typeof CaseSealedSchema>;

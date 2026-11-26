@@ -43,10 +43,14 @@ export const ToolItemSchema = z.object({
   // Free to view: the command's shape with <placeholders> instead of the concrete pattern/field/file.
   syntax: z.string().optional(),
   syntaxPowershell: z.string().optional(),
+  // The lab track (#149): the same item in the lab image's shell (lab/README.md), run from /case, where
+  // tcpdump, dig, jq and gawk exist. `syntaxLab` is free like `syntax`; `lab` is paid like `command`.
+  syntaxLab: z.string().optional(),
   // The runnable commands. Authored in the JSON, STRIPPED from the browser bundle, and served by the
   // API only after the player pays (5 points) or finishes the case.
   command: z.string().optional(),
   powershell: z.string().optional(),    // Windows PowerShell equivalent (no installs needed)
+  lab: z.string().optional(),           // lab image command; paid, stripped and served like `command`
   explain: z.string(),                  // markdown
 });
 

@@ -26,6 +26,7 @@ import {
   type UserStats,
 } from "../../shared/contract";
 import { cachedCase } from "../content/load";
+import { cachedEvent, eventPhase, formatCountdown, serverNow as publicServerNow } from "../lib/event";
 import { dataTable, type Column } from "../components/dataTable";
 import { statGrid, statTile } from "../components/statGrid";
 import { formActions, formField } from "../components/formLayout";
@@ -76,6 +77,8 @@ import {
 const POLL_MS = 5000;
 /** The dashboard poll refetches /api/today at most this often (see load()). */
 const TODAY_REFRESH_MS = 60_000;
+/** Rows on the projector board; the rest are summed up as "+N more". */
+const BOARD_ROWS = 10;
 const MAX_BACKOFF_MS = 60000;
 const STUCK_WARN_MIN = 8;
 const STUCK_ALERT_MIN = 15;
@@ -245,6 +248,21 @@ function headWithHint(heading: HTMLElement, hint: string): HTMLElement {
 function formatDateTimeSec(iso: string | null): string {
   const t = ms(iso);
   return t === null ? "—" : new Intl.DateTimeFormat(locale(), { dateStyle: "medium", timeStyle: "medium" }).format(t);
+}
+
+/** Same, with the browser's time zone named ("25 Nov 2026, 14:04:11 GMT+2"): the audit log's full-time tooltip. */
+function formatDateTimeSecZone(iso: string | null): string {
+  const t = ms(iso);
+  if (t === null) return "—";
+  return new Intl.DateTimeFormat(locale(), {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  }).format(t);
 }
 
 /** Same, with the time zone named ("25 Nov 2026, 18:30 GMT+2"): for values typed in a browser-formatted picker. */
@@ -1217,7 +1235,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
           h("p", { class: "eyebrow" }, T().admInstructorLive),
           h("h1", { class: "admin-title" }, T().admClassDashboard),
         ),
-        // The page's quick actions: freshness, pause/refresh, the projector board, then the session.
+        // The page's quick actions: freshness, pause/refresh, the projector board (and Sign out for a typed key).
         h(
           "div",
           { class: "admin-head-actions" },
@@ -1225,8 +1243,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
           pauseBtn,
           refreshBtn,
           boardBtn,
-          state.auth === "session" ? h("span", { class: "admin-session-tag" }, T().admSignedInAsAdmin) : null,
-          logoutBtn,
+          // A session admin signs out from the account menu in the top bar; a typed key has no account there.
+          state.auth === "key" ? logoutBtn : null,
         ),
       ),
       statusBanner.el,
@@ -1751,7 +1769,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   const trashTable = dataTable<TrashEntry>({
     columns: [
       { id: "item", header: T().admColItem, rowHeader: true, className: "trash-label", cell: (e) => h("span", { dir: "auto" }, e.label), sortValue: (e) => e.label },
-      { id: "deleted", header: T().admColDeletedAt, className: "col-seen", cell: (e) => tipped(h("span", {}, formatDateTime(e.deletedAt)), e.deletedAt), sortValue: (e) => ms(e.deletedAt), sortFirst: "desc" },
+      { id: "deleted", header: T().admColDeletedAt, className: "col-seen", cell: (e) => tipped(h("span", {}, formatDateTime(e.deletedAt)), formatDateTimeZone(e.deletedAt)), sortValue: (e) => ms(e.deletedAt), sortFirst: "desc" },
       { id: "expires", header: T().admColExpires, className: "col-seen", cell: (e) => tipped(h("span", {}, relativeIn(e.expiresAt, trashNow)), formatDateTime(e.expiresAt)), sortValue: (e) => ms(e.expiresAt) },
       { id: "records", header: T().admColRecords, numeric: true, cell: (e) => fmtInt(e.records), sortValue: (e) => e.records, sortFirst: "desc" },
       {
@@ -1961,8 +1979,22 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     const key = `acct:${a.accountId}`;
     const items: MenuItem[] = [];
     if (a.status !== "approved") items.push({ label: T().admApprove, run: () => void changeStatus(a, "approve") });
-    if (a.status === "approved") items.push({ label: T().admRevoke, run: () => void changeStatus(a, "reject") });
-    else if (a.status === "pending") items.push({ label: T().admReject, run: () => void changeStatus(a, "reject") });
+    // Revoke signs the player out at once, so it asks first: approving again later can't bring the session back.
+    if (a.status === "approved") {
+      items.push({
+        label: T().admRevoke,
+        run: () =>
+          void askConfirm({
+            title: T().admRevokeTitle(a.username),
+            body: T().admRevokeBody,
+            confirmLabel: T().admRevokeConfirm,
+            tone: "danger",
+            returnFocus: () => menuTriggerEl(key),
+          }).then((ok) => {
+            if (ok) void changeStatus(a, "reject");
+          }),
+      });
+    } else if (a.status === "pending") items.push({ label: T().admReject, run: () => void changeStatus(a, "reject") });
     items.push(a.role === "author" ? { label: T().admRemoveAuthor, run: () => void changeRole(a, "player") } : { label: T().admMakeAuthor, run: () => void changeRole(a, "author") });
     items.push({
       label: T().admResetPwItem,
@@ -2687,9 +2719,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       tile(
         T().admAvgScoreAll,
         avg === null ? "—" : fmtInt(avg),
-        [maxScore ? T().admPar(fmtInt(maxScore)) : null, T().admSample(fmtInt(players.length))].filter((x) => x !== null).join(" · "),
+        [maxScore ? T().admPar(fmtInt(maxScore)) : null, T().admSample(players.length, fmtInt(players.length))].filter((x) => x !== null).join(" · "),
       ),
-      tile(T().admMedianTime, med === null ? "—" : formatFinish(med), `${T().admFinishedPlayers} · ${T().admSample(fmtInt(finished.length))}`),
+      tile(T().admMedianTime, med === null ? "—" : formatFinish(med), T().admFinishedSample(finished.length, fmtInt(finished.length))),
     );
     setTilesSummary(liveTiles, T().admLiveSummary(fmtInt(players.length), fmtInt(finished.length), fmtInt(needing)));
   }
@@ -3381,7 +3413,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     tzField.setError(tzValid ? null : T().admTimezoneInvalid);
     tzInput.addEventListener("input", () => {
       const v = tzInput.value.trim();
-      tzField.setError(v === "" || isValidTimeZone(v) ? null : T().admTimezoneInvalid);
+      const ok = v === "" || isValidTimeZone(v);
+      tzField.setError(ok ? null : T().admTimezoneInvalid);
+      syncSave(ok);
     });
     tzInput.addEventListener("change", () => {
       const v = tzInput.value.trim();
@@ -3401,10 +3435,20 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
 
     const saveBtn = h(
       "button",
-      { type: "button", class: "btn btn-primary", id: "sched-save", disabled: !dirty || sch.saving },
+      { type: "button", class: "btn btn-primary", id: "sched-save", "aria-describedby": "sched-status" },
       sch.saving ? T().admSaving : T().admSaveSchedule,
     );
     saveBtn.addEventListener("click", () => void onSaveSchedule());
+    const entries = Object.keys(draft.days).length;
+    const statusEl = h("span", { class: "small", id: "sched-status", role: "status" });
+    // An unknown time zone blocks Save, and the save bar says so (the field shows the details).
+    function syncSave(tzOk: boolean): void {
+      saveBtn.disabled = !dirty || sch.saving || !tzOk;
+      const blocked = dirty && !tzOk;
+      statusEl.className = `small ${blocked || dirty ? "sched-dirty" : "muted"}`;
+      statusEl.textContent = blocked ? T().admScheduleFixTz : dirty ? T().admUnsaved : (sch.msg ?? T().admScheduledDays(entries));
+    }
+    syncSave(tzValid);
     const discardBtn = h(
       "button",
       { type: "button", class: "btn btn-ghost", id: "sched-discard", disabled: !dirty || sch.saving },
@@ -3415,7 +3459,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       renderSchedule();
     });
 
-    const entries = Object.keys(draft.days).length;
     setChildren(
       panel,
       todayPanel,
@@ -3443,7 +3486,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         { class: "sched-actions panel admin-panel", hidden: !scheduleBarVisible() },
         saveBtn,
         discardBtn,
-        h("span", { class: `small ${dirty ? "sched-dirty" : "muted"}`, role: "status" }, dirty ? T().admUnsaved : sch.msg ?? T().admScheduledDays(entries)),
+        statusEl,
         sch.error ? h("p", { class: "admin-error", role: "alert" }, T().admScheduleSaveFailed(sch.error)) : null,
       ),
     );
@@ -3866,7 +3909,18 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     const f = ms(e.freezeAt);
     if (f !== null) parts.push(f <= now ? T().admStatusFrozen(formatDateTime(e.freezeAt)) : T().admStatusFreezesIn(formatDuration(f - now)));
     const label = e.name.trim();
-    setChildren(evStatusEl, h("span", { class: `adm-ev-dot is-${tone}`, "aria-hidden": "true" }), label ? h("strong", {}, label) : null, label ? " · " : "", parts.join(" · "));
+    // Each part carries its separator at its own end, so a wrapped line never starts with a stray "·" (#129).
+    const segs: Array<{ text: string; strong: boolean }> = [
+      ...(label ? [{ text: label, strong: true }] : []),
+      ...parts.map((text) => ({ text, strong: false })),
+    ];
+    setChildren(
+      evStatusEl,
+      h("span", { class: `adm-ev-dot is-${tone}`, "aria-hidden": "true" }),
+      segs.map((s, i) =>
+        h("span", { class: "adm-ev-part" }, s.strong ? h("strong", {}, s.text) : s.text, i < segs.length - 1 ? " ·" : ""),
+      ),
+    );
     evClockEl.textContent = T().admServerClock(new Intl.DateTimeFormat(locale(), { timeStyle: "medium" }).format(now));
   }
 
@@ -4005,7 +4059,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         header: T().admColTime,
         className: "col-seen",
         // Seconds matter here: a class's approvals land within the same minute.
-        cell: (e) => tipped(h("time", { datetime: e.at }, formatDateTimeSec(e.at)), e.at),
+        cell: (e) => tipped(h("time", { datetime: e.at }, formatDateTimeSec(e.at)), formatDateTimeSecZone(e.at)),
         sortValue: (e) => ms(e.at),
         sortFirst: "desc",
         csv: (e) => e.at,
@@ -4167,6 +4221,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     const med = median(finishTimes);
     const timeValue = med !== null ? formatFinish(med) : s.avgDurationSeconds !== null ? formatFinish(s.avgDurationSeconds * 1000) : "—";
     const timeLabel = med !== null || s.avgDurationSeconds === null ? T().admMedianTime : T().admAvgTime;
+    const timeSample = med !== null ? finishTimes.length : s.completed;
     const head = h(
       "div",
       { class: "stats-case-head" },
@@ -4186,14 +4241,14 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         { class: "stats-kpi is-lead" },
         h("div", { class: "admin-tile-label" }, T().admCompletion),
         h("div", { class: "stats-kpi-value" }, formatPct(s.completed / s.players)),
-        h("div", { class: "admin-tile-sub" }, T().admCompletionSub(fmtInt(s.completed), fmtInt(s.players))),
+        h("div", { class: "admin-tile-sub" }, T().admCompletionSub(fmtInt(s.completed), s.players, fmtInt(s.players))),
       ),
       h(
         "div",
         { class: "stats-kpi" },
         h("div", { class: "admin-tile-label" }, timeLabel),
         h("div", { class: "stats-kpi-value" }, timeValue),
-        h("div", { class: "admin-tile-sub" }, `${T().admFinishedPlayers} · ${T().admSample(fmtInt(med !== null ? finishTimes.length : s.completed))}`),
+        h("div", { class: "admin-tile-sub" }, T().admFinishedSample(timeSample, fmtInt(timeSample))),
       ),
       h(
         "div",
@@ -4216,7 +4271,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       { class: "muted small stats-secondary" },
       `${T().admAvgScoreFinishers}: ${s.avgScore === null ? "—" : fmtInt(Math.round(s.avgScore))}`,
       maxScore ? ` (${T().admPar(fmtInt(maxScore))})` : "",
-      ` · ${T().admSample(fmtInt(s.completed))}`,
+      ` · ${T().admFinishedSample(s.completed, fmtInt(s.completed))}`,
     );
     // Per question: a bar of everyone who reached it, split into solved / gave up / still on it (text says the same).
     const bars = h(
@@ -4362,6 +4417,54 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     void loadBoard();
   });
 
+  // Event line and freeze state in the board header: kept across re-renders and ticked once a second.
+  const boardEventEl = h("p", { class: "admin-board-event", "aria-live": "off" });
+  const boardStateEl = h("p", { class: "admin-board-state" });
+
+  /** The event as the room sees it: the admin's copy once the Event section loaded it, else the public poll's. */
+  function boardEvent(): { event: LiveEvent | null; now: number } {
+    return state.event.server ? { event: state.event.server, now: serverNow() } : { event: cachedEvent(), now: publicServerNow() };
+  }
+
+  function renderBoardClock(): void {
+    const { event, now } = boardEvent();
+    const name = event?.name.trim() ?? "";
+    const phase = eventPhase(event, now);
+    const when =
+      phase.kind === "before"
+        ? T().admBoardStartsIn(formatCountdown(phase.msLeft))
+        : phase.kind === "running"
+          ? phase.msLeft === null
+            ? ""
+            : T().admBoardEndsIn(formatCountdown(phase.msLeft))
+          : phase.kind === "over"
+            ? T().admBoardEventOver
+            : "";
+    setChildren(boardEventEl, name ? h("strong", { dir: "auto" }, name) : null, name && when ? " · " : "", when ? h("span", { class: "board-clock" }, when) : null);
+    boardEventEl.hidden = !name && !when;
+
+    const data = state.board.data && state.board.data.caseId === state.board.scope ? state.board.data : null;
+    if (!data) {
+      boardStateEl.hidden = true;
+      return;
+    }
+    boardStateEl.hidden = false;
+    const freezeAt = ms(event?.freezeAt ?? null);
+    const detail = data.frozen
+      ? data.frozenAt
+        ? T().admBoardFrozenAt(formatDateTime(data.frozenAt))
+        : ""
+      : freezeAt !== null && freezeAt > now
+        ? T().admBoardFreezesIn(formatCountdown(freezeAt - now))
+        : "";
+    boardStateEl.classList.toggle("is-frozen", data.frozen);
+    setChildren(
+      boardStateEl,
+      data.frozen ? h("span", { class: "board-frozen-chip" }, "❄ ", T().admBoardFrozen) : h("span", { class: "board-live-chip" }, T().admBoardLive),
+      detail ? h("span", { class: "board-frozen-at" }, detail) : null,
+    );
+  }
+
   function renderLeaderboard(): void {
     if (!state.leaderboard) {
       boardDialog?.close(null); // focus goes back to the button (or the "More" menu) that opened it
@@ -4386,7 +4489,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       released.map((id) => h("option", { value: id, selected: id === b.scope }, caseTitle(id))),
     );
     const data = b.data && b.data.caseId === b.scope ? b.data : null;
-    const top = data ? data.entries.slice(0, 10) : [];
+    const top = data ? data.entries.slice(0, BOARD_ROWS) : [];
     const close = h(
       "button",
       {
@@ -4396,15 +4499,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       },
       T().admClose,
     );
-    const frozen = data?.frozen === true;
-    const stateChip = data
-      ? h(
-          "p",
-          { class: `admin-board-state${frozen ? " is-frozen" : ""}` },
-          frozen ? h("span", { class: "board-frozen-chip" }, "❄ ", T().admBoardFrozen) : h("span", { class: "board-live-chip" }, T().admBoardLive),
-          frozen && data.frozenAt ? h("span", { class: "board-frozen-at" }, T().admBoardFrozenAt(formatDateTime(data.frozenAt))) : null,
-        )
-      : null;
+    renderBoardClock();
+    const more = data ? Math.max(0, data.entries.length - BOARD_ROWS) : 0;
     let body: HTMLElement;
     if (b.error && !data) body = h("p", { class: "admin-error admin-board-empty", role: "alert" }, T().admBoardFailed(b.error));
     else if (!data) body = h("p", { class: "muted admin-board-empty" }, T().admLoading);
@@ -4433,6 +4529,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       h(
         "div",
         { class: "admin-board-inner" },
+        // The header answers what the room asks: which event, how long is left, and are the standings frozen.
         h(
           "div",
           { class: "admin-board-head" },
@@ -4444,9 +4541,10 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
             boardScopeSelect,
             close,
           ),
+          h("div", { class: "admin-board-meta" }, boardEventEl, boardStateEl),
         ),
-        stateChip,
         body,
+        more > 0 ? h("p", { class: "admin-board-more" }, T().admBoardMore(more, fmtInt(more))) : null,
       ),
     );
     // Re-appending moves focus out of the dialog: put it back (Close on first open).
@@ -4639,6 +4737,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       if (!container.isConnected) return dispose();
       renderUpdated();
       if (state.tab === "event") renderEventStatus();
+      if (state.leaderboard && boardDialog !== null) renderBoardClock();
     }, 1000);
   }
 

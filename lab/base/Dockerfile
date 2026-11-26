@@ -2,19 +2,18 @@
 # Case images (lab/case.Dockerfile) add only the public evidence at /case. No answers, no solvers, no
 # project files are ever copied here: the build context of this image is this directory alone.
 #
-# Built in CI (.github/workflows/lab.yml) for linux/amd64 and linux/arm64. Published to GHCR under the
-# incidentslab organisation once it exists (#144, #151). Pin the base by digest when publishing.
-FROM debian:bookworm-slim
+# Alpine keeps the image small (a class pulls it over one school connection), with the GNU userland
+# (coreutils, grep, sed, findutils, gawk) so toolbox commands and solvers behave exactly as on Debian/WSL.
+# Built in CI (.github/workflows/lab.yml). Published to GHCR under the incidentslab organisation once it
+# exists (#144, #151); pin the base by digest when publishing.
+FROM alpine:3.20
 
-# tcpdump/tshark-free pcap reading, DNS tools, JSON, POSIX text tools, a pager and an editor, git for the
-# repo-history cases, unzip for evidence packs. --no-install-recommends keeps the image small.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      tcpdump dnsutils jq gawk less vim-tiny git unzip file bsdextrautils procps ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache \
+      bash coreutils grep sed findutils gawk diffutils util-linux-misc \
+      tcpdump bind-tools jq less vim git unzip file procps tzdata ca-certificates
 
 # A non-root analyst. The evidence is read-only for the case; players work in /home/analyst.
-RUN useradd --create-home --shell /bin/bash analyst
+RUN adduser -D -s /bin/bash analyst
 USER analyst
 WORKDIR /case
 ENV LANG=C.UTF-8 TZ=UTC

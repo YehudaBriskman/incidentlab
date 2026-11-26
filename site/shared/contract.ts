@@ -123,7 +123,8 @@ export const ProgressViewSchema = z.object({
   /** Paid-for content in the requested language. Everything is unlocked once the case is completed. */
   unlocked: z.object({
     hints: z.partialRecord(QuestionIdSchema, z.array(z.string())),
-    commands: z.record(z.string(), z.object({ command: z.string(), powershell: z.string().nullable() })),
+    /** `lab`: the lab image variant (#149), null when the item has none; older servers omit it */
+    commands: z.record(z.string(), z.object({ command: z.string(), powershell: z.string().nullable(), lab: z.string().nullable().default(null) })),
   }),
 });
 export type ProgressView = z.infer<typeof ProgressViewSchema>;
