@@ -135,3 +135,43 @@
   :is(.question-box, .result-panel, .hint, .cmd, .briefing, .score-card, .form-section, .error-summary, .lb-frozen-banner, .tip) { border: 1px solid CanvasText; }
   .step.is-viewing { border: 1px solid Highlight; }
 }
+
+/* ---- instructor: case preview and presentation mode (views/present.ts) ---- */
+.present-preview { display: grid; gap: var(--gap-stack); }
+.present-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-4); }
+.present-head-title { display: grid; gap: var(--space-1); min-inline-size: 0; }
+.present-head-title h1 { margin: 0; }
+.present-subtitle { margin: 0; max-inline-size: var(--measure); color: var(--text-2); font-size: var(--type-body-size); }
+.present-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.present-card { padding: var(--space-5); border-radius: var(--radius-card); background: var(--level-1); box-shadow: var(--surface-lift); }
+.present-card > h2 { margin: 0 0 var(--space-3); font-size: var(--type-title-size); }
+.present-prose { max-inline-size: var(--measure); }
+.present-inspired-title { margin: 0 0 var(--space-2); font-weight: 600; }
+.present-files { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.present-file { display: grid; grid-template-columns: minmax(12rem, max-content) minmax(0, 1fr); gap: var(--space-3); align-items: baseline; }
+.present-file-path { font-size: var(--type-small-size); color: var(--text-1); }
+.present-file-desc { color: var(--text-2); font-size: var(--type-small-size); }
+.present-stages { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: var(--space-3); }
+.present-stage { padding: var(--space-4); border-radius: var(--radius-card); background: var(--fill-inset); }
+.present-stage-n { margin: 0; font-size: var(--type-label-size); font-weight: 600; color: var(--accent-text); }
+.present-stage-name { margin: var(--space-1) 0; font-weight: 600; }
+.present-stage-goal { margin: 0; color: var(--text-2); font-size: var(--type-small-size); }
+@media (max-width: 640px) { .present-file { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); } }
+
+.present-deck { display: flex; flex-direction: column; gap: var(--space-4); min-block-size: calc(100dvh - var(--space-8) * 2); }
+.present-deck-bar { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-2); }
+.slide {
+  flex: 1; display: flex; flex-direction: column; justify-content: center; gap: var(--space-4);
+  padding: clamp(var(--space-5), 5vw, var(--space-8)); border-radius: var(--radius-card); background: var(--level-1); box-shadow: var(--surface-lift);
+}
+.slide-kicker { margin: 0; font-size: clamp(1rem, 0.8rem + 0.8vw, 1.5rem); font-weight: 600; color: var(--accent-text); }
+.slide-title { margin: 0; font-size: clamp(2rem, 1.2rem + 3vw, 4rem); line-height: 1.1; letter-spacing: var(--type-display-track); }
+.slide-lead { margin: 0; max-inline-size: 40ch; font-size: clamp(1.25rem, 0.9rem + 1.4vw, 2.25rem); line-height: 1.35; color: var(--text-1); }
+.slide-prose { max-inline-size: 60ch; font-size: clamp(1.0625rem, 0.85rem + 0.8vw, 1.5rem); }
+.slide .page-meta { font-size: clamp(1rem, 0.85rem + 0.5vw, 1.25rem); margin-block-start: var(--space-3); }
+.slide-files .present-file-path, .slide-files .present-file-desc { font-size: clamp(0.9375rem, 0.8rem + 0.4vw, 1.125rem); }
+.present-deck-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.slide-pos-wrap { text-align: center; }
+.slide-pos { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.slide-pos-wrap .small { margin: 0; }
+@media (pointer: coarse) { .slide-pos-wrap .small { display: none; } }

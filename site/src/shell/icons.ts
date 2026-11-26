@@ -11,6 +11,7 @@ export const ICONS = {
   cases: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
   leaderboard: svg('<path d="M8 21V11H4v10"/><path d="M14 21V5h-4v16"/><path d="M20 21v-7h-4v7"/><path d="M3 21h18"/>'),
   stats: svg('<path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/>'),
+  present: svg('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4"/><path d="M8 20h8"/><path d="M10 8.5v3.5l3-1.75z"/>'),
   author: svg('<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>'),
   admin: svg('<path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="M9 12l2 2 4-4"/>'),
   investigation: svg('<path d="M9 4h6"/><path d="M10 4v5L5 19a1.5 1.5 0 0 0 1.3 2h11.4a1.5 1.5 0 0 0 1.3-2L14 9V4"/><path d="M7.5 15h9"/>'),

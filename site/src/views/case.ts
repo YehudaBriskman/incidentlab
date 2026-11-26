@@ -9,6 +9,7 @@ import { caseSummary } from "../content/load";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { withApprovedAccount } from "./auth";
+import { renderInstructorPreview } from "./present";
 import { announce, copyButton, ensureAnnouncer, h, html, setChildren } from "../lib/dom";
 import { confirm, tooltip } from "../lib/overlay";
 import "../player.css";
@@ -112,7 +113,7 @@ export function renderCase(root: HTMLElement, c: Case): void {
   stopCaseTimers();
   document.title = `${c.title} · IncidentLab`;
   ensureAnnouncer();
-  withApprovedAccount(root, c.title, () => loadProgress(root, c));
+  withApprovedAccount(root, c.title, () => loadProgress(root, c), { onAdmin: () => renderInstructorPreview(root, c) });
 }
 
 function loadProgress(root: HTMLElement, c: Case, refreshToday = false): void {

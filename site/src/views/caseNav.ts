@@ -4,10 +4,12 @@
 import type { Case } from "../../shared/case";
 import { TS } from "../i18n/strings-shell";
 import { h, setChildren } from "../lib/dom";
+import { cachedAccount, isAdmin } from "../lib/session";
+import { TR } from "../i18n/strings-present";
 import { navSubLink, refreshNav } from "../shell/nav";
 import type { NavSection } from "../shell/types";
 
-export type CasePage = "case" | "toolbox" | "explorer";
+export type CasePage = "case" | "toolbox" | "explorer" | "present";
 
 export interface CaseNav {
   section: NavSection;
@@ -25,6 +27,8 @@ export function createCaseNav(c: Case, page: CasePage): CaseNav {
     first,
     h("li", {}, navSubLink(`${base}/toolbox`, { label: TS().sideToolbox, icon: "toolbox", current: page === "toolbox" ? "page" : null })),
     h("li", {}, navSubLink(`${base}/explorer`, { label: TS().sideExplorer, icon: "explorer", current: page === "explorer" ? "page" : null })),
+    // the instructor presents the case to the class (views/present.ts)
+    isAdmin(cachedAccount()) ? h("li", {}, navSubLink(`${base}/present`, { label: TR().present, icon: "present", current: page === "present" ? "page" : null })) : null,
   );
   return {
     section: { under: "cases", label: c.title, content },

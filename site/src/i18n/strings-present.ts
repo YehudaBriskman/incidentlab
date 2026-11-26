@@ -1,0 +1,53 @@
+import { defineStrings, formatNumber as num } from "./i18n";
+
+// The instructor's case preview (#/case/<id> as admin) and presentation mode (#/case/<id>/present).
+// Case titles are never concatenated in here: the views put them in their own <bdi>.
+
+export const TR = defineStrings({
+  en: {
+    eyebrow: "Instructor preview",
+    previewNote: "What players see before they start. Answers and the debrief stay sealed here.",
+    present: "Present to class",
+    liveBoard: "Live leaderboard",
+    liveBoardTip: "This case's standings in projector mode, refreshed every 10 seconds",
+    backToPreview: "Back to case preview",
+    openExplorer: "Evidence Explorer",
+    stagesCount: (n: number): string => `${num(n)} stages`,
+    story: "The story",
+    inspired: "Inspired by",
+    evidence: "The evidence",
+    evidenceCount: (n: number): string => `${num(n)} files`,
+    stages: "The stages",
+    stageN: (n: number): string => `Stage ${num(n)}`,
+    goSlideTitle: "Your turn",
+    goSlideBody: "Open the case, get the evidence and solve the stages in order. The live board shows who is ahead.",
+    slideOf: (i: number, n: number): string => `${num(i)} of ${num(n)}`,
+    prev: "Previous",
+    next: "Next",
+    slides: "Presentation",
+    keysHint: "Arrow keys move between slides",
+  },
+  he: {
+    eyebrow: "תצוגת מדריך",
+    previewNote: "מה שהמשתתפים רואים לפני שהם מתחילים. התשובות וסיכום התיק נשארים חתומים כאן.",
+    present: "הצגה לכיתה",
+    liveBoard: "טבלת מובילים חיה",
+    liveBoardTip: "הדירוג בתיק הזה במצב מקרן, מתעדכן כל 10 שניות",
+    backToPreview: "חזרה לתצוגת התיק",
+    openExplorer: "סייר הראיות",
+    stagesCount: (n: number): string => `${num(n)} שלבים`,
+    story: "הסיפור",
+    inspired: "בהשראת",
+    evidence: "הראיות",
+    evidenceCount: (n: number): string => `${num(n)} קבצים`,
+    stages: "השלבים",
+    stageN: (n: number): string => `שלב ${num(n)}`,
+    goSlideTitle: "תורכם",
+    goSlideBody: "פתחו את התיק, הורידו את הראיות ופתרו את השלבים לפי הסדר. הטבלה החיה מראה מי מוביל.",
+    slideOf: (i: number, n: number): string => `${num(i)} מתוך ${num(n)}`,
+    prev: "הקודם",
+    next: "הבא",
+    slides: "מצגת",
+    keysHint: "מקשי החיצים עוברים בין השקפים",
+  },
+});
