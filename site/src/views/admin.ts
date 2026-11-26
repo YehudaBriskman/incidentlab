@@ -220,8 +220,13 @@ function formatDateTime(iso: string | null): string {
   return new Intl.DateTimeFormat(locale(), { dateStyle: "medium", timeStyle: "short" }).format(t);
 }
 
-/** Puts a secondary detail (a full timestamp, an ID) into the shared tooltip instead of on screen. */
+/** Puts a secondary detail (a full timestamp) into the shared tooltip instead of on screen. The trigger takes
+ * keyboard focus, which opens the tooltip too, and carries the detail as visually hidden text so screen readers
+ * get the full value whether or not the tooltip is open (#114). */
 function tipped<E extends HTMLElement>(el: E, detail: string): E {
+  el.tabIndex = 0;
+  el.classList.add("admin-tipped");
+  el.append(h("span", { class: "visually-hidden" }, `, ${detail}`));
   tooltip(el, detail);
   return el;
 }
@@ -1024,7 +1029,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
 
   // ---- shell: header, tabs, banner (built once; tab regions re-rendered) ------------------
 
-  const updatedEl = h("span", { class: "admin-updated", "aria-live": "off" });
+  // Focusable so keyboard users can open the full-time tooltip; renderUpdated() adds the time as hidden text.
+  const updatedEl = h("span", { class: "admin-updated admin-tipped", "aria-live": "off", tabindex: "0" });
   tooltip(updatedEl, () => updatedEl.dataset.full ?? "");
   const pauseBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admPause);
   const refreshBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admRefresh);
@@ -1240,8 +1246,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       return;
     }
     const sec = Math.max(0, Math.round((Date.now() - state.lastUpdated) / 1000));
-    updatedEl.textContent = T().admUpdated(state.paused, relativeAgo(new Date(state.lastUpdated).toISOString(), Date.now()));
-    updatedEl.dataset.full = formatDateTime(new Date(state.lastUpdated).toISOString());
+    const full = formatDateTime(new Date(state.lastUpdated).toISOString());
+    setChildren(updatedEl, T().admUpdated(state.paused, relativeAgo(new Date(state.lastUpdated).toISOString(), Date.now())), h("span", { class: "visually-hidden" }, `, ${full}`));
+    updatedEl.dataset.full = full;
     updatedEl.classList.toggle("is-stale", sec > 20);
   }
 
