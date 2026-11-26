@@ -143,6 +143,9 @@
   --dialog-md: 40rem;
   --dialog-lg: var(--read);
   --sheet-size: 24rem;
+  /* app-shell sidebar (#60): full column above 1024px, icon rail at 641–1024px and when collapsed */
+  --sidebar-size: 264px;
+  --rail-size: 64px;
   --toast-size: 22.5rem;
 
   /* layers: what stays in the page. Modals and popovers open in the top layer, ordered by open order;
@@ -457,7 +460,7 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 [hidden] { display: none !important; }
 
 /* ============ app shell: grid, navbar, live strip (src/shell/) ============
-   Column 1 is reserved for aside#sidebar (#60): with nothing in it, the auto column is 0 wide. */
+   Column 1 holds aside#sidebar (#60): on pages without a sidebar it is hidden and the auto column is 0 wide. */
 .shell {
   flex: 1; display: grid; min-inline-size: 0;
   grid-template-columns: auto minmax(0, 1fr);
@@ -562,6 +565,119 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success-fg); display: inline-block; }
 .footer { text-align: center; color: var(--text-muted); font-size: var(--step--2); padding: var(--space-6) var(--gutter); }
+
+/* ============ per-page sidebar (src/shell/sidebar.ts, #60) ============
+   html[data-sidebar-page] reserves the column (settings-boot.js before first paint, the router on navigation),
+   so the page never shifts when the sidebar fills. Above 1024px: --sidebar-size, or the --rail-size rail when
+   html[data-sidebar=collapsed]. 641–1024px: always the rail; its button opens the content in a Sheet.
+   640px and below: no column; the page-header button opens the Sheet. Logical sides only: RTL mirrors. */
+.view { display: contents; }
+.sidebar { display: none; grid-area: sidebar; }
+:root[data-sidebar-page] .sidebar {
+  display: flex; flex-direction: column; inline-size: var(--sidebar-size);
+  position: sticky; inset-block-start: 0; align-self: start; block-size: 100dvh; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--surface); border-inline-end: 1px solid var(--border);
+  transition: inline-size var(--motion-dur-medium) var(--motion-ease-standard);
+}
+.sidebar-head { display: flex; justify-content: flex-end; padding: var(--space-2); }
+.sidebar-btn {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  min-block-size: var(--control-sm); min-inline-size: var(--control-sm); padding: 0;
+  border: 1px solid transparent; border-radius: var(--radius-md); background: none; color: var(--text-muted); cursor: pointer;
+}
+.sidebar-btn:hover { color: var(--text); background: var(--hover); }
+.sidebar-icon { display: inline-flex; }
+.sidebar-icon svg { display: block; }
+/* The panel icon points inline-start ("fold away"); mirrored for RTL, flipped again to mean "unfold". */
+.sidebar-collapse .sidebar-icon { transform: scaleX(calc(-1 * var(--dir))); }
+:root[data-sidebar="collapsed"] .sidebar-collapse .sidebar-icon, .sidebar-open .sidebar-icon { transform: scaleX(var(--dir)); }
+.sidebar-open { display: none; }
+.sidebar-body { padding: 0 var(--space-4) var(--space-6); }
+.sidebar-rail { display: none; flex-direction: column; align-items: center; gap: var(--space-2); padding-block: var(--space-2) var(--space-6); }
+/* The rail: desktop collapsed, and every width from 641 to 1024px. */
+:root[data-sidebar-page][data-sidebar="collapsed"] .sidebar { inline-size: var(--rail-size); }
+:root[data-sidebar="collapsed"] .sidebar-head { justify-content: center; }
+:root[data-sidebar="collapsed"] .sidebar-body { display: none; }
+:root[data-sidebar="collapsed"] .sidebar-rail { display: flex; }
+@media (max-width: 1024px) {
+  :root[data-sidebar-page] .sidebar { inline-size: var(--rail-size); }
+  .sidebar-head { justify-content: center; }
+  .sidebar-body { display: none; }
+  .sidebar-rail { display: flex; }
+  .sidebar-collapse { display: none; }
+  .sidebar-open { display: inline-flex; }
+}
+@media (max-width: 640px) {
+  :root[data-sidebar-page] .sidebar { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-sidebar-page] .sidebar { transition: none; }
+}
+
+/* page header: a view's optional header, and on phones the button that opens the sidebar drawer */
+.page-header { display: none; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin-block-end: var(--space-3); }
+.page-header.has-header { display: flex; }
+.sidebar-trigger { display: none; }
+@media (max-width: 640px) {
+  :root[data-sidebar-page] .page-header { display: flex; min-block-size: var(--control-sm); }
+  .sidebar-trigger { display: inline-flex; }
+}
+
+/* the drawer: the same content in a Sheet from the inline-start edge */
+.sidebar-sheet .ov-body { padding-block-end: var(--space-6); }
+
+/* sidebar content: shared parts the views build with */
+.side-stack { display: flex; flex-direction: column; gap: var(--space-5); }
+.side-group { display: flex; flex-direction: column; gap: var(--space-1); min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+.side-h {
+  margin: 0; padding: 0; font-size: var(--step--2); font-weight: 600; line-height: var(--leading-tight);
+  text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted);
+}
+.side-h { margin-block-end: var(--space-1); }
+.side-stack .tb-filter .answer-label {
+  font-size: var(--step--2); font-weight: 600; line-height: var(--leading-tight);
+  text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted);
+}
+.side-h:lang(he), .side-stack .tb-filter .answer-label:lang(he) { text-transform: none; letter-spacing: normal; }
+.side-meta { margin: 0; font-size: var(--step--1); color: var(--text-2); overflow-wrap: anywhere; }
+.side-links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.side-link {
+  display: flex; align-items: center; min-block-size: var(--control-sm); padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md); color: var(--text); font-size: var(--step--1); line-height: var(--leading-tight); text-decoration: none;
+}
+.side-link:hover { background: var(--hover); }
+.side-link[aria-current] { background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; box-shadow: inset calc(var(--dir) * 3px) 0 0 var(--accent); }
+.side-options { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
+.side-chips { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
+.side-option { display: inline-flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-xs); font-size: var(--step--1); cursor: pointer; }
+.side-option input { margin: 0; inline-size: 1rem; block-size: 1rem; accent-color: var(--accent); }
+.side-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-3); }
+.side-stack .tb-filter { margin: 0; }
+.side-progress { margin-block-start: 0; }
+.side-progress .progress-stats { font-family: var(--font-sans); }
+/* case stages as a vertical list in the sidebar and icons in the rail (the stepper's states are unchanged) */
+.stepper.side-steps { display: flex; flex-direction: column; gap: 2px; }
+.side-steps .step { flex-direction: row; justify-content: flex-start; gap: var(--space-3); min-block-size: var(--control-sm); padding: var(--space-1) var(--space-2); }
+.side-steps .step-icon { flex: none; inline-size: 28px; block-size: 28px; font-size: var(--step--2); }
+.stepper.side-steps .step-label { display: -webkit-box; text-align: start; font-size: var(--step--1); }
+.side-steps .step.is-viewing { background: var(--hover); box-shadow: inset calc(var(--dir) * 3px) 0 0 var(--accent); border-radius: var(--radius-md); }
+.stepper.rail-steps { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); }
+.rail-steps .step { inline-size: auto; min-block-size: 0; padding: 2px; }
+.rail-steps .step-icon { inline-size: 28px; block-size: 28px; font-size: var(--step--2); }
+.rail-steps .step-label { display: none; }
+.rail-steps .step.is-viewing { background: var(--hover); box-shadow: none; border-radius: var(--radius-md); }
+/* the viewed stage's name in the case header wherever the labelled list is not on screen */
+@media (max-width: 1024px) {
+  :root[data-sidebar-page] .step-now { display: block; }
+}
+:root[data-sidebar-page][data-sidebar="collapsed"] .step-now { display: block; }
+@media (forced-colors: active) {
+  .sidebar { border-inline-end-color: CanvasText; }
+  .side-link[aria-current], .side-steps .step.is-viewing { forced-color-adjust: none; background: Highlight; color: HighlightText; box-shadow: none; }
+}
+@media print {
+  .sidebar, .page-header { display: none !important; }
+}
 
 /* ============ buttons ============ */
 .btn {

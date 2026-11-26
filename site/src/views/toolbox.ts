@@ -15,6 +15,8 @@ import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { T } from "../i18n/strings-player";
 import { TP } from "../i18n/strings-play";
+import { TS } from "../i18n/strings-shell";
+import type { ViewResult } from "../shell/types";
 import { withApprovedAccount } from "./auth";
 
 type ToolItem = Case["toolbox"][number]["items"][number];
@@ -36,12 +38,16 @@ function readShell(): Shell {
     return "bash";
   }
 }
+/** Set while the toolbox page is up: keeps its sidebar switch in step with a card's own tabs. */
+let onShellWritten: ((shell: Shell) => void) | null = null;
+
 function writeShell(shell: Shell): void {
   try {
     window.localStorage.setItem("il.pref.shell", shell);
   } catch {
     /* ignore */
   }
+  onShellWritten?.(shell);
 }
 
 /** 1-based number of the stage that is active right now (the one a reveal is charged to), or null. */
@@ -198,6 +204,17 @@ type PageState =
   | { kind: "player"; progress: ProgressView; locked: LockedToday | null }
   | { kind: "error"; message: string };
 
+/** The toolbox page's sidebar content (contents, shell switch, filter), set by toolboxView. */
+let sideEl: HTMLElement | null = null;
+
+/** The toolbox as a shell view: commands in main; contents, the Bash/PowerShell switch and the filter in the sidebar. */
+export function toolboxView(c: Case): ViewResult {
+  const main = h("div", { class: "view" });
+  const side = h("div", { class: "side-stack tb-side" });
+  sideEl = side;
+  return { main, sidebar: { label: TS().tbSide, trigger: TS().tbSideTrigger, content: side }, start: () => renderToolbox(main, c) };
+}
+
 export function renderToolbox(root: HTMLElement, c: Case): void {
   document.title = T().allCommandsTitle(c.title);
   const hash = window.location.hash;
@@ -295,6 +312,8 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
           ev.preventDefault();
           const target = sections[i];
           if (target === undefined) return;
+          for (const link of tocLinks) link.removeAttribute("aria-current");
+          tocLinks[i]?.setAttribute("aria-current", "location");
           target.el.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
           target.heading.focus({ preventScroll: true });
         },
@@ -333,7 +352,8 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
       }
       sec.el.hidden = inSection === 0;
       const link = tocLinks[i];
-      if (link !== undefined) link.hidden = inSection === 0;
+      // In the sidebar each link sits in an <li>: hide the item, not only the link.
+      if (link !== undefined) (link.parentElement instanceof HTMLLIElement ? link.parentElement : link).hidden = inSection === 0;
       shown += inSection;
     });
     count.textContent = TP().filterCount(shown, total);
@@ -346,7 +366,31 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
     filters.set(c.id, filter.value);
     applyFilter(true);
   });
+
+  const filterBox = h(
+    "div",
+    { class: "tb-filter", role: "search" },
+    h("label", { class: "answer-label", for: filterId }, TP().filterLabel),
+    h("p", { id: `${filterId}-hint`, class: "muted small" }, TP().filterHint),
+    filter,
+    count,
+  );
+  // Without the shell sidebar (never on the toolbox route today) the controls stay above the commands.
+  const side = sideEl !== null && sideEl.isConnected ? sideEl : null;
+  const toc =
+    side === null
+      ? h("nav", { class: "toc tb-toc", "aria-label": TP().jumpTo }, tocLinks)
+      : h("nav", { class: "side-group", "aria-labelledby": "tb-toc-h" }, h("h2", { class: "side-h", id: "tb-toc-h" }, TP().jumpTo), h("ul", { class: "side-links" }, tocLinks.map((a) => h("li", {}, a))));
+  if (side !== null) {
+    for (const a of tocLinks) a.classList.add("side-link");
+    setChildren(side, shellSwitch(c, state, () => redraw()), filterBox, toc);
+  }
   applyFilter(false);
+  const redraw = (): void => {
+    const y = window.scrollY;
+    drawToolbox(root, c, state);
+    window.scrollTo(0, y);
+  };
 
   setChildren(
     root,
@@ -357,17 +401,29 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
       h("h1", {}, T().allCommands),
       h("p", { class: "muted" }, T().allCommandsSub),
       toolboxNote(c, root, state),
-      h(
-        "div",
-        { class: "tb-filter", role: "search" },
-        h("label", { class: "answer-label", for: filterId }, TP().filterLabel),
-        h("p", { id: `${filterId}-hint`, class: "muted small" }, TP().filterHint),
-        filter,
-        count,
-      ),
-      h("nav", { class: "toc tb-toc", "aria-label": TP().jumpTo }, tocLinks),
+      side === null ? [filterBox, toc] : null,
       none,
       sections.map((sec) => sec.el),
     ),
   );
+}
+
+/** One switch for every card: Bash or PowerShell. Cards keep their own tabs; both write the same preference. */
+function shellSwitch(c: Case, state: PageState, redraw: () => void): HTMLElement | null {
+  const unlocked = state.kind === "player" ? Object.values(state.progress.unlocked.commands) : [];
+  const hasPowershell = c.toolbox.some((sec) => sec.items.some((it) => it.syntaxPowershell !== undefined)) || unlocked.some((cmd) => cmd.powershell !== null);
+  if (!hasPowershell) return null;
+  const radios = (["bash", "powershell"] as const).map((value) => {
+    const input = h("input", { type: "radio", name: "tb-shell", value, checked: readShell() === value });
+    input.addEventListener("change", () => {
+      if (!input.checked) return;
+      writeShell(value);
+      redraw();
+    });
+    return { value, input, el: h("label", { class: "side-option" }, input, h("span", {}, value === "bash" ? "Bash" : "PowerShell")) };
+  });
+  onShellWritten = (shell) => {
+    for (const r of radios) r.input.checked = r.value === shell;
+  };
+  return h("fieldset", { class: "side-group" }, h("legend", { class: "side-h" }, TS().tbShellLegend), h("div", { class: "side-options" }, radios.map((r) => r.el)));
 }

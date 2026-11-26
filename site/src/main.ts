@@ -3,10 +3,12 @@ import { applyLang, isRelabel, noteRoute } from "./i18n/i18n";
 import { T } from "./i18n/strings-player";
 import { caseSummary, catalogReady, loadAllCases, loadCase, onCatalogChange } from "./content/load";
 import { h, setChildren } from "./lib/dom";
+import type { View, ViewResult } from "./shell/types";
+import { initSidebar, reserveSidebar, showSidebar } from "./shell/sidebar";
 import { closeOverlays, toast } from "./lib/overlay";
 import { TA } from "./i18n/strings-account";
 import { TO } from "./i18n/strings-onboard";
-import { renderHome } from "./views/home";
+import { homeView } from "./views/home";
 import { renderLeaderboard, stopLeaderboard } from "./views/leaderboard";
 import { applyPendingRestore, labelStatic, mountNavbar } from "./shell/navbar";
 import { mountLiveStrip } from "./shell/liveStrip";
@@ -26,6 +28,11 @@ if (header instanceof HTMLElement) {
 const root = document.getElementById("app");
 if (!(root instanceof HTMLElement)) throw new Error("#app root missing");
 const appRoot: HTMLElement = root;
+
+/* ---------- per-page sidebar (src/shell/sidebar.ts) ---------- */
+const sidebarEl = document.getElementById("sidebar");
+const pageHeaderEl = document.querySelector(".page-header");
+if (sidebarEl instanceof HTMLElement && pageHeaderEl instanceof HTMLElement) initSidebar(sidebarEl, pageHeaderEl);
 new MutationObserver(() => applyPendingRestore()).observe(appRoot, { childList: true, subtree: true });
 
 /* ---------- global safety net: never white-screen ---------- */
@@ -39,8 +46,31 @@ window.addEventListener("unhandledrejection", (ev) => {
   toast({ tone: "error", text: T().toastRequestFailed });
 });
 
+/** Puts a view on screen: its main content in #app, its sidebar and page header in the shell, then starts it. */
+function mount(view: ViewResult): void {
+  // A language switch re-renders the route: the new view starts from the old page's nodes, as views did
+  // when they drew into #app itself, so they can carry over what was typed (auth's draft, field restore).
+  if (isRelabel() && view.main.childNodes.length === 0) {
+    const only = appRoot.childElementCount === 1 ? appRoot.firstElementChild : null;
+    const old = only instanceof HTMLElement && only.classList.contains("view") ? only : appRoot;
+    view.main.append(...old.childNodes);
+  }
+  setChildren(appRoot, view.main);
+  showSidebar(view.sidebar ?? null, view.header ?? null);
+  view.start?.();
+}
+
+/** Adapter for the views still written as `render(root)`: they draw into a layout-neutral wrapper, full width. */
+function legacy(render: (root: HTMLElement) => void): View {
+  return () => {
+    const main = h("div", { class: "view" });
+    return { main, start: () => render(main) };
+  };
+}
+
 function notFound(message: string): void {
   document.title = T().notFoundTitle;
+  showSidebar(null);
   setChildren(
     appRoot,
     h(
@@ -67,12 +97,12 @@ function loadingView(): void {
  * Render a view whose code or content loads asynchronously. A language switch keeps the current page up
  * until the re-render is ready (no "Loading…" flash); a navigation shows the loading card at once.
  */
-function lazyView(load: () => Promise<(root: HTMLElement) => void>): void {
+function lazyView(load: () => Promise<View>): void {
   if (!isRelabel() || appRoot.childElementCount === 0) loadingView();
   const token = routeToken;
   load()
-    .then((render) => {
-      if (token === routeToken) render(appRoot);
+    .then((view) => {
+      if (token === routeToken) mount(view());
     })
     .catch((err: unknown) => {
       console.error(err);
@@ -95,6 +125,25 @@ const loadAuthView = (): Promise<AuthView> => import("./views/auth").then((m) =>
 const loadCaseViews = (): Promise<CaseViews> =>
   Promise.all([import("./views/case"), import("./views/toolbox"), loadAuthView()]).then(([caseView, toolbox]) => (caseViews = { ...caseView, ...toolbox }));
 
+/**
+ * Does `id` name a case this site can show (bundled, or DB-published and already merged into the catalog)?
+ * The router asks before loading any case chunk. Kept as its own function so the catalog check has one home.
+ */
+function isKnownCase(id: string): boolean {
+  return caseSummary(id) !== undefined;
+}
+
+/**
+ * Routes whose view has a sidebar: home, a case, its toolbox and its Explorer. Their column is reserved
+ * while the view loads (a DB case may not be in the catalog yet; an unknown id releases it on the 404).
+ * public/settings-boot.js runs the same test before first paint; keep them in step.
+ */
+function sidebarRoute(parts: readonly string[]): boolean {
+  if (parts.length === 0) return true;
+  const [section, id, sub] = parts;
+  return section === "case" && id !== undefined && parts.length <= 3 && (sub === undefined || sub === "toolbox" || sub === "explorer");
+}
+
 function route(): void {
   routeToken++;
   // Strip the "?query" part (Explorer deep links: #/case/<id>/explorer?f=...) before matching.
@@ -109,11 +158,14 @@ function route(): void {
   if (!isRelabel()) {
     closeOverlays(); // a dialog or menu belongs to the page it was opened on
     window.scrollTo(0, 0);
+    // The next page's column is there (or gone) before its code loads, so it never shifts in.
+    if (sidebarRoute(parts)) reserveSidebar(true);
+    else showSidebar(null);
   }
 
   try {
     if (parts.length === 0) {
-      renderHome(appRoot);
+      mount(homeView());
       return;
     }
     if ((parts[0] === "login" || parts[0] === "signup") && parts.length === 1) {
@@ -124,23 +176,25 @@ function route(): void {
       // code); signed in -> the pending / rejected / password screens, or home once approved. The
       // instructor's session goes to the admin panel instead of the "sign in as a player" card.
       lazyView(() =>
-        loadAuthView().then((auth) => (root: HTMLElement) =>
-          auth.withApprovedAccount(root, "IncidentLab", () => void (window.location.hash = "#/"), {
-            onAdmin: () => void (window.location.hash = "#/admin"),
-            signedOutMode: signUp ? "sign-up" : "sign-in",
-            inviteCode: code !== undefined && code.length > 0 ? code.slice(0, 40) : undefined,
-            titled: true,
-          }),
+        loadAuthView().then((auth) =>
+          legacy((root) =>
+            auth.withApprovedAccount(root, "IncidentLab", () => void (window.location.hash = "#/"), {
+              onAdmin: () => void (window.location.hash = "#/admin"),
+              signedOutMode: signUp ? "sign-up" : "sign-in",
+              inviteCode: code !== undefined && code.length > 0 ? code.slice(0, 40) : undefined,
+              titled: true,
+            }),
+          ),
         ),
       );
       return;
     }
     if (parts[0] === "leaderboard" && parts.length === 1) {
-      renderLeaderboard(appRoot, query);
+      mount(legacy((root) => renderLeaderboard(root, query))());
       return;
     }
     if (parts[0] === "me" && parts.length === 1) {
-      lazyView(() => Promise.all([import("./views/stats"), loadAuthView()]).then(([m]) => m.renderStats));
+      lazyView(() => Promise.all([import("./views/stats"), loadAuthView()]).then(([m]) => legacy(m.renderStats)));
       return;
     }
     if (parts[0] === "author" && parts.length === 1) {
@@ -149,7 +203,8 @@ function route(): void {
     }
     if (parts[0] === "admin" && parts.length === 1) {
       // Admin shows titles and question names of every case: load them all (in parallel with its code).
-      lazyView(() => Promise.all([import("./views/admin"), loadAllCases()]).then(([m]) => m.renderAdmin));
+      // Admin is not on the sidebar yet: its tabs become sidebar sections in a follow-up (#60, after #62).
+      lazyView(() => Promise.all([import("./views/admin"), loadAllCases()]).then(([m]) => legacy(m.renderAdmin)));
       return;
     }
     if (parts[0] === "case" && parts[1] !== undefined) {
@@ -159,27 +214,25 @@ function route(): void {
         notFound(TO().notOnRunbook);
         return;
       }
-      if (caseSummary(id) === undefined) {
+      if (!isKnownCase(id)) {
         // It may be a DB-published case the catalog fetch hasn't merged yet: wait for it once, then decide.
         const token = routeToken;
         void catalogReady.then(() => {
           if (token !== routeToken) return;
-          if (caseSummary(id) === undefined) notFound(T().caseMissing(id));
+          if (!isKnownCase(id)) notFound(T().caseMissing(id));
           else route();
         });
         return;
       }
       // The case's content is its own chunk (per language), fetched only now.
-      const missing = (): void => notFound(T().caseMissing(id));
+      const missing: View = () => ({ main: h("div", { class: "view" }), start: () => notFound(T().caseMissing(id)) });
       if (sub === "explorer") {
-        lazyView(() =>
-          Promise.all([loadCase(id), import("./views/explorer")]).then(([c, m]) => (c === undefined ? missing : (root: HTMLElement) => m.renderExplorer(root, c))),
-        );
+        lazyView(() => Promise.all([loadCase(id), import("./views/explorer")]).then(([c, m]): View => (c === undefined ? missing : () => m.explorerView(c))));
       } else {
         lazyView(() =>
-          Promise.all([loadCase(id), loadCaseViews()]).then(([c, views]) => {
-            const render = sub === "toolbox" ? views.renderToolbox : views.renderCase;
-            return c === undefined ? missing : (root: HTMLElement) => render(root, c);
+          Promise.all([loadCase(id), loadCaseViews()]).then(([c, views]): View => {
+            if (c === undefined) return missing;
+            return sub === "toolbox" ? () => views.toolboxView(c) : () => views.caseView(c);
           }),
         );
       }

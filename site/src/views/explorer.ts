@@ -1,6 +1,7 @@
 import "../explorer.css";
 import { h } from "../lib/dom";
 import { openSheet } from "../lib/overlay";
+import type { ViewResult } from "../shell/types";
 import { getLang } from "../i18n/i18n";
 import { WorkerClient } from "../explorer/client";
 import type { RestartReason } from "../explorer/client";
@@ -155,7 +156,14 @@ type Progress =
   | { kind: "cancelled" }
   | { kind: "failed"; message: string };
 
-export function renderExplorer(root: HTMLElement, c: Case): void {
+/** The Explorer as a shell view: the log pane in main; the evidence files and the time converter in the sidebar. */
+export function explorerView(c: Case): ViewResult {
+  const main = h("div", { class: "view" });
+  const sidebar = h("div", { class: "ex-side", id: "ex-sidebar" });
+  return { main, sidebar: { label: T().exFilesTime, content: sidebar }, start: () => renderExplorer(main, c, sidebar) };
+}
+
+export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement): void {
   activeTeardown?.();
   activeTeardown = null;
   const ROUTE = `#/case/${c.id}/explorer`;
@@ -235,8 +243,7 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
   const fileSearch = h("input", { class: "ex-input ex-file-search", id: "ex-file-search", type: "search", placeholder: T().exFileSearchPh, spellcheck: "false", autocomplete: "off", "aria-controls": "ex-files" });
   const noFiles = h("p", { class: "ex-muted ex-no-files", role: "status", hidden: true }, T().exNoFiles);
   const fileCount = h("p", { class: "ex-muted ex-file-count", role: "status", hidden: true });
-  const sidebar = h("aside", { class: "ex-sidebar", id: "ex-sidebar", "aria-label": T().exFilesTime });
-  const sideToggle = h("button", { class: "btn btn-sm ex-side-toggle", type: "button", "aria-expanded": "false", "aria-controls": "ex-sidebar" }, T().exFilesTime);
+  sidebar.replaceChildren();
 
   const progressBar = h("div", { class: "ex-progress-bar" });
   const progressText = h("p", { class: "ex-progress-text" });
@@ -627,7 +634,8 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     const active = file?.path === f.path;
     const btn = h(
       "button",
-      { class: `ex-file${active ? " is-active" : ""}`, type: "button", "aria-current": active ? "true" : null },
+      // data-sidebar-close: picking a file closes the sidebar drawer on narrow screens (shell/sidebar.ts)
+      { class: `ex-file${active ? " is-active" : ""}`, type: "button", "aria-current": active ? "true" : null, "data-sidebar-close": "" },
       h("span", { class: "ex-file-name mono", dir: "ltr" }, breakablePath(f.path)),
       h("span", { class: "ex-file-meta" },
         f.format !== "" ? h("span", {}, f.format) : null,
@@ -635,11 +643,7 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
         inWorker.has(f.path) ? [h("span", { class: "ex-dot", "aria-hidden": "true" }), h("span", {}, T().exLoadedTag)] : null),
       h("span", { class: "ex-file-desc" }, f.description),
     );
-    btn.addEventListener("click", () => {
-      selectFile(f);
-      sidebar.classList.remove("is-open");
-      sideToggle.setAttribute("aria-expanded", "false");
-    });
+    btn.addEventListener("click", () => selectFile(f));
     return h("li", {}, btn);
   }
 
@@ -1969,10 +1973,6 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     renderTime();
   });
   zoneSel.addEventListener("change", renderTime);
-  sideToggle.addEventListener("click", () => {
-    const open = sidebar.classList.toggle("is-open");
-    sideToggle.setAttribute("aria-expanded", String(open));
-  });
   const narrow = window.matchMedia(NARROW);
   const onNarrow = (): void => {
     if (!narrow.matches) controls.open = true;
@@ -2050,10 +2050,9 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
         h("a", { class: "btn btn-sm btn-ghost", href: `#/case/${c.id}` }, T().exBack),
         h("strong", {}, T().exTitle),
         h("span", { class: "ex-muted ex-case" }, c.title),
-        tagline,
-        sideToggle),
+        tagline),
       announcer,
-      h("div", { class: "ex-layout" }, sidebar, main)),
+      h("div", { class: "ex-layout" }, main)),
   );
   viewport.classList.toggle("is-wrap", wrap);
   renderConds();
