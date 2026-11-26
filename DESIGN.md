@@ -315,8 +315,9 @@ Each role is four tokens: `--type-<role>-size`, `-lh`, `-weight`, `-track`. Noth
 |---|---|---|---|---|---|
 | display | clamp(2rem, 1.6rem + 1.6vw, 2.5rem) | 1.1 | 600 | -0.02em | the home welcome only |
 | page-title | clamp(1.75rem, 1.5rem + 1vw, 2rem) | 1.2 | 600 | -0.015em | every page `h1` |
+| page-title-compact | 1.5rem (24) | 1.25 | 700 (set in `player.css`) | -0.02em | player page `h1` (case, stats, toolbox, author, leaderboard, sign-in) |
 | headline | 1.375rem (22) | 1.3 | 600 | -0.01em | `h2`, stage question, section titles (sentence case) |
-| title | 1.125rem (18) | 1.35 | 600 | 0 | `h3`, card, command and panel titles |
+| title | 1.125rem (18) | 1.35 | 600 | -0.005em | `h3`, card, command and panel titles |
 | prose | 1.0625rem (17) | 1.65 | 400 | 0 | case prompt, debrief, hints (max `--measure`) |
 | body | 1rem (16) | 1.5 | 400 | 0 | `body`, UI copy, card blurbs, forms |
 | small | 0.875rem (14) | 1.45 | 400 | 0 | meta, table cells, buttons, nav |

@@ -8,7 +8,7 @@
 
 /* ---- shared: page header, meta, numbers, the info dot ---- */
 :is(.case-head-title, .stats-page, .author-page, .toolbox-page, .lb-page:not(.is-projector) .lb-head, .center-card) h1 {
-  font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.25;
+  font-size: var(--type-page-title-compact-size); font-weight: 700; letter-spacing: var(--type-page-title-compact-track); line-height: var(--type-page-title-compact-lh);
 }
 .page-meta, .player-tag { margin: 0; font-size: var(--type-small-size); color: var(--text-muted); }
 .page-meta strong, .player-tag strong { color: var(--text); font-weight: 600; }
