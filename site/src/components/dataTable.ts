@@ -341,21 +341,22 @@ export function dataTable<R>(options: DataTableOptions<R>): DataTable<R> {
     const sig = JSON.stringify([cols.map((c) => c.id), sort, getLang()]);
     if (sig === headSig) return;
     headSig = sig;
-    allBox = null;
-    let selectHead: HTMLElement | null = null;
-    if (options.selection) {
-      const box = h("input", { type: "checkbox", class: "dt-select-box", "aria-label": options.selection.allLabel });
-      box.addEventListener("change", () => {
-        const keys = selectableKeys();
-        if (box.checked) for (const k of keys) selected.add(k);
-        else for (const k of keys) selected.delete(k);
-        changed();
-      });
-      allBox = box;
-      selectHead = h("th", { scope: "col", class: "dt-select" }, box);
-    }
+    allBox = options.selection ? makeAllBox(options.selection.allLabel) : null;
+    const selectHead = allBox ? h("th", { scope: "col", class: "dt-select" }, allBox) : null;
     setChildren(thead, h("tr", {}, selectHead, cols.map(headerCell)));
   };
+
+  /** The select-all box: in the header (table) or above the list (cards). */
+  function makeAllBox(label: string): HTMLInputElement {
+    const box = h("input", { type: "checkbox", class: "dt-select-box dt-select-all", "aria-label": label });
+    box.addEventListener("change", () => {
+      const keys = selectableKeys();
+      if (box.checked) for (const k of keys) selected.add(k);
+      else for (const k of keys) selected.delete(k);
+      changed();
+    });
+    return box;
+  }
 
   const buildRow = (row: R, key: string, cols: readonly Column<R>[]): Element[] => {
     const tr = h(
@@ -439,7 +440,10 @@ export function dataTable<R>(options: DataTableOptions<R>): DataTable<R> {
     if (!cardList || cardList.parentNode !== wrap) {
       cardList = h("ul", { class: ["dt-cards", cards.className ?? ""].filter((c) => c !== "").join(" "), "aria-labelledby": cards.labelledBy ?? options.labelledBy });
       cardCache.clear();
-      setChildren(wrap, cardList);
+      // Cards have no header row: the select-all box sits above the list, with a visible label.
+      allBox = options.selection ? makeAllBox(options.selection.allLabel) : null;
+      const allRow = allBox && options.selection ? h("label", { class: "dt-check dt-cards-all" }, allBox, h("span", { "aria-hidden": "true" }, options.selection.allLabel)) : null;
+      setChildren(wrap, allRow, cardList);
     }
     if (!keyed) cardCache.clear();
     syncKeyed(
