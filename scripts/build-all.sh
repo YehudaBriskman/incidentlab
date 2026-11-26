@@ -71,6 +71,8 @@ if [[ "$BUILD_SITE" -eq 1 ]]; then
   if (cd site && node -e 'process.exit(require("./package.json").scripts?.["test:server"] ? 0 : 1)'); then
     banner "Test: server                 (site: npm run test:server)"
     (cd site && npm run test:server)
+    banner "Test: client core            (site: npm run test:client)"
+    (cd site && npm run test:client)
   else
     echo "[build-all] site has no test:server script; skipping server tests."
   fi
