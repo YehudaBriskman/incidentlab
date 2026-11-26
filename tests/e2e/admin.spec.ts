@@ -231,3 +231,98 @@ test.describe("HE 390", () => {
     await expect(row.getByRole("button", { name: new RegExp(username) })).toBeVisible();
   });
 });
+
+// ---- sections in the shell sidebar (#60) --------------------------------------------------------
+const side = {
+  aside: (p: Page) => p.getByRole("complementary", { name: "Dashboard menu" }),
+  nav: (p: Page) => side.aside(p).getByRole("navigation", { name: "Dashboard sections" }),
+  link: (p: Page, name: RegExp) => side.nav(p).getByRole("link", { name }),
+  panel: (p: Page, tab: string) => p.locator(`#admin-panel-${tab}`),
+  rail: (p: Page) => p.locator("#sidebar .sidebar-rail").getByRole("navigation", { name: "Dashboard sections" }),
+  trigger: (p: Page, name: string) => p.locator(".page-header").getByRole("button", { name }),
+};
+
+test("sections: the sidebar links switch sections, mark the current one, and Back walks them", async ({ page }) => {
+  await signInAdmin(page);
+  await page.goto("/#/admin?tab=accounts");
+  await expect(side.panel(page, "accounts")).toBeVisible();
+  await expect(side.link(page, /^Accounts/)).toHaveAttribute("aria-current", "page");
+  // Quick actions sit above the sections; Authoring is a plain link.
+  await expect(side.aside(page).getByRole("button", { name: "Projector board" })).toBeVisible();
+  await expect(side.aside(page).getByRole("link", { name: "Authoring" })).toHaveAttribute("href", "#/author");
+
+  await side.link(page, /^Stats$/).click();
+  await expect(page).toHaveURL(/#\/admin\?tab=stats$/);
+  await expect(side.panel(page, "stats")).toBeVisible();
+  await expect(side.panel(page, "accounts")).toBeHidden();
+  await expect(side.link(page, /^Stats$/)).toHaveAttribute("aria-current", "page");
+  await expect(side.link(page, /^Accounts/)).not.toHaveAttribute("aria-current", /.*/);
+
+  await side.link(page, /^Audit log$/).click();
+  await expect(side.panel(page, "audit")).toBeVisible();
+  await expect(side.panel(page, "stats")).toBeHidden();
+
+  await page.goBack();
+  await expect(page).toHaveURL(/tab=stats/);
+  await expect(side.panel(page, "stats")).toBeVisible();
+  await expect(side.link(page, /^Stats$/)).toHaveAttribute("aria-current", "page");
+  await page.goBack();
+  await expect(page).toHaveURL(/tab=accounts/);
+  await expect(side.panel(page, "accounts")).toBeVisible();
+  await page.goForward();
+  await expect(side.panel(page, "stats")).toBeVisible();
+});
+
+test("sections: a deep link opens its section (and the Live case) on a fresh load", async ({ page }) => {
+  await signInAdmin(page);
+  await page.goto(`/#/admin?tab=live&case=${CASE_ID}`);
+  await page.reload();
+  await expect(side.panel(page, "live")).toBeVisible();
+  await expect(side.link(page, /^Live$/)).toHaveAttribute("aria-current", "page");
+  await expect(page.locator("#admin-live-case")).toHaveValue(CASE_ID);
+  await page.goto("/#/admin?tab=schedule");
+  await expect(side.panel(page, "schedule")).toBeVisible();
+  await expect(side.link(page, /^Schedule$/)).toHaveAttribute("aria-current", "page");
+});
+
+test("sections: leaving unsaved Schedule edits through the sidebar asks first", async ({ page }) => {
+  await signInAdmin(page);
+  await page.goto("/#/admin?tab=schedule");
+  await page.locator("#sched-lock").click();
+  await expect(page.locator("#sched-save")).toBeEnabled();
+
+  await side.link(page, /^Live$/).click();
+  await expect(ui.confirm(page)).toContainText(/discard unsaved changes/i);
+  await ui.confirm(page).getByRole("button", { name: /keep editing/i }).click();
+  await expect(side.panel(page, "schedule")).toBeVisible();
+  await expect(page).toHaveURL(/tab=schedule/);
+  await expect(side.link(page, /^Schedule$/)).toHaveAttribute("aria-current", "page");
+  await expect(page.locator("#sched-save")).toBeEnabled();
+
+  // The Authoring quick link leaves #/admin: the same guard.
+  await side.aside(page).getByRole("link", { name: "Authoring" }).click();
+  await ui.confirm(page).getByRole("button", { name: /keep editing/i }).click();
+  await expect(page).toHaveURL(/#\/admin\?tab=schedule/);
+
+  await side.link(page, /^Live$/).click();
+  await ui.confirm(page).getByRole("button", { name: /discard changes/i }).click();
+  await expect(side.panel(page, "live")).toBeVisible();
+  await expect(page).toHaveURL(/tab=live/);
+});
+
+test.describe("tablet rail", () => {
+  test.use({ viewport: { width: 900, height: 900 } });
+
+  test("the rail shows every section as a named icon link", async ({ page }) => {
+    await signInAdmin(page);
+    await page.goto("/#/admin?tab=accounts");
+    const rail = side.rail(page);
+    await expect(rail).toBeVisible();
+    await expect(rail.getByRole("link")).toHaveCount(6);
+    const event = rail.getByRole("link", { name: "Event" });
+    await expect(event).toHaveAttribute("title", "Event");
+    await event.click();
+    await expect(side.panel(page, "event")).toBeVisible();
+    await expect(event).toHaveAttribute("aria-current", "page");
+  });
+});
