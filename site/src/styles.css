@@ -735,7 +735,7 @@ body { min-height: 0; overflow: hidden; }
 .topbar-status { display: flex; align-items: center; gap: var(--space-2); min-inline-size: 0; }
 .status-chip {
   display: inline-flex; align-items: center; gap: var(--space-2); min-inline-size: 0; max-inline-size: 22rem;
-  min-block-size: 28px; padding-inline: var(--space-3); border-radius: var(--radius-full);
+  min-block-size: var(--control-xs); padding-inline: var(--space-3); border-radius: var(--radius-full);
   background: var(--fill-inset); color: var(--text-2); font-size: var(--type-label-size); font-weight: 500; text-decoration: none; white-space: nowrap;
 }
 a.status-chip:hover { background: var(--hover-fill); color: var(--text-1); }
@@ -1978,12 +1978,12 @@ html { scrollbar-gutter: stable; }
   min-height: var(--btn-h); padding: 0 var(--space-4); gap: var(--space-2);
   font-size: var(--type-small-size); font-weight: 500; line-height: 1.25;
 }
-.btn-sm { --btn-h: 36px; padding-inline: var(--space-3); font-size: var(--type-small-size); }
+.btn-sm { --btn-h: var(--control-sm); padding-inline: var(--space-3); font-size: var(--type-small-size); }
 .btn-lg { --btn-h: 44px; padding-inline: var(--space-6); font-size: var(--type-small-size); }
 .btn:disabled, .btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
 .btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .btn:hover:not(:disabled) { background: color-mix(in oklab, var(--fill-track) 80%, var(--fill-inset)); }
-.btn-copy { --btn-h: 28px; padding-inline: var(--space-3); font-size: var(--type-label-size); }
+.btn-copy { --btn-h: var(--control-xs); padding-inline: var(--space-3); font-size: var(--type-label-size); }
 .btn-primary { background: var(--accent); color: var(--on-accent); }
 .btn-primary:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 90%, var(--level-1)); }
 /* outline: the 3:1 control edge over no fill; hover takes the soft accent fill */
@@ -1995,7 +1995,7 @@ html { scrollbar-gutter: stable; }
 .btn-danger:hover:not(:disabled) { background: color-mix(in oklab, var(--danger-fg) 90%, var(--level-1)); }
 /* icon buttons: a 40px square, 8px corners; on touch the hit area reaches 44px */
 .btn-icon { --btn-h: 40px; inline-size: var(--btn-h); min-inline-size: var(--btn-h); padding: 0; position: relative; }
-.btn-icon.btn-sm { --btn-h: 36px; }
+.btn-icon.btn-sm { --btn-h: var(--control-sm); }
 @media (pointer: coarse) {
   :is(.btn-icon, .ov-close, .toast-close, .banner-close)::after { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: 44px; block-size: 44px; translate: -50% -50%; }
   [dir="rtl"] :is(.btn-icon, .ov-close, .toast-close, .banner-close)::after { translate: 50% -50%; }
@@ -2056,7 +2056,7 @@ input[type="radio"] { inline-size: 16px; block-size: 16px; accent-color: var(--a
   border: 0; border-radius: var(--radius-control); background: var(--segment-track);
 }
 .shell-tab {
-  min-height: 28px; padding: 0 var(--space-3); border-radius: var(--radius-mark);
+  min-height: var(--control-xs); padding: 0 var(--space-3); border-radius: var(--radius-mark);
   font-size: var(--type-small-size); font-weight: 500; color: var(--text-2);
   transition: background-color var(--motion-settle) var(--ease-standard), color var(--motion-settle) var(--ease-standard);
 }
