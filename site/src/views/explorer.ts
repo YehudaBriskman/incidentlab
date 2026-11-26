@@ -1,5 +1,6 @@
 import "../explorer.css";
 import { h } from "../lib/dom";
+import { openSheet } from "../lib/overlay";
 import { getLang } from "../i18n/i18n";
 import { WorkerClient } from "../explorer/client";
 import type { RestartReason } from "../explorer/client";
@@ -265,7 +266,25 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
   const timeRow = h("div", { class: "ex-time-filter", hidden: true });
   const filtersBadge = h("span", { class: "ex-badge" });
   const controlsSet = h("fieldset", { class: "ex-fieldset" }, h("legend", { class: "ex-sr" }, T().exFilters), pipeline, timeRow, presetsRow, jsonBar);
-  const controls = h("details", { class: "ex-controls" }, h("summary", { class: "ex-controls-sum" }, T().exFilters, filtersBadge), controlsSet);
+  const controlsSum = h("summary", { class: "ex-controls-sum" }, T().exFilters, filtersBadge);
+  const controls = h("details", { class: "ex-controls" }, controlsSum, controlsSet);
+  // Phones: the filters open in a bottom sheet over the log instead of pushing it down the page. The same
+  // fieldset moves into the sheet and back, so every input keeps its state and listeners; the log updates live
+  // behind the sheet. Wider screens keep the inline panel.
+  const PHONE_FILTERS = window.matchMedia("(max-width: 600px)");
+  controlsSum.addEventListener("click", (ev) => {
+    if (!PHONE_FILTERS.matches) return;
+    ev.preventDefault();
+    const sheet = openSheet<"done">({
+      side: "bottom",
+      title: T().exFilters,
+      body: controlsSet,
+      className: "ex-filter-sheet",
+      actions: [{ value: "done", label: T().exFiltersDone, tone: "primary" }],
+      returnFocus: () => controlsSum,
+    });
+    void sheet.result.then(() => controls.append(controlsSet));
+  });
 
   const keysHelp = h("p", { class: "ex-sr", id: "ex-keys-help" }, T().exLineKeysHelp);
   const viewport = h("div", { class: "ex-viewport", dir: "ltr", tabindex: "0", role: "region", "aria-label": T().exFileLines, "aria-describedby": "ex-keys-help" });
