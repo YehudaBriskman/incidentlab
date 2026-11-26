@@ -179,7 +179,7 @@
   --leading-body: var(--type-body-lh);
   --leading-tight: var(--type-headline-lh);
   --track-display: var(--type-display-track);
-  --track-label: 0.06em;                                       /* only for the remaining uppercase Latin labels */
+  --track-label: 0.06em;                                       /* deprecated: only the invite code's spaced characters */
 
   /* controls: one height scale shared by buttons, inputs, tabs and toggles */
   --target-min: 24px;
@@ -554,10 +554,8 @@
   --shadow-lg: var(--elev-3);
   --shadow: var(--elev-2);
 }
-/* Scoped aliases: inside the dark code island the ring and halo follow the pane (#96 F10). Admin's sign-in
-   link still reads --accent as a text colour (admin.css belongs to the admin sweep), so it gets the text shade. */
+/* Scoped alias: inside the dark code island the ring and halo follow the pane (#96 F10). */
 :where(.code-block, .answer-code, .ex-view, .prose pre) { --focus-ring: var(--code-accent); --focus-halo: var(--code-bg); }
-:where(.admin-login-alt) { --accent: var(--accent-text); }
 
 /* ============ base ============
    Global elements on the 2.0.0 roles: body text, the heading roles, links (text colour + amber underline), a

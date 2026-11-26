@@ -322,7 +322,7 @@ Each role is four tokens: `--type-<role>-size`, `-lh`, `-weight`, `-track`. Noth
 | code | 0.875rem; inline 0.9em | 1.55 | 400 | 0 | code blocks and inline code |
 
 - **Hebrew (`:root:lang(he)`):** tracking 0 on every role, no `text-transform` and no letter-spacing from any component (a global rule; the text-spacing setting keeps its 0.12em), looser leading (body 1.6, prose 1.75, small 1.55, headings 1.25-1.45) and a 13px label. Emphasis comes from weight, never italics or case.
-- **Deprecated steps** map onto roles: `--step--2` label, `--step--1` small, `--step-0` prose, `--step-1` title, `--step-2` headline, `--step-3` page-title, `--step-4` display; `--leading-body` = body line-height, `--leading-tight` = headline line-height, `--track-display` = display tracking. `--track-label` (0.06em, 0 in Hebrew) is kept only for the admin's remaining uppercase labels until the admin sweep.
+- **Deprecated steps** map onto roles: `--step--2` label, `--step--1` small, `--step-0` prose, `--step-1` title, `--step-2` headline, `--step-3` page-title, `--step-4` display; `--leading-body` = body line-height, `--leading-tight` = headline line-height, `--track-display` = display tracking. `--track-label` (0.06em, 0 in Hebrew) is kept only for the invite code's spaced characters.
 - Numbers that align use `font-variant-numeric: tabular-nums` (every pill does).
 
 ## Layout
@@ -462,7 +462,7 @@ Check: `node --experimental-strip-types scripts/check-contrast.mts [--markdown] 
 | `--text-2` (old mix) | `--text-2` (role) | same name, now a real role |
 | `--border` | `--edge-subtle` | |
 | `--border-strong` | `--edge-control` | buttons and tags that use it move to fill + `--elev-1` / borderless in the sweeps |
-| `--accent` (fill and text) | `--accent` (fill only) | text uses moved to `--accent-text`, state edges to `--edge-selected` in `styles.css`/`explorer.css`; `admin.css` is aliased by scope (`.admin-login-alt`) |
+| `--accent` (fill and text) | `--accent` (fill only) | text uses moved to `--accent-text` (links to `--text-1`), state edges to `--edge-selected`, in `styles.css`, `explorer.css` and `admin.css` |
 | `--accent-strong` | `--accent-text` | |
 | `--accent-line` | `--edge-selected` | |
 | `--accent-ink` | `--on-accent` | |
@@ -473,7 +473,7 @@ Check: `node --experimental-strip-types scripts/check-contrast.mts [--markdown] 
 | `--radius-xs/sm/md/lg/xl` | 2 / 3 / 4 / 6 / 8 (were 4 / 6 / 8 / 12 / 16) | same names, 4px base |
 | `--step--2 … --step-4` | `--type-label/small/prose/title/headline/page-title/display-size` | |
 | `--leading-body`, `--leading-tight`, `--track-display` | `--type-body-lh`, `--type-headline-lh`, `--type-display-track` | |
-| `--track-label` | 0.06em (0 in Hebrew) | only the admin's uppercase labels still use it |
+| `--track-label` | 0.06em (0 in Hebrew) | only the invite code's spaced characters still use it |
 | `--page` 1080, `--page-wide` 1280 | 1120, 1440 | |
 | `--code-accent` as text | `--code-accent-text`; marks `--code-mark` | |
 | `--sans`, `--mono` | `--font-sans`, `--font-mono` | |
