@@ -945,6 +945,13 @@ function renderDebrief(c: Case, player: ProgressView): HTMLElement {
       shareLine(c, player),
       copyButton(() => shareText(c, player), T().copyResult),
     ),
+    // Not a dead end: the leaderboard and the case list are one tap away.
+    h(
+      "div",
+      { class: "row-actions debrief-next" },
+      h("a", { class: "btn btn-primary", href: "#/leaderboard" }, TG().homeLeaderboard),
+      h("a", { class: "btn", href: "#/" }, T().backToCases),
+    ),
     body,
   );
 }
@@ -1070,7 +1077,17 @@ function stageTotals(c: Case, player: ProgressView): HTMLElement {
         return h(
           "tr",
           { class: revealed || (s?.points ?? 0) === 0 ? "is-zero" : "is-plus" },
-          h("th", { scope: "row" }, h("bdi", {}, `${i + 1}.`), " ", contentText("bdi", {}, stageLabel(c, id)), revealed ? h("span", { class: "bd-detail muted" }, TG().revealedShort) : null),
+          h(
+            "th",
+            { scope: "row" },
+            h("bdi", {}, `${i + 1}.`),
+            " ",
+            contentText("bdi", {}, stageLabel(c, id)),
+            // Where the points went: revealed, or the help bought on this stage.
+            s === undefined
+              ? null
+              : h("span", { class: "bd-detail muted" }, revealed ? TG().revealedShort : TP().stageCosts(s.hintsRevealed, s.commandsRevealed, s.wrongAttempts)),
+          ),
           h("td", { class: "num mono" }, String(s?.points ?? 0)),
         );
       }),
