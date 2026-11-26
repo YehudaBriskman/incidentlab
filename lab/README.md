@@ -3,7 +3,7 @@
 A lab image is a Linux shell with the investigation tools and one case's **public** evidence at `/case`.
 It is the optional "real terminal" track next to the browser Explorer. Answers are still checked on the site.
 
-- `lab/base/Dockerfile`: the tools (tcpdump, dig, jq, gawk, git, less, vim), running as a non-root `analyst`.
+- `lab/base/Dockerfile`: Alpine with the GNU userland and the tools (tcpdump, dig, jq, gawk, git, less, vim), running as a non-root `analyst`.
 - `lab/case.Dockerfile`: the base plus `/case`, read-only.
 - `scripts/build-lab-image.sh <case-id>`: builds both from a clean context and proves the result:
   - `scripts/lab_gate.py` checks that `/case` equals the public evidence zip file by file, and that no file
