@@ -934,6 +934,8 @@ function scheduleTooltipHide(): void {
 }
 
 function showTooltip(anchor: HTMLElement, content: () => Child): void {
+  // Never cover the anchor's own open menu or popover with its tooltip.
+  if (anchor.getAttribute("aria-expanded") === "true") return;
   window.clearTimeout(tooltipHideTimer);
   const el = sharedTooltip();
   el.replaceChildren();
@@ -978,6 +980,7 @@ export function tooltip(anchor: HTMLElement, content: Child | (() => Child)): vo
     if (tooltipOwner === anchor) hideTooltipNow();
   });
   anchor.addEventListener("click", () => {
+    window.clearTimeout(tooltipShowTimer); // a hover timer still pending must not fire over what the click opened
     if (tooltipOwner === anchor) hideTooltipNow();
   });
 }
