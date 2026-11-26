@@ -903,6 +903,16 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
   color: var(--text); background: var(--surface); border: 1px solid var(--border-strong);
   border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
 }
+/* tooltip (lib/overlay.ts tooltip()): secondary details on hover and focus; never the only place for needed info */
+.ov-tooltip {
+  position: fixed; inset: auto; margin: 0; z-index: var(--z-popover);
+  max-inline-size: min(22rem, calc(100vw - 2 * var(--space-2))); padding: var(--space-2) var(--space-3);
+  color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg); font-size: var(--step--1); line-height: 1.45; text-align: start;
+}
+.ov-tooltip .tip-title { display: block; font-weight: 600; margin-block-end: 2px; }
+.ov-tooltip .tip-meta { display: block; color: var(--text-muted); font-size: var(--step--2); margin-block-end: var(--space-1); }
+@media (forced-colors: active) { .ov-tooltip { border-color: CanvasText; } }
 .ov-menu { min-inline-size: 12rem; max-inline-size: calc(100vw - 2 * var(--space-2)); padding: var(--space-1); }
 .ov-menu:focus { outline: none; }
 .ov-menu-item {

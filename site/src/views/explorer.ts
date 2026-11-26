@@ -1,6 +1,6 @@
 import "../explorer.css";
 import { h } from "../lib/dom";
-import { openSheet } from "../lib/overlay";
+import { openSheet, tooltip } from "../lib/overlay";
 import type { ViewResult } from "../shell/types";
 import { getLang } from "../i18n/i18n";
 import { WorkerClient } from "../explorer/client";
@@ -618,7 +618,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     // One flat list when there is nothing to group (a single folder, or only top-level files).
     const flat = groups.length < 2;
     fileList.replaceChildren(...groups.flatMap((g, gi) => {
-      const items = g.items.map(fileItem);
+      const items = g.items.map((f) => fileItem(f, !flat));
       if (flat) return items;
       const id = `ex-files-g${gi}`;
       return [h("li", { class: "ex-file-group" },
@@ -628,21 +628,32 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     }));
   }
 
-  function fileItem(f: EvidenceFile): HTMLElement {
+  /**
+   * One file: only its name is visible (the folder is the group heading above it), plus a dot once it is loaded.
+   * Path, format, size and description are secondary, so they live in a tooltip on hover and keyboard focus.
+   * The folder stays in the button's name as hidden text, so screen readers and search still get the full path.
+   */
+  function fileItem(f: EvidenceFile, grouped: boolean): HTMLElement {
     const bytes = knownBytes.get(f.path);
     const size = bytes !== undefined ? fmtBytes(bytes) : f.size;
     const active = file?.path === f.path;
+    const slash = f.path.lastIndexOf("/");
+    const dir = grouped && slash >= 0 ? f.path.slice(0, slash + 1) : "";
+    const base = dir === "" ? f.path : f.path.slice(slash + 1);
+    const loaded = inWorker.has(f.path);
     const btn = h(
       "button",
       // data-sidebar-close: picking a file closes the sidebar drawer on narrow screens (shell/sidebar.ts)
       { class: `ex-file${active ? " is-active" : ""}`, type: "button", "aria-current": active ? "true" : null, "data-sidebar-close": "" },
-      h("span", { class: "ex-file-name mono", dir: "ltr" }, breakablePath(f.path)),
-      h("span", { class: "ex-file-meta" },
-        f.format !== "" ? h("span", {}, f.format) : null,
-        size !== "" ? [f.format !== "" ? " · " : "", num(size)] : null,
-        inWorker.has(f.path) ? [h("span", { class: "ex-dot", "aria-hidden": "true" }), h("span", {}, T().exLoadedTag)] : null),
-      h("span", { class: "ex-file-desc" }, f.description),
+      h("span", { class: "ex-file-name mono", dir: "ltr" }, dir !== "" ? h("span", { class: "visually-hidden" }, dir) : null, breakablePath(base)),
+      loaded ? [h("span", { class: "ex-dot", "aria-hidden": "true" }), h("span", { class: "visually-hidden" }, ` ${T().exLoadedTag}`)] : null,
     );
+    const meta = [f.format, size !== "" ? num(size) : "", loaded ? T().exLoadedTag : ""].filter((v) => v !== "").join(" · ");
+    tooltip(btn, () => [
+      h("span", { class: "tip-title mono", dir: "ltr" }, f.path),
+      meta !== "" ? h("span", { class: "tip-meta" }, meta) : null,
+      f.description !== "" ? h("span", { dir: "auto" }, f.description) : null,
+    ]);
     btn.addEventListener("click", () => selectFile(f));
     return h("li", {}, btn);
   }
