@@ -1,4 +1,5 @@
 import { QUESTION_ORDER, SCORING, type ProgressView, type QuestionId, type ScoreBreakdown, type StageProgress } from "../../shared/contract";
+import { canonicalAnswer, formatKind, matchesFormat, type FormatKind } from "../lib/answer-format";
 import type { Case, Question } from "../../shared/case";
 import { ApiError, getDebrief, getProgress, revealAnswer, revealHint, setupDone, submitAnswer } from "../lib/api";
 import { recordVisit } from "../lib/recent";
@@ -8,6 +9,7 @@ import { caseSummary } from "../content/load";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { withApprovedAccount } from "./auth";
+import { renderInstructorPreview } from "./present";
 import { announce, copyButton, ensureAnnouncer, h, html, setChildren } from "../lib/dom";
 import { confirm, tooltip } from "../lib/overlay";
 import "../player.css";
@@ -111,7 +113,7 @@ export function renderCase(root: HTMLElement, c: Case): void {
   stopCaseTimers();
   document.title = `${c.title} · IncidentLab`;
   ensureAnnouncer();
-  withApprovedAccount(root, c.title, () => loadProgress(root, c));
+  withApprovedAccount(root, c.title, () => loadProgress(root, c), { onAdmin: () => renderInstructorPreview(root, c) });
 }
 
 function loadProgress(root: HTMLElement, c: Case, refreshToday = false): void {
@@ -519,39 +521,6 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
 
 /* ---------- answer formats: client-side format check (free) before a guess that costs points ---------- */
 
-type FormatKind = "time" | "integer" | "ipv4" | "sha" | "version" | "change" | "order" | "accessKey" | "other";
-
-/** Recognise the common `answerFormat` texts (EN and HE). Anything unrecognised is "other": never blocked. */
-function formatKind(format: string): FormatKind {
-  const t = format.toLowerCase();
-  if (t.includes("hh:mm:ss")) return "time";
-  if (/^(integer|מספר שלם)/.test(t)) return "integer";
-  if (t.includes("ipv4")) return "ipv4";
-  if (t.includes("sha") && t.includes("7")) return "sha";
-  if (t.includes("x.y.z")) return "version";
-  if (t.includes("chg-n")) return "change";
-  if (t.includes("ord-x")) return "order";
-  if (t.includes("asia")) return "accessKey";
-  return "other";
-}
-
-const FORMAT_PATTERN: Record<Exclude<FormatKind, "other">, RegExp> = {
-  time: /^\d{1,2}:\d{2}:\d{2}$/,
-  integer: /^\d+$/,
-  ipv4: /^\d{1,3}(\.\d{1,3}){3}$/,
-  sha: /^[0-9a-f]{7,40}$/i,
-  version: /^\d+\.\d+\.\d+$/,
-  change: /^chg-\d+$/i,
-  order: /^ord-[a-z0-9]+$/i,
-  accessKey: /^asia[a-z0-9]{16}$/i,
-};
-
-/** True when `answer` fits the stage's format (or the format can't be checked). */
-export function matchesFormat(format: string, answer: string): boolean {
-  const kind = formatKind(format);
-  return kind === "other" ? true : FORMAT_PATTERN[kind].test(answer.trim());
-}
-
 /** The placeholder shows the format's shape, never a realistic value that reads as a prefilled answer. */
 function formatPlaceholder(kind: FormatKind): string | null {
   const t = TP();
@@ -777,7 +746,7 @@ function renderQuestionStage(
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
     if (busy || submit.disabled) return;
-    const answer = input.value.trim();
+    const answer = canonicalAnswer(q.answerFormat, input.value);
     if (answer.length === 0) {
       setInvalid(T().typeFirst);
       input.focus();

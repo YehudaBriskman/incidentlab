@@ -212,7 +212,7 @@ function route(): void {
     if (parts[0] === "case" && parts[1] !== undefined) {
       const id = parts[1];
       const sub = parts[2];
-      if (sub !== undefined && sub !== "toolbox" && sub !== "explorer") {
+      if (sub !== undefined && sub !== "toolbox" && sub !== "explorer" && sub !== "present") {
         notFound(TO().notOnRunbook);
         return;
       }
@@ -228,7 +228,9 @@ function route(): void {
       }
       // The case's content is its own chunk (per language), fetched only now.
       const missing: View = () => ({ main: h("div", { class: "view" }), start: () => notFound(T().caseMissing(id)) });
-      if (sub === "explorer") {
+      if (sub === "present") {
+        lazyView(() => Promise.all([loadCase(id), import("./views/present")]).then(([c, m]): View => (c === undefined ? missing : () => m.presentView(c))));
+      } else if (sub === "explorer") {
         lazyView(() => Promise.all([loadCase(id), import("./views/explorer")]).then(([c, m]): View => (c === undefined ? missing : () => m.explorerView(c))));
       } else {
         lazyView(() =>
