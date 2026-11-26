@@ -1129,7 +1129,7 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 /* ============ pill: one component (chips, badges, tags, status) ============
    Tones set three variables; every pill class below maps onto this base. */
 .chip, .meter-item, .event-clock, .stuck-badge, .status-pill, .via-pill, .today-tag, .hardest-badge,
-.tab-badge, .count-badge, .admin-session-tag, .ex-chip, .board-frozen-chip, .board-live-chip {
+.tab-badge, .count-badge, .ex-chip, .board-frozen-chip, .board-live-chip {
   --pill-fg: var(--text-2);
   --pill-bg: var(--surface-2);
   --pill-line: var(--border-strong);
@@ -1506,7 +1506,7 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
   .step-active .step-icon { border-color: Highlight; border-width: 3px; }
   .step.is-viewing { outline: 1px solid CanvasText; }
   .chip, .meter-item, .event-clock, .stuck-badge, .status-pill, .via-pill, .today-tag, .hardest-badge,
-  .tab-badge, .count-badge, .admin-session-tag, .ex-chip, .board-frozen-chip, .board-live-chip { border: 1px solid CanvasText; }
+  .tab-badge, .count-badge, .ex-chip, .board-frozen-chip, .board-live-chip { border: 1px solid CanvasText; }
   .chip-completed, .chip-in-progress, .chip-frozen, .lb-you { border-width: 2px; }
   .dot, .event-clock .dot { forced-color-adjust: none; background: CanvasText; }
   .nav-link[aria-current="page"] { box-shadow: none; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
@@ -2067,7 +2067,7 @@ input[type="radio"] { inline-size: 16px; block-size: 16px; accent-color: var(--a
 
 /* ---- pills (chips, badges, status): 12px semibold, no edge unless the tone needs one ---- */
 .chip, .meter-item, .event-clock, .stuck-badge, .status-pill, .via-pill, .today-tag, .hardest-badge,
-.tab-badge, .count-badge, .admin-session-tag, .ex-chip, .board-frozen-chip, .board-live-chip {
+.tab-badge, .count-badge, .ex-chip, .board-frozen-chip, .board-live-chip {
   border-radius: var(--radius-pill); border-color: transparent; padding: 2px 10px;
   font-size: var(--type-label-size); font-weight: 600; text-transform: none; letter-spacing: 0;
 }
@@ -2144,3 +2144,10 @@ input[type="radio"] { inline-size: 16px; block-size: 16px; accent-color: var(--a
 :is(.stats-table, .data-table) tbody tr:not(.dt-spacer, .dt-detail):hover { background: color-mix(in oklab, var(--fill-track) 40%, transparent); }
 .data-table tr.is-selected > * { background: color-mix(in oklab, var(--fill-track) 60%, transparent); }
 .data-table tr.dt-detail > td { background: color-mix(in oklab, var(--fill-inset) 50%, transparent); }
+
+/* Forced colours: the one primary action must still stand out from secondary buttons once fills are gone
+   (#130). Last in the file so it outranks the Soft UI button rules, hover included. */
+@media (forced-colors: active) {
+  .btn-primary, .btn-primary:hover:not(:disabled) { forced-color-adjust: none; background: ButtonText; color: ButtonFace; border-color: ButtonText; filter: none; }
+  .btn-primary:disabled, .btn-primary[aria-disabled="true"] { background: GrayText; color: ButtonFace; border-color: GrayText; }
+}

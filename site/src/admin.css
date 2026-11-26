@@ -125,7 +125,8 @@ input.admin-input[type="search"] {
 .funnel-track { position: relative; height: 12px; background: var(--fill-track); border-radius: var(--radius-pill); overflow: hidden; }
 .funnel-reached, .funnel-done { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: var(--radius-pill); transition: width var(--motion-dur-long) var(--motion-ease-standard); }
 .funnel-reached { background: var(--info-bg); box-shadow: inset 0 0 0 1px var(--info-fg); }
-.funnel-done { background: var(--success-fg); opacity: 0.85; }
+/* a solid role mix, not opacity: opacity also fades anything inside and is erased by forced colours (#130) */
+.funnel-done { background: color-mix(in oklab, var(--success-fg) 85%, var(--fill-track)); }
 .funnel-count { font-size: var(--type-label-size); text-align: end; color: var(--text-2); font-variant-numeric: tabular-nums; }
 
 /* ---- needs help: first on the Live tab; one quiet line when nobody does ---- */
@@ -427,7 +428,8 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 }
 .cal-day.is-blank { background: transparent; }
 .cal-day.is-set { background: var(--level-2); box-shadow: var(--surface-lift); }
-.cal-day.is-past { opacity: 0.6; }
+/* past days recede by role (quieter text on the sunken fill), not by opacity, which also dims their chips (#130) */
+.cal-day.is-past { background: var(--fill-sunken); color: var(--text-2); }
 .cal-day.is-today { background: var(--info-bg); box-shadow: inset 0 0 0 2px var(--info-fg); opacity: 1; }
 .cal-day-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1); }
 .cal-num { font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -788,7 +790,9 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
   .cell.is-locked { border-color: GrayText; border-style: dotted; }
   .funnel-track { forced-color-adjust: none; background: Canvas; border: 1px solid CanvasText; }
   .funnel-reached { forced-color-adjust: none; background: Canvas; box-shadow: inset 0 0 0 2px CanvasText; }
-  .funnel-done { forced-color-adjust: none; background: Highlight; opacity: 1; }
+  .funnel-done { forced-color-adjust: none; background: Highlight; }
+  /* the just-updated flash is a fading tint: keep a visible edge while the class is on */
+  .is-flash > :is(td, th), .is-flash.player-card { outline: 2px solid Highlight; outline-offset: -2px; }
   .admin-rail-link[aria-current] { forced-color-adjust: none; background: Highlight; color: HighlightText; }
   .admin-rail-badge { border: 1px solid CanvasText; }
   .admin-table tr.is-warn > :first-child, .admin-table tr.is-alert > :first-child,
