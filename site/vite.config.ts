@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import { summarize, type CatalogEntry, type EvidenceFormats } from "./src/content/catalog-schema.ts";
-import { CaseSchema } from "./src/content/schema.ts";
+import { CaseSchema } from "./shared/case.ts";
 
 /**
  * Paid content never ships to the browser. Case JSONs are authored with the full toolbox commands

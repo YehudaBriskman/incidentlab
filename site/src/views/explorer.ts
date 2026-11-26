@@ -27,7 +27,7 @@ import {
   yearInText,
 } from "../explorer/core";
 import type { FilterStep, HistogramResult, JsonFilter, StepKind, TimeSeries } from "../explorer/core";
-import type { Case } from "../content/schema";
+import type { Case } from "../../shared/case";
 import {
   ALL_ZONES,
   caseYearHint,
