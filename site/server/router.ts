@@ -1,5 +1,7 @@
 // Tiny router: maps method + path to controller calls. Every dispatch is wrapped so nothing escapes as a crash.
 import { AdminController } from "./controllers/AdminController.ts";
+import { AuthorController } from "./controllers/AuthorController.ts";
+import { answerFingerprint } from "../shared/answer-fingerprint.ts";
 import { AuthController } from "./controllers/AuthController.ts";
 import { ContentController } from "./controllers/ContentController.ts";
 import { GameController } from "./controllers/GameController.ts";
@@ -26,6 +28,10 @@ import { ScheduleService } from "./services/ScheduleService.ts";
 import { StatsService } from "./services/StatsService.ts";
 import { TrashService } from "./services/TrashService.ts";
 import { TrashRepository } from "./repositories/trash-repository.ts";
+import { UploadRepository } from "./repositories/upload-repository.ts";
+import { AuthorAuthService } from "./services/AuthorAuthService.ts";
+import { CaseAuthoringService } from "./services/CaseAuthoringService.ts";
+import { CaseUploadService } from "./services/CaseUploadService.ts";
 
 export type AppDeps = {
   readonly store: KvStore;
@@ -46,7 +52,9 @@ export const createApp = (deps: AppDeps): App => {
   const bundledSecrets = deps.secrets ?? loadSecrets();
   const repos = createRepositories(deps.store);
   const caseRepo = new CaseRepository(deps.store);
-  const evidence = new EvidenceService({ cases: caseRepo, chunks: new EvidenceChunkRepository(deps.bytes ?? new InMemoryByteStore()) });
+  const bytes = deps.bytes ?? new InMemoryByteStore();
+  const chunkRepo = new EvidenceChunkRepository(bytes);
+  const evidence = new EvidenceService({ cases: caseRepo, chunks: chunkRepo });
   const cases = new CaseService({ cases: caseRepo, evidence });
   // Answer keys: bundled secrets.json overlaid with DB-published cases (refreshed before each request, see handle).
   const secrets = new CaseSecretsProvider({ bundled: bundledSecrets, source: cases, now });
@@ -60,15 +68,34 @@ export const createApp = (deps: AppDeps): App => {
   const game = new GameService({ repository: repos.progress, firstBlood, secrets, schedule, events, now });
   const stats = new StatsService({ repos, secrets, now });
   const trashRepo = new TrashRepository(deps.store);
-  const trash = new TrashService({ trash: trashRepo, repos, now });
+  const trash = new TrashService({ trash: trashRepo, repos, cases: caseRepo, now });
   const accounts = new AccountAdminService({ repos, firstBlood, game, stats, trash, trashRepo, now });
   const audit = new AuditService({ repository: new AuditRepository(deps.store), now });
+
+  // Bundled (pre-DB) cases: only the admin may upload their ids, and their answer key is the drift
+  // baseline until a DB version of the case is published.
+  const bundledFingerprints = new Map<string, Promise<string>>();
+  const bundledFingerprint = (caseId: string): Promise<string | null> => {
+    const sealed = Object.entries(bundledSecrets.cases).find(([id]) => id === caseId)?.[1];
+    if (!sealed) return Promise.resolve(null);
+    let found = bundledFingerprints.get(caseId);
+    if (!found) bundledFingerprints.set(caseId, (found = answerFingerprint(sealed)));
+    return found;
+  };
+  const reservedIds = new Set(Object.keys(bundledSecrets.cases));
+  const caseUploads = new CaseUploadService({
+    uploads: new UploadRepository({ kv: deps.store, bytes }), cases: caseRepo, chunks: chunkRepo, limiter, bundledFingerprint, reservedIds: () => reservedIds, now,
+  });
+  const authoring = new CaseAuthoringService({ cases: caseRepo, progress: repos.progress, trash, bundledFingerprint, now });
 
   const authController = new AuthController({ auth, schedule, stats, events });
   const gameController = new GameController({ auth, game });
   const contentController = new ContentController({ cases });
-  const adminController = new AdminController({
-    accounts, schedule, stats, events, audit, trash, guard: new AdminAuthService({ adminKey: deps.adminKey, auth }), now,
+  const adminGuard = new AdminAuthService({ adminKey: deps.adminKey, auth });
+  const adminController = new AdminController({ accounts, schedule, stats, events, audit, trash, guard: adminGuard, now });
+  const authorController = new AuthorController({
+    guard: new AuthorAuthService({ admin: adminGuard, auth }), uploads: caseUploads, authoring, audit,
+    onPublishedChange: () => secrets.refresh(true), // this instance plays the new version at once; others within SECRETS_REFRESH_MS
   });
 
   const route = (req: Request, ip: string): MethodTable | null => {
@@ -96,6 +123,8 @@ export const createApp = (deps: AppDeps): App => {
       "/api/admin/export.csv": { GET: () => adminController.exportCsv(req) },
       "/api/admin/audit": { GET: () => adminController.auditLog(req) },
       "/api/admin/trash": { GET: () => adminController.listTrash(req) },
+      "/api/author/uploads": { POST: () => authorController.createUpload(req) },
+      "/api/author/cases": { GET: () => authorController.listCases(req) },
     };
     const found = exact[path];
     if (found) return found;
@@ -118,6 +147,21 @@ export const createApp = (deps: AppDeps): App => {
         debrief: { GET: () => gameController.debrief(req, caseId) },
       };
       return table[second ?? ""] ?? null;
+    }
+    if (area === "author" && first === "uploads" && second !== undefined) {
+      const [, , , , action, a, b] = segments;
+      if (segments.length === 5 && action === "finalize") return { POST: () => authorController.finalize(req, second) };
+      if (segments.length === 6 && action === "parts" && a !== undefined) return { PUT: () => authorController.putPart(req, second, a) };
+      if (segments.length === 7 && action === "chunks" && a !== undefined && b !== undefined) {
+        return { PUT: () => authorController.putChunk(req, second, a, b) };
+      }
+      return null;
+    }
+    if (area === "author" && first === "cases" && second !== undefined) {
+      if (segments.length === 4) return { DELETE: () => authorController.remove(req, second) };
+      if (segments.length === 5 && segments[4] === "publish") return { POST: () => authorController.publish(req, second) };
+      if (segments.length === 5 && segments[4] === "restore") return { POST: () => authorController.restore(req, second) };
+      return null;
     }
     if (area === "admin" && first === "accounts" && second !== undefined) {
       const action = segments[4];

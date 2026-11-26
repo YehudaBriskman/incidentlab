@@ -31,6 +31,17 @@ export const toErrorResponse = (error: unknown): Response => {
   return errorResponse(500, "internal");
 };
 
+/** Reads a raw binary body (application/octet-stream), refusing more than `maxBytes` with 413 "too-large". */
+export const readBytes = async (req: Request, maxBytes: number): Promise<Uint8Array> => {
+  const contentType = req.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().startsWith("application/octet-stream")) throw new AppError(415, "content-type must be application/octet-stream");
+  const declared = Number(req.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declared) && declared > maxBytes) throw new AppError(413, "request body too large", { code: "too-large" });
+  const bytes = new Uint8Array(await req.arrayBuffer());
+  if (bytes.byteLength > maxBytes) throw new AppError(413, "request body too large", { code: "too-large" });
+  return bytes;
+};
+
 /** Reads the body (enforcing size + content-type) and validates it with a zod schema. */
 export const parseBody = async <T extends z.ZodType>(req: Request, schema: T, maxBytes = MAX_BODY_BYTES): Promise<z.infer<T>> => {
   const contentType = req.headers.get("content-type") ?? "";

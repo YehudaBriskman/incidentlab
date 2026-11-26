@@ -9,9 +9,10 @@ import type { KvStore } from "../repositories/KvStore.ts";
  * Keys a JSON snapshot never holds:
  * - ephemeral: rate-limit windows and login sessions are never backed up or restored;
  * - binary: `evidence:` chunks are raw bytes (ByteStore), not JSON. They are content-addressed and rebuilt
- *   from the case package, so a snapshot skips them (and a restore with --prune leaves them alone).
+ *   from the case package, so a snapshot skips them (and a restore with --prune leaves them alone);
+ * - in-progress uploads: `upload:` records expire within a day and hold binary parts (#66).
  */
-const SKIPPED_PREFIXES = ["ratelimit:", "session:", "evidence:"];
+const SKIPPED_PREFIXES = ["ratelimit:", "session:", "evidence:", "upload:"];
 export const isSnapshotKey = (key: string): boolean => !SKIPPED_PREFIXES.some((p) => key.startsWith(p));
 const isDurable = isSnapshotKey;
 
