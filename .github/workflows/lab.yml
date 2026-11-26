@@ -1,0 +1,67 @@
+name: Lab images
+
+# Builds every case's lab image from its public evidence zip and proves it with the leak gate and the
+# case solver run inside the image (#147, #148). Nothing is pushed: publishing to GHCR is a separate
+# workflow in the incidentslab organisation (#151), so this repo's CI keeps `contents: read`.
+on:
+  pull_request:
+    paths:
+      - "lab/**"
+      - "scripts/build-lab-image.sh"
+      - "scripts/lab_gate.py"
+      - "generator/**"
+      - "solutions/**"
+      - ".github/workflows/lab.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: lab-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lab-image:
+    name: Lab image (${{ matrix.case }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [ghost-in-the-network, 3am-outage, kubernetes-crime-scene, the-insider-commit, who-deleted-prod]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install system tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zip gawk
+
+      - name: Configure git identity for the generated case repos
+        run: |
+          git config --global user.name "IncidentLab CI"
+          git config --global user.email "ci@incidentlab.invalid"
+          git config --global init.defaultBranch main
+
+      - name: Build the evidence (no site)
+        run: ./scripts/build-all.sh --no-site
+
+      - name: Leak gate self-test
+        run: python3 scripts/lab_gate.py --self-test
+
+      - name: Build and prove the lab image
+        run: scripts/build-lab-image.sh "${{ matrix.case }}"
+
+      - name: Image size
+        run: docker image ls --format '{{.Repository}}:{{.Tag}} {{.Size}}' | grep incidentlab/
