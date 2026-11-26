@@ -32,7 +32,8 @@ done
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-NETLIFY=(npx -y netlify-cli@17)
+# netlify-cli@17 crashes on Node >= 25 (a dependency uses the removed SlowBuffer); 27 runs on Node 26.
+NETLIFY=(npx -y netlify-cli@27)
 KEY_FILE="$HOME/.incidentlab-admin-key"
 TOKEN_FILE="$HOME/.netlify-token"
 
@@ -51,6 +52,14 @@ if [[ ! -f "$ROOT/.netlify/state.json" ]]; then
   echo "[deploy] ERROR: repo is not linked to a Netlify site (.netlify/state.json missing). Run: ${NETLIFY[*]} link" >&2
   exit 1
 fi
+
+# Fail fast, before building or backing up, if the CLI itself can't start.
+if ! cli_version="$("${NETLIFY[@]}" --version 2>&1)"; then
+  echo "[deploy] ERROR: the Netlify CLI does not start (${NETLIFY[*]}):" >&2
+  printf '%s\n' "$cli_version" | tail -n 5 >&2
+  exit 1
+fi
+echo "[deploy] using $(printf '%s\n' "$cli_version" | grep -m1 '^netlify-cli/' || printf '%s\n' "$cli_version" | tail -n1)"
 
 echo "[deploy] building (scripts/build-all.sh)"
 "$ROOT/scripts/build-all.sh"
@@ -80,7 +89,15 @@ node --experimental-strip-types "$ROOT/scripts/data.ts" backup --reason pre-depl
 
 # --- ADMIN_KEY: ensure it exists on the site (never echo it) ---
 echo "[deploy] checking ADMIN_KEY on the Netlify site"
-existing="$("${NETLIFY[@]}" env:get ADMIN_KEY --context production 2>/dev/null || true)"
+# Fail closed: a CLI error must never look like "no key". Treating a crash as unset would mint a new key and
+# silently lock the instructor out of the live admin dashboard.
+if ! existing="$("${NETLIFY[@]}" env:get ADMIN_KEY --context production 2>"$ROOT/.netlify/env-get.err")"; then
+  echo "[deploy] ERROR: could not read ADMIN_KEY from the site; not deploying (and not touching the key):" >&2
+  tail -n 5 "$ROOT/.netlify/env-get.err" >&2
+  rm -f "$ROOT/.netlify/env-get.err"
+  exit 1
+fi
+rm -f "$ROOT/.netlify/env-get.err"
 if [[ -z "$existing" || "$existing" == *"No value"* || "$existing" == *"not set"* || "$existing" == *"not found"* ]]; then
   echo "[deploy] ADMIN_KEY not set; generating a new one"
   new_key="$(openssl rand -hex 24)"
@@ -101,7 +118,7 @@ unset existing
 
 BUILD_STAMP="$(sed -nE 's/.*<meta name="build" content="([^"]+)".*/\1/p' "$ROOT/site/dist/index.html" | head -n1)"
 echo "[deploy] deploying site/dist + site/netlify/functions (build ${BUILD_STAMP:-unknown})"
-"${NETLIFY[@]}" deploy --prod --dir=site/dist --functions=site/netlify/functions
+"${NETLIFY[@]}" deploy --prod --no-build --dir=site/dist --functions=site/netlify/functions
 echo "[deploy] live build: ${BUILD_STAMP:-unknown} (check: curl -s <site>/ | grep 'name=\"build\"')"
 cp "$NEW_FP" "$DEPLOYED_FP"
 
