@@ -59,7 +59,7 @@ if ! cli_version="$("${NETLIFY[@]}" --version 2>&1)"; then
   printf '%s\n' "$cli_version" | tail -n 5 >&2
   exit 1
 fi
-echo "[deploy] using $cli_version"
+echo "[deploy] using $(printf '%s\n' "$cli_version" | grep -m1 '^netlify-cli/' || printf '%s\n' "$cli_version" | tail -n1)"
 
 echo "[deploy] building (scripts/build-all.sh)"
 "$ROOT/scripts/build-all.sh"
