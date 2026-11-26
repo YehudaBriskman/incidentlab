@@ -42,6 +42,7 @@ export const TG = defineStrings({
     toolboxCompleted: "Case completed: every command is unlocked for free.",
     toolboxCostNote: (cost: number, stage: number): string => `Each full command costs ${cost} pts, charged to stage ${stage} (the one you're on).`,
     toolboxNotStarted: "Start the case to reveal exact commands. Until then you can read every command's syntax.",
+    toolboxRetry: "Retry",
     stageShort: (n: number): string => `stage ${n}`,
 
     // scoring
@@ -171,6 +172,7 @@ export const TG = defineStrings({
     toolboxCompleted: "התיק הושלם: כל הפקודות פתוחות בחינם.",
     toolboxCostNote: (cost: number, stage: number): string => `כל פקודה מלאה עולה ${cost} נק', על חשבון שלב ${stage} (השלב הנוכחי).`,
     toolboxNotStarted: "התחילו את התיק כדי לחשוף פקודות מדויקות. עד אז אפשר לקרוא את התחביר של כל פקודה.",
+    toolboxRetry: "ניסיון חוזר",
     stageShort: (n: number): string => `שלב ${n}`,
 
     breakdownCaption: "פירוט הניקוד",

@@ -284,7 +284,15 @@ function toolboxNote(c: Case, root: HTMLElement, state: PageState): HTMLElement 
     );
   }
   if (state.kind === "admin") return h("p", { class: "notice muted" }, TG().toolboxAdmin);
-  if (state.kind === "error") return h("p", { class: "notice form-error", role: "alert" }, state.message);
+  if (state.kind === "error") {
+    // The progress load failed (offline, server error): say why and let the player try again in place.
+    return h(
+      "div",
+      { class: "notice", role: "alert" },
+      h("p", { class: "form-error" }, state.message),
+      h("button", { type: "button", class: "btn btn-sm", onclick: () => renderToolbox(root, c) }, TG().toolboxRetry),
+    );
+  }
   const p = state.progress;
   if (state.locked !== null) {
     const todayCase = state.locked.todayCaseId !== null ? caseSummary(state.locked.todayCaseId) : undefined;
