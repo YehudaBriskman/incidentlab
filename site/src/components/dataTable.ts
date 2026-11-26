@@ -413,7 +413,6 @@ export function dataTable<R>(options: DataTableOptions<R>): DataTable<R> {
       spacerBottom.remove();
       table.removeAttribute("aria-rowcount");
     }
-    if (!keyed) rowCache.clear();
     const slice = view.slice(start, end);
     syncKeyed(
       domContainer(tbody),
@@ -445,7 +444,6 @@ export function dataTable<R>(options: DataTableOptions<R>): DataTable<R> {
       const allRow = allBox && options.selection ? h("label", { class: "dt-check dt-cards-all" }, allBox, h("span", { "aria-hidden": "true" }, options.selection.allLabel)) : null;
       setChildren(wrap, allRow, cardList);
     }
-    if (!keyed) cardCache.clear();
     syncKeyed(
       domContainer(cardList),
       cardCache,
