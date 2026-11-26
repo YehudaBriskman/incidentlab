@@ -1,5 +1,5 @@
-// Player UI locks: 44px touch targets on coarse pointers (#126), no home layout shift at 390px (#124) and the
-// skip link hidden at 200% text (#136).
+// Player UI locks: 44px touch targets on coarse pointers (#126), no home layout shift at 390px (#124), the
+// "not you? switch" link asks before it signs out (#134) and the skip link stays hidden at 200% text (#136).
 import { expect, test, type Page } from "@playwright/test";
 import { approveAccount, randomUsername } from "./support";
 
@@ -53,6 +53,24 @@ test.describe("phone with touch (390x844)", () => {
     const cls = await page.evaluate(() => (window as unknown as { __cls: number }).__cls);
     expect(cls).toBeLessThan(0.1);
   });
+});
+
+test("case page: \"not you? switch\" asks before it signs out", async ({ page }) => {
+  await signedInPlayer(page, "switch");
+  await page.goto(`/#/case/${CASE_ID}`);
+  const link = page.getByRole("button", { name: "not you? switch" });
+
+  await link.click();
+  const prompt = page.getByRole("alertdialog");
+  await expect(prompt).toContainText(/progress is saved/i);
+  await prompt.getByRole("button", { name: /cancel/i }).click();
+  await expect(prompt).toBeHidden();
+  await expect(page).toHaveURL(new RegExp(`#/case/${CASE_ID}$`));
+  expect((await page.request.get("/api/me")).status(), "still signed in after Cancel").toBe(200);
+
+  await link.click();
+  await page.getByRole("alertdialog").getByRole("button", { name: /^sign out$/i }).click();
+  await expect(page).toHaveURL(/#\/login$/);
 });
 
 test("skip link stays off screen at 200% text and shows on focus", async ({ page }) => {
