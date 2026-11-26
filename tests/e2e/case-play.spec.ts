@@ -104,5 +104,17 @@ test("case play keeps focus, discloses bonus losses and explains finished stages
     await expect(page.locator(".debrief-next a[href='#/']")).toBeVisible();
   });
 
+  await test.step("debrief: the On this page contents jump to a heading and move focus there", async () => {
+    const toc = page.locator(".reading .toc");
+    await expect(toc).toBeVisible();
+    await toc.locator("summary").click();
+    const first = toc.locator(".toc-list a").first();
+    const target = (await first.getAttribute("href"))?.slice(1) ?? "";
+    expect(target).toMatch(/^debrief-/);
+    await first.click();
+    await expect(page.locator(`[id="${target}"]`)).toBeFocused();
+    await expect(page).toHaveURL(new RegExp(`#/case/${CASE_ID}`)); // hash routing untouched
+  });
+
   expect(pageErrors, "uncaught page errors").toEqual([]);
 });
