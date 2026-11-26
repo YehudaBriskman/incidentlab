@@ -1,4 +1,4 @@
-// Player UI locks: 44px touch targets on coarse pointers (#126).
+// Player UI locks: 44px touch targets on coarse pointers (#126) and the skip link hidden at 200% text (#136).
 import { expect, test, type Page } from "@playwright/test";
 import { approveAccount, randomUsername } from "./support";
 
@@ -27,4 +27,15 @@ test.describe("phone with touch (390x844)", () => {
     const box = await allCommands.boundingBox();
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
   });
+});
+
+test("skip link stays off screen at 200% text and shows on focus", async ({ page }) => {
+  await page.goto("/#/");
+  await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
+  const skip = page.locator(".skip-link");
+  const hidden = await skip.boundingBox();
+  expect((hidden?.y ?? 0) + (hidden?.height ?? 0)).toBeLessThanOrEqual(0);
+  await skip.focus();
+  const shown = await skip.boundingBox();
+  expect(shown?.y ?? -1).toBeGreaterThanOrEqual(0);
 });
