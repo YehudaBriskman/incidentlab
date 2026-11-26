@@ -210,14 +210,19 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, l
     heading.scrollIntoView({ block: "nearest", behavior: "auto" });
   };
 
+  // On a shared lab computer this is the quickest way to hand over, so it stays next to the name, but it asks
+  // first: signing out clears the unchecked answer drafts. Then straight to sign-in (the local session clears
+  // even if logout fails).
   const switchPlayer = (): void => {
-    drafts.clear();
-    // One tap: sign out and go straight to the sign-in screen (the local session clears even if logout fails).
-    void signOut()
-      .catch(() => undefined)
-      .finally(() => {
-        location.hash = "#/login";
-      });
+    void confirm({ title: T().switchTitle, body: T().switchBody, confirmLabel: T().switchConfirm }).then((ok) => {
+      if (!ok) return;
+      drafts.clear();
+      void signOut()
+        .catch(() => undefined)
+        .finally(() => {
+          location.hash = "#/login";
+        });
+    });
   };
 
   const elStats = h("span", { class: "progress-stats" });
