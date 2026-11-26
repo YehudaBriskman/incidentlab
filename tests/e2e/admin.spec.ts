@@ -116,6 +116,8 @@ test("accounts: the column picker adds a column and remembers it", async ({ page
   await page.goto("/#/admin?tab=accounts");
   await expect(ui.acctTable(page)).toBeVisible();
   await expect(page.locator("table.acct-table thead th", { hasText: /^hints$/i })).toHaveCount(0);
+  // closed until asked for (a display rule once kept the popover open from page load)
+  await expect(page.getByRole("checkbox", { name: /^hints$/i })).toBeHidden();
   await ui.columnsButton(page).click();
   await page.getByRole("checkbox", { name: /^hints$/i }).check();
   await expect(page.locator("table.acct-table thead th", { hasText: /^hints/i })).toHaveCount(1);
