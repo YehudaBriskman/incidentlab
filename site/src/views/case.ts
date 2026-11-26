@@ -10,7 +10,8 @@ import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { withApprovedAccount } from "./auth";
 import { renderInstructorPreview } from "./present";
-import { announce, copyButton, ensureAnnouncer, h, html, setChildren } from "../lib/dom";
+import { announce, copyButton, ensureAnnouncer, h, html, setChildren, type Child } from "../lib/dom";
+import { ICONS, type IconName } from "../shell/icons";
 import { confirm, tooltip } from "../lib/overlay";
 import "../player.css";
 import { md, mdInline } from "../lib/markdown";
@@ -70,6 +71,9 @@ function writePref(key: string, value: string): void {
 }
 
 const errorMessage = playErrorText;
+
+/** A decorative stroke icon (shell/icons.ts) before a text label, which carries the meaning (#137). */
+const inlineIcon = (name: IconName): HTMLElement => html("span", { class: "inline-icon", "aria-hidden": "true" }, ICONS[name]);
 
 /* ---------- scoring v2 helpers (mirror server/services/scoring.ts; display only) ---------- */
 
@@ -636,7 +640,7 @@ function renderQuestionStage(
         "div",
         { class: `result-panel ${solved ? "is-solved" : "is-revealed"}${justSolved ? " pop" : ""}` },
         // Focus target after a solve or a reveal; the result itself is announced through the shared region.
-        h("p", { class: "result-title", tabindex: "-1" }, solved ? T().solvedPts(s.points) : T().revealedPts),
+        h("p", { class: "result-title with-icon", tabindex: "-1" }, solved ? null : inlineIcon("eye"), solved ? T().solvedPts(s.points) : T().revealedPts),
         solved && s.breakdown !== null ? breakdownTable(s.breakdown) : null,
         !solved && answer !== null
           ? h("p", { class: "answer-line" }, T().answerLabel, h("code", { class: "answer-code" }, answer), copyButton(() => answer))
@@ -1018,7 +1022,7 @@ function renderDebrief(c: Case, player: ProgressView): HTMLElement {
 const mmss = (seconds: number): string => formatElapsed(seconds * 1000);
 
 function breakdownTable(b: ScoreBreakdown): HTMLElement {
-  const row = (label: string, value: number, detail?: string, extra = ""): HTMLElement =>
+  const row = (label: Child, value: number, detail?: string, extra = ""): HTMLElement =>
     h(
       "tr",
       { class: `${value === 0 ? "is-zero" : value < 0 ? "is-minus" : "is-plus"}${extra}` },
@@ -1039,7 +1043,7 @@ function breakdownTable(b: ScoreBreakdown): HTMLElement {
       row(TG().bdTime, b.time, TG().bdTimeDetail(mmss(b.solveSeconds), mmss(b.targetSeconds))),
       // A bonus that scored 0 says why, so the table explains itself.
       row(TG().bdClean, b.clean, b.clean === 0 && (b.hints < 0 || b.commands < 0 || b.wrong < 0) ? TP().cleanLost(b.hints < 0, b.commands < 0, b.wrong < 0) : undefined),
-      row(TG().bdFirstBlood, b.firstBlood, b.firstBlood === 0 ? TP().firstTaken : undefined),
+      row(h("span", { class: "with-icon" }, inlineIcon("drop"), TG().bdFirstBlood), b.firstBlood, b.firstBlood === 0 ? TP().firstTaken : undefined),
     ),
     h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().bdTotal), h("td", { class: "num" }, formatNumber(b.total)))),
   );

@@ -2,7 +2,8 @@
 import { ACHIEVEMENT_IDS, type CaseStats, type LeaderboardResponse, type UserStats } from "../../shared/contract";
 import { caseSummary } from "../content/load";
 import { ApiError, fetchLeaderboard, fetchMyStats } from "../lib/api";
-import { h, setChildren, type Child } from "../lib/dom";
+import { h, html, setChildren, type Child } from "../lib/dom";
+import { iconSvg } from "../shell/icons";
 import { tooltip } from "../lib/overlay";
 import "../player.css";
 import { dataTable, type Column } from "../components/dataTable";
@@ -94,6 +95,9 @@ function caseColumns(): Column<CaseStats>[] {
   ];
 }
 
+/** Achievement tiles draw their icon at 22px inside the 40px badge. */
+const ACH_ICON_PX = 22;
+
 function achievementsGrid(stats: UserStats): HTMLElement {
   const earned = new Map(stats.achievements.map((a) => [a.id, a.earnedAt]));
   const fmt = new Intl.DateTimeFormat(locale(), { day: "numeric", month: "short", year: "numeric" });
@@ -112,7 +116,8 @@ function achievementsGrid(stats: UserStats): HTMLElement {
         return h(
           "li",
           { class: `ach${at ? " is-earned" : " is-locked"}` },
-          h("span", { class: "ach-icon", "aria-hidden": "true" }, at ? info.icon : "🔒"),
+          // Decorative: the label beside it names the achievement, and "Locked" / "Earned on" says its state.
+          html("span", { class: "ach-icon", "aria-hidden": "true" }, iconSvg(at ? info.icon : "lock", ACH_ICON_PX)),
           h(
             "div",
             { class: "ach-text" },

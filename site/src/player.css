@@ -55,6 +55,11 @@
 .result-panel.is-revealed { background: var(--surface); }
 .breakdown th, .breakdown td { border-bottom-color: color-mix(in oklab, var(--border) 60%, transparent); }
 .breakdown caption { letter-spacing: 0; }
+/* a decorative stroke icon (shell/icons.ts) before its text label: "Answer revealed", "First blood" (#137) */
+.with-icon { display: inline-flex; align-items: center; gap: var(--gap-tight); }
+.result-title.with-icon { display: flex; }
+.inline-icon { display: inline-flex; flex: none; }
+.inline-icon svg { display: block; }
 
 /* hints and tips: soft cards and tone, not side stripes */
 .hint { background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift); padding: var(--space-4) var(--pad-card); }
@@ -99,7 +104,9 @@
 .detail-list dt { font-size: var(--type-label-size); color: var(--text-2); }
 .ach { padding: var(--space-4); border: 0; }
 .ach.is-earned { box-shadow: var(--surface-lift), inset 0 0 0 1px var(--accent-line); }
-.ach-icon { border-radius: var(--radius-control); font-size: 1.4rem; }
+.ach-icon { border-radius: var(--radius-control); color: var(--text-2); }
+.ach-icon svg { display: block; }
+.ach.is-earned .ach-icon { color: var(--accent-text); }
 .ach-label { font-weight: 600; }
 .ach-desc { font-size: var(--type-small-size); }
 .achievements h2, .stats-page h2 { font-size: var(--type-title-size); }
