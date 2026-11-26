@@ -638,15 +638,18 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     const size = bytes !== undefined ? fmtBytes(bytes) : f.size;
     const active = file?.path === f.path;
     const slash = f.path.lastIndexOf("/");
-    const dir = grouped && slash >= 0 ? f.path.slice(0, slash + 1) : "";
-    const base = dir === "" ? f.path : f.path.slice(slash + 1);
+    const base = grouped && slash >= 0 ? f.path.slice(slash + 1) : f.path;
     const loaded = inWorker.has(f.path);
     const btn = h(
       "button",
       // data-sidebar-close: picking a file closes the sidebar drawer on narrow screens (shell/sidebar.ts)
-      { class: `ex-file${active ? " is-active" : ""}`, type: "button", "aria-current": active ? "true" : null, "data-sidebar-close": "" },
-      h("span", { class: "ex-file-name mono", dir: "ltr" }, dir !== "" ? h("span", { class: "visually-hidden" }, dir) : null, breakablePath(base)),
-      loaded ? [h("span", { class: "ex-dot", "aria-hidden": "true" }), h("span", { class: "visually-hidden" }, ` ${T().exLoadedTag}`)] : null,
+      // aria-label carries the full path: hidden text beside the visible name would be read with a space ("app/ x.log")
+      {
+        class: `ex-file${active ? " is-active" : ""}`, type: "button", "aria-current": active ? "true" : null, "data-sidebar-close": "",
+        "aria-label": loaded ? `${f.path}, ${T().exLoadedTag}` : f.path,
+      },
+      h("span", { class: "ex-file-name mono", dir: "ltr", "aria-hidden": "true" }, breakablePath(base)),
+      loaded ? h("span", { class: "ex-dot", "aria-hidden": "true" }) : null,
     );
     const meta = [f.format, size !== "" ? num(size) : "", loaded ? T().exLoadedTag : ""].filter((v) => v !== "").join(" · ");
     tooltip(btn, () => [
