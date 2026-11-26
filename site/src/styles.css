@@ -702,9 +702,7 @@ body { min-height: 0; overflow: hidden; }
 .topbar {
   grid-area: top; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); min-inline-size: 0; min-block-size: var(--topbar-size);
   padding-inline: var(--gutter); border-block-end: var(--edge-width) solid var(--edge-subtle);
-  background: color-mix(in oklab, var(--level-0) 85%, transparent);
-  -webkit-backdrop-filter: saturate(1.6) blur(12px); backdrop-filter: saturate(1.6) blur(12px);
-  position: relative; z-index: 1;
+  position: relative; z-index: 1; /* the glass (background, blur, shadow) comes from the chrome recipe below */
 }
 .icon-btn, .settings-btn {
   flex: none; display: inline-flex; align-items: center; justify-content: center;
@@ -1490,7 +1488,7 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
   .chip-completed, .chip-in-progress, .chip-frozen, .lb-you { border-width: 2px; }
   .dot, .event-clock .dot { forced-color-adjust: none; background: CanvasText; }
   .nav-link[aria-current="page"] { box-shadow: none; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
-  .nav-toggle, .settings-btn, .settings-option, .settings-panel, .net-status.is-down { border-color: CanvasText; }
+  .icon-btn, .settings-btn, .settings-option, .settings-panel, .net-status.is-down { border-color: CanvasText; }
   .settings-option:has(input:checked) { border-width: 2px; }
   .lb-table tr.is-me > * { forced-color-adjust: none; background: Highlight; color: HighlightText; }
   .cmd.is-revealed .code-block { border-inline-start: 3px solid CanvasText; }
@@ -1897,7 +1895,7 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
 }
 
 /* ---- glass chrome: the top bar (92% opaque, so text always reads) ---- */
-.navbar, .surface-chrome {
+.topbar, .surface-chrome {
   background: color-mix(in oklab, var(--surface) 92%, transparent);
   -webkit-backdrop-filter: blur(20px) saturate(140%); backdrop-filter: blur(20px) saturate(140%);
   border-block-end-color: color-mix(in oklab, var(--border) 70%, transparent);
@@ -1905,10 +1903,10 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
 }
 /* glass turns opaque when the user asks for less transparency or more contrast */
 @media (prefers-reduced-transparency: reduce) {
-  .navbar, .surface-chrome { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .topbar, .surface-chrome { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
   .ov-dialog::backdrop, .ov-sheet::backdrop { -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
-:root[data-contrast="more"] :is(.navbar, .surface-chrome) { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-contrast="more"] :is(.topbar, .surface-chrome) { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
 
 /* ---- motion: popups fade + scale 0.95 + 8px from the trigger side over 220ms; dialogs scale over 300ms and
         leave on the faster exit curve. transform-origin comes from lib/overlay.ts (the anchor point). ---- */
