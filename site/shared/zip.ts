@@ -24,7 +24,7 @@ export interface ZipArchive {
   readonly entries: readonly ZipEntry[];
   get(name: string): ZipEntry | undefined;
   /** the entry's uncompressed bytes, checked against its size and CRC-32 */
-  read(entry: ZipEntry | string): Promise<Uint8Array>;
+  read(entry: ZipEntry | string): Promise<Uint8Array<ArrayBuffer>>;
 }
 
 const SIG_EOCD = 0x06054b50;
@@ -56,7 +56,7 @@ const isSafeName = (name: string): boolean => {
     path.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
 };
 
-async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
+async function inflateRaw(data: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
   const stream = new DecompressionStream("deflate-raw");
   const writer = stream.writable.getWriter();
   // Failures surface on the readable side; keep the writer's promises from rejecting unhandled.

@@ -24,12 +24,20 @@ export function createTextScan(haystack: string): (text: string) => boolean {
   };
 }
 
-const isWordChar = (ch: string | undefined): boolean => ch !== undefined && /[\p{L}\p{N}_]/u.test(ch);
+type CharClass = "letter" | "digit" | "other";
+const charClass = (ch: string | undefined): CharClass =>
+  ch === undefined ? "other" : /\p{N}/u.test(ch) ? "digit" : /[\p{L}_]/u.test(ch) ? "letter" : "other";
+/** True when `outside` would extend the token that `edge` ends: a digit next to a digit, a letter next to a letter. */
+const continues = (edge: string | undefined, outside: string | undefined): boolean => {
+  const cls = charClass(edge);
+  return cls !== "other" && cls === charClass(outside);
+};
 
 /**
  * Returns a test for "does this answer appear in the haystack": both sides are normalized like player input
  * (normalizeAnswer, so case and whitespace do not matter, after escape normalization), and a match must be
- * a whole token (no letter, digit or underscore right before or after it), so "42" does not match "1428".
+ * a whole token: a digit may not continue into a digit, nor a letter into a letter, so "1428" does not match
+ * "91428" and "role" does not match "roles", while "07:15:42" does match "07:15:42Z".
  * Answers shorter than ANSWER_MIN_LENGTH never match.
  */
 export function createAnswerScan(haystack: string): (answer: string) => boolean {
@@ -38,7 +46,8 @@ export function createAnswerScan(haystack: string): (answer: string) => boolean 
     const needle = normalizeAnswer(normalizeEscapes(answer));
     if (needle.length < ANSWER_MIN_LENGTH) return false;
     for (let at = normalized.indexOf(needle); at >= 0; at = normalized.indexOf(needle, at + 1)) {
-      if (!isWordChar(normalized[at - 1]) && !isWordChar(normalized[at + needle.length])) return true;
+      const end = at + needle.length;
+      if (!continues(needle[0], normalized[at - 1]) && !continues(needle[needle.length - 1], normalized[end])) return true;
     }
     return false;
   };
