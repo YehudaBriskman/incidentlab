@@ -237,6 +237,31 @@ test("row menu: Revoke asks first, and Cancel changes nothing (#128)", async ({ 
   });
 });
 
+test.describe("projector board at 1440x900", () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test("shows the whole top 10 on one screen, then +N more (#127)", async ({ page, playwright, baseURL, request }) => {
+    // Top the board up to 11 scored players (earlier specs may already have made some).
+    const res = await request.get("/api/leaderboard");
+    const have = ((await res.json()) as { entries: unknown[] }).entries.length;
+    for (let i = have; i < 11; i += 1) await playingPlayer(playwright, baseURL, request, "e2eboard", 1);
+    await signInAdmin(page);
+    await page.goto("/#/admin?tab=accounts");
+    await side.head(page).getByRole("button", { name: "Projector board" }).click();
+    const rows = page.locator(".admin-board-row");
+    await expect(rows).toHaveCount(10);
+    await expect(page.locator(".admin-board-more")).toHaveText(/^\+\d+ more players?$/);
+    await expect(page.locator(".admin-board-state")).toContainText(/live standings|frozen/i);
+    // Every row and the "+N more" line sit inside the viewport, with nothing to scroll.
+    const fits = await page.evaluate(() => {
+      const bottoms = [...document.querySelectorAll(".admin-board-row, .admin-board-more")].map((el) => el.getBoundingClientRect().bottom);
+      const body = document.querySelector(".admin-board .ov-body");
+      return { inView: bottoms.every((b) => b <= window.innerHeight), scrolls: body !== null && body.scrollHeight > body.clientHeight + 1 };
+    });
+    expect(fits).toEqual({ inView: true, scrolls: false });
+  });
+});
+
 test.describe("HE 390", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 

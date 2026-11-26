@@ -26,6 +26,7 @@ import {
   type UserStats,
 } from "../../shared/contract";
 import { cachedCase } from "../content/load";
+import { cachedEvent, eventPhase, formatCountdown, serverNow as publicServerNow } from "../lib/event";
 import { dataTable, type Column } from "../components/dataTable";
 import { statGrid, statTile } from "../components/statGrid";
 import { formActions, formField } from "../components/formLayout";
@@ -76,6 +77,8 @@ import {
 const POLL_MS = 5000;
 /** The dashboard poll refetches /api/today at most this often (see load()). */
 const TODAY_REFRESH_MS = 60_000;
+/** Rows on the projector board; the rest are summed up as "+N more". */
+const BOARD_ROWS = 10;
 const MAX_BACKOFF_MS = 60000;
 const STUCK_WARN_MIN = 8;
 const STUCK_ALERT_MIN = 15;
@@ -4414,6 +4417,54 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     void loadBoard();
   });
 
+  // Event line and freeze state in the board header: kept across re-renders and ticked once a second.
+  const boardEventEl = h("p", { class: "admin-board-event", "aria-live": "off" });
+  const boardStateEl = h("p", { class: "admin-board-state" });
+
+  /** The event as the room sees it: the admin's copy once the Event section loaded it, else the public poll's. */
+  function boardEvent(): { event: LiveEvent | null; now: number } {
+    return state.event.server ? { event: state.event.server, now: serverNow() } : { event: cachedEvent(), now: publicServerNow() };
+  }
+
+  function renderBoardClock(): void {
+    const { event, now } = boardEvent();
+    const name = event?.name.trim() ?? "";
+    const phase = eventPhase(event, now);
+    const when =
+      phase.kind === "before"
+        ? T().admBoardStartsIn(formatCountdown(phase.msLeft))
+        : phase.kind === "running"
+          ? phase.msLeft === null
+            ? ""
+            : T().admBoardEndsIn(formatCountdown(phase.msLeft))
+          : phase.kind === "over"
+            ? T().admBoardEventOver
+            : "";
+    setChildren(boardEventEl, name ? h("strong", { dir: "auto" }, name) : null, name && when ? " · " : "", when ? h("span", { class: "board-clock" }, when) : null);
+    boardEventEl.hidden = !name && !when;
+
+    const data = state.board.data && state.board.data.caseId === state.board.scope ? state.board.data : null;
+    if (!data) {
+      boardStateEl.hidden = true;
+      return;
+    }
+    boardStateEl.hidden = false;
+    const freezeAt = ms(event?.freezeAt ?? null);
+    const detail = data.frozen
+      ? data.frozenAt
+        ? T().admBoardFrozenAt(formatDateTime(data.frozenAt))
+        : ""
+      : freezeAt !== null && freezeAt > now
+        ? T().admBoardFreezesIn(formatCountdown(freezeAt - now))
+        : "";
+    boardStateEl.classList.toggle("is-frozen", data.frozen);
+    setChildren(
+      boardStateEl,
+      data.frozen ? h("span", { class: "board-frozen-chip" }, "❄ ", T().admBoardFrozen) : h("span", { class: "board-live-chip" }, T().admBoardLive),
+      detail ? h("span", { class: "board-frozen-at" }, detail) : null,
+    );
+  }
+
   function renderLeaderboard(): void {
     if (!state.leaderboard) {
       boardDialog?.close(null); // focus goes back to the button (or the "More" menu) that opened it
@@ -4438,7 +4489,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       released.map((id) => h("option", { value: id, selected: id === b.scope }, caseTitle(id))),
     );
     const data = b.data && b.data.caseId === b.scope ? b.data : null;
-    const top = data ? data.entries.slice(0, 10) : [];
+    const top = data ? data.entries.slice(0, BOARD_ROWS) : [];
     const close = h(
       "button",
       {
@@ -4448,15 +4499,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       },
       T().admClose,
     );
-    const frozen = data?.frozen === true;
-    const stateChip = data
-      ? h(
-          "p",
-          { class: `admin-board-state${frozen ? " is-frozen" : ""}` },
-          frozen ? h("span", { class: "board-frozen-chip" }, "❄ ", T().admBoardFrozen) : h("span", { class: "board-live-chip" }, T().admBoardLive),
-          frozen && data.frozenAt ? h("span", { class: "board-frozen-at" }, T().admBoardFrozenAt(formatDateTime(data.frozenAt))) : null,
-        )
-      : null;
+    renderBoardClock();
+    const more = data ? Math.max(0, data.entries.length - BOARD_ROWS) : 0;
     let body: HTMLElement;
     if (b.error && !data) body = h("p", { class: "admin-error admin-board-empty", role: "alert" }, T().admBoardFailed(b.error));
     else if (!data) body = h("p", { class: "muted admin-board-empty" }, T().admLoading);
@@ -4485,6 +4529,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       h(
         "div",
         { class: "admin-board-inner" },
+        // The header answers what the room asks: which event, how long is left, and are the standings frozen.
         h(
           "div",
           { class: "admin-board-head" },
@@ -4496,9 +4541,10 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
             boardScopeSelect,
             close,
           ),
+          h("div", { class: "admin-board-meta" }, boardEventEl, boardStateEl),
         ),
-        stateChip,
         body,
+        more > 0 ? h("p", { class: "admin-board-more" }, T().admBoardMore(more, fmtInt(more))) : null,
       ),
     );
     // Re-appending moves focus out of the dialog: put it back (Close on first open).
@@ -4691,6 +4737,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       if (!container.isConnected) return dispose();
       renderUpdated();
       if (state.tab === "event") renderEventStatus();
+      if (state.leaderboard && boardDialog !== null) renderBoardClock();
     }, 1000);
   }
 
