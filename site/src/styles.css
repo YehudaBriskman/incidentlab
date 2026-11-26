@@ -794,8 +794,9 @@ main.app-content {
   max-width: none; margin: 0; padding: var(--space-4) var(--gutter) var(--space-8);
 }
 .app-notice:empty { display: none; }
-.app-notice, .page-header, .page-body { inline-size: 100%; max-inline-size: var(--page); margin-inline: auto; }
-:root[data-aside-page] :is(.app-notice, .page-header, .page-body), .app-content[data-layout="fit"] :is(.app-notice, .page-header, .page-body) { max-inline-size: var(--page-wide); }
+/* Dashboard frame: every page fills the content area at every width (no capped column, no dead side space).
+   Long reading text keeps its own --read / --measure cap inside the page (.stage-wrap, .reading, .prose). */
+.app-notice, .page-header, .page-body { inline-size: 100%; max-inline-size: none; margin-inline: 0; }
 .page-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap-stack); align-items: start; }
 #app { min-inline-size: 0; outline: none; }
 .view { display: contents; }
@@ -1188,7 +1189,7 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 .progress-stats { font-size: var(--step--1); color: var(--text-2); min-width: 0; overflow-wrap: anywhere; }
 
 /* ============ stage ============ */
-.stage-wrap { max-width: var(--read); margin: 0 auto; }
+.stage-wrap { max-width: none; margin: 0; } /* fills the page; paragraphs keep --measure */
 /* design-review-ignore LU-OUTLINE-NONE: tabindex=-1 route focus target (focused by script after navigation), never a Tab stop */
 .stage-wrap:focus { outline: none; }
 .stage { display: flex; flex-direction: column; gap: var(--space-6); }
@@ -1316,7 +1317,7 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 @keyframes skeleton-pulse { 50% { opacity: 0.55; } }
 
 /* ============ stats page ============ */
-.stats-page { max-width: var(--page-narrow); padding: var(--space-6) 0; }
+.stats-page { max-width: none; padding: var(--space-6) 0; }
 .stats-page h1 { margin: var(--space-3) 0 var(--space-1); }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--space-3); margin: var(--space-5) 0 var(--space-2); }
 .stat-tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4); }
@@ -1422,7 +1423,7 @@ p.notice.form-error { display: block; }
 }
 
 /* ============ leaderboard ============ */
-.lb-page { max-width: var(--page-narrow); margin: 0 auto; padding: var(--space-5) 0; }
+.lb-page { max-width: none; margin: 0; padding: var(--space-5) 0; }
 .lb-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: var(--space-4); margin-bottom: var(--space-4); }
 .lb-head h1 { margin: var(--space-2) 0 2px; }
 .lb-case-title { margin: 0; color: var(--text-2); }
@@ -1813,7 +1814,7 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
 .debrief-next { margin-block: var(--space-5); }
 
 /* ============ reading layout + form layout (src/components/readingLayout.ts, formLayout.ts) ============ */
-.reading { max-inline-size: var(--read); }
+.reading { max-inline-size: none; } /* fills the page; paragraphs keep --measure */
 .toc { margin-block: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
 .toc-summary { cursor: pointer; padding: var(--space-3) var(--space-4); min-block-size: var(--target-min); font-weight: 600; font-size: var(--step--1); }
 .toc nav { padding: 0 var(--space-4) var(--space-3); }
@@ -1827,7 +1828,7 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
 .form-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 
 /* ============ case authoring (#/author, views/author.ts) ============ */
-.author-page { max-inline-size: var(--page-narrow); padding-block: var(--space-6); }
+.author-page { max-inline-size: none; padding-block: var(--space-6); }
 .author-page h1 { margin: 0 0 var(--space-1); }
 .author-form { margin-block: var(--space-5); }
 .check-row { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--target-min); font-size: var(--step--1); }
