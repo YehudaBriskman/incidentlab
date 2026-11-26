@@ -5,6 +5,7 @@ import { caseSummaries, caseSummary } from "../content/load";
 import { fetchLeaderboard } from "../lib/api";
 import { dataTable, type Column } from "../components/dataTable";
 import { h, setChildren } from "../lib/dom";
+import "../player.css";
 import { cachedEvent, eventPhase, formatCountdown, isEventActive, onEventChange } from "../lib/event";
 import { cachedAccount, loadAccount } from "../lib/session";
 import type { AccountView } from "../../shared/contract";

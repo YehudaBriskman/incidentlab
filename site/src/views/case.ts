@@ -9,7 +9,8 @@ import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { withApprovedAccount } from "./auth";
 import { announce, copyButton, ensureAnnouncer, h, html, setChildren } from "../lib/dom";
-import { confirm } from "../lib/overlay";
+import { confirm, tooltip } from "../lib/overlay";
+import "../player.css";
 import { md, mdInline } from "../lib/markdown";
 import { readingLayout } from "../components/readingLayout";
 import { formatElapsed } from "../lib/time";
@@ -114,7 +115,7 @@ export function renderCase(root: HTMLElement, c: Case): void {
 }
 
 function loadProgress(root: HTMLElement, c: Case, refreshToday = false): void {
-  setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, T().loadingInvestigation)));
+  setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted" }, T().loadingInvestigation)));
   const today = loadToday(refreshToday).catch(() => null);
   getProgress(c.id)
     .then(async (progress) => renderStaged(root, c, progress, lockedToday(progress, await today, c.id)))
@@ -217,7 +218,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, l
       });
   };
 
-  const elStats = h("span", { class: "progress-stats mono" });
+  const elStats = h("span", { class: "progress-stats" });
   const elFill = h("span", { class: "progress-fill" });
   const tick = (): void => {
     const solved = QUESTION_ORDER.filter((id) => isDone(stageProgress(player, id))).length;
@@ -394,7 +395,7 @@ function lockedCard(c: Case, locked: LockedToday): HTMLElement {
   return h(
     "div",
     { class: "notice locked-card", role: "status" },
-    h("p", { class: "stage-kicker mono" }, TA().lockedKicker),
+    h("p", { class: "stage-kicker" }, TA().lockedKicker),
     h("p", { class: "notice-title" }, TA().lockedTitle(c.title)),
     h("p", { class: "muted" }, TA().lockedBody, todayCase ? ` ${TA().lockedTodayIs(todayCase.title)}` : null),
     lockedActions(locked),
@@ -465,7 +466,7 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
   return h(
     "div",
     { class: "stage" },
-    h("p", { class: "stage-kicker mono" }, T().setupKicker),
+    h("p", { class: "stage-kicker" }, T().setupKicker),
     locked ? lockedCard(c, locked) : h("h2", { class: "stage-goal", tabindex: "-1" }, T().setupGoal),
     briefing,
     h(
@@ -619,7 +620,7 @@ function renderQuestionStage(
   const q = questionFor(c, id);
   const s = stageProgress(player, id);
   const index = QUESTION_ORDER.indexOf(id) + 1;
-  const kicker = h("p", { class: "stage-kicker mono" }, T().stageOf(index, QUESTION_ORDER.length));
+  const kicker = h("p", { class: "stage-kicker" }, T().stageOf(index, QUESTION_ORDER.length));
   if (q === undefined || s === undefined) {
     return h("div", { class: "stage" }, kicker, h("h2", { class: "stage-goal", tabindex: "-1" }, T().stageUnavailable));
   }
@@ -678,7 +679,7 @@ function renderQuestionStage(
               "ol",
               { class: "hint-list" },
               usedHints.map((text, i) =>
-                h("li", { class: "hint" }, h("span", { class: "hint-label mono" }, TP().hintLabel(i + 1, q.hints[i]?.cost ?? 0)), prose("prose", text)),
+                h("li", { class: "hint" }, h("span", { class: "hint-label" }, TP().hintLabel(i + 1, q.hints[i]?.cost ?? 0)), prose("prose", text)),
               ),
             ),
           )
@@ -759,14 +760,19 @@ function renderQuestionStage(
     else cooldowns.delete(cooldownKey);
   }
 
+  // Scoring fine print: read by screen readers in place, shown to sighted players on the ⓘ beside the format.
+  const costText = TP().costNote(SCORING.WRONG_COST, SCORING.WRONG_CAP, SCORING.CLEAN_BONUS, cleanOpen);
+  const costNote = h("p", { class: "visually-hidden cost-note" }, costText);
+  const costInfo = h("button", { type: "button", class: "info-dot", "aria-label": costText }, "i");
+  tooltip(costInfo, costText);
   const form = h(
     "form",
     { class: "answer-form", id: `form-${id}`, novalidate: true },
     h("label", { class: "answer-label", for: inputId }, T().yourAnswer),
-    h("p", { id: `fmt-${id}`, class: "muted small" }, T().format, contentText("bdi", { class: "answer-format" }, q.answerFormat)),
+    h("p", { id: `fmt-${id}`, class: "muted small answer-format-line" }, T().format, contentText("bdi", { class: "answer-format" }, q.answerFormat), costInfo),
     h("div", { class: "answer-row" }, input, submit),
     feedback,
-    h("p", { class: "muted small cost-note" }, TP().costNote(SCORING.WRONG_COST, SCORING.WRONG_CAP, SCORING.CLEAN_BONUS, cleanOpen)),
+    costNote,
   );
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
@@ -834,7 +840,7 @@ function renderQuestionStage(
     h(
       "li",
       { class: "hint", tabindex: "-1", "data-hint": String(i) },
-      h("span", { class: "hint-label mono" }, TP().hintLabel(i + 1, hint.cost)),
+      h("span", { class: "hint-label" }, TP().hintLabel(i + 1, hint.cost)),
       prose("prose", hintTexts[i] ?? ""),
     ),
   );
@@ -985,7 +991,7 @@ function shareLine(c: Case, player: ProgressView): HTMLElement {
     sep,
     TP().shareHints(totalHints(player)),
     sep,
-    h("bdi", { dir: "ltr", class: "mono" }, caseElapsed(player)),
+    h("bdi", { dir: "ltr", class: "tnum" }, caseElapsed(player)),
   );
 }
 
@@ -1006,14 +1012,14 @@ function renderDebrief(c: Case, player: ProgressView): HTMLElement {
   return h(
     "div",
     { class: "stage" },
-    h("p", { class: "stage-kicker mono" }, T().debrief),
+    h("p", { class: "stage-kicker" }, T().debrief),
     h("h2", { class: "stage-goal", tabindex: "-1" }, T().caseClosed),
     h(
       "div",
       { class: "score-card" },
       h(
         "p",
-        { class: "score-big mono" },
+        { class: "score-big" },
         formatNumber(player.score),
         h("span", { class: "muted" }, ` ${TG().ptsUnit} · ${TG().parOf(player.maxScore)}`),
         player.score > player.maxScore ? h("span", { class: "chip chip-completed above-par" }, `▲ ${TG().abovePar}`) : null,
@@ -1043,7 +1049,7 @@ function breakdownTable(b: ScoreBreakdown): HTMLElement {
       "tr",
       { class: `${value === 0 ? "is-zero" : value < 0 ? "is-minus" : "is-plus"}${extra}` },
       h("th", { scope: "row" }, label, detail ? h("span", { class: "bd-detail muted" }, detail) : null),
-      h("td", { class: "num mono" }, TG().pts(value)),
+      h("td", { class: "num" }, TG().pts(value)),
     );
   return h(
     "table",
@@ -1061,7 +1067,7 @@ function breakdownTable(b: ScoreBreakdown): HTMLElement {
       row(TG().bdClean, b.clean, b.clean === 0 && (b.hints < 0 || b.commands < 0 || b.wrong < 0) ? TP().cleanLost(b.hints < 0, b.commands < 0, b.wrong < 0) : undefined),
       row(TG().bdFirstBlood, b.firstBlood, b.firstBlood === 0 ? TP().firstTaken : undefined),
     ),
-    h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().bdTotal), h("td", { class: "num mono" }, formatNumber(b.total)))),
+    h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().bdTotal), h("td", { class: "num" }, formatNumber(b.total)))),
   );
 }
 
@@ -1165,16 +1171,16 @@ function stageTotals(c: Case, player: ProgressView): HTMLElement {
               ? null
               : h("span", { class: "bd-detail muted" }, revealed ? TG().revealedShort : TP().stageCosts(s.hintsRevealed, s.commandsRevealed, s.wrongAttempts)),
           ),
-          h("td", { class: "num mono" }, String(s?.points ?? 0)),
+          h("td", { class: "num" }, String(s?.points ?? 0)),
         );
       }),
       h(
         "tr",
         { class: player.completionBonus > 0 ? "is-plus" : "is-zero" },
         h("th", { scope: "row" }, player.completionBonus > 0 ? TG().completionBonus : TG().completionNone),
-        h("td", { class: "num mono" }, TG().pts(player.completionBonus)),
+        h("td", { class: "num" }, TG().pts(player.completionBonus)),
       ),
     ),
-    h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().totalLabel), h("td", { class: "num mono" }, formatNumber(player.score)))),
+    h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().totalLabel), h("td", { class: "num" }, formatNumber(player.score)))),
   );
 }

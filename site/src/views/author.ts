@@ -21,6 +21,7 @@ import { locale } from "../i18n/i18n";
 import { rawApiFetch } from "../lib/api";
 import { h, setChildren, type Child } from "../lib/dom";
 import { confirm, menu, toast } from "../lib/overlay";
+import "../player.css";
 import { loadAccount } from "../lib/session";
 
 const send: UploadTransport = (path, init) =>
@@ -52,7 +53,7 @@ const errorText = (err: unknown): string => (err instanceof Error ? err.message 
 
 export function renderAuthor(root: HTMLElement): void {
   document.title = `${TAu().title} · IncidentLab`;
-  setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, TAu().casesLoading)));
+  setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted" }, TAu().casesLoading)));
   loadAccount()
     .then((account) => {
       if (account === null) {

@@ -3,6 +3,8 @@ import { ACHIEVEMENT_IDS, type CaseStats, type LeaderboardResponse, type UserSta
 import { caseSummary } from "../content/load";
 import { ApiError, fetchLeaderboard, fetchMyStats } from "../lib/api";
 import { h, setChildren, type Child } from "../lib/dom";
+import { tooltip } from "../lib/overlay";
+import "../player.css";
 import { dataTable, type Column } from "../components/dataTable";
 import { statGrid, statTile } from "../components/statGrid";
 import { formatElapsed } from "../lib/time";
@@ -15,6 +17,13 @@ import { T } from "../i18n/strings-player";
 import { passwordChangeForm, withApprovedAccount } from "./auth";
 
 const locale = (): string => (getLang() === "he" ? "he-IL" : "en-GB");
+
+/** Puts a secondary line in a hover tooltip; the text stays in the DOM for screen readers. */
+function withTip(el: HTMLElement, text: string): HTMLElement {
+  el.append(h("span", { class: "visually-hidden" }, ` ${text}`));
+  tooltip(el, text);
+  return el;
+}
 
 /** A KPI card: label, value (+ unit), then comparison lines that give the number its context. */
 function kpi(label: string, value: string, unit: string | null, subs: ReadonlyArray<string | null>): HTMLElement {
@@ -75,13 +84,13 @@ function caseColumns(): Column<CaseStats>[] {
       id: "time",
       header: TA().colTime,
       numeric: true,
-      className: "mono",
+      className: "tnum",
       sortValue: (c) => (played(c) ? c.durationSeconds : null),
       cell: (c) => (c.durationSeconds === null || !played(c) ? none() : formatElapsed(c.durationSeconds * 1000)),
     },
-    { id: "hints", header: TA().colHints, numeric: true, className: "mono", sortValue: (c) => (played(c) ? c.hintsUsed : null), cell: (c) => count(c, c.hintsUsed) },
-    { id: "commands", header: TG().colCommands, numeric: true, className: "mono", sortValue: (c) => (played(c) ? c.commandsRevealed : null), cell: (c) => count(c, c.commandsRevealed) },
-    { id: "wrong", header: TA().colWrong, numeric: true, className: "mono", sortValue: (c) => (played(c) ? c.wrongAttempts : null), cell: (c) => count(c, c.wrongAttempts) },
+    { id: "hints", header: TA().colHints, numeric: true, className: "tnum", sortValue: (c) => (played(c) ? c.hintsUsed : null), cell: (c) => count(c, c.hintsUsed) },
+    { id: "commands", header: TG().colCommands, numeric: true, className: "tnum", sortValue: (c) => (played(c) ? c.commandsRevealed : null), cell: (c) => count(c, c.commandsRevealed) },
+    { id: "wrong", header: TA().colWrong, numeric: true, className: "tnum", sortValue: (c) => (played(c) ? c.wrongAttempts : null), cell: (c) => count(c, c.wrongAttempts) },
   ];
 }
 
@@ -155,8 +164,7 @@ function draw(root: HTMLElement, stats: UserStats, board: LeaderboardResponse | 
       { class: "stats-page" },
       h("a", { class: "back-link", href: "#/" }, T().navCases),
       h("h1", {}, TA().statsTitle),
-      h("p", { class: "muted" }, h("strong", {}, h("bdi", {}, stats.username)), " · ", TA().memberSince(since)),
-      h("p", { class: "muted small" }, TO().statsSub),
+      withTip(h("p", { class: "page-meta" }, h("strong", {}, h("bdi", {}, stats.username)), " · ", TA().memberSince(since)), TO().statsSub),
       statGrid([
         kpi(TO().kpiScore, formatNumber(stats.totalScore), TO().ptsUnit, [
           classMedian !== null ? TO().vsMedian(stats.totalScore - classMedian, classMedian) : null,
@@ -210,7 +218,7 @@ export function renderStats(root: HTMLElement): void {
     root,
     TA().statsTitle,
     () => {
-      setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, TA().statsLoading)));
+      setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted" }, TA().statsLoading)));
       const board = fetchLeaderboard(null).catch(() => null); // comparisons only: never blocks the page
       Promise.all([fetchMyStats(), board])
         .then(([stats, leaderboard]) => draw(root, stats, leaderboard))

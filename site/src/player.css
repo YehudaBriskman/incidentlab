@@ -1,0 +1,137 @@
+/* =====================================================================
+   Player pages, Soft UI sweep B (DESIGN.md 3.0.0): case, toolbox, My stats, leaderboard and projector,
+   auth, authoring. Imported by those views, so it loads after styles.css and wins at equal specificity.
+   Role tokens only. Cards: no border, --surface-lift, 12px; controls 8px; sections separate by spacing
+   and tone, not rules. Mono only for copyable text (commands, IDs, answers). Hebrew tracking and case are
+   reset globally in styles.css.
+   ===================================================================== */
+
+/* ---- shared: page header, meta, numbers, the info dot ---- */
+:is(.case-head-title, .stats-page, .author-page, .toolbox-page, .lb-page:not(.is-projector) .lb-head, .center-card) h1 {
+  font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.25;
+}
+.page-meta, .player-tag { margin: 0; font-size: var(--type-small-size); color: var(--text-muted); }
+.page-meta strong, .player-tag strong { color: var(--text); font-weight: 600; }
+.tnum, .progress-stats, .score-big, .breakdown td.num, .stats-table td.num { font-variant-numeric: tabular-nums; }
+.eyebrow { font-size: var(--type-small-size); font-weight: 500; color: var(--text-muted); letter-spacing: 0; }
+/* a quiet "i" that holds fine print in a tooltip; 24px target (WCAG 2.5.8) */
+.info-dot {
+  display: inline-grid; place-items: center; inline-size: 24px; block-size: 24px; margin-inline-start: var(--space-2);
+  padding: 0; border: 0; border-radius: var(--radius-pill); background: var(--fill-inset); color: var(--text-2);
+  font: inherit; font-size: var(--type-label-size); font-weight: 600; line-height: 1; cursor: help; vertical-align: middle;
+  transition: background-color var(--motion-settle) var(--ease-standard);
+}
+.info-dot:hover { background: var(--fill-track); color: var(--text); }
+
+/* ---- case header: title, the stage row, progress; spacing instead of a rule ---- */
+.case-head { border-bottom: 0; padding-block: 0; margin-bottom: var(--gap-section); }
+.case-head-title { margin-block: var(--gap-related) var(--gap-stack); }
+.progress { margin-top: var(--gap-stack); }
+.progress-track { block-size: 6px; border-radius: var(--radius-pill); background: var(--fill-track); }
+.progress-fill { border-radius: var(--radius-pill); }
+.progress-stats { font-size: var(--type-small-size); color: var(--text-2); }
+/* phone stage row: each step is a pill-shaped hit area */
+.step { border-radius: var(--radius-pill); }
+.step.is-viewing { border-radius: var(--radius-pill); box-shadow: none; background: var(--fill-inset); color: var(--text); }
+.step:not(:disabled):not([aria-disabled="true"]):hover { background: var(--hover); }
+
+/* ---- stage ---- */
+.stage-kicker { font-size: var(--type-small-size); font-weight: 600; letter-spacing: 0; color: var(--accent-text); }
+.stage h3, .look-for > summary { font-size: var(--type-small-size); font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text-2); }
+.stage-goal { font-size: clamp(1.375rem, 1.2rem + 0.9vw, 1.75rem); letter-spacing: -0.015em; line-height: 1.25; }
+/* stage chips: tinted pills, no outline */
+.meter-item { --pill-bg: var(--fill-inset); --pill-line: transparent; border-color: transparent; font-weight: 500; }
+.meter-upto { --pill-bg: var(--fill-track); --pill-line: transparent; font-weight: 600; }
+.meter-bonus, .meter-time { --pill-bg: var(--success-bg); --pill-line: transparent; }
+.meter-item.is-minus { --pill-bg: var(--danger-bg); --pill-line: transparent; }
+.meter-bonus.is-lost { --pill-bg: var(--fill-inset); --pill-line: transparent; }
+.meter-track { background: transparent; }
+
+/* the stage card, answer form and result panel */
+.question-box { padding: var(--pad-card); border: 0; border-radius: var(--radius-card); box-shadow: var(--surface-lift); background: var(--surface); }
+.answer-format-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-1); }
+.answer-label { font-size: var(--type-small-size); }
+.result-panel { padding: var(--pad-card); border: 0; border-radius: var(--radius-card); box-shadow: var(--surface-lift); }
+.result-panel.is-revealed { background: var(--surface); }
+.breakdown th, .breakdown td { border-bottom-color: color-mix(in oklab, var(--border) 60%, transparent); }
+.breakdown caption { letter-spacing: 0; }
+
+/* hints and tips: soft cards and tone, not side stripes */
+.hint { background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift); padding: var(--space-4) var(--pad-card); }
+.hint-label { font-size: var(--type-label-size); font-weight: 600; }
+.tip { border-inline-start: 0; background: var(--fill-inset); border-radius: var(--radius-card); padding: var(--space-4); }
+.reveal { border-top: 0; padding-top: var(--space-3); }
+
+/* command cards (case stage and toolbox): a soft card; the code keeps its dark surface at 8px */
+.cmd { background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift); padding: var(--space-4) var(--pad-card) var(--pad-card); }
+.cmd h4 { font-size: var(--type-body-size); font-weight: 600; }
+.code-block, .code-block.syntax-block { border-radius: var(--radius-control); }
+.code-block.syntax-block { background: var(--fill-inset); border: 1px dashed var(--edge-control); }
+.syntax-label { margin-block: var(--space-3) var(--space-1); font-size: var(--type-label-size); font-weight: 500; letter-spacing: 0; text-transform: none; }
+.tool-list { gap: var(--gap-stack); }
+.btn-reveal { border-style: solid; }
+
+/* setup: the briefing and the two paths are soft cards */
+.briefing { background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift); padding: var(--space-1) var(--pad-card); }
+.briefing[open] { padding-bottom: var(--pad-card); }
+.path-card { padding: var(--pad-card); }
+.notice { padding: var(--space-4) var(--pad-card); }
+.locked-card { box-shadow: var(--surface-lift), inset 0 0 0 1px var(--accent-line); }
+.notice-ok { box-shadow: none; }
+
+/* debrief */
+.score-card { padding: var(--pad-card); border-radius: var(--radius-card); box-shadow: var(--surface-lift); }
+.score-big { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
+
+/* ---- toolbox page ---- */
+.toolbox-page .tb-section > h2, .toolbox-page .block > h2 { font-size: var(--type-title-size); letter-spacing: -0.005em; }
+.toolbox-page .tb-section + .tb-section { margin-block-start: var(--gap-section); }
+
+/* ---- My stats: KPI tiles at 12px, 20px semibold values, 12px labels ---- */
+.stats-page .stat-tile { border-radius: var(--radius-card); }
+.stats-page .stat-tile.kpi { padding: var(--space-4) var(--space-5); gap: var(--space-1); }
+.stats-page .stat-label { font-size: var(--type-label-size); font-weight: 500; color: var(--text-2); letter-spacing: 0; text-transform: none; }
+.stats-page .stat-value-row .stat-value, .stats-page .stat-value { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em; }
+.stats-page .stat-unit { font-size: var(--type-label-size); }
+.stats-page .stat-sub { font-size: var(--type-label-size); color: var(--text-muted); }
+.stats-page .kpi-grid { margin-block: var(--gap-stack); }
+.detail-list { padding: var(--space-4) var(--pad-card); border: 0; border-radius: var(--radius-card); margin-block-end: var(--gap-section); }
+.detail-list dt { font-size: var(--type-label-size); color: var(--text-2); }
+.ach { padding: var(--space-4); border: 0; }
+.ach.is-earned { box-shadow: var(--surface-lift), inset 0 0 0 1px var(--accent-line); }
+.ach-icon { border-radius: var(--radius-control); font-size: 1.4rem; }
+.ach-label { font-weight: 600; }
+.ach-desc { font-size: var(--type-small-size); }
+.achievements h2, .stats-page h2 { font-size: var(--type-title-size); }
+
+/* ---- leaderboard (the projector keeps its own big sizes in vh) ---- */
+.lb-page:not(.is-projector) .lb-head { margin-bottom: var(--gap-stack); }
+.lb-select { min-block-size: var(--control-sm); border-radius: var(--radius-control); }
+.lb-frozen-banner { border: 0; border-radius: var(--radius-card); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--info-fg) 35%, transparent); }
+.lb-table th, .lb-table td { border-bottom-color: color-mix(in oklab, var(--border) 60%, transparent); }
+.is-projector .lb-table { border-radius: var(--radius-card); }
+
+/* ---- auth: the form card at padding 24 with 40px fields ---- */
+.center-card { padding: var(--pad-card-lg); border: 0; }
+.center-card.gate { padding: var(--pad-card); gap: var(--gap-stack); }
+.center-card.gate .input { min-block-size: 40px; }
+.field-label { font-size: var(--type-small-size); font-weight: 600; }
+.error-summary {
+  border: 0; border-radius: var(--radius-card); background: var(--danger-bg);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--danger-fg) 45%, transparent);
+}
+
+/* ---- authoring ---- */
+.author-page .page-meta, .author-page > p.muted { font-size: var(--type-small-size); }
+.form-section { padding: var(--pad-card); border: 0; border-radius: var(--radius-card); box-shadow: var(--surface-lift); background: var(--surface); }
+/* a borderless fieldset: the legend sits inside the card as its title */
+.form-section-legend { float: inline-start; inline-size: 100%; padding: 0; margin: 0; font-size: var(--type-title-size); font-weight: 600; }
+.form-section :is(.input, select) { min-block-size: 40px; }
+.author-diff { padding: var(--pad-card); }
+.check-row input { inline-size: 16px; block-size: 16px; }
+
+/* forced colours erase shadows: give the soft cards their edge back */
+@media (forced-colors: active) {
+  :is(.question-box, .result-panel, .hint, .cmd, .briefing, .score-card, .form-section, .error-summary, .lb-frozen-banner, .tip) { border: 1px solid CanvasText; }
+  .step.is-viewing { border: 1px solid Highlight; }
+}
