@@ -20,13 +20,20 @@ export type FormField<C extends FieldControl = HTMLInputElement> = {
  * One labelled field. `extra` (e.g. a password Show/Hide toggle) goes after the control so Tab reaches the
  * next field before it. The control must already have an id.
  */
-export function formField<C extends FieldControl>(opts: { input: C; label: string; help?: string; extra?: HTMLElement }): FormField<C> {
+export function formField<C extends FieldControl>(opts: {
+  input: C;
+  label: string;
+  help?: string;
+  extra?: HTMLElement;
+  /** ids of other elements that describe the control (a live preview, a shared note), kept beside help and error */
+  describedBy?: readonly string[];
+}): FormField<C> {
   const id = opts.input.id;
   const helpId = `${id}-help`;
   const errorId = `${id}-error`;
   const errorEl = h("p", { id: errorId, class: "field-error", hidden: true });
   const describe = (): void => {
-    const ids = [opts.help ? helpId : null, errorEl.hidden ? null : errorId].filter((v): v is string => v !== null);
+    const ids = [errorEl.hidden ? null : errorId, opts.help ? helpId : null, ...(opts.describedBy ?? [])].filter((v): v is string => v !== null);
     if (ids.length > 0) opts.input.setAttribute("aria-describedby", ids.join(" "));
     else opts.input.removeAttribute("aria-describedby");
   };
