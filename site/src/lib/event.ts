@@ -1,16 +1,24 @@
 // The live event (name, window, announcement): polled from GET /api/event and shared by the header banner,
 // the countdown, the home page and the leaderboard. Countdowns use the server clock (corrected for skew).
-import type { LiveEvent } from "../../shared/contract";
+import { z } from "zod";
+import { EventSchema, type LiveEvent } from "../../shared/contract";
 import { fetchEvent } from "./api";
+import { readSnapshot, writeSnapshot } from "./snapshot";
 import { TO } from "../i18n/strings-onboard";
 
 const POLL_MS = 30_000;
 
 type Listener = (event: LiveEvent | null) => void;
 
-let current: LiveEvent | null = null;
+/** The last answer, reused for the first paint of the next page load (see lib/snapshot.ts). */
+const SNAPSHOT_KEY = "event";
+const SNAPSHOT_MAX_AGE_MS = 10 * 60_000;
+const SnapshotSchema = z.object({ event: EventSchema, skewMs: z.number() });
+const snapshot = readSnapshot(SNAPSHOT_KEY, SnapshotSchema, SNAPSHOT_MAX_AGE_MS);
+
+let current: LiveEvent | null = snapshot?.event ?? null;
 /** serverTime − local time, in ms (positive when the local clock is behind). */
-let skewMs = 0;
+let skewMs = snapshot?.skewMs ?? 0;
 let timer: number | null = null;
 const listeners = new Set<Listener>();
 
@@ -36,6 +44,7 @@ async function poll(): Promise<void> {
     const server = Date.parse(serverTime);
     if (Number.isFinite(server)) skewMs = server - (sentAt + receivedAt) / 2;
     current = event;
+    writeSnapshot(SNAPSHOT_KEY, { event, skewMs });
     for (const fn of listeners) fn(event);
   } catch {
     /* keep the last known event; the next poll retries */

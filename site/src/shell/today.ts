@@ -1,9 +1,14 @@
 // Today's scheduled case for the shell (the navbar's Today link and the live strip's countdown).
 // Wraps lib/session's cached /api/today so both parts redraw together when the day rolls over.
-import type { TodayResponse } from "../../shared/contract";
+import { TodayResponseSchema, type TodayResponse } from "../../shared/contract";
 import { loadToday } from "../lib/session";
+import { readSnapshot, writeSnapshot } from "../lib/snapshot";
 
-let current: TodayResponse | null = null;
+const SNAPSHOT_KEY = "today";
+const SNAPSHOT_MAX_AGE_MS = 10 * 60_000;
+
+/** Seeded from the last page load so the strip draws at first paint; the fetch below replaces it. */
+let current: TodayResponse | null = readSnapshot(SNAPSHOT_KEY, TodayResponseSchema, SNAPSHOT_MAX_AGE_MS);
 const listeners = new Set<(today: TodayResponse | null) => void>();
 
 export function cachedToday(): TodayResponse | null {
@@ -19,6 +24,7 @@ export function refreshToday(refresh = false): void {
   loadToday(refresh).then(
     (today) => {
       current = today;
+      writeSnapshot(SNAPSHOT_KEY, today);
       for (const fn of listeners) fn(today);
     },
     () => undefined,

@@ -5,6 +5,7 @@ import { T } from "../i18n/strings-player";
 import { TG } from "../i18n/strings-game";
 import { TS } from "../i18n/strings-shell";
 import { onConnectivity } from "../lib/api";
+import type { LiveEvent } from "../../shared/contract";
 import { cachedEvent, formatCountdown, onEventChange, serverNow, startEventPolling } from "../lib/event";
 import { h } from "../lib/dom";
 import { caseSummary } from "../content/load";
@@ -100,7 +101,7 @@ function createAnnouncement(): HTMLElement {
     banner.hidden = true;
     document.getElementById("app")?.focus({ preventScroll: true });
   });
-  onEventChange((event) => {
+  const show = (event: LiveEvent | null): void => {
     const a = event?.announcement ?? null;
     currentText = a?.text ?? null;
     if (a === null || a.text === dismissedText) {
@@ -113,7 +114,9 @@ function createAnnouncement(): HTMLElement {
     if (text.textContent !== a.text) text.textContent = a.text; // textContent only: admin-authored text
     close.setAttribute("aria-label", TG().dismiss);
     banner.hidden = false;
-  });
+  };
+  show(cachedEvent()); // a remembered event draws at first paint (no layout shift); polling then updates it
+  onEventChange(show);
   return banner;
 }
 

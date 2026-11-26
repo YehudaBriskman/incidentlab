@@ -452,7 +452,8 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 }
 .navbar { grid-area: navbar; position: relative; background: var(--surface); border-block-end: 1px solid var(--border); }
 .shell > .announce { grid-area: banner; margin-block-start: var(--space-3); }
-.shell-main { grid-area: main; padding-block-start: var(--space-4); }
+/* min-height: the footer starts below the fold, so it can't jump when the first view replaces "Loading…" (CLS) */
+.shell-main { grid-area: main; padding-block-start: var(--space-4); min-block-size: 100dvh; }
 .shell > .footer { grid-area: footer; }
 /* 56px row: a 44px control plus 12px */
 .navbar-row {
