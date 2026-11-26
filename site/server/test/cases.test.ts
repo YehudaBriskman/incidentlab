@@ -1,6 +1,8 @@
 // DB-stored cases (#64): repository, content API, evidence streaming and route wiring.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { z } from "zod";
 import { CasesResponseSchema } from "../../shared/contract.ts";
 import { CaseContentResponseSchema, CaseContentSchema, EVIDENCE_CHUNK_BYTES } from "../../shared/case-records.ts";
 import { InMemoryByteStore } from "../repositories/ByteStore.ts";
@@ -308,4 +310,12 @@ test("parseRange follows RFC 9110 for single ranges", () => {
   assert.equal(parseRange("bytes=5-2", 10), null);
   assert.equal(parseRange("items=0-1", 10), null);
   assert.equal(parseRange("bytes=-", 10), null);
+});
+
+test("the Edge Function import map pins the same npm versions as site/package.json", async () => {
+  const readJson = async (path: string): Promise<unknown> => JSON.parse(await readFile(new URL(path, import.meta.url), "utf8"));
+  const { dependencies } = z.object({ dependencies: z.record(z.string(), z.string()) }).parse(await readJson("../../package.json"));
+  const { imports } = z.object({ imports: z.record(z.string(), z.string()) }).parse(await readJson("../../netlify/edge-functions/import_map.json"));
+  assert.ok(Object.keys(imports).length > 0);
+  for (const [name, target] of Object.entries(imports)) assert.equal(target, `npm:${name}@${dependencies[name] ?? "missing"}`, name);
 });
