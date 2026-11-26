@@ -6,17 +6,22 @@ import type { RestartReason } from "../explorer/client";
 import {
   decodeState,
   encodeState,
+  epochLabel,
+  epochTokens,
+  flattenJson,
   fmtBucket,
   fmtBytes,
   fmtCount,
   formatInZone,
   getJsonField,
+  groupByDir,
   isEpochSeconds,
   isYearless,
   isZoneless,
+  kvPairs,
+  matchesQuery,
   matchRanges,
   parseCsvLine,
-  parseJsonFilter,
   parseJsonLine,
   parseTimeInput,
   pluralCategory,
@@ -26,7 +31,7 @@ import {
   wallClockToUtc,
   yearInText,
 } from "../explorer/core";
-import type { FilterStep, HistogramResult, JsonFilter, StepKind, TimeSeries } from "../explorer/core";
+import type { FilterStep, HistogramResult, JsonFilter, JsonOp, SortKey, StepKind, TimeRange, TimeSeries } from "../explorer/core";
 import type { Case } from "../../shared/case";
 import {
   ALL_ZONES,
@@ -40,7 +45,7 @@ import {
   zoneLabel,
 } from "../explorer/files";
 import type { EvidenceFile, PatternPreset } from "../explorer/files";
-import type { WorkerErrorCode, WorkerResponse } from "../explorer/protocol";
+import type { SortSpec, WorkerErrorCode, WorkerResponse } from "../explorer/protocol";
 import { T } from "../i18n/strings-tools";
 
 /** A file path with line-break opportunities after "/", "_", "-" and ".", so names wrap at word joins, not mid-word. */
@@ -56,6 +61,8 @@ const HARD_TIMEOUT_MS = 2500;
 const WRAP_KEY = "il.explorer.wrap";
 const NARROW = "(max-width: 600px)";
 const SVG_NS = "http://www.w3.org/2000/svg";
+/** Scopes the worker's download cache to this page load (see explorer/cache.ts). */
+const SESSION = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
 /* ---------------------------------------------------------------- text helpers */
 
@@ -177,8 +184,18 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
   let isJson = false;
   let csvHeader: string[] = [];
   let steps: FilterStep[] = initial.steps.length > 0 ? initial.steps : [{ kind: "contains", text: "", ci: true }];
-  let json: JsonFilter | null = initial.json;
+  /** JSON conditions as edited (a half-typed one has an empty field and is not applied) */
+  let conds: JsonFilter[] = initial.json.map((j) => ({ ...j }));
   let cols: string[] = initial.cols;
+  let sort: { col: number; desc: boolean } | null = initial.sort ?? null;
+  let timeRange: TimeRange | null = initial.time ?? null;
+  const fieldsByPath = new Map<string, string[]>();
+  const widthsByPath = new Map<string, number[]>();
+  let detailOpen = false;
+  let detailJob = 0;
+  let detailTimer: number | null = null;
+  let detailSay = false;
+  let histRefocus = false;
   let sentSteps: FilterStep[] = [];
   let lastEdited: FilterStep | null = null;
   let countState: CountState = { kind: "none" };
@@ -216,6 +233,7 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
   const fileList = h("ul", { class: "ex-files", id: "ex-files" });
   const fileSearch = h("input", { class: "ex-input ex-file-search", id: "ex-file-search", type: "search", placeholder: T().exFileSearchPh, spellcheck: "false", autocomplete: "off", "aria-controls": "ex-files" });
   const noFiles = h("p", { class: "ex-muted ex-no-files", role: "status", hidden: true }, T().exNoFiles);
+  const fileCount = h("p", { class: "ex-muted ex-file-count", role: "status", hidden: true });
   const sidebar = h("aside", { class: "ex-sidebar", id: "ex-sidebar", "aria-label": T().exFilesTime });
   const sideToggle = h("button", { class: "btn btn-sm ex-side-toggle", type: "button", "aria-expanded": "false", "aria-controls": "ex-sidebar" }, T().exFilesTime);
 
@@ -234,23 +252,48 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
   const pipeline = h("div", { class: "ex-pipeline" });
   const presets = h("div", { class: "ex-chips" });
   const presetsRow = h("div", { class: "ex-presets" }, h("span", { class: "ex-muted" }, T().exExamples), presets);
-  const jsonInput = h("input", { class: "ex-input mono", id: "ex-json", placeholder: T().exJsonPh, spellcheck: "false", autocomplete: "off" });
+  const fieldList = h("datalist", { id: "ex-json-fields" });
+  const condList = h("div", { class: "ex-conds" });
+  const addCondBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exAddCond);
   const colsInput = h("input", { class: "ex-input mono", id: "ex-cols", placeholder: T().exColsPh, spellcheck: "false", autocomplete: "off" });
   const jsonBar = h("div", { class: "ex-jsonbar", hidden: true },
-    h("label", { for: "ex-json" }, h("span", {}, T().exJsonFilter), jsonInput),
-    h("label", { for: "ex-cols" }, h("span", {}, T().exColView), colsInput));
+    h("div", { class: "ex-json-conds", role: "group", "aria-labelledby": "ex-json-h", "aria-describedby": "ex-json-help" },
+      h("span", { class: "ex-json-h", id: "ex-json-h" }, T().exJsonConds),
+      h("p", { class: "ex-muted ex-json-help", id: "ex-json-help" }, T().exJsonCondsHelp),
+      condList, addCondBtn, fieldList),
+    h("label", { for: "ex-cols", class: "ex-json-cols" }, h("span", {}, T().exColView), colsInput));
+  const timeRow = h("div", { class: "ex-time-filter", hidden: true });
   const filtersBadge = h("span", { class: "ex-badge" });
-  const controlsSet = h("fieldset", { class: "ex-fieldset" }, h("legend", { class: "ex-sr" }, T().exFilters), pipeline, presetsRow, jsonBar);
+  const controlsSet = h("fieldset", { class: "ex-fieldset" }, h("legend", { class: "ex-sr" }, T().exFilters), pipeline, timeRow, presetsRow, jsonBar);
   const controls = h("details", { class: "ex-controls" }, h("summary", { class: "ex-controls-sum" }, T().exFilters, filtersBadge), controlsSet);
 
   const keysHelp = h("p", { class: "ex-sr", id: "ex-keys-help" }, T().exLineKeysHelp);
   const viewport = h("div", { class: "ex-viewport", dir: "ltr", tabindex: "0", role: "region", "aria-label": T().exFileLines, "aria-describedby": "ex-keys-help" });
-  const headEl = h("div", { class: "ex-colhead mono", "aria-hidden": "true", hidden: true });
+  const headEl = h("div", { class: "ex-colhead mono", role: "group", "aria-label": T().exColumns, hidden: true });
   const spacer = h("div", { class: "ex-spacer" });
   const rowsLayer = h("div", { class: "ex-rows", role: "list", "aria-label": T().exFileLines });
   viewport.append(headEl, spacer, rowsLayer);
   const staleStrip = h("p", { class: "ex-stale-strip", hidden: true }, T().exStaleRows);
   const view = h("div", { class: "ex-view" }, staleStrip, viewport, progress);
+
+  // Row detail drawer: a non-modal panel beside the log (a bottom sheet on narrow screens). It follows the
+  // line cursor, so arrow keys in the log and Previous/Next here both update it. Self-contained, so the shared
+  // Sheet primitive (#61) can replace the narrow-screen presentation without touching the content.
+  const detailHeading = h("h3", { class: "ex-detail-h", id: "ex-detail-h", tabindex: "-1" }, T().exDetails);
+  const detailPos = h("p", { class: "ex-detail-pos" });
+  const detailClose = h("button", { class: "btn btn-sm btn-ghost ex-detail-close", type: "button", "aria-label": T().exDetailClose, "aria-keyshortcuts": "Escape" }, "×");
+  const detailPrev = h("button", { class: "btn btn-sm", type: "button", "aria-keyshortcuts": "Shift+N" }, T().exPrevLine);
+  const detailNext = h("button", { class: "btn btn-sm", type: "button", "aria-keyshortcuts": "N" }, T().exNextLine);
+  const detailCopy = h("button", { class: "btn btn-sm", type: "button", "aria-keyshortcuts": "C" }, T().exCopyLine);
+  const detailLink = h("button", { class: "btn btn-sm btn-ghost", type: "button", "aria-keyshortcuts": "L" }, T().exLinkLine);
+  const detailBody = h("div", { class: "ex-detail-body" });
+  const drawer = h("section", { class: "ex-drawer", id: "ex-drawer", role: "region", "aria-labelledby": "ex-detail-h", "aria-describedby": "ex-detail-keys", hidden: true },
+    h("div", { class: "ex-drawer-head" }, h("div", { class: "ex-drawer-title" }, detailHeading, detailPos), detailClose),
+    h("p", { class: "ex-sr", id: "ex-detail-keys" }, T().exDetailKeys),
+    h("div", { class: "ex-drawer-tools", role: "group", "aria-label": T().exMatchNav }, detailPrev, detailNext, detailCopy, detailLink),
+    detailBody);
+  const detailBtn = h("button", { class: "btn btn-sm", type: "button", "aria-expanded": "false", "aria-controls": "ex-drawer", "aria-keyshortcuts": "Enter" }, T().exDetails);
+  const work = h("div", { class: "ex-work" }, view, drawer);
 
   const firstBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exFirst);
   const lastBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exLast);
@@ -264,7 +307,7 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
   const nextMatchBtn = h("button", { class: "btn btn-sm", type: "button", "aria-keyshortcuts": "N" }, T().exNextMatch);
   const matchPos = h("span", { class: "ex-match-pos", "aria-live": "polite", "aria-atomic": "true" });
   const matchNav = h("div", { class: "ex-match-nav", role: "group", "aria-label": T().exMatchNav, hidden: true }, prevMatchBtn, matchPos, nextMatchBtn);
-  const actionButtons = [firstBtn, lastBtn, prevMatchBtn, nextMatchBtn, copyBtn, shareBtn, copyLineBtn, linkLineBtn];
+  const actionButtons = [firstBtn, lastBtn, prevMatchBtn, nextMatchBtn, copyBtn, shareBtn, copyLineBtn, linkLineBtn, detailBtn];
 
   const makeAgg = (kind: Agg["kind"], label: string, placeholder: string): Agg => {
     const id = `ex-${kind}`;
@@ -363,6 +406,9 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
         paintProgress({ kind: "hidden" });
         inWorker.add(msg.path);
         knownBytes.set(msg.path, msg.bytes);
+        fieldsByPath.set(msg.path, msg.fields);
+        widthsByPath.set(msg.path, msg.widths);
+        renderFieldList();
         if (msg.year !== null && !yearEdited) {
           yearFromEvidence = msg.year;
           renderTime();
@@ -391,6 +437,8 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
           pendingLine = null;
         } else if (cursorLine >= 0) {
           locateLine(cursorLine, false);
+        } else if (detailOpen) {
+          renderDetailGone();
         }
         for (const a of aggs) {
           if (a.wanted !== null && (a.state === "done" || a.state === "stale") && a.gen < filterGen) runAgg(a, a.wanted, false);
@@ -417,8 +465,13 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
           cursorLine = -1;
           syncHash();
           updateLineButtons();
+          if (detailOpen) renderDetailGone();
           if (locateIsDeepLink) showNotice(T().exLineHidden(fmtCount(msg.line + 1)), "info");
         }
+        return;
+      case "detail":
+        if (msg.job !== detailJob) return;
+        renderDetail(msg.row, msg.line, msg.text, msg.truncated);
         return;
       case "unique":
         if (msg.job !== uniq.job) return;
@@ -437,7 +490,7 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
         void copyText(msg.text).then((ok) => {
           if (!ok) showNotice(T().exClipBlocked);
           else if (copyKind === "line") {
-            flashButton(copyLineBtn);
+            flashButton(detailOpen && drawer.contains(document.activeElement) ? detailCopy : copyLineBtn);
             showNotice(T().exCopiedLine(fmtCount(cursorLine + 1)), "info");
           } else {
             flashButton(copyBtn);
@@ -518,7 +571,7 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     paintProgress({ kind: "loading", loaded: 0, total: 0 });
     countState = { kind: "loading" };
     paintCount(false);
-    client.send({ type: "load", job: loadJob, path: f.path, url: evidenceUrl(c.id, f.path) });
+    client.send({ type: "load", job: loadJob, path: f.path, url: evidenceUrl(c.id, f.path), mode: f.mode, session: SESSION });
   }
 
   function requestCsvHeader(): void {
@@ -529,33 +582,46 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
 
   /* ---------------------------------------------------------------- files */
   function renderFileList(): void {
-    const q = fileSearch.value.trim().toLowerCase();
-    const shown = q === "" ? EVIDENCE_FILES : EVIDENCE_FILES.filter((f) => f.path.toLowerCase().includes(q));
+    const q = fileSearch.value.trim();
+    const shown = EVIDENCE_FILES.filter((f) => matchesQuery(q, [f.path, f.format, f.description]));
     noFiles.hidden = shown.length > 0;
     fileList.hidden = shown.length === 0;
-    fileList.replaceChildren(
-      ...shown.map((f) => {
-        const bytes = knownBytes.get(f.path);
-        const size = bytes !== undefined ? fmtBytes(bytes) : f.size;
-        const active = file?.path === f.path;
-        const btn = h(
-          "button",
-          { class: `ex-file${active ? " is-active" : ""}`, type: "button", "aria-current": active ? "true" : null },
-          h("span", { class: "ex-file-name mono", dir: "ltr" }, breakablePath(f.path)),
-          h("span", { class: "ex-file-meta" },
-            f.format !== "" ? h("span", {}, f.format) : null,
-            size !== "" ? [f.format !== "" ? " · " : "", num(size)] : null,
-            inWorker.has(f.path) ? [h("span", { class: "ex-dot", "aria-hidden": "true" }), h("span", {}, T().exLoadedTag)] : null),
-          h("span", { class: "ex-file-desc" }, f.description),
-        );
-        btn.addEventListener("click", () => {
-          selectFile(f);
-          sidebar.classList.remove("is-open");
-          sideToggle.setAttribute("aria-expanded", "false");
-        });
-        return h("li", {}, btn);
-      }),
+    fileCount.hidden = q === "" || shown.length === 0;
+    fileCount.textContent = fillText(T().exFilesShown, { n: fmtCount(shown.length), t: fmtCount(EVIDENCE_FILES.length) });
+    const groups = groupByDir(shown, (f) => f.path);
+    // One flat list when there is nothing to group (a single folder, or only top-level files).
+    const flat = groups.length < 2;
+    fileList.replaceChildren(...groups.flatMap((g, gi) => {
+      const items = g.items.map(fileItem);
+      if (flat) return items;
+      const id = `ex-files-g${gi}`;
+      return [h("li", { class: "ex-file-group" },
+        h("h4", { class: "ex-file-group-h", id }, g.dir === "" ? T().exTopLevel : h("span", { class: "mono", dir: "ltr" }, `${g.dir}/`),
+          h("span", { class: "ex-file-group-n" }, num(fmtCount(g.items.length)))),
+        h("ul", { class: "ex-files-sub", "aria-labelledby": id }, ...items))];
+    }));
+  }
+
+  function fileItem(f: EvidenceFile): HTMLElement {
+    const bytes = knownBytes.get(f.path);
+    const size = bytes !== undefined ? fmtBytes(bytes) : f.size;
+    const active = file?.path === f.path;
+    const btn = h(
+      "button",
+      { class: `ex-file${active ? " is-active" : ""}`, type: "button", "aria-current": active ? "true" : null },
+      h("span", { class: "ex-file-name mono", dir: "ltr" }, breakablePath(f.path)),
+      h("span", { class: "ex-file-meta" },
+        f.format !== "" ? h("span", {}, f.format) : null,
+        size !== "" ? [f.format !== "" ? " · " : "", num(size)] : null,
+        inWorker.has(f.path) ? [h("span", { class: "ex-dot", "aria-hidden": "true" }), h("span", {}, T().exLoadedTag)] : null),
+      h("span", { class: "ex-file-desc" }, f.description),
     );
+    btn.addEventListener("click", () => {
+      selectFile(f);
+      sidebar.classList.remove("is-open");
+      sideToggle.setAttribute("aria-expanded", "false");
+    });
+    return h("li", {}, btn);
   }
 
   function setEnabled(on: boolean): void {
@@ -587,6 +653,13 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     }
     if (file && loading === file.path) client.send({ type: "cancelLoad", path: file.path });
     loading = null;
+    if (file !== null) {
+      // A sort column and a time pattern belong to one file's layout; a deep link's first file keeps them.
+      sort = null;
+      timeRange = null;
+      paintTimeRow();
+      closeDetail(false);
+    }
     file = f;
     title.textContent = f.path;
     title.setAttribute("dir", "ltr");
@@ -609,6 +682,8 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     renderPresets(f);
     renderFileList();
     syncHash();
+    renderFieldList();
+    renderConds();
     if (inWorker.has(f.path)) {
       paintProgress({ kind: "hidden" });
       loadJob = client.job();
@@ -682,7 +757,9 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
         job: filterJob,
         path: file.path,
         steps: sentSteps.map((s) => ({ kind: s.kind, text: s.text, ci: s.ci })),
-        json: file.mode === "json" ? json : null,
+        json: file.mode === "json" ? appliedConds() : [],
+        time: timeRange,
+        sort: sortSpec(),
         skipHeader: file.mode === "csv",
       },
       hasRegex ? HARD_TIMEOUT_MS : 0,
@@ -753,8 +830,21 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     }
   }
 
+  /** Conditions complete enough to apply: a field, and a value unless the test is "exists". */
+  function appliedConds(): JsonFilter[] {
+    return conds.filter((j) => j.field !== "" && (j.op === "exists" || j.value !== "")).map((j) => ({ ...j }));
+  }
+
+  function sortSpec(): SortSpec | null {
+    if (!sort || !file) return null;
+    let key: SortKey | null = null;
+    if (file.mode === "csv") key = { kind: "csv", index: sort.col };
+    else if (isJson && cols[sort.col] !== undefined) key = { kind: "json", path: cols[sort.col] ?? "" };
+    return key ? { key, desc: sort.desc } : null;
+  }
+
   function activeFilterCount(): number {
-    return steps.filter((s) => s.text !== "").length + (json && file?.mode === "json" ? 1 : 0);
+    return steps.filter((s) => s.text !== "").length + (file?.mode === "json" ? appliedConds().length : 0) + (timeRange ? 1 : 0);
   }
 
   function paintBadge(): void {
@@ -868,6 +958,110 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     scheduleFilter();
   }
 
+  /* ---------------------------------------------------------------- json conditions */
+  function renderFieldList(): void {
+    const fields = file ? (fieldsByPath.get(file.path) ?? []) : [];
+    fieldList.replaceChildren(...fields.map((f) => h("option", { value: f })));
+  }
+
+  const OPS: ReadonlyArray<[JsonOp, () => string]> = [
+    ["eq", () => T().exOpEq],
+    ["ne", () => T().exOpNe],
+    ["has", () => T().exOpHas],
+    ["exists", () => T().exOpExists],
+  ];
+
+  function renderConds(focusIdx: number | null = null): void {
+    const t = T();
+    if (conds.length === 0) conds.push({ field: "", op: "eq", value: "" });
+    condList.replaceChildren(...conds.map((cond, idx) => {
+      const n = String(idx + 1);
+      const field = h("input", { class: "ex-input mono ex-cond-field", list: "ex-json-fields", placeholder: t.exFieldPh, spellcheck: "false", autocomplete: "off", "aria-label": fillText(t.exCondField, { n }) });
+      field.value = cond.field;
+      const op = h("select", { class: "ex-select", "aria-label": fillText(t.exCondOp, { n }) }, ...OPS.map(([v, label]) => h("option", { value: v }, label())));
+      op.value = cond.op;
+      const value = h("input", { class: "ex-input mono ex-cond-value", placeholder: t.exValuePh, spellcheck: "false", autocomplete: "off", "aria-label": fillText(t.exCondValue, { n }) });
+      value.value = cond.value;
+      value.hidden = cond.op === "exists";
+      const remove = h("button", { class: "btn btn-sm btn-ghost ex-remove", type: "button", "aria-label": fillText(t.exRemoveCond, { n }) }, "×");
+      field.addEventListener("input", () => {
+        cond.field = field.value.trim();
+        scheduleFilter();
+      });
+      op.addEventListener("change", () => {
+        cond.op = OPS.find(([v]) => v === op.value)?.[0] ?? "eq";
+        value.hidden = cond.op === "exists";
+        scheduleFilter();
+      });
+      value.addEventListener("input", () => {
+        cond.value = value.value;
+        scheduleFilter();
+      });
+      remove.addEventListener("click", () => {
+        conds.splice(idx, 1);
+        renderConds(Math.max(0, idx - 1));
+        scheduleFilter();
+      });
+      if (focusIdx === idx) queueMicrotask(() => field.focus());
+      return h("div", { class: "ex-cond", role: "group", "aria-label": fillText(t.exCondition, { n }) }, field, op, value, remove);
+    }));
+  }
+
+  /** Adds (or fills the empty last) JSON condition `field = value` and filters at once. */
+  function addCond(field: string, op: JsonOp, value: string): void {
+    const last = conds[conds.length - 1];
+    if (last && last.field === "") conds.pop();
+    conds.push({ field, op, value });
+    renderConds();
+    scheduleFilter();
+  }
+
+  /* ---------------------------------------------------------------- time filter */
+  function paintTimeRow(): void {
+    timeRow.hidden = timeRange === null;
+    if (!timeRange) {
+      timeRow.replaceChildren();
+      return;
+    }
+    const remove = h("button", { class: "btn btn-sm btn-ghost ex-remove", type: "button", "aria-label": T().exRemoveTime }, "×");
+    remove.addEventListener("click", () => {
+      setTimeRange(null);
+      pipeline.querySelector<HTMLInputElement>(".ex-input")?.focus();
+    });
+    timeRow.replaceChildren(
+      h("span", { class: "ex-time-filter-k" }, T().exTimeFilter),
+      h("span", { class: "chip pill-accent ex-time-chip" },
+        ...fill(T().exTimeRange, { from: num(fmtBucket(timeRange.from)), to: num(fmtBucket(timeRange.to)) })),
+      remove);
+  }
+
+  function setTimeRange(range: TimeRange | null): void {
+    timeRange = range;
+    paintTimeRow();
+    paintBadge();
+    if (range) say(fillText(T().exTimeFilterSet, { from: fmtBucket(range.from), to: fmtBucket(range.to) }));
+    if (debounce !== null) window.clearTimeout(debounce);
+    debounce = null;
+    for (const a of aggs) if (a.state === "done") markAggStale(a, T().exAggUpdating);
+    clearNotice();
+    syncHash();
+    runFilter();
+  }
+
+  /** A histogram bucket becomes a time filter; with `extend`, the range grows to cover it as well. */
+  function pickBucket(from: number, to: number, extend: boolean): void {
+    const pattern = hist.wanted;
+    if (pattern === null) return;
+    // The chart re-renders for the narrower view; put keyboard focus back on it when it was there.
+    histRefocus = hist.out.contains(document.activeElement);
+    const year = currentYear().year;
+    if (extend && timeRange && timeRange.pattern === pattern) {
+      setTimeRange({ pattern, year, from: Math.min(from, timeRange.from), to: Math.max(to, timeRange.to) });
+    } else {
+      setTimeRange({ pattern, year, from, to });
+    }
+  }
+
   /* ---------------------------------------------------------------- virtual list */
   function headerCells(): string[] | null {
     if (!file) return null;
@@ -881,12 +1075,44 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     const cells = headerCells();
     headEl.hidden = cells === null;
     headH = cells === null ? 0 : ROW_H;
-    const wide = file?.mode !== "csv";
+    // Columns not known yet (the CSV header is still loading) keep a deep-linked sort; a removed column drops it.
+    if (sort && cells !== null && sort.col >= cells.length) sort = null;
     if (cells) {
-      headEl.replaceChildren(h("span", { class: "ex-ln" }, "#"),
-        ...cells.map((name) => h("span", { class: `ex-cell${wide ? " ex-cell-wide" : ""}`, title: name }, name)));
+      const t = T();
+      headEl.replaceChildren(h("span", { class: "ex-ln", "aria-hidden": "true" }, "#"),
+        ...cells.map((name, col) => {
+          const state = sort?.col === col ? (sort.desc ? "desc" : "asc") : "none";
+          const label = fillText(state === "asc" ? t.exSortedAsc : state === "desc" ? t.exSortedDesc : t.exSortBy, { c: name });
+          const b = h("button", { class: `ex-cell ex-sort${state !== "none" ? ` is-${state}` : ""}`, type: "button", title: name, "aria-label": label, "data-col": String(col) },
+            h("span", { class: "ex-sort-name" }, name),
+            state !== "none" ? h("span", { class: "ex-sort-mark", "aria-hidden": "true" }, state === "asc" ? "▲" : "▼") : null);
+          applyColWidth(b, col);
+          b.addEventListener("click", () => cycleSort(col, name));
+          return b;
+        }));
     }
     updateSpacer();
+  }
+
+  /** Content-sized CSV columns (measured in the worker); JSON column view keeps a fixed wide cell. */
+  function applyColWidth(el: HTMLElement, col: number): void {
+    if (file?.mode === "csv") {
+      const w = file ? widthsByPath.get(file.path)?.[col] : undefined;
+      if (w !== undefined) el.style.width = `${w}ch`;
+    } else el.classList.add("ex-cell-wide");
+  }
+
+  /** File order → ascending → descending → file order, like the shared data table. */
+  function cycleSort(col: number, name: string): void {
+    const t = T();
+    if (sort?.col !== col) sort = { col, desc: false };
+    else if (!sort.desc) sort = { col, desc: true };
+    else sort = null;
+    say(sort ? fillText(t.exSortSaid, { c: name, dir: sort.desc ? t.exDescending : t.exAscending }) : t.exSortOff);
+    paintHeader();
+    headEl.querySelector<HTMLElement>(`[data-col="${col}"]`)?.focus();
+    syncHash();
+    runFilter();
   }
 
   function updateSpacer(): void {
@@ -978,15 +1204,17 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     }
     row.appendChild(h("span", { class: "ex-ln" }, String(lineIdx + 1)));
     if (file?.mode === "csv" && csvHeader.length > 0) {
-      for (const cell of parseCsvLine(text)) {
+      parseCsvLine(text).forEach((cell, col) => {
         const el = h("span", { class: `ex-cell${cell === "" ? " is-blank" : ""}`, title: cell }, cell === "" ? "—" : cell);
         if (isEpochSeconds(cell)) {
-          const ms = Number(cell) * 1000;
-          el.title = `${cell}\n${formatInZone(ms, "UTC")}`;
-          el.classList.add("is-epoch");
+          // The time is shown inline (not only on hover), muted so the raw value still reads first.
+          const at = epochLabel(cell);
+          el.title = `${cell}\n${at}`;
+          el.append(h("span", { class: "ex-epoch" }, ` ${at}`));
         }
+        applyColWidth(el, col);
         row.appendChild(el);
-      }
+      });
       return row;
     }
     if (isJson && cols.length > 0) {
@@ -1030,6 +1258,7 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     syncHash();
     updateLineButtons();
     scheduleRender();
+    queueDetail();
   }
 
   function locateLine(line: number, deepLink: boolean): void {
@@ -1047,6 +1276,9 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     firstBtn.disabled = !has;
     lastBtn.disabled = !has;
     copyBtn.disabled = !has;
+    detailBtn.disabled = !has;
+    detailCopy.disabled = !on;
+    detailLink.disabled = !on;
     paintMatchNav();
   }
 
@@ -1078,9 +1310,156 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     if (cursorLine < 0) return;
     syncHash();
     void copyText(window.location.href).then((ok) => {
-      if (ok) flashButton(linkLineBtn);
+      if (ok) flashButton(detailOpen && drawer.contains(document.activeElement) ? detailLink : linkLineBtn);
       showNotice(ok ? T().exLineLinkCopied(fmtCount(cursorLine + 1)) : T().exCopyAddress, "info");
     });
+  }
+
+  /* ---------------------------------------------------------------- detail drawer */
+  function openDetail(focus: boolean): void {
+    if (!file || count === 0) return;
+    if (cursor < 0) setCursor(firstVisibleRow(), false);
+    detailOpen = true;
+    drawer.hidden = false;
+    work.classList.add("has-detail");
+    detailBtn.setAttribute("aria-expanded", "true");
+    detailBody.replaceChildren(h("p", { class: "ex-muted" }, T().exDetailLoading));
+    queueDetail(0);
+    if (focus) detailHeading.focus();
+  }
+
+  function closeDetail(returnFocus: boolean): void {
+    if (!detailOpen) return;
+    detailOpen = false;
+    drawer.hidden = true;
+    work.classList.remove("has-detail");
+    detailBtn.setAttribute("aria-expanded", "false");
+    if (detailTimer !== null) window.clearTimeout(detailTimer);
+    detailTimer = null;
+    if (returnFocus) {
+      if (cursor >= 0) setCursor(cursor, true);
+      else viewport.focus();
+    }
+  }
+
+  /** Asks the worker for the cursor line; a short delay coalesces key repeat while the cursor moves. */
+  function queueDetail(delay = 60): void {
+    if (!detailOpen || !file || cursor < 0) return;
+    if (detailTimer !== null) window.clearTimeout(detailTimer);
+    const path = file.path;
+    const row = cursor;
+    detailTimer = window.setTimeout(() => {
+      detailTimer = null;
+      detailJob = client.job();
+      client.send({ type: "detail", job: detailJob, path, row });
+    }, delay);
+  }
+
+  function renderDetailGone(): void {
+    detailHeading.textContent = T().exDetails;
+    detailPos.textContent = "";
+    detailBody.replaceChildren(h("p", { class: "ex-muted" }, T().exDetailGone));
+  }
+
+  function paintDetailNav(row: number): void {
+    const t = T();
+    const filtered = activeFilterCount() > 0;
+    detailPrev.textContent = filtered ? t.exPrevMatch : t.exPrevLine;
+    detailNext.textContent = filtered ? t.exNextMatch : t.exNextLine;
+    detailPrev.disabled = count < 2;
+    detailNext.disabled = count < 2;
+    detailPos.replaceChildren(...fill(filtered ? t.exMatchPos : t.exLinePos, { i: num(fmtCount(row + 1)), n: num(fmtCount(count)) }));
+  }
+
+  function detailTable(rows: Array<[string, string]>, onFilter: (k: string, v: string) => void): HTMLElement {
+    const t = T();
+    return h("div", { class: "ex-table-wrap ex-detail-fields" }, h("table", { class: "ex-table" },
+      h("thead", {}, h("tr", {},
+        h("th", { scope: "col", class: "ex-th-start" }, t.exDetailField),
+        h("th", { scope: "col", class: "ex-th-start" }, t.exValue),
+        h("th", { scope: "col" }, h("span", { class: "ex-sr" }, t.exDetailFilterAdd)))),
+      h("tbody", {}, ...rows.map(([k, v]) => {
+        const b = h("button", { class: "btn btn-sm btn-ghost", type: "button", "aria-label": fillText(t.exDetailFilterOn, { f: k, v: v === "" ? t.exEmpty : v }) }, t.exDetailFilterAdd);
+        b.addEventListener("click", () => onFilter(k, v));
+        return h("tr", {},
+          h("th", { scope: "row", class: "mono ex-detail-k" }, h("bdi", { dir: "ltr" }, k)),
+          h("td", { class: "mono ex-detail-v" }, v === "" ? h("span", { class: "ex-muted" }, "—") : h("bdi", { dir: "ltr" }, v)),
+          h("td", { class: "ex-detail-act" }, b));
+      }))));
+  }
+
+  function renderDetail(row: number, line: number, text: string, truncated: boolean): void {
+    if (line < 0) {
+      renderDetailGone();
+      return;
+    }
+    const t = T();
+    detailHeading.replaceChildren(...fill(t.exDetailTitle, { n: num(fmtCount(line + 1)) }));
+    paintDetailNav(row);
+    const parts: Node[] = [];
+    let fields: Array<[string, string]> = [];
+    let onFilter: (k: string, v: string) => void = (k, v) => addStep("contains", `${k}=${v}`);
+    if (file?.mode === "csv" && csvHeader.length > 0) {
+      const cells = parseCsvLine(text);
+      fields = csvHeader.map((name, i) => [name, cells[i] ?? ""]);
+      onFilter = (_k, v) => addStep("contains", v);
+    } else {
+      const obj = isJson ? parseJsonLine(text) : undefined;
+      if (obj !== undefined) {
+        fields = flattenJson(obj);
+        onFilter = (k, v) => addCond(k, "eq", v);
+      } else fields = kvPairs(text);
+    }
+    if (fields.length > 0) parts.push(h("h4", { class: "ex-detail-sub" }, t.exDetailFields), detailTable(fields, onFilter));
+    const epochs = epochTokens(text);
+    if (epochs.length > 0) {
+      parts.push(h("h4", { class: "ex-detail-sub" }, t.exDetailTimes),
+        h("dl", { class: "ex-detail-times", dir: "ltr" }, ...epochs.flatMap(([v, at]) => [h("dt", { class: "mono" }, v), h("dd", { class: "mono" }, at)])));
+    }
+    const raw = h("pre", { class: "ex-detail-raw", dir: "ltr", tabindex: "0", "aria-labelledby": "ex-detail-raw-h" });
+    const ranges = matchRanges(text, sentSteps.filter((s) => !ui(s).slow));
+    let pos = 0;
+    for (const [a, b] of ranges) {
+      if (a > pos) raw.append(text.slice(pos, a));
+      raw.append(h("mark", {}, text.slice(a, b)));
+      pos = b;
+    }
+    if (pos < text.length) raw.append(text.slice(pos));
+    parts.push(h("h4", { class: "ex-detail-sub", id: "ex-detail-raw-h" }, t.exDetailRaw), raw);
+    if (truncated) parts.push(h("p", { class: "ex-muted" }, t.exDetailTruncated));
+    detailBody.replaceChildren(...parts);
+    if (detailSay) {
+      // Stepped from the drawer: focus did not move, so say where we are.
+      detailSay = false;
+      say(`${detailHeading.textContent ?? ""}. ${detailPos.textContent ?? ""}`);
+    }
+  }
+
+  /** Moves the cursor one row (wrapping), from the drawer: the row is not focused so focus stays here. */
+  function stepFromDrawer(dir: 1 | -1): void {
+    if (!file || count === 0) return;
+    detailSay = true;
+    const from = cursor >= 0 ? cursor : dir === 1 ? -1 : count;
+    setCursor((((from + dir) % count) + count) % count, false);
+  }
+
+  function onDrawerKey(e: KeyboardEvent): void {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeDetail(true);
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "n" || e.key === "N") {
+      e.preventDefault();
+      stepFromDrawer(e.key === "N" ? -1 : 1);
+    } else if (e.key === "c") {
+      e.preventDefault();
+      copyLine();
+    } else if (e.key === "l") {
+      e.preventDefault();
+      copyLineLink();
+    }
   }
 
   function onViewportKey(e: KeyboardEvent): void {
@@ -1118,7 +1497,18 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
       stepMatch(e.key === "N" ? -1 : 1);
       return;
     }
-    if (cursor < 0 || e.target === viewport) return;
+    if (e.key === "Escape" && detailOpen) {
+      e.preventDefault();
+      closeDetail(false);
+      return;
+    }
+    const onRow = e.target instanceof HTMLElement && e.target.classList.contains("ex-row");
+    if (e.key === "Enter" && onRow && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      e.preventDefault();
+      openDetail(true);
+      return;
+    }
+    if (cursor < 0 || !onRow) return;
     const noSelection = window.getSelection()?.isCollapsed ?? true;
     if ((e.key === "c" && !e.ctrlKey && !e.metaKey) || ((e.ctrlKey || e.metaKey) && e.key === "c" && noSelection)) {
       e.preventDefault();
@@ -1279,6 +1669,15 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     }
     if (parts.length === 0) parts.push(h("p", { class: "ex-muted" }, T().exNoLineMatched));
     hist.out.replaceChildren(...parts);
+    if (histRefocus) {
+      histRefocus = false;
+      const bar = hist.out.querySelector<SVGRectElement>("rect.is-picked") ?? hist.out.querySelector<SVGRectElement>('rect[tabindex="0"]');
+      if (bar) {
+        for (const r of hist.out.querySelectorAll("rect")) r.setAttribute("tabindex", "-1");
+        bar.setAttribute("tabindex", "0");
+        bar.focus();
+      }
+    }
   }
 
   function renderChart(s: TimeSeries): HTMLElement[] {
@@ -1295,27 +1694,82 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     svg.setAttribute("viewBox", `0 0 ${n} 100`);
     svg.setAttribute("preserveAspectRatio", "none");
     svg.setAttribute("class", "ex-chart");
-    svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label", `${summary}. ${peakText}. ${gapText}.`);
+    // Bars are buttons (click = keep only that time) with a roving tab stop, like an APG toolbar: one Tab
+    // stop for the chart, arrow keys between bars, Enter or Space to pick, Shift to widen to a range.
+    svg.setAttribute("role", "toolbar");
+    svg.setAttribute("aria-label", `${t.exChartBars}. ${summary}. ${peakText}. ${gapText}.`);
+    svg.setAttribute("aria-describedby", "ex-hist-click-help");
+    const bars: SVGRectElement[] = [];
+    const selFrom = timeRange && timeRange.pattern === hist.wanted ? timeRange.from : null;
+    const selTo = timeRange && timeRange.pattern === hist.wanted ? timeRange.to : null;
     for (let i = 0; i < n; i++) {
       const v = s.counts[i] ?? 0;
       if (v === 0) continue;
+      const at = s.start + i * stepMs;
       const hgt = Math.max(1.5, (v / max) * 100);
       const rect = document.createElementNS(SVG_NS, "rect");
       rect.setAttribute("x", String(i + 0.08));
       rect.setAttribute("width", "0.84");
       rect.setAttribute("y", String(100 - hgt));
       rect.setAttribute("height", String(hgt));
+      rect.setAttribute("role", "button");
+      rect.setAttribute("tabindex", "-1");
+      rect.setAttribute("aria-label", fillText(t.exBarLabel, { at: fmtBucket(at), n: fmtCount(v) }));
+      rect.dataset.from = String(at);
+      if (selFrom !== null && selTo !== null && at >= selFrom && at < selTo) rect.classList.add("is-picked");
       const tip = document.createElementNS(SVG_NS, "title");
-      tip.textContent = `${fmtBucket(s.start + i * stepMs)} · ${fmtCount(v)}`;
+      tip.textContent = `${fmtBucket(at)} · ${fmtCount(v)}`;
       rect.appendChild(tip);
       svg.appendChild(rect);
+      bars.push(rect);
     }
+    // Inside a picked range every bar is picked; the mark only means something when some are not.
+    if (bars.every((b) => b.classList.contains("is-picked"))) for (const b of bars) b.classList.remove("is-picked");
+    const peakBar = bars.find((b) => Number(b.dataset.from) === s.peak.at) ?? bars[0];
+    peakBar?.setAttribute("tabindex", "0");
+    const pick = (rect: SVGRectElement, extend: boolean): void => {
+      const from = Number(rect.dataset.from);
+      pickBucket(from, from + stepMs, extend);
+    };
+    svg.addEventListener("click", (e) => {
+      const rect = e.target instanceof SVGRectElement ? e.target : null;
+      if (rect) pick(rect, e.shiftKey);
+    });
+    svg.addEventListener("keydown", (e) => {
+      const at = bars.findIndex((b) => b === document.activeElement);
+      if (at < 0) return;
+      let next: number | null = null;
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") next = Math.min(bars.length - 1, at + 1);
+      else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = Math.max(0, at - 1);
+      else if (e.key === "Home") next = 0;
+      else if (e.key === "End") next = bars.length - 1;
+      else if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        const rect = bars[at];
+        if (rect) pick(rect, e.shiftKey);
+        return;
+      }
+      if (next === null) return;
+      e.preventDefault();
+      for (const b of bars) b.setAttribute("tabindex", "-1");
+      bars[next]?.setAttribute("tabindex", "0");
+      bars[next]?.focus();
+    });
     const end = s.start + (n - 1) * stepMs;
     const mid = s.start + Math.floor((n - 1) / 2) * stepMs;
-    const rowsTable = s.counts.map((v, i) => h("tr", {}, h("td", { class: "mono" }, fmtBucket(s.start + i * stepMs)), h("td", { class: "num mono" }, fmtCount(v))));
+    const rowsTable = s.counts.map((v, i) => {
+      const at = s.start + i * stepMs;
+      const label = fmtBucket(at);
+      const cell = v === 0 ? label : (() => {
+        const b = h("button", { class: "ex-linkish mono", type: "button", dir: "ltr", "aria-label": fillText(t.exFilterToTime, { at: label }) }, label);
+        b.addEventListener("click", (e) => pickBucket(at, at + stepMs, e.shiftKey));
+        return b;
+      })();
+      return h("tr", {}, h("td", { class: "mono" }, cell), h("td", { class: "num mono" }, fmtCount(v)));
+    });
     return [
       h("p", { class: "ex-muted" }, ...fill(t.exHistSummary(plural(s.total)), { per, total: num(fmtCount(s.total)), n: num(fmtCount(n)) })),
+      h("p", { class: "ex-muted ex-hist-help", id: "ex-hist-click-help" }, t.exHistClickHelp),
       h("div", { class: "ex-chart-wrap", dir: "ltr" },
         h("div", { class: "ex-yaxis mono", "aria-hidden": "true" }, h("span", {}, fmtCount(s.peak.count)), h("span", {}, "0")),
         h("div", { class: "ex-chart-box" }, svg,
@@ -1375,7 +1829,15 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
 
   /* ---------------------------------------------------------------- hash / copy */
   function stateQuery(): string {
-    return encodeState({ file: file?.path ?? null, steps, json, cols, line: cursorLine >= 0 ? cursorLine + 1 : null });
+    return encodeState({
+      file: file?.path ?? null,
+      steps,
+      json: file?.mode === "json" ? appliedConds() : [],
+      cols,
+      line: cursorLine >= 0 ? cursorLine + 1 : null,
+      sort,
+      time: timeRange,
+    });
   }
   function syncHash(): void {
     const q = stateQuery();
@@ -1457,10 +1919,23 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     scheduleRender();
   });
   ro.observe(viewport);
-  jsonInput.value = json ? `${json.field} = ${json.value}` : "";
-  jsonInput.addEventListener("input", () => {
-    json = parseJsonFilter(jsonInput.value);
-    scheduleFilter();
+  addCondBtn.addEventListener("click", () => {
+    conds.push({ field: "", op: "eq", value: "" });
+    renderConds(conds.length - 1);
+  });
+  detailBtn.addEventListener("click", () => {
+    if (detailOpen) closeDetail(true);
+    else openDetail(true);
+  });
+  detailClose.addEventListener("click", () => closeDetail(true));
+  detailPrev.addEventListener("click", () => stepFromDrawer(-1));
+  detailNext.addEventListener("click", () => stepFromDrawer(1));
+  detailCopy.addEventListener("click", copyLine);
+  detailLink.addEventListener("click", copyLineLink);
+  drawer.addEventListener("keydown", onDrawerKey);
+  rowsLayer.addEventListener("dblclick", (e) => {
+    const target = e.target instanceof Element ? e.target.closest("[data-row]") : null;
+    if (target instanceof HTMLElement) openDetail(true);
   });
   colsInput.value = cols.join(", ");
   colsInput.addEventListener("input", () => {
@@ -1514,6 +1989,7 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     h("h3", { class: "ex-side-h" }, T().exEvidenceFiles),
     h("label", { class: "ex-sr", for: "ex-file-search" }, T().exFileSearch),
     fileSearch,
+    fileCount,
     noFiles,
     fileList,
     h("section", { class: "ex-time", "aria-labelledby": "ex-time-h" },
@@ -1542,10 +2018,10 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
     h("div", { class: "ex-head" }, h("div", { class: "ex-head-title" }, title, fileFormat), countEl),
     controls,
     notice,
-    h("div", { class: "ex-actions" }, firstBtn, lastBtn, matchNav, copyLineBtn, linkLineBtn, copyBtn, shareBtn,
+    h("div", { class: "ex-actions" }, firstBtn, lastBtn, matchNav, detailBtn, copyLineBtn, linkLineBtn, copyBtn, shareBtn,
       h("label", { class: "ex-toggle", for: "ex-wrap" }, wrapCb, T().exWrap)),
     keysHelp,
-    view,
+    work,
     aggSet,
   );
 
@@ -1561,6 +2037,8 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
       h("div", { class: "ex-layout" }, sidebar, main)),
   );
   viewport.classList.toggle("is-wrap", wrap);
+  renderConds();
+  paintTimeRow();
   renderPipeline();
   renderFileList();
   renderTime();

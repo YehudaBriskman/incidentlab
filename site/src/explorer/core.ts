@@ -10,10 +10,27 @@ export interface FilterStep {
   ci: boolean;
 }
 
+/** One JSON condition: `eq` equals, `ne` differs (or is missing), `has` contains, `exists` is present. */
+export type JsonOp = "eq" | "ne" | "has" | "exists";
+
 export interface JsonFilter {
   field: string;
+  op: JsonOp;
   value: string;
 }
+
+/** A time window over a timestamp capture (the histogram's pattern). Wall clock as written, read as UTC. */
+export interface TimeRange {
+  pattern: string;
+  year: number | null;
+  /** epoch ms, inclusive */
+  from: number;
+  /** epoch ms, exclusive */
+  to: number;
+}
+
+/** Sort the view by one header column: a CSV column index, or a JSON field path (column view). */
+export type SortKey = { kind: "csv"; index: number } | { kind: "json"; path: string };
 
 export interface UniqueResult {
   rows: Array<[string, number]>;
@@ -86,13 +103,40 @@ export function compileStep(step: FilterStep): Matcher | null {
 
 /* ------------------------------------------------------------ json */
 
+const JSON_OPS: ReadonlyArray<[string, JsonOp]> = [["!=", "ne"], ["~=", "has"], ["=", "eq"]];
+
+/** `field = value` (eq), `field != value`, `field ~= value` (contains), `field = *` (exists). */
 export function parseJsonFilter(input: string): JsonFilter | null {
-  const eq = input.indexOf("=");
-  if (eq <= 0) return null;
-  const field = input.slice(0, eq).trim();
-  const value = input.slice(eq + 1).trim();
+  let at = -1;
+  let len = 0;
+  let op: JsonOp = "eq";
+  for (const [token, o] of JSON_OPS) {
+    const i = input.indexOf(token);
+    if (i > 0 && (at < 0 || i < at)) {
+      at = i;
+      len = token.length;
+      op = o;
+    }
+  }
+  if (at <= 0) return null;
+  const field = input.slice(0, at).trim();
+  const value = input.slice(at + len).trim();
   if (field === "") return null;
-  return { field, value };
+  if (op === "eq" && value === "*") return { field, op: "exists", value: "" };
+  return { field, op, value };
+}
+
+export function formatJsonFilter(f: JsonFilter): string {
+  switch (f.op) {
+    case "eq":
+      return `${f.field}=${f.value}`;
+    case "ne":
+      return `${f.field}!=${f.value}`;
+    case "has":
+      return `${f.field}~=${f.value}`;
+    case "exists":
+      return `${f.field}=*`;
+  }
 }
 
 export function getJsonField(obj: unknown, path: string): unknown {
@@ -121,13 +165,59 @@ export function stringifyField(value: unknown): string {
   return String(value);
 }
 
-export function jsonLineMatches(line: string, filter: JsonFilter): boolean {
+function jsonValueMatches(obj: unknown, f: JsonFilter): boolean {
+  const value = getJsonField(obj, f.field);
+  switch (f.op) {
+    case "exists":
+      return value !== undefined;
+    case "eq":
+      return value !== undefined && (f.value === "*" || stringifyField(value) === f.value);
+    case "ne":
+      return value === undefined || stringifyField(value) !== f.value;
+    case "has":
+      return value !== undefined && stringifyField(value).toLowerCase().includes(f.value.toLowerCase());
+  }
+}
+
+const asList = (json: JsonFilter | readonly JsonFilter[] | null): readonly JsonFilter[] =>
+  json === null ? [] : isFilterList(json) ? json : [json];
+
+function isFilterList(json: JsonFilter | readonly JsonFilter[]): json is readonly JsonFilter[] {
+  return Array.isArray(json);
+}
+
+/** True when the line is a JSON object that meets every condition. */
+export function jsonLineMatches(line: string, filter: JsonFilter | readonly JsonFilter[]): boolean {
   const obj = parseJsonLine(line);
   if (obj === undefined) return false;
-  const value = getJsonField(obj, filter.field);
-  if (value === undefined) return false;
-  if (filter.value === "*") return true;
-  return stringifyField(value) === filter.value;
+  for (const f of asList(filter)) if (!jsonValueMatches(obj, f)) return false;
+  return true;
+}
+
+/** Dot paths of the scalar fields in a JSON object (arrays count as one value), in key order. */
+export function flattenJson(obj: unknown, prefix = "", out: Array<[string, string]> = [], depth = 0): Array<[string, string]> {
+  if (obj === null || typeof obj !== "object" || Array.isArray(obj) || depth > 6) {
+    if (prefix !== "") out.push([prefix, stringifyField(obj)]);
+    return out;
+  }
+  const entries = Object.entries(obj);
+  if (entries.length === 0 && prefix !== "") out.push([prefix, "{}"]);
+  for (const [k, v] of entries) flattenJson(v, prefix === "" ? k : `${prefix}.${k}`, out, depth + 1);
+  return out;
+}
+
+/** Field paths seen in the first `sample` JSON lines, most common first (ties in first-seen order). */
+export function jsonFieldPaths(lines: readonly string[], sample = 300, max = 200): string[] {
+  const seen = new Map<string, number>();
+  let n = 0;
+  for (const line of lines) {
+    if (n >= sample) break;
+    const obj = parseJsonLine(line);
+    if (obj === undefined) continue;
+    n++;
+    for (const [path] of flattenJson(obj)) seen.set(path, (seen.get(path) ?? 0) + 1);
+  }
+  return [...seen.entries()].sort((a, b) => b[1] - a[1]).slice(0, max).map(([p]) => p);
 }
 
 export function looksLikeJsonLines(lines: readonly string[]): boolean {
@@ -146,6 +236,27 @@ export function looksLikeJsonLines(lines: readonly string[]): boolean {
 
 export class FilterTimeout extends Error {}
 
+/** A matcher for lines whose timestamp capture falls inside `range`. Parsed keys are cached. */
+export function timeMatcher(range: TimeRange): (line: string) => boolean {
+  const re = new RegExp(range.pattern);
+  const cache = new Map<string, number | null>();
+  return (line) => {
+    const m = re.exec(line);
+    if (!m) return false;
+    const key = m[1] ?? m[0];
+    let ms = cache.get(key);
+    if (ms === undefined) {
+      ms = parseTimeKey(key, range.year);
+      if (cache.size < 100_000) cache.set(key, ms);
+    }
+    return ms !== null && ms >= range.from && ms < range.to;
+  };
+}
+
+export interface FilterExtras {
+  time?: TimeRange | null;
+}
+
 /**
  * Runs the pipeline and returns the indices of kept lines.
  * `deadline` (epoch ms) is checked periodically; FilterTimeout is thrown past it.
@@ -153,15 +264,18 @@ export class FilterTimeout extends Error {}
 export function applyFilters(
   lines: readonly string[],
   steps: readonly FilterStep[],
-  json: JsonFilter | null = null,
+  json: JsonFilter | readonly JsonFilter[] | null = null,
   deadline = Number.POSITIVE_INFINITY,
   skipFirst = false,
+  extras: FilterExtras = {},
 ): Uint32Array {
   const matchers: Matcher[] = [];
   for (const step of steps) {
     const m = compileStep(step);
     if (m) matchers.push(m);
   }
+  if (extras.time) matchers.push(timeMatcher(extras.time));
+  const conds = asList(json);
   const out = new Uint32Array(lines.length);
   let n = 0;
   for (let i = skipFirst ? 1 : 0; i < lines.length; i++) {
@@ -174,10 +288,110 @@ export function applyFilters(
         break;
       }
     }
-    if (keep && json && !jsonLineMatches(line, json)) keep = false;
+    if (keep && conds.length > 0 && !jsonLineMatches(line, conds)) keep = false;
     if (keep) out[n++] = i;
   }
   return out.slice(0, n);
+}
+
+/* ------------------------------------------------------------ sorting */
+
+const NUMERIC = /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i;
+
+/** The value a sort key reads from one line ("" when missing). */
+export function sortValue(line: string, key: SortKey): string {
+  if (key.kind === "csv") return parseCsvLine(line)[key.index] ?? "";
+  const obj = parseJsonLine(line);
+  return obj === undefined ? "" : stringifyField(getJsonField(obj, key.path));
+}
+
+/**
+ * Sorts view `indices` (file line numbers) by one column. Numeric when every non-empty value is a number,
+ * otherwise a natural string compare. Empty values sort last both ways; ties keep file order (stable).
+ */
+export function sortIndices(
+  lines: readonly string[],
+  indices: ArrayLike<number>,
+  key: SortKey,
+  desc: boolean,
+  deadline = Number.POSITIVE_INFINITY,
+): Uint32Array {
+  const n = indices.length;
+  const values = new Array<string>(n);
+  let numeric = true;
+  for (let k = 0; k < n; k++) {
+    if ((k & 2047) === 0 && Date.now() > deadline) throw new FilterTimeout("sort took too long");
+    const v = sortValue(lines[indices[k] ?? 0] ?? "", key);
+    values[k] = v;
+    if (numeric && v !== "" && !NUMERIC.test(v.trim())) numeric = false;
+  }
+  const order = Array.from({ length: n }, (_, k) => k);
+  const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+  const nums = numeric ? values.map((v) => (v === "" ? 0 : Number(v))) : null;
+  order.sort((a, b) => {
+    const va = values[a] ?? "";
+    const vb = values[b] ?? "";
+    if (va === "" || vb === "") return va === vb ? a - b : va === "" ? 1 : -1;
+    const d = nums ? (nums[a] ?? 0) - (nums[b] ?? 0) : collator.compare(va, vb);
+    if (d !== 0) return desc ? -d : d;
+    return a - b;
+  });
+  const out = new Uint32Array(n);
+  for (let k = 0; k < n; k++) out[k] = indices[order[k] ?? 0] ?? 0;
+  return out;
+}
+
+/** Width of the inline time shown after an epoch value: ` 2026-11-13 00:00:00Z`. */
+export const EPOCH_SUFFIX_CH = 21;
+
+/**
+ * Column widths in characters for a CSV file: the longest of the header and the first `sample` rows,
+ * plus room for an inline epoch time, clamped to [4, max] (one more for the gap).
+ */
+export function csvColumnWidths(lines: readonly string[], sample = 2000, max = 48): number[] {
+  const widths: number[] = [];
+  const epoch: boolean[] = [];
+  const end = Math.min(lines.length, sample + 1);
+  for (let i = 0; i < end; i++) {
+    const cells = parseCsvLine(lines[i] ?? "");
+    for (let c = 0; c < cells.length; c++) {
+      const v = cells[c] ?? "";
+      widths[c] = Math.max(widths[c] ?? 0, v.length);
+      if (i > 0 && isEpochSeconds(v)) epoch[c] = true;
+    }
+  }
+  return Array.from(widths, (w, c) => Math.min(max, Math.max(4, (w ?? 0) + (epoch[c] ? EPOCH_SUFFIX_CH : 0))) + 1);
+}
+
+/** The UTC time an epoch-seconds value stands for, as `YYYY-MM-DD HH:MM:SSZ`. */
+export function epochLabel(value: string): string {
+  const ms = Math.round(Number(value) * 1000);
+  return `${formatInZone(ms, "UTC").replace(/ UTC$/, "")}Z`;
+}
+
+/** `key=value` and `key="quoted value"` pairs in a text line (iptables, logfmt), first `limit` of them. */
+export function kvPairs(line: string, limit = 40): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (const m of line.matchAll(/(?:^|[\s,;])([A-Za-z_][\w.-]{0,40})=("(?:[^"\\]|\\.)*"|[^\s,;]*)/g)) {
+    const raw = m[2] ?? "";
+    out.push([m[1] ?? "", raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2 ? raw.slice(1, -1) : raw]);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/** Epoch-seconds tokens in a free-text line (VPC flow logs, CSV rows), with their UTC time. */
+export function epochTokens(line: string, limit = 8): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  const seen = new Set<string>();
+  for (const m of line.matchAll(/(?<![\d.])\d{9,10}(?:\.\d+)?(?![\d.])/g)) {
+    const v = m[0];
+    if (seen.has(v) || !isEpochSeconds(v)) continue;
+    seen.add(v);
+    out.push([v, epochLabel(v)]);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 function* iterIndices(lineCount: number, indices: ArrayLike<number> | null): Generator<number> {
@@ -562,10 +776,14 @@ export function pluralCategory(n: number, lang: string): Intl.LDMLPluralRule {
 export interface ViewState {
   file: string | null;
   steps: FilterStep[];
-  json: JsonFilter | null;
+  json: JsonFilter[];
   cols: string[];
   /** 1-based line number to focus (`l=`), or null */
   line?: number | null;
+  /** header column to sort by (`s=2` ascending, `s=-2` descending, 0-based index) */
+  sort?: { col: number; desc: boolean } | null;
+  /** time window from a histogram bar (`t=from-to[-year]`, `tp=pattern`) */
+  time?: TimeRange | null;
 }
 
 const KIND_CODE: Record<StepKind, string> = { contains: "c", not: "n", regex: "r" };
@@ -577,8 +795,13 @@ export function encodeState(state: ViewState): string {
     if (s.text === "") continue;
     p.append("q", `${KIND_CODE[s.kind]}${s.ci ? "i" : ""}:${s.text}`);
   }
-  if (state.json) p.set("jf", `${state.json.field}=${state.json.value}`);
+  for (const j of state.json) p.append("jf", formatJsonFilter(j));
   if (state.cols.length > 0) p.set("cols", state.cols.join(","));
+  if (state.sort) p.set("s", `${state.sort.desc ? "-" : ""}${state.sort.col}`);
+  if (state.time) {
+    p.set("t", `${state.time.from}-${state.time.to}${state.time.year !== null ? `-${state.time.year}` : ""}`);
+    p.set("tp", state.time.pattern);
+  }
   if (state.line !== undefined && state.line !== null && state.line > 0) p.set("l", String(state.line));
   return p.toString();
 }
@@ -592,10 +815,55 @@ export function decodeState(query: string): ViewState {
     const kind: StepKind = m[1] === "n" ? "not" : m[1] === "r" ? "regex" : "contains";
     steps.push({ kind, ci: m[2] === "i", text: m[3] ?? "" });
   }
-  const jf = p.get("jf");
+  const json = p.getAll("jf").map(parseJsonFilter).filter((j): j is JsonFilter => j !== null);
   const cols = (p.get("cols") ?? "").split(",").map((c) => c.trim()).filter((c) => c !== "");
   const l = Number(p.get("l") ?? "");
-  return { file: p.get("f"), steps, json: jf ? parseJsonFilter(jf) : null, cols, line: Number.isInteger(l) && l > 0 ? l : null };
+  const sm = /^(-?)(\d{1,3})$/.exec(p.get("s") ?? "");
+  const tm = /^(\d{1,15})-(\d{1,15})(?:-(\d{4}))?$/.exec(p.get("t") ?? "");
+  const tp = p.get("tp");
+  const time: TimeRange | null = tm && tp !== null && tp !== "" && regexError(tp) === null
+    ? { pattern: tp, from: Number(tm[1]), to: Number(tm[2]), year: tm[3] ? Number(tm[3]) : null }
+    : null;
+  return {
+    file: p.get("f"),
+    steps,
+    json,
+    cols,
+    line: Number.isInteger(l) && l > 0 ? l : null,
+    sort: sm ? { col: Number(sm[2]), desc: sm[1] === "-" } : null,
+    time,
+  };
+}
+
+/* ------------------------------------------------------------ file list */
+
+export interface FileGroup<T> {
+  /** top-level folder, or "" for files at the root */
+  dir: string;
+  items: T[];
+}
+
+/** Groups by the first path segment, keeping the input order of groups and files (root files first). */
+export function groupByDir<T>(items: readonly T[], pathOf: (item: T) => string): Array<FileGroup<T>> {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const path = pathOf(item);
+    const slash = path.indexOf("/");
+    const dir = slash > 0 ? path.slice(0, slash) : "";
+    const list = groups.get(dir);
+    if (list) list.push(item);
+    else groups.set(dir, [item]);
+  }
+  const out = [...groups.entries()].map(([dir, list]) => ({ dir, items: list }));
+  return out.sort((a, b) => Number(b.dir === "") - Number(a.dir === ""));
+}
+
+/** True when every whitespace-separated term appears in one of the fields (case-insensitive). */
+export function matchesQuery(query: string, fields: readonly string[]): boolean {
+  const terms = query.toLowerCase().split(/\s+/).filter((t) => t !== "");
+  if (terms.length === 0) return true;
+  const hay = fields.join("\n").toLowerCase();
+  return terms.every((t) => hay.includes(t));
 }
 
 export function fmtCount(n: number): string {

@@ -106,7 +106,6 @@
 .ex-cell { flex: none; width: 14ch; overflow: hidden; text-overflow: ellipsis; padding-right: 1ch; }
 .ex-cell-wide { width: 28ch; }
 .ex-cell.is-blank { color: var(--code-muted); }
-.ex-cell.is-epoch { text-decoration: underline dotted; cursor: help; }
 /* Sticky INSIDE the scroller: it scrolls sideways with its columns and stays on top vertically. */
 .ex-colhead { position: sticky; top: 0; z-index: 2; width: max-content; min-width: 100%; color: var(--code-accent); background: var(--code-bg); border-bottom: 1px solid var(--code-border); font-weight: 600; }
 .ex-colhead[hidden] { display: none; }
@@ -178,6 +177,93 @@ th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
 .ex-hist-take { font-size: var(--step--1); margin: var(--space-2) 0; }
 .ex-hist-table summary { font-size: var(--step--1); color: var(--text-2); cursor: pointer; }
 .ex-offscreen { position: fixed; left: -9999px; top: 0; }
+.ex-hist-help { margin-block: 0 var(--space-1); }
+.ex-chart rect { cursor: pointer; }
+.ex-chart rect.is-picked { fill: var(--accent-strong); }
+.ex-chart rect:focus { outline: none; }
+.ex-chart rect:focus-visible { fill: var(--text); stroke: var(--focus-ring); stroke-width: var(--focus-width); vector-effect: non-scaling-stroke; }
+
+/* file groups */
+.ex-file-count { margin: 0 0 var(--space-2); font-size: var(--step--2); }
+.ex-file-group { display: flex; flex-direction: column; gap: var(--space-1); }
+.ex-file-group + .ex-file-group { margin-block-start: var(--space-2); }
+.ex-file-group-h { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); margin: 0; padding: var(--space-1) var(--space-3) 0; font-size: var(--step--2); font-weight: 600; color: var(--text-muted); }
+.ex-file-group-n { font-weight: 400; }
+.ex-files-sub { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+
+/* time filter chip (from a histogram bar) */
+.ex-time-filter { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; font-size: var(--step--1); }
+.ex-time-filter[hidden] { display: none; }
+.ex-time-filter-k { color: var(--text-muted); min-width: 3ch; }
+.ex-time-chip { font-size: var(--step--1); }
+
+/* JSON conditions */
+.ex-jsonbar { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); align-items: start; }
+.ex-json-conds { display: flex; flex-direction: column; gap: var(--space-2); align-items: flex-start; min-width: 0; }
+.ex-json-h { font-size: var(--step--2); color: var(--text-muted); }
+.ex-json-help { margin: 0; font-size: var(--step--2); }
+.ex-conds { display: flex; flex-direction: column; gap: var(--space-2); width: 100%; }
+.ex-cond { display: grid; grid-template-columns: minmax(0, 1.3fr) auto minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; }
+.ex-cond:has(.ex-cond-value[hidden]) { grid-template-columns: minmax(0, 1.3fr) auto auto; }
+.ex-cond-field { min-width: 0; width: 100%; }
+.ex-cond-value { min-width: 0; width: 100%; }
+.ex-cond-value[hidden] { display: none; }
+.ex-json-cols { min-width: 0; }
+
+/* CSV / column header: sort buttons. Inside the LTR code island, so physical sides are intended. */
+.ex-sort { background: none; border: 0; color: inherit; font: inherit; font-weight: 600; text-align: left; height: 20px; line-height: 20px; padding: 0 1ch 0 0; cursor: pointer; display: inline-flex; gap: 0.5ch; white-space: nowrap; }
+.ex-sort:hover .ex-sort-name { text-decoration: underline; }
+.ex-sort:focus-visible { outline: var(--focus-width) solid var(--code-accent); outline-offset: calc(-1 * var(--focus-width)); }
+.ex-sort-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ex-sort.is-asc, .ex-sort.is-desc { color: var(--code-text); }
+.ex-epoch { color: var(--code-muted); }
+
+/* row detail drawer: beside the log on wide screens, a bottom sheet below that */
+.ex-work { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); align-items: start; }
+.ex-drawer { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; overflow: auto; }
+.ex-drawer[hidden] { display: none; }
+.ex-drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-2); }
+.ex-drawer-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ex-detail-h { margin: 0; font-size: var(--step-0); }
+.ex-detail-h:focus { outline: none; }
+.ex-detail-h:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); border-radius: var(--radius-xs); }
+.ex-detail-pos { margin: 0; font-size: var(--step--1); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ex-detail-close { min-width: var(--control-sm); font-size: var(--step-1); line-height: 1; }
+.ex-drawer-tools { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.ex-detail-body { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.ex-detail-body > .ex-muted { margin: 0; }
+.ex-detail-sub { margin: var(--space-2) 0 0; font-size: var(--step--2); text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted); }
+.ex-detail-fields { max-height: 300px; }
+.ex-detail-fields .ex-table th, .ex-detail-fields .ex-table td { vertical-align: top; }
+.ex-detail-fields thead th { padding: var(--space-1) var(--space-2); text-align: start; }
+/* A row header (field name), not a column header: undo the shared header look. */
+.ex-table th.ex-detail-k { text-transform: none; letter-spacing: normal; color: var(--text); background: none; font-size: var(--step--1); font-weight: 600; text-align: start; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--border); white-space: nowrap; }
+.ex-detail-v { word-break: break-all; }
+.ex-detail-act { width: 1%; white-space: nowrap; text-align: end; }
+.ex-detail-times { display: grid; grid-template-columns: auto 1fr; gap: var(--space-1) var(--space-3); margin: 0; font-size: var(--step--1); }
+.ex-detail-times dt { color: var(--text-muted); }
+.ex-detail-times dd { margin: 0; }
+.ex-detail-raw { margin: 0; padding: var(--space-2) var(--space-3); background: var(--code-bg); color: var(--code-text); border-radius: var(--radius-md); font-family: var(--font-mono); font-size: var(--step--1); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto; text-align: left; } /* LTR code island */
+.ex-detail-raw mark { background: var(--code-accent); color: var(--code-on-accent); border-radius: 2px; }
+.ex-detail-raw:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); }
+
+@media (min-width: 1180px) {
+  .ex-work.has-detail { grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); }
+  .ex-drawer { position: sticky; top: var(--space-3); max-height: calc(min(60vh, 560px) + 2px); }
+}
+@media (max-width: 1179.98px) {
+  /* Bottom sheet: the log stays visible above it, so the cursor row and the details read together. */
+  .ex-drawer { position: fixed; inset-inline: 0; inset-block-end: 0; z-index: 30; max-height: 55vh; max-height: 55svh; border-end-start-radius: 0; border-end-end-radius: 0; box-shadow: var(--shadow-lg); padding-block-end: calc(var(--space-3) + env(safe-area-inset-bottom, 0px)); max-width: 900px; margin-inline: auto; }
+  .ex-work.has-detail { padding-block-end: 55vh; padding-block-end: 55svh; }
+}
+@media (prefers-reduced-motion: no-preference) and (max-width: 1179.98px) {
+  .ex-drawer:not([hidden]) { animation: ex-sheet-in var(--motion-dur-medium) var(--motion-ease-enter); }
+  @keyframes ex-sheet-in { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+}
+@media (forced-colors: active) {
+  .ex-drawer { border-color: CanvasText; }
+  .ex-chart rect.is-picked { fill: Highlight; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .ex-progress-bar { transition: none; }
@@ -221,6 +307,8 @@ th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
 [dir=rtl] .ex-hist-key,
 [dir=rtl] .ex-hist-n,
 [dir=rtl] .ex-pipe,
+[dir=rtl] .ex-detail-raw,
+[dir=rtl] .ex-detail-times,
 [dir=rtl] .explorer code { direction: ltr; unicode-bidi: isolate; }
 /* Typed patterns stay LTR; an empty field shows its Hebrew placeholder right-aligned in the UI direction. */
 [dir=rtl] .ex-input:placeholder-shown { direction: rtl; text-align: start; }
