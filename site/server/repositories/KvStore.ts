@@ -40,16 +40,20 @@ export const LEGACY_STORE = "incidentlab-players";
 
 /** Explicit credentials for scripts that run outside a Netlify Function (backup/restore/migrate CLI). */
 export type BlobsCredentials = { readonly siteID: string; readonly token: string };
+/** "strong" everywhere except the evidence Edge Function, which reads immutable, versioned records. */
+export type BlobsConsistency = "strong" | "eventual";
 
 export class BlobsKvStore implements KvStore {
   private readonly injected: BlobStore | undefined;
   private readonly name: string;
   private readonly credentials: BlobsCredentials | undefined;
+  private readonly consistency: BlobsConsistency;
 
-  constructor(options: { store?: BlobStore; name?: string; credentials?: BlobsCredentials } = {}) {
+  constructor(options: { store?: BlobStore; name?: string; credentials?: BlobsCredentials; consistency?: BlobsConsistency } = {}) {
     this.injected = options.store;
     this.name = options.name ?? PRIMARY_STORE;
     this.credentials = options.credentials;
+    this.consistency = options.consistency ?? "strong";
   }
 
   // Resolve the store on EVERY call: getStore() reads the per-request Blobs token from the
@@ -58,8 +62,8 @@ export class BlobsKvStore implements KvStore {
   private get store(): BlobStore {
     if (this.injected) return this.injected;
     return this.credentials
-      ? getStore({ name: this.name, consistency: "strong", siteID: this.credentials.siteID, token: this.credentials.token })
-      : getStore({ name: this.name, consistency: "strong" });
+      ? getStore({ name: this.name, consistency: this.consistency, siteID: this.credentials.siteID, token: this.credentials.token })
+      : getStore({ name: this.name, consistency: this.consistency });
   }
 
   async get(key: string): Promise<Versioned<unknown> | null> {
