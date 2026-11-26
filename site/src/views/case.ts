@@ -404,9 +404,10 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
       h(
         "div",
         { class: "paths" },
+        // Both paths are links with the same affordance: the terminal path opens the full command list.
         h(
-          "div",
-          { class: "path-card" },
+          "a",
+          { class: "path-card path-link", href: `#/case/${c.id}/toolbox` },
           h("h4", {}, T().pathTerminal),
           h("p", { class: "muted" }, T().pathTerminalBody),
         ),
