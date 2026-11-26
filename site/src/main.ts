@@ -198,7 +198,7 @@ function route(): void {
       return;
     }
     if (parts[0] === "author" && parts.length === 1) {
-      lazyView(() => import("./views/author").then((m) => m.renderAuthor));
+      lazyView(() => import("./views/author").then((m) => legacy(m.renderAuthor)));
       return;
     }
     if (parts[0] === "admin" && parts.length === 1) {
