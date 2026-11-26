@@ -2147,3 +2147,6 @@ input[type="radio"] { inline-size: 16px; block-size: 16px; accent-color: var(--a
   .btn-primary, .btn-primary:hover:not(:disabled) { forced-color-adjust: none; background: ButtonText; color: ButtonFace; border-color: ButtonText; filter: none; }
   .btn-primary:disabled, .btn-primary[aria-disabled="true"] { background: GrayText; color: ButtonFace; border-color: GrayText; }
 }
+
+/* Case stage glyphs (number, check, star) come from data-glyph, so they are not part of the button text. */
+.step-icon::before { content: attr(data-glyph); }
