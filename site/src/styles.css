@@ -1294,17 +1294,8 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
 .ach.is-locked .ach-icon { opacity: 1; filter: grayscale(1) contrast(1.2); border: 1px solid var(--border-strong); }
 .ach.is-locked .ach-desc, .ach.is-locked .ach-when { color: var(--text-muted); }
 
-/* phones: the per-case table becomes one card per case, each value labelled */
+/* phones: the per-case table stacks into cards through .dt-stack (data table section); only its extras live here */
 @media (max-width: 600px) {
-  .per-case-wrap { border: 0; overflow: visible; }
-  .per-case-table, .per-case-table tbody { display: block; }
-  .per-case-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .per-case-table tr { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-1) var(--space-3); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
-  .per-case-table th, .per-case-table td { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0; border: 0; text-align: start; white-space: normal; }
-  .per-case-table .case-cell { grid-column: 1 / -1; font-size: var(--step-0); font-weight: 700; }
-  .per-case-table td::before { content: attr(data-label); color: var(--text-muted); font-size: var(--step--2); font-weight: 600; font-family: var(--font-sans); }
-  .per-case-table tbody tr:last-child > * { border: 0; }
-  [dir=rtl] .per-case-table td.num { direction: rtl; text-align: start; }
   .per-case-table .bar { margin-inline-start: 0; }
 }
 
@@ -1359,3 +1350,36 @@ body.projector main { padding: 0 4vw 2vh; }
   .resume-seg.is-done { forced-color-adjust: none; background: Highlight; }
 }
 .pw-toggle { align-self: flex-end; margin-top: calc(-1 * var(--space-2)); }
+
+/* ============ data table (src/components/dataTable.ts; DESIGN.md "Data table") ============ */
+.data-table thead th { position: sticky; inset-block-start: 0; z-index: 1; }
+.dt-sort { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: var(--space-1); min-block-size: var(--target-min); cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; }
+.dt-sort:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); border-radius: var(--radius-xs); }
+.dt-sort:hover { color: var(--text); }
+.num .dt-sort { flex-direction: row-reverse; }
+.dt-sort-icon { font-size: 0.85em; color: var(--text-muted); }
+th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-icon { color: var(--accent); }
+.dt-message { padding: var(--space-5) var(--space-4); color: var(--text-muted); text-align: center; display: flex; flex-direction: column; align-items: center; gap: var(--space-3); }
+.dt-message p { margin: 0; }
+.dt-skeleton { display: inline-block; inline-size: 70%; block-size: 0.9rem; border-radius: var(--radius-sm); background: var(--surface-2); vertical-align: middle; }
+.stat-skeleton { inline-size: 5ch; block-size: 1.6rem; }
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion=reduce]) .dt-skeleton { animation: skeleton-pulse 1.4s ease-in-out infinite; }
+}
+.stat-sub.is-up { color: var(--success-fg); }
+.stat-sub.is-down { color: var(--danger-fg); }
+@media (max-width: 640px) {
+  .data-table:not(.dt-stack) .dt-opt { display: none; }
+}
+/* phones: a stacking table becomes one card per row, each value labelled by its column */
+@media (max-width: 600px) {
+  .dt-wrap:has(.dt-stack) { border: 0; overflow: visible; }
+  .dt-stack, .dt-stack tbody { display: block; }
+  .dt-stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .dt-stack tr { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-1) var(--space-3); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+  .dt-stack th, .dt-stack td { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0; border: 0; text-align: start; white-space: normal; }
+  .dt-stack th[scope=row] { grid-column: 1 / -1; font-size: var(--step-0); font-weight: 700; }
+  .dt-stack td::before { content: attr(data-label); color: var(--text-muted); font-size: var(--step--2); font-weight: 600; font-family: var(--font-sans); }
+  .dt-stack tbody tr:last-child > * { border: 0; }
+  [dir=rtl] .dt-stack td.num { direction: rtl; text-align: start; }
+}
