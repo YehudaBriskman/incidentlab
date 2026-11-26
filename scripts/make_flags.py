@@ -14,8 +14,10 @@ content-sealed/<id>.debrief.md (+ optional <id>.debrief.he.md). Writes:
   build/truth/answers.json            3am-outage plaintext answers (read by solutions/solve.sh)
   build/truth/all-answers.json        every case's plaintext answers (instructor only; NEVER deployed)
 
-Normalization must match normalizeAnswer() in site/src/content/schema.ts:
+Normalization must match normalizeAnswer() in site/shared/normalize.ts:
   trim -> lowercase -> collapse runs of whitespace to a single space.
+Every run first checks normalize_answer() against site/shared/normalize-vectors.json, the vectors the
+TypeScript implementation is tested against too.
 
 Python 3 stdlib only. Run from anywhere; paths are resolved from the repo root.
 """
@@ -39,6 +41,7 @@ CASES_JSON_DIR = ROOT / "site" / "src" / "content" / "cases"
 CASE_GENERATORS = ROOT / "generator" / "cases"
 ANSWERS_OUT = TRUTH_DIR / "answers.json"
 ALL_ANSWERS_OUT = TRUTH_DIR / "all-answers.json"
+NORMALIZE_VECTORS = ROOT / "site" / "shared" / "normalize-vectors.json"
 QUESTION_IDS = ["q1", "q2", "q3", "q4", "q5", "q6"]
 
 _HMS_RE = re.compile(r"(\d{2}:\d{2}:\d{2})")
@@ -49,9 +52,26 @@ def fail(message: str) -> "None":
     sys.exit(1)
 
 
+# JavaScript's \s (and what String.prototype.trim removes). Python's \s differs (it includes \x1c-\x1f and
+# leaves out U+FEFF), so the set is spelled out to match site/shared/normalize.ts exactly.
+_JS_WHITESPACE = "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+_JS_WHITESPACE_RUN = re.compile("[" + _JS_WHITESPACE + "]+")
+
+
 def normalize_answer(raw: str) -> str:
-    # Mirrors JS: raw.trim().toLowerCase().replace(/\s+/g, " ")
-    return re.sub(r"\s+", " ", raw.strip().lower())
+    # Mirrors site/shared/normalize.ts: raw.trim().toLowerCase().replace(/\s+/g, " ")
+    return _JS_WHITESPACE_RUN.sub(" ", raw.strip(_JS_WHITESPACE).lower())
+
+
+def check_normalize_vectors() -> None:
+    vectors = load_json(NORMALIZE_VECTORS).get("vectors")
+    if not isinstance(vectors, list) or not vectors:
+        fail(f"{NORMALIZE_VECTORS.relative_to(ROOT)} has no vectors")
+    for vector in vectors:
+        got = normalize_answer(vector["input"])
+        if got != vector["expected"]:
+            fail(f"normalize_answer({vector['input']!r}) = {got!r}, expected {vector['expected']!r} "
+                 f"({NORMALIZE_VECTORS.relative_to(ROOT)}); keep it in step with site/shared/normalize.ts")
 
 
 def load_json(path: Path) -> dict:
@@ -191,6 +211,7 @@ def discover_contract_cases() -> list[str]:
 
 
 def main() -> int:
+    check_normalize_vectors()
     all_answers: dict[str, dict[str, str]] = {}
 
     repo = load_json(TRUTH_DIR / "repo.json")

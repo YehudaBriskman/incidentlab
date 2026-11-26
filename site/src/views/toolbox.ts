@@ -3,7 +3,7 @@
 // for (SCORING.COMMAND_COST on the active stage) and comes from `progress.unlocked.commands`, never from the
 // bundled content: production builds strip `command` / `powershell` from the case JSON.
 import { QUESTION_ORDER, SCORING, type ProgressView, type StageProgress, type TodayResponse } from "../../shared/contract";
-import type { Case } from "../content/schema";
+import type { Case } from "../../shared/case";
 import { getProgress, revealCommand } from "../lib/api";
 import { announce, confirmButton, copyButton, ensureAnnouncer, h, html, setChildren, type Child } from "../lib/dom";
 import { playErrorText } from "../lib/errors";

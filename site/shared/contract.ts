@@ -373,5 +373,5 @@ export const AuditResponseSchema = z.object({ entries: z.array(AuditEntrySchema)
 
 // Scoring: solved points = max(0, question.points - sum(cost of the first `hintsRevealed` hints)).
 // Rate limit: max 5 wrong answers per account per question per 60s -> 429 with retryAfterSeconds.
-// Answer normalization: trim, lowercase, collapse whitespace.
-export const normalizeAnswer = (raw: string): string => raw.trim().toLowerCase().replace(/\s+/g, " ");
+// Answer normalization: trim, lowercase, collapse whitespace (one implementation, in ./normalize.ts).
+export { normalizeAnswer } from "./normalize.ts";

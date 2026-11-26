@@ -1,5 +1,12 @@
-// Canonical content schema. The site agent copies this verbatim into site/src/content/schema.ts.
-// The content agent writes JSON that validates against it.
+// Case schemas shared by the browser, the server and the case-upload validator.
+//
+// `CaseSchema` is the authored per-language case file (site/src/content/cases/<id>(.he).json). It still
+// carries the paid fields (hint texts, runnable commands); vite.config.ts strips those before the browser
+// ever sees them. Case JSON validates against it; docs/CASE_CONTRACT.md is the author-facing contract.
+//
+// The public, sealed, record and package schemas built on it are in ./case-records.ts. They are a separate
+// module because the browser imports this one: zod schema definitions are not tree-shaken, so anything
+// defined here ships in the entry chunk.
 import { z } from "zod";
 
 export const HintSchema = z.object({
@@ -72,25 +79,5 @@ export const CaseSchema = z.object({
   debrief: z.string(),                  // markdown, unlocked after all questions solved
 });
 
-export const TeaserSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  tagline: z.string(),
-  skills: z.array(z.string()),
-  inspiredBy: z.string(),
-});
-export const TeasersSchema = z.array(TeaserSchema);
-
-export const FlagsSchema = z.object({
-  caseId: z.string(),
-  flags: z.record(z.string(), z.object({ salt: z.string(), sha256: z.string() })),
-});
-
 export type Case = z.infer<typeof CaseSchema>;
 export type Question = z.infer<typeof QuestionSchema>;
-export type Teaser = z.infer<typeof TeaserSchema>;
-export type Flags = z.infer<typeof FlagsSchema>;
-
-// Answer normalization (must match scripts/make_flags.py):
-export const normalizeAnswer = (raw: string): string =>
-  raw.trim().toLowerCase().replace(/\s+/g, " ");

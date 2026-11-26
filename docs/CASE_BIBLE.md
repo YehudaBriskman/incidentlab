@@ -185,7 +185,7 @@ All generators: Python 3 stdlib only, `random.Random(SEED)`, import constants fr
 output root `build/evidence/3am-outage/`, and run from the repo root.
 
 ## 6. Site contract
-- `site/src/content/cases/3am-outage.json`: case content (schema in `site/src/content/schema.ts`). It contains NO answers.
+- `site/src/content/cases/3am-outage.json`: case content (schema in `site/shared/case.ts`). It contains NO answers.
 - `site/src/content/teasers.json`: the 4 "coming soon" cases.
 - `site/server/generated/secrets.json`: `{"caseId","answers":{qN: normalized},"debrief"}`, bundled into the Netlify Function only (gitignored).
 - Evidence zip served from `/evidence/3am-outage-evidence.zip`.

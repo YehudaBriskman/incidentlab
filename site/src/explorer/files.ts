@@ -1,5 +1,5 @@
 import { englishEvidenceFormats } from "../content/evidence-formats";
-import type { Case } from "../content/schema";
+import type { Case } from "../../shared/case";
 import { T } from "../i18n/strings-tools";
 import type { StepKind } from "./core";
 

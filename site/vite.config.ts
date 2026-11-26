@@ -3,44 +3,18 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import { summarize, type CatalogEntry, type EvidenceFormats } from "./src/content/catalog-schema.ts";
-import { CaseSchema } from "./src/content/schema.ts";
+import { CaseSchema } from "./shared/case.ts";
+import { stripPaidContent } from "./shared/case-records.ts";
 
 /**
  * Paid content never ships to the browser. Case JSONs are authored with the full toolbox commands
  * (`command`, `powershell`) and hint texts, which the server hands out only after charging for them
  * (see scripts/make_flags.py and /api/cases/:id/{hint,reveal-command}). This plugin removes them from
- * the case files before Vite turns them into modules. Free fields (syntax, explain, costs) stay.
+ * the case files before Vite turns them into modules (stripPaidContent in shared/case-records.ts). Free fields
+ * (syntax, explain, costs) stay.
  * scripts/check-bundle.mjs fails the build if any of it leaks anyway.
  */
 const CASE_JSON = /[\\/]src[\\/]content[\\/]cases[\\/][^\\/]+\.json$/;
-
-type JsonObject = Record<string, unknown>;
-const isObject = (value: unknown): value is JsonObject => typeof value === "object" && value !== null && !Array.isArray(value);
-
-export function stripPaidContent(raw: unknown): unknown {
-  if (!isObject(raw)) return raw;
-  const out: JsonObject = { ...raw };
-  if (Array.isArray(raw["questions"])) {
-    out["questions"] = raw["questions"].map((q: unknown) => {
-      if (!isObject(q) || !Array.isArray(q["hints"])) return q;
-      return { ...q, hints: q["hints"].map((hint: unknown) => (isObject(hint) ? { cost: hint["cost"] } : hint)) };
-    });
-  }
-  if (Array.isArray(raw["toolbox"])) {
-    out["toolbox"] = raw["toolbox"].map((section: unknown) => {
-      if (!isObject(section) || !Array.isArray(section["items"])) return section;
-      return {
-        ...section,
-        items: section["items"].map((item: unknown) => {
-          if (!isObject(item)) return item;
-          const { command: _command, powershell: _powershell, ...free } = item;
-          return free;
-        }),
-      };
-    });
-  }
-  return out;
-}
 
 const stripPaidContentPlugin = (): Plugin => ({
   name: "incidentlab-strip-paid-content",

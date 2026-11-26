@@ -1,7 +1,7 @@
 import catalogRaw from "virtual:case-catalog";
 import { getLang, type Lang } from "../i18n/i18n";
-import { CatalogSchema, type CaseSummary, type CatalogEntry } from "./catalog-schema";
-import { CaseSchema, TeasersSchema, type Case, type Teaser } from "./schema";
+import { CatalogSchema, TeasersSchema, type CaseSummary, type CatalogEntry, type Teaser } from "./catalog-schema";
+import { CaseSchema, type Case } from "../../shared/case";
 
 /*
  * Two layers of content:

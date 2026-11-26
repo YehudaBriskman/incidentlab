@@ -1,7 +1,6 @@
 import type { AccountView, CaseStats, LeaderboardResponse, TodayResponse } from "../../shared/contract";
 import { caseSummaries, caseSummary, teasers } from "../content/load";
-import type { CaseSummary } from "../content/catalog-schema";
-import type { Teaser } from "../content/schema";
+import type { CaseSummary, Teaser } from "../content/catalog-schema";
 import { fetchLeaderboard, fetchMyStats } from "../lib/api";
 import { h, setChildren, type Child } from "../lib/dom";
 import { cachedAccount, isAccountKnown, loadAccount, loadToday } from "../lib/session";

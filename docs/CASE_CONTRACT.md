@@ -15,7 +15,7 @@ pipeline discovers cases from `generator/cases/*/build.py`, so a case that follo
 | `generator/cases/<id>/build.py` | Entry point. Python 3.10+ **stdlib only**, fixed seed, deterministic. Run from anywhere as `python3 generator/cases/<id>/build.py`. May import sibling modules in the same folder (add the folder to `sys.path` yourself). |
 | `content-sealed/<id>.debrief.md` | Debrief markdown (English), served only after all six stages are finished. |
 | `content-sealed/<id>.debrief.he.md` | Hebrew debrief (optional; falls back to English). |
-| `site/src/content/cases/<id>.json` | Player content (English). Validates against `site/src/content/schema.ts`. **Contains no answers.** |
+| `site/src/content/cases/<id>.json` | Player content (English). Validates against `CaseSchema` in `site/shared/case.ts`. **Contains no answers.** |
 | `site/src/content/cases/<id>.he.json` | Hebrew translation of the same file (same ids, points, costs, tool ids, evidence paths; commands stay in English). |
 | `solutions/<id>/solve.sh` | Evidence-only solver (see below). |
 
@@ -73,6 +73,20 @@ Evidence rules:
 - `debrief`: one line: `"_Sealed._ Finish all six stages to unlock the debrief."` (the real one is served by the server).
 - `inspiredBy`: the real public incident, year and a factual 2–3 sentence summary.
 - Writing style: plain, direct, no em dashes.
+
+## Schemas
+
+The zod schemas are the source of truth for every case shape (there is no separate schema doc):
+
+| Schema | File | What |
+|---|---|---|
+| `CaseSchema` | `site/shared/case.ts` | The authored case JSON above, paid fields included. The browser bundle gets it with the paid fields stripped. |
+| `CaseContentSchema` | `site/shared/case-records.ts` | The public form: hints are `{cost}` only, toolbox items have no `command`/`powershell`. Derived from `CaseSchema`; `stripPaidContent()` turns one into the other. |
+| `CaseSealedSchema` | `site/shared/case-records.ts` | The server-only half: normalized answers, hint texts, commands, debriefs, points and hint costs. Each case in `site/server/generated/secrets.json` has this shape. |
+| `CaseMetaSchema`, `EvidenceEntrySchema`, `CasePackageManifestSchema` | `site/shared/case-records.ts` | Case records and the upload package manifest (evidence in `EVIDENCE_CHUNK_BYTES` = 4 MiB chunks). Planned in #64/#65; nothing uses them yet. |
+
+Answers are normalized by `normalizeAnswer()` in `site/shared/normalize.ts`. `scripts/make_flags.py` mirrors it
+and checks itself against `site/shared/normalize-vectors.json` on every build.
 
 ## Solver: `solutions/<id>/solve.sh`
 

@@ -1,5 +1,5 @@
 import { QUESTION_ORDER, SCORING, type ProgressView, type QuestionId, type ScoreBreakdown, type StageProgress } from "../../shared/contract";
-import type { Case, Question } from "../content/schema";
+import type { Case, Question } from "../../shared/case";
 import { ApiError, getDebrief, getProgress, revealAnswer, revealHint, setupDone, submitAnswer } from "../lib/api";
 import { playErrorText } from "../lib/errors";
 import { loadAccount, loadToday, setAccount, signOut } from "../lib/session";
