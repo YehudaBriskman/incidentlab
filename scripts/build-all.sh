@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
 # Full IncidentLab build: generators (3am-outage + generator/cases/*) -> server answer keys -> evidence zips
 # -> case packages (build/packages/, checked) -> solver test -> site -> server tests.
-# Usage: ./scripts/build-all.sh [--no-site]
+# Usage: ./scripts/build-all.sh [--no-site | --evidence-only | --e2e-prep]
+#   --no-site        everything except the site build and its checks
+#   --evidence-only  generators, answer keys and evidence zips only (what a lab image needs; CI lab jobs)
+#   --e2e-prep       evidence, case packages and the site, without solvers, command checks or unit tests
+#                    (what a local server for the e2e suite needs; CI e2e shards, which run beside the full build)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 BUILD_SITE=1
+MODE=full
+USAGE="Usage: $0 [--no-site | --evidence-only | --e2e-prep]"
 for arg in "$@"; do
   case "$arg" in
     --no-site) BUILD_SITE=0 ;;
-    -h|--help) echo "Usage: $0 [--no-site]"; exit 0 ;;
-    *) echo "Unknown argument: $arg" >&2; echo "Usage: $0 [--no-site]" >&2; exit 2 ;;
+    --evidence-only) MODE=evidence ;;
+    --e2e-prep) MODE=e2e ;;
+    -h|--help) echo "$USAGE"; exit 0 ;;
+    *) echo "Unknown argument: $arg" >&2; echo "$USAGE" >&2; exit 2 ;;
   esac
 done
 
@@ -49,12 +57,22 @@ banner "Answer keys -> server secrets (scripts/make_flags.py)"
 banner "Package evidence zips         (scripts/package.sh -> build/evidence-zips/)"
 "$ROOT/scripts/package.sh"
 
+if [[ "$MODE" == "evidence" ]]; then
+  echo; echo "Done (--evidence-only): build/evidence, build/truth, build/evidence-zips"; exit 0
+fi
+
 banner "Package cases                (scripts/make_package.py -> build/packages/)"
 "$PYTHON" scripts/make_package.py
 
 banner "Check packages               (scripts/check-packages.mts)"
 (cd site && { [[ -d node_modules ]] || npm ci || npm install; })
 node --experimental-strip-types scripts/check-packages.mts
+
+if [[ "$MODE" == "e2e" ]]; then
+  banner "Build site                   (site: npm ci && npm run build)"
+  (cd site && { npm ci || npm install; } && npm run build)
+  echo; echo "Done (--e2e-prep): packages for the local server and site/dist"; exit 0
+fi
 
 banner "Test: official solver        (solutions/solve.sh)"
 bash solutions/solve.sh
