@@ -809,13 +809,14 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
   direction: rtl; text-align: start; unicode-bidi: normal;
 }
 [dir=rtl] .footer, [dir=rtl] .center-card > .mono { text-align: center; }
+[dir=rtl] .center-card.gate > .mono { text-align: start; } /* the gate form is start-aligned in both languages */
 
 /* ============ accounts: header menu + auth form ============ */
 .account-menu { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--step--1); }
 .account-name { font-weight: 600; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .field-label { font-weight: 600; font-size: var(--step--1); }
 .field-label-row { display: flex; justify-content: space-between; align-items: baseline; }
-.center-card.gate .muted.small { margin-top: -6px; }
+.center-card.gate > .muted.small { margin-top: -6px; }
 .row-center { display: flex; justify-content: center; align-items: center; gap: var(--space-4); flex-wrap: wrap; margin-top: var(--space-2); }
 
 /* ============ home: today + catalog ============ */
@@ -922,7 +923,7 @@ p.notice.form-error { display: block; }
 .form-ok { color: var(--success-fg); margin: var(--space-2) 0 0; font-size: var(--step--1); }
 .form-ok:empty { display: none; }
 .pw-form { display: flex; flex-direction: column; gap: var(--space-3); max-width: 420px; }
-.pw-form .muted.small { margin-top: -6px; }
+.pw-form > .muted.small { margin-top: -6px; }
 .pw-section { margin-top: var(--space-7); }
 
 /* ============ achievements ============ */
@@ -1350,6 +1351,11 @@ body.projector main { padding: 0 4vw 2vh; }
   .resume-seg.is-done { forced-color-adjust: none; background: Highlight; }
 }
 .pw-toggle { align-self: flex-end; margin-top: calc(-1 * var(--space-2)); }
+/* --- one group per field: label -> input is tighter (space-1) than field -> field (gate gap space-3 + space-2) --- */
+.field { display: flex; flex-direction: column; gap: var(--space-1); }
+.field > :is(.field-help, .field-error) { margin: 0; }
+.field > .pw-toggle { margin-top: 0; }
+.center-card.gate > .field + .field, .pw-form > .field + .field { margin-block-start: var(--space-2); }
 
 /* ============ data table (src/components/dataTable.ts; DESIGN.md "Data table") ============ */
 .data-table thead th { position: sticky; inset-block-start: 0; z-index: 1; }

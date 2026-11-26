@@ -199,13 +199,18 @@ function makeField(opts: { input: HTMLInputElement; label: string; help?: string
     label: opts.label,
     setError,
     hasError: () => !errorEl.hidden,
+    // One group per field, so the label sits closer to its own input than to the previous field.
     nodes: [
-      h("label", { class: "field-label", for: id }, opts.label),
-      opts.help ? h("p", { id: helpId, class: "field-help muted small" }, opts.help) : null,
-      errorEl,
-      opts.input,
-      // After the input, so Tab goes username → password → submit without stopping on the toggle first.
-      opts.toggle ?? null,
+      h(
+        "div",
+        { class: "field" },
+        h("label", { class: "field-label", for: id }, opts.label),
+        opts.help ? h("p", { id: helpId, class: "field-help muted small" }, opts.help) : null,
+        errorEl,
+        opts.input,
+        // After the input, so Tab goes username → password → submit without stopping on the toggle first.
+        opts.toggle ?? null,
+      ),
     ],
   };
 }
@@ -380,7 +385,8 @@ export function renderAuthForm(
         }),
       })
     : null;
-  if (invite !== null && opts.inviteCode !== undefined) invite.input.value = opts.inviteCode;
+  const prefilled = invite !== null && opts.inviteCode !== undefined && opts.inviteCode.length > 0;
+  if (invite !== null && prefilled) invite.input.value = opts.inviteCode ?? "";
   const fields: Field[] = [user, pw, ...(invite ? [invite] : [])];
   const summary = errorSummary(baseTitle);
   const submitLabel = isSignUp ? TA().signUpBtn : TA().signInBtn;
@@ -402,9 +408,11 @@ export function renderAuthForm(
     h("p", { class: "eyebrow mono" }, opts.context),
     h("h1", {}, isSignUp ? TA().authTitleSignUp : (opts.signInTitle ?? TA().authTitleSignIn)),
     h("p", { class: "muted" }, isSignUp ? TA().authHelpSignUp : TA().authHelpSignIn),
+    // A class link (`?code=`) leads with the prefilled code: it is why this student skips the approval wait.
+    prefilled && invite ? invite.nodes : null,
     user.nodes,
     pw.nodes,
-    invite ? invite.nodes : null,
+    invite && !prefilled ? invite.nodes : null,
     submit,
     switchMode,
     isSignUp ? null : h("p", { class: "muted small auth-forgot" }, TG().forgotPassword),
