@@ -1,5 +1,6 @@
 import "../explorer.css";
 import { h } from "../lib/dom";
+import { recordVisit } from "../lib/recent";
 import { openSheet, tooltip } from "../lib/overlay";
 import type { ViewResult } from "../shell/types";
 import { getLang } from "../i18n/i18n";
@@ -698,6 +699,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
       closeDetail(false);
     }
     file = f;
+    recordVisit({ kind: "explorer", caseId: c.id, file: f.path });
     title.textContent = f.path;
     title.setAttribute("dir", "ltr");
     fileFormat.textContent = f.format;

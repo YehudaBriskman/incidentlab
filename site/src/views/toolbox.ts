@@ -5,6 +5,7 @@
 import { QUESTION_ORDER, SCORING, type ProgressView, type StageProgress, type TodayResponse } from "../../shared/contract";
 import type { Case } from "../../shared/case";
 import { getProgress, revealCommand } from "../lib/api";
+import { recordVisit } from "../lib/recent";
 import { announce, copyButton, ensureAnnouncer, h, html, setChildren, type Child } from "../lib/dom";
 import { confirm } from "../lib/overlay";
 import { playErrorText } from "../lib/errors";
@@ -212,7 +213,11 @@ export function toolboxView(c: Case): ViewResult {
   const main = h("div", { class: "view" });
   const side = h("div", { class: "side-stack tb-side" });
   sideEl = side;
-  return { main, sidebar: { label: TS().tbSide, trigger: TS().tbSideTrigger, content: side }, start: () => renderToolbox(main, c) };
+  const start = (): void => {
+    recordVisit({ kind: "toolbox", caseId: c.id }); // the home page's "Continue" card
+    renderToolbox(main, c);
+  };
+  return { main, sidebar: { label: TS().tbSide, trigger: TS().tbSideTrigger, content: side }, start };
 }
 
 export function renderToolbox(root: HTMLElement, c: Case): void {

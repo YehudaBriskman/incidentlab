@@ -49,9 +49,9 @@ test("desktop: each page names its sidebar landmark and marks the current item",
   await playerOnStage2(page, request);
   await freshSettings(page);
 
+  // Home is a dashboard without a sidebar (its filters sit in the table toolbar).
   await page.goto("/#/");
-  await expect(ui.aside(page, "Filter cases")).toBeVisible();
-  await expect(ui.aside(page, "Filter cases").getByRole("group", { name: "Difficulty" })).toBeVisible();
+  await expect(page.locator("#sidebar")).toBeHidden();
 
   await page.goto(`/#/case/${CASE_ID}`);
   await expect(ui.stages(page)).toBeVisible();
@@ -75,8 +75,9 @@ test("desktop: each page names its sidebar landmark and marks the current item",
 
 test("the collapsed sidebar stays collapsed after a reload", async ({ page }) => {
   await freshSettings(page);
-  await page.goto("/#/");
-  const aside = ui.aside(page, "Filter cases");
+  // The Explorer's sidebar works signed out (the case and toolbox pages sit behind the account gate).
+  await page.goto(`/#/case/${CASE_ID}/explorer`);
+  const aside = ui.aside(page, "Files & time");
   await expect(aside).toBeVisible();
   await expect(ui.collapse(page)).toHaveAttribute("aria-expanded", "true");
   await ui.collapse(page).click();
@@ -134,7 +135,7 @@ test.describe("phone", () => {
   test("Hebrew: the drawer opens from the right and no page scrolls sideways", async ({ page, request }) => {
     await playerOnStage2(page, request);
     await freshSettings(page, "he");
-    for (const hash of ["#/", `#/case/${CASE_ID}`, `#/case/${CASE_ID}/toolbox`, `#/case/${CASE_ID}/explorer`]) {
+    for (const hash of [`#/case/${CASE_ID}`, `#/case/${CASE_ID}/toolbox`, `#/case/${CASE_ID}/explorer`]) {
       await page.goto(`/${hash}`);
       await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
       await expect(page.locator(".page-header .sidebar-trigger")).toBeVisible();

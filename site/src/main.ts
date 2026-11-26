@@ -139,7 +139,7 @@ function isKnownCase(id: string): boolean {
  * public/settings-boot.js runs the same test before first paint; keep them in step.
  */
 function sidebarRoute(parts: readonly string[]): boolean {
-  if (parts.length === 0) return true;
+  if (parts.length === 0) return false; // home: a dashboard without a sidebar
   // Admin: its sign-in gate releases the column again (views/admin.ts); the signed-in dashboard doesn't shift.
   if (parts.length === 1 && parts[0] === "admin") return true;
   const [section, id, sub] = parts;
