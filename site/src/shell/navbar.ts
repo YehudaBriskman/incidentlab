@@ -110,8 +110,8 @@ function createAccountMenu(status: Element | null): HTMLElement {
 
 /* ---------- page navigation ---------- */
 
-type NavKey = "cases" | "today" | "leaderboard" | "stats" | "admin";
-const NAV_KEYS: readonly NavKey[] = ["cases", "today", "leaderboard", "stats", "admin"];
+type NavKey = "cases" | "today" | "leaderboard" | "stats" | "author" | "admin";
+const NAV_KEYS: readonly NavKey[] = ["cases", "today", "leaderboard", "stats", "author", "admin"];
 
 /** Which nav entry is the current page, from the hash. */
 function currentNav(todayId: string | null): NavKey | null {
@@ -120,6 +120,7 @@ function currentNav(todayId: string | null): NavKey | null {
   if (parts[0] === "leaderboard") return "leaderboard";
   if (parts[0] === "me") return "stats";
   if (parts[0] === "admin") return "admin";
+  if (parts[0] === "author") return "author";
   if (parts[0] === "case" && parts.length === 2 && todayId !== null && decodeURIComponent(parts[1] ?? "") === todayId) return "today";
   return null;
 }
@@ -131,6 +132,7 @@ function createSiteNav(): HTMLElement {
     today: h("a", { class: "nav-link", href: "#/" }),
     leaderboard: h("a", { class: "nav-link", href: "#/leaderboard" }),
     stats: h("a", { class: "nav-link", href: "#/me" }),
+    author: h("a", { class: "nav-link", href: "#/author" }),
     admin: h("a", { class: "nav-link", href: "#/admin" }),
   };
   const items = NAV_KEYS.map((key) => h("li", { class: "nav-item" }, links[key]));
@@ -139,13 +141,15 @@ function createSiteNav(): HTMLElement {
   const draw = (): void => {
     const account = cachedAccount();
     const todayId = cachedToday()?.caseId ?? null;
-    const labels: Record<NavKey, string> = { cases: TS().navCases, today: TS().navToday, leaderboard: TG().leaderboard, stats: TA().myStats, admin: TG().adminLink };
+    const labels: Record<NavKey, string> = { cases: TS().navCases, today: TS().navToday, leaderboard: TG().leaderboard, stats: TA().myStats, author: TS().navAuthor, admin: TG().adminLink };
     const shown: Record<NavKey, boolean> = {
       cases: true,
       today: todayId !== null && !isAdmin(account),
       leaderboard: true,
       // the forced password screen gates every view, so My stats waits for an approved, settled account
       stats: account !== null && !isAdmin(account) && account.status === "approved" && !account.mustChangePassword,
+      // authors and the instructor manage cases (#66); approval and password state are enforced by the server
+      author: account !== null && (account.role === "author" || isAdmin(account)),
       admin: isAdmin(account),
     };
     const current = currentNav(todayId);

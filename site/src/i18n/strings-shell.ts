@@ -9,6 +9,7 @@ export const TS = defineStrings({
     navMain: "Main",
     navCases: "Cases",
     navToday: "Today",
+    navAuthor: "Authoring",
     navMenu: "Menu",
 
     // live strip
@@ -39,6 +40,7 @@ export const TS = defineStrings({
     navMain: "ראשי",
     navCases: "תיקים",
     navToday: "היום",
+    navAuthor: "ניהול תיקים",
     navMenu: "תפריט",
 
     liveStrip: "מצב חי",

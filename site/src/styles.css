@@ -1525,3 +1525,21 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
 .form-section { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-4); margin: 0 0 var(--space-4); display: grid; gap: var(--space-4); min-inline-size: 0; }
 .form-section-legend { padding-inline: var(--space-2); font-weight: 600; font-size: var(--step--1); }
 .form-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+
+/* ============ case authoring (#/author, views/author.ts) ============ */
+.author-page { max-inline-size: var(--page-narrow); padding-block: var(--space-6); }
+.author-page h1 { margin: 0 0 var(--space-1); }
+.author-form { margin-block: var(--space-5); }
+.check-row { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--target-min); font-size: var(--step--1); }
+.check-row input { inline-size: 1.1rem; block-size: 1.1rem; accent-color: var(--accent); }
+.author-progress { inline-size: 100%; block-size: 8px; accent-color: var(--accent); }
+.author-status { margin: 0; font-size: var(--step--1); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.author-status:empty { display: none; }
+.author-diff { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); padding: var(--space-4); display: grid; gap: var(--space-3); }
+.author-diff h3 { margin: 0; font-size: var(--step-0); }
+.author-diff ul { margin: 0; padding-inline-start: 1.2em; display: grid; gap: var(--space-1); }
+.author-diff .is-warning { color: var(--warning-fg); font-weight: 600; }
+.author-error ul { margin: var(--space-2) 0; padding-inline-start: 1.2em; font-size: var(--step--1); }
+.status-pill.is-case-published { --pill-fg: var(--success-fg); --pill-bg: var(--success-bg); --pill-line: var(--success-fg); }
+.status-pill.is-case-draft { --pill-fg: var(--warning-fg); --pill-bg: var(--warning-bg); --pill-line: var(--warning-fg); }
+.status-pill.is-case-trashed { --pill-fg: var(--danger-fg); --pill-bg: var(--danger-bg); --pill-line: var(--danger-fg); }
