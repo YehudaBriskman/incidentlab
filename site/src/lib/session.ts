@@ -15,9 +15,32 @@ export function onAccountChange(fn: Listener): void {
   listeners.add(fn);
 }
 
+/* The session cookie is HttpOnly, so until /api/me answers the page cannot know who is signed in. A one-character
+   hint from the last answer ("1" signed in, "0" signed out; nothing personal) lets views lay out for the likely
+   case at first paint instead of shifting when the answer arrives. No hint means a first visit: signed out. */
+const HINT_KEY = "il.signedIn";
+function writeHint(account: AccountView | null): void {
+  try {
+    localStorage.setItem(HINT_KEY, account === null ? "0" : "1");
+  } catch {
+    /* storage blocked: views fall back to the signed-out guess */
+  }
+}
+
+/** Best guess before the server answers; the real answer once it has (see isAccountKnown). */
+export function likelySignedIn(): boolean {
+  if (known) return current !== null;
+  try {
+    return localStorage.getItem(HINT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function setAccount(account: AccountView | null): void {
   current = account;
   known = true;
+  writeHint(account);
   loaded = Promise.resolve(account);
   for (const fn of listeners) fn(account);
 }
@@ -48,6 +71,7 @@ export function loadAccount(refresh = false): Promise<AccountView | null> {
       (account) => {
         if (!sameAccount(account, current)) setAccount(account);
         known = true;
+        writeHint(account);
         return account;
       },
       (err: unknown) => {

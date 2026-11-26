@@ -1,4 +1,5 @@
-// Player UI locks: 44px touch targets on coarse pointers (#126) and the skip link hidden at 200% text (#136).
+// Player UI locks: 44px touch targets on coarse pointers (#126), no home layout shift at 390px (#124) and the
+// skip link hidden at 200% text (#136).
 import { expect, test, type Page } from "@playwright/test";
 import { approveAccount, randomUsername } from "./support";
 
@@ -26,6 +27,31 @@ test.describe("phone with touch (390x844)", () => {
     await expect(allCommands).toBeVisible();
     const box = await allCommands.boundingBox();
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  });
+
+  test("home, signed out: cumulative layout shift stays under 0.1 while the API is slow", async ({ page }) => {
+    // Production answers in about a second; the local server in a few milliseconds. Hold every API call back so
+    // the late answers (who is signed in, today's case, the catalog) land after the first paint, as they do there.
+    await page.route("**/api/**", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await route.continue();
+    });
+    await page.addInitScript(() => {
+      const w = window as unknown as { __cls: number };
+      w.__cls = 0;
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          const shift = entry as PerformanceEntry & { value: number; hadRecentInput: boolean };
+          if (!shift.hadRecentInput) w.__cls += shift.value;
+        }
+      }).observe({ type: "layout-shift", buffered: true });
+    });
+    await page.goto("/#/");
+    await expect(page.locator(".home-intro")).toBeVisible();
+    await expect(page.locator(".home-today[aria-busy]")).toHaveCount(0);
+    await page.waitForTimeout(500); // let the last answer's redraw settle
+    const cls = await page.evaluate(() => (window as unknown as { __cls: number }).__cls);
+    expect(cls).toBeLessThan(0.1);
   });
 });
 

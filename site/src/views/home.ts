@@ -10,7 +10,7 @@ import { dataTable, type Column, type DataTable } from "../components/dataTable"
 import type { SortState } from "../components/table-core";
 import { fetchMyStats } from "../lib/api";
 import { h, setChildren, type Child } from "../lib/dom";
-import { cachedAccount, isAccountKnown, loadAccount, loadToday } from "../lib/session";
+import { isAccountKnown, likelySignedIn, loadAccount, loadToday } from "../lib/session";
 import { cachedEvent, isEventActive, onEventChange } from "../lib/event";
 import { tooltip } from "../lib/overlay";
 import { filterButton, type FilterButtonHandle, type FilterValue } from "../components/filterPopover";
@@ -178,7 +178,7 @@ function skeletonRows(n: number): HTMLElement {
 
 function continueCard(state: HomeState, signedIn: boolean): HTMLElement {
   const body = ((): Child => {
-    if (!isAccountKnown() || (signedIn && state.loading)) return skeletonRows(3);
+    if (signedIn && state.loading) return skeletonRows(3);
     if (!signedIn) {
       const steps = [
         [T().step1Title, T().step1Body],
@@ -211,7 +211,7 @@ function continueCard(state: HomeState, signedIn: boolean): HTMLElement {
   return h(
     "section",
     { class: "home-card home-continue", "aria-labelledby": "home-continue-h", "aria-busy": state.loading ? "true" : null },
-    cardHead("home-continue-h", signedIn || !isAccountKnown() ? TH().continueTitle : TH().howTitle),
+    cardHead("home-continue-h", signedIn ? TH().continueTitle : TH().howTitle),
     h("div", { class: "home-card-body" }, body),
   );
 }
@@ -566,10 +566,9 @@ export function renderHome(root: HTMLElement): void {
 
   const draw = (): void => {
     if (!onHome()) return;
-    const account = cachedAccount();
-    const known = isAccountKnown();
-    const signedIn = account !== null;
-    setChildren(intro, known && !signedIn ? introStrip() : null);
+    // Before /api/me answers, lay out for the likely state (lib/session.ts hint) so nothing shifts when it does.
+    const signedIn = likelySignedIn();
+    setChildren(intro, signedIn ? null : introStrip());
     setChildren(top, continueCard(state, signedIn), todayCard(state, signedIn, reload));
     if (state.loading) {
       // Keep rows already shown (a retry): only the first load draws skeleton rows.
