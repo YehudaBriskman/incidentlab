@@ -15,6 +15,58 @@ click may lose it. This document is the contract for anyone changing stored reco
 `session:`, `ratelimit:` and `upload:` keys are ephemeral and never backed up or restored. `evidence:` keys
 are binary and are left out of the JSON snapshots too (see below).
 
+## Where each kind of data belongs (placement policy, #143)
+
+The rule: **private or changing data → Netlify Blobs; public, versioned and large → GitHub.** The site repo
+is public, so anything placed on GitHub is public too.
+
+| Data | Home | Why |
+|---|---|---|
+| Accounts, sessions, progress, scores, first bloods, audit, schedule, event, settings | Netlify Blobs (`incidentlab-v2`) | private, changes constantly |
+| Answer keys, paid hints and commands, sealed debriefs, case content | Netlify Blobs (`case:`; the only source since #68) | secret, versioned together with its answers |
+| Evidence files and zips | Netlify Blobs chunks (`evidence:`), served by the Edge Function `/evidence/db/*` and cached at the CDN (#141) | 88 MB in total today (largest file 40 MB) |
+| Lab images (lab mode, #146) | GHCR under the `incidentslab` org | public images cost nothing and have no pull-rate limit. Docker Hub limits pulls per IP, which a class behind one NAT would hit. |
+| Lab material (Dockerfiles, devcontainers, lab docs) | `incidentslab/lab-*` repos | public, contains no answers |
+| Evidence on GitHub Pages or Releases | **deferred** (#145) | move only when a trigger below fires |
+
+Every evidence URL comes from one place: `evidenceLocation()` in `site/server/services/evidenceStream.ts` (the
+content API hands it to `site/src/content/evidence.ts`). Moving evidence to another host is a server change.
+It also needs a CSP `connect-src` entry and CORS from the new host: Pages sends CORS headers, Releases don't,
+so Releases suit zip downloads only.
+
+**Never publish** anything built from `build/truth/`, `build/packages/`, `site/server/generated/secrets.json`,
+`solutions/` or `content-sealed/`. Images and releases are built only from the public evidence zip, in a clean
+build context (lab mode adds a gate that compares an image's `/case` with the zip, file by file and sha256 by
+sha256).
+
+## Capacity budget (zero-cost hosting)
+
+The account is on Netlify's **legacy Free plan** (verified 2026-11-26). **Never accept the switch to
+credit-based pricing**: it charges credits per production deploy and per GB, and it can't be undone.
+
+| Monthly allowance | Limit | Main users |
+|---|---|---|
+| Bandwidth | 100 GB | the app, evidence downloads |
+| Function calls (`/api`) | 125,000 | every uncached API request |
+| Function runtime | 100 GB-hours | the same requests |
+| Edge function calls | 1,000,000 | evidence requests the CDN hasn't cached yet |
+| Build minutes | 300 | unused: builds are local and deploys use the CLI |
+
+- **Function calls are the binding limit.** Every open tab polls `/api/event`.
+  - **Before #140:** a 2-hour class of 30 players cost about 11,000 calls (about 10 classes a month), and a
+    forgotten tab about 2,900 a day.
+  - **Since #140:**
+    - `/api/event`, `/api/today` and `/api/leaderboard` are CDN-cached (`docs/API.md`);
+    - the poll pauses in hidden tabs and slows to 2 minutes when no event is live;
+    - a class costs about 1,500 calls and idle tabs about 0.
+  - **Keep it that way:**
+    - any new polled endpoint must be public and use `publicJson`, or stay off a timer;
+    - personalised routes stay `no-store`.
+- **Check monthly:** `node --experimental-strip-types scripts/data.ts usage`. It prints bandwidth with a 70%
+  warning. The API doesn't report function counts on this plan, so check those in the Netlify UI (Team → Usage).
+- **Triggers to move public evidence to GitHub (#145):** Netlify bandwidth over about 50 GB a month, or total
+  evidence over about 500 MB.
+
 ### DB-stored cases (`case:`, `evidence:` and `upload:`, since #64 and #66)
 
 Written through `CaseRepository` / `EvidenceChunkRepository` (`site/server/repositories/case-repository.ts`)

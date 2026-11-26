@@ -102,6 +102,14 @@ A deploy does not change any case.
   - `deploy.sh` backs up production first and refuses answer-key drift.
   - Production data tools: `node --experimental-strip-types scripts/data.ts backup|list-backups|restore|migrate`
     (dry run unless `--apply`).
+- **Zero budget** (`docs/DATA.md`, "Placement policy" and "Capacity budget"):
+  - Netlify runs on the legacy Free plan. Never switch to credit pricing.
+  - Function calls (125k a month) are the binding limit. Polled endpoints must be public and CDN-cached
+    (`publicJson`); personalised routes stay `no-store`.
+  - Private or changing data stays in Blobs. Public, versioned material may go to GitHub (GHCR under
+    `incidentslab`).
+  - Never publish anything built from `build/truth`, `build/packages`, `secrets.json`, `solutions/` or
+    `content-sealed/`.
 - **Spoilers:** `docs/CASE_BIBLE.md`, `docs/cases/`, `docs/SOLUTION.md`, `docs/INSTRUCTOR.md`, `solutions/`,
   `content-sealed/` and `build/truth/` contain answers.
 - **Workflow:**
