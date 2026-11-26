@@ -1,6 +1,7 @@
 // Shared API contract between the Netlify function (site/server, site/netlify/functions) and the browser (site/src).
 // Single source of truth: both sides import these zod schemas. NEVER use `any`.
 import { z } from "zod";
+import { CatalogEntrySchema } from "./catalog.ts";
 
 export const QuestionIdSchema = z.enum(["q1", "q2", "q3", "q4", "q5", "q6"]);
 export type QuestionId = z.infer<typeof QuestionIdSchema>;
@@ -308,6 +309,14 @@ export const AccountResponseSchema = z.object({ account: AccountViewSchema });
 // GET  /api/me -> {account}   (401 when not signed in)
 // GET  /api/session -> {account | null}   (always 200: the signed-out probe the browser uses, so a visitor's console stays clean)
 export const SessionResponseSchema = z.object({ account: AccountViewSchema.nullable() });
+
+// ---- DB-stored case content (public, cacheable: Cache-Control public, max-age=60, stale-while-revalidate=600) ----
+// GET /api/cases                          -> {cases: CatalogEntry[]}   (published DB cases only; ETag, 304)
+// GET /api/cases/:caseId/content?lang=en|he -> {id, version, lang, content: CaseContent}
+//                                            (lang is the one served: he falls back to en; ETag, 304; 404 unless published)
+//     CaseContentResponseSchema is in ./case-records.ts (server-side schemas).
+// Evidence: /evidence/db/<id>/v<n>/files/<path> and /evidence/db/<id>/v<n>.zip (Edge Function; Range, immutable).
+export const CasesResponseSchema = z.object({ cases: z.array(CatalogEntrySchema) });
 
 // GET /api/today -> public
 export const TodayResponseSchema = z.object({

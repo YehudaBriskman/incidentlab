@@ -1,5 +1,5 @@
 // Case schemas for the server, the build scripts and the case-upload validator, built on the authored
-// `CaseSchema` in ./case.ts (groundwork for DB-stored cases, #64-#66; nothing stores these records yet):
+// `CaseSchema` in ./case.ts (DB-stored cases; server/repositories/case-repository.ts stores them):
 // - `CaseContentSchema`: the public form of `CaseSchema`, paid fields absent (what the browser may see);
 // - `CaseSealedSchema`: the server-only half (answers, hint texts, commands, debriefs, scoring), the shape
 //   of each case in site/server/generated/secrets.json;
@@ -93,7 +93,8 @@ export const CaseSealedSchema = z.object({
 export type CaseSealed = z.infer<typeof CaseSealedSchema>;
 
 // ---------------------------------------------------------------------------------------------------------
-// Case records and the upload package manifest (planned storage: `case:` and `evidence:` keys, #64).
+// Case records and the upload package manifest (stored under `case:` and `evidence:` keys, see
+// server/repositories/case-repository.ts).
 
 const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, "expected a lowercase hex SHA-256");
 
@@ -155,3 +156,15 @@ export const CasePackageManifestSchema = z.object({
   path: ["evidence"],
 });
 export type CasePackageManifest = z.infer<typeof CasePackageManifestSchema>;
+
+// ---------------------------------------------------------------------------------------------------------
+// GET /api/cases/:caseId/content?lang=en|he (see the endpoint list in ./contract.ts).
+
+export const CaseContentResponseSchema = z.object({
+  id: CaseIdSchema,
+  version: z.number().int().min(1),
+  /** the language served: `he` falls back to `en` */
+  lang: CaseLangSchema,
+  content: CaseContentSchema,
+});
+export type CaseContentResponse = z.infer<typeof CaseContentResponseSchema>;
