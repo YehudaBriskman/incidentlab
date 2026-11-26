@@ -71,8 +71,8 @@ expired ones.
 **Deleting a case** is soft: its meta becomes `trashed` (every public route answers 404), a `trash:` entry
 of kind `case` records the status to restore, and nothing else is removed. After the 7 days the trash entry
 goes and the case stays trashed. Evidence chunks are never deleted on delete, because cases and versions
-share them; a later garbage collection can reclaim chunks no version references (and chunks from abandoned
-uploads).
+share them. `scripts/data.ts gc-evidence` (`EvidenceGcService`, #122) reclaims chunks that no case version
+(of any status) and no live upload references, such as chunks from abandoned uploads.
 
 Their input is the **case package** (`build/packages/<id>-v<n>.case.zip`, format in `docs/CASE_CONTRACT.md`).
 Packages are build artefacts: `scripts/build-all.sh` writes and validates them under the gitignored `build/`.
@@ -114,6 +114,11 @@ node --experimental-strip-types scripts/data.ts list-backups
 node --experimental-strip-types scripts/data.ts restore ~/.incidentlab-backups/<file>.json
 node --experimental-strip-types scripts/data.ts restore daily/2026-11-25.json --apply
 #   --prune also deletes keys created after the snapshot (exact rollback). Use with care.
+
+# Evidence chunks no case version or live upload uses (#122): dry run, then apply (pre-gc backup first;
+# refuses while an upload is in progress, and stops if any evidence record is unreadable)
+node --experimental-strip-types scripts/data.ts gc-evidence
+node --experimental-strip-types scripts/data.ts gc-evidence --apply
 
 # Pending migrations: dry run, then apply (takes a pre-migrate backup first)
 node --experimental-strip-types scripts/data.ts migrate
