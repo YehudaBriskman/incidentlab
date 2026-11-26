@@ -10,7 +10,7 @@ import { CaseRepository, EvidenceChunkRepository, caseKeys, sha256Hex } from "..
 import { InMemoryKvStore } from "../repositories/KvStore.ts";
 import { isSnapshotKey } from "../services/BackupService.ts";
 import { CaseService } from "../services/CaseService.ts";
-import { EvidenceService, parseEvidencePath, parseRange } from "../services/evidenceStream.ts";
+import { EvidenceService, cdnCacheFor, parseEvidencePath, parseRange } from "../services/evidenceStream.ts";
 import { createApp } from "../router.ts";
 import { contentFixture, metaFixture, patternBytes, seedCase } from "./case-fixtures.ts";
 import { ADMIN_KEY, SECRETS } from "./helpers.ts";
@@ -308,6 +308,9 @@ test("evidence: the zip route, unknown files and a missing chunk", async () => {
   assert.equal((await s.fetchEvidence("zip-case/v1/files/nope.log")).status, 404);
   assert.equal((await s.fetchEvidence("zip-case/v2.zip")).status, 404);
   assert.equal((await s.fetchEvidence("nobody/v1.zip")).headers.get("cache-control"), "no-store");
+  // #141: the CDN caches complete GETs only, never a partial or a 404
+  assert.equal(res.headers.get("netlify-cdn-cache-control"), "public, max-age=31536000, immutable");
+  assert.equal((await s.fetchEvidence("nobody/v1.zip")).headers.get("netlify-cdn-cache-control"), null, "404s stay plain no-store");
 
   // a lost chunk truncates the stream with an error instead of serving wrong bytes
   const big = patternBytes(BIG, 9);
@@ -349,4 +352,11 @@ test("the Edge Function's root package.json pins the same npm versions as site/p
   const edge = Deps.parse(await readJson("../../../package.json")).dependencies;
   assert.deepEqual(Object.keys(edge).sort(), ["@netlify/blobs", "zod"]);
   for (const [name, version] of Object.entries(edge)) assert.equal(version, site[name], name);
+});
+
+test("evidence: only a complete GET 200 may be cached at the CDN (#141)", () => {
+  assert.equal(cdnCacheFor(200, "GET"), "public, max-age=31536000, immutable");
+  for (const [status, method] of [[206, "GET"], [304, "GET"], [416, "GET"], [200, "HEAD"], [206, "HEAD"]] as const) {
+    assert.equal(cdnCacheFor(status, method), "no-store", `${method} ${status}`);
+  }
 });
