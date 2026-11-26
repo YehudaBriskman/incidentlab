@@ -1,12 +1,15 @@
 // The live event (name, window, announcement): polled from GET /api/event and shared by the header banner,
 // the countdown, the home page and the leaderboard. Countdowns use the server clock (corrected for skew).
+//
+// Every open tab runs this poll, so it is the site's biggest source of function calls (Netlify's free plan
+// allows 125k a month). It pauses while the tab is hidden, slows to 2 minutes when no event is live, and the
+// response is CDN-cached for 10 s (server publicJson), so most polls never reach the function.
 import { z } from "zod";
 import { EventSchema, type LiveEvent } from "../../shared/contract";
-import { fetchEvent } from "./api";
+import { fetchEvent, onServerClock } from "./api";
+import { eventPollDelay, responseServerMs, skewFrom, type ClockSample } from "./clock";
 import { readSnapshot, writeSnapshot } from "./snapshot";
 import { TO } from "../i18n/strings-onboard";
-
-const POLL_MS = 30_000;
 
 type Listener = (event: LiveEvent | null) => void;
 
@@ -19,7 +22,10 @@ const snapshot = readSnapshot(SNAPSHOT_KEY, SnapshotSchema, SNAPSHOT_MAX_AGE_MS)
 let current: LiveEvent | null = snapshot?.event ?? null;
 /** serverTime − local time, in ms (positive when the local clock is behind). */
 let skewMs = snapshot?.skewMs ?? 0;
+/** True once an exact (millisecond) reading came from an origin /api/event response; coarser ones then step aside. */
+let exactSkew = false;
 let timer: number | null = null;
+let polling = false;
 const listeners = new Set<Listener>();
 
 export function onEventChange(fn: Listener): () => void {
@@ -36,13 +42,24 @@ export function serverNow(): number {
   return Date.now() + skewMs;
 }
 
+// Any response the origin answered carries a `Date` header: a whole-second reading, used until the event poll
+// gives an exact one (an origin answer to /api/event, whose body time has milliseconds).
+onServerClock((sample) => {
+  if (!exactSkew) skewMs = skewFrom(sample);
+});
+
 async function poll(): Promise<void> {
   try {
     const sentAt = Date.now();
-    const { event, serverTime } = await fetchEvent();
+    const { event, serverTime, cacheHit, age } = await fetchEvent();
     const receivedAt = Date.now();
-    const server = Date.parse(serverTime);
-    if (Number.isFinite(server)) skewMs = server - (sentAt + receivedAt) / 2;
+    const serverMs = responseServerMs(Date.parse(serverTime), cacheHit, age);
+    if (serverMs !== null) {
+      const sample: ClockSample = { serverMs, sentAt, receivedAt };
+      // A cached copy is only good to the second (Age): it may not replace an exact origin reading.
+      if (!cacheHit || !exactSkew) skewMs = skewFrom(sample);
+      if (!cacheHit) exactSkew = true;
+    }
     current = event;
     writeSnapshot(SNAPSHOT_KEY, { event, skewMs });
     for (const fn of listeners) fn(event);
@@ -56,10 +73,27 @@ export function refreshEvent(): void {
   void poll();
 }
 
+function schedule(): void {
+  if (timer !== null) window.clearTimeout(timer);
+  timer = null;
+  const phase = eventPhase(current);
+  const delay = eventPollDelay(phase.kind === "running" ? { kind: "running" } : phase, document.hidden);
+  if (delay === null) return; // hidden: nothing until the tab is visible again
+  timer = window.setTimeout(() => {
+    timer = null;
+    void poll().finally(schedule);
+  }, delay);
+}
+
+/** Starts the poll once per page: now, then on a cadence that follows the event and the tab's visibility. */
 export function startEventPolling(): void {
-  if (timer !== null) return;
-  void poll();
-  timer = window.setInterval(() => void poll(), POLL_MS);
+  if (polling) return;
+  polling = true;
+  void poll().finally(schedule);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) schedule(); // clears the timer
+    else void poll().finally(schedule); // catch up at once, then resume
+  });
 }
 
 export type EventPhase =
