@@ -12,10 +12,10 @@ import { fetchMyStats } from "../lib/api";
 import { h, setChildren, type Child } from "../lib/dom";
 import { cachedAccount, isAccountKnown, loadAccount, loadToday } from "../lib/session";
 import { cachedEvent, isEventActive, onEventChange } from "../lib/event";
-import { popover, tooltip } from "../lib/overlay";
+import { tooltip } from "../lib/overlay";
+import { filterButton, type FilterButtonHandle, type FilterValue } from "../components/filterPopover";
 import { recentVisits, visitHref, type Visit } from "../lib/recent";
 import {
-  activeFilterCount,
   matchesFilters,
   parseFilters,
   serializeFilters,
@@ -48,6 +48,9 @@ type HomeState = {
 };
 
 type Row = { readonly c: CaseSummary; readonly stats: CaseStats | undefined; readonly isToday: boolean; readonly locked: boolean };
+
+/** The shared filter button's value for the current case filters (the URL query is the source of truth). */
+const filterValue = (f: CaseFilters): FilterValue => ({ difficulty: [...f.difficulty], tag: [...f.tags], status: [...f.status] });
 
 /* ================= small helpers ================= */
 
@@ -292,90 +295,7 @@ function todayCard(state: HomeState, signedIn: boolean, retry: () => void): HTML
   );
 }
 
-/* ================= filter button (local stand-in for the shell's filterButton()) ================= */
 
-type FilterGroup = { readonly key: "difficulty" | "tag" | "status"; readonly legend: string; readonly options: readonly { value: string; label: Child }[] };
-type FilterControl = { readonly element: HTMLElement; sync: (filters: CaseFilters) => void };
-
-/**
- * A "Filter (n)" button with a popover of checkbox groups and a Clear button. Built on popover() from
- * lib/overlay.ts; swap it for the frame's filterButton() once that lands (same groups, same onChange).
- */
-function filterButton(opts: { groups: readonly FilterGroup[]; onChange: (key: FilterGroup["key"], values: Set<string>) => void; onClear: () => void }): FilterControl {
-  const count = h("span", { class: "home-filter-count" });
-  const button = h(
-    "button",
-    { type: "button", class: "btn btn-sm home-filter-btn" },
-    funnelIcon(),
-    TH().filter,
-    count,
-  );
-  const boxes: { key: FilterGroup["key"]; input: HTMLInputElement }[] = [];
-  const summary = h("p", { class: "home-filter-summary", role: "status" });
-  const groups = opts.groups.map((g) =>
-    h(
-      "fieldset",
-      { class: "home-filter-group" },
-      h("legend", {}, g.legend),
-      h(
-        "div",
-        { class: "home-filter-options" },
-        g.options.map((o) => {
-          const input = h("input", { type: "checkbox", name: `home-f-${g.key}`, value: o.value });
-          input.addEventListener("change", () => opts.onChange(g.key, new Set(boxes.filter((b) => b.key === g.key && b.input.checked).map((b) => b.input.value))));
-          boxes.push({ key: g.key, input });
-          return h("label", { class: "home-filter-option" }, input, h("span", {}, o.label));
-        }),
-      ),
-    ),
-  );
-  const clear = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, TS().filterClear);
-  clear.addEventListener("click", () => {
-    opts.onClear();
-    boxes[0]?.input.focus();
-  });
-  const panel = h("div", { class: "home-filter-panel", role: "dialog", "aria-label": TH().filterTitle }, groups, h("div", { class: "home-filter-foot" }, summary, clear));
-  const ctl = popover(button, panel, { align: "start", onOpen: () => panel.querySelector<HTMLInputElement>("input")?.focus() });
-  // Escape closes even when the browser's close watcher skips it (no fresh user activation since it opened).
-  panel.addEventListener("keydown", (ev) => {
-    if (ev.key !== "Escape" || !ctl.isOpen()) return;
-    ev.preventDefault();
-    ctl.close();
-    button.focus();
-  });
-  return {
-    element: h("span", { class: "home-filter" }, button, panel),
-    sync(filters) {
-      const n = activeFilterCount(filters);
-      count.textContent = n > 0 ? ` ${TH().filterCount(n)}` : "";
-      button.classList.toggle("is-active", n > 0);
-      summary.textContent = n > 0 ? TH().filterActive(n) : "";
-      clear.disabled = n === 0;
-      for (const b of boxes) {
-        const set: ReadonlySet<string> = b.key === "difficulty" ? filters.difficulty : b.key === "tag" ? filters.tags : filters.status;
-        b.input.checked = set.has(b.input.value);
-      }
-    },
-  };
-}
-
-function funnelIcon(): SVGSVGElement {
-  const ns = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(ns, "svg");
-  svg.setAttribute("viewBox", "0 0 16 16");
-  svg.setAttribute("width", "14");
-  svg.setAttribute("height", "14");
-  svg.setAttribute("aria-hidden", "true");
-  svg.setAttribute("class", "home-icon");
-  const path = document.createElementNS(ns, "path");
-  path.setAttribute("d", "M2 3h12l-4.5 5.5V13l-3 1.5V8.5Z");
-  path.setAttribute("fill", "none");
-  path.setAttribute("stroke", "currentColor");
-  path.setAttribute("stroke-width", "1.4");
-  path.setAttribute("stroke-linejoin", "round");
-  svg.append(path);
-  return svg;
-}
 
 /* ================= the cases table ================= */
 
@@ -500,7 +420,7 @@ export function renderHome(root: HTMLElement): void {
 
   let table: DataTable<Row> | null = null;
   let tableFor: boolean | null = null;
-  let filter: FilterControl | null = null;
+  let filter: FilterButtonHandle | null = null;
 
   /** Still the page on screen? (A late answer must not redraw, or rewrite the URL of, the next route.) */
   const onHome = (): boolean => activeRender === token && dash.isConnected && window.location.hash.replace(/^#\/?/, "").split("?")[0] === "";
@@ -546,7 +466,7 @@ export function renderHome(root: HTMLElement): void {
     const visible = recommended(rows).filter((r) => matchesFilters(r.c, state.isPlayer ? statusOf(r.stats) : null, filters));
     table.update(visible);
     shown.textContent = rows.length === 0 ? "" : TH().shown(visible.length, rows.length);
-    filter?.sync(filters);
+    filter?.set(filterValue(filters));
     writeUrl();
     fit();
   };
@@ -555,21 +475,18 @@ export function renderHome(root: HTMLElement): void {
     const present = new Set(caseSummaries().map((c) => c.difficulty));
     filter = filterButton({
       groups: [
-        { key: "difficulty", legend: TS().filterDifficulty, options: DIFFICULTIES.filter((d) => present.has(d)).map((d) => ({ value: d, label: TO().difficulty(d) })) },
-        { key: "tag", legend: TS().filterTags, options: topTags(caseSummaries()).map((t) => ({ value: t, label: h("bdi", {}, t) })) },
-        ...(state.isPlayer ? [{ key: "status" as const, legend: TS().filterStatus, options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) }] : []),
+        { id: "difficulty", legend: TS().filterDifficulty, type: "checkbox", options: DIFFICULTIES.filter((d) => present.has(d)).map((d) => ({ value: d, label: TO().difficulty(d) })) },
+        { id: "tag", legend: TS().filterTags, type: "checkbox", options: topTags(caseSummaries()).map((t) => ({ value: t, label: t })) },
+        ...(state.isPlayer ? [{ id: "status", legend: TS().filterStatus, type: "checkbox" as const, options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) }] : []),
       ],
-      onChange: (key, values) => {
-        filters =
-          key === "difficulty"
-            ? { ...filters, difficulty: new Set([...values].filter((v): v is Difficulty => (DIFFICULTIES as readonly string[]).includes(v))) }
-            : key === "tag"
-              ? { ...filters, tags: values }
-              : { ...filters, status: new Set([...values].filter((v): v is CaseStatus => (STATUSES as readonly string[]).includes(v))) };
-        applyRows();
-      },
-      onClear: () => {
-        filters = { ...filters, difficulty: new Set(), tags: new Set(), status: new Set() };
+      value: filterValue(filters),
+      onChange: (value) => {
+        filters = {
+          ...filters,
+          difficulty: new Set((value["difficulty"] ?? []).filter((v): v is Difficulty => (DIFFICULTIES as readonly string[]).includes(v))),
+          tags: new Set(value["tag"] ?? []),
+          status: new Set((value["status"] ?? []).filter((v): v is CaseStatus => (STATUSES as readonly string[]).includes(v))),
+        };
         applyRows();
       },
     });
@@ -585,7 +502,7 @@ export function renderHome(root: HTMLElement): void {
     setChildren(
       toolbar,
       h("span", { class: "home-search-wrap" }, search),
-      filter.element,
+      filter.el,
       h("label", { class: "home-sort-wrap" }, h("span", { class: "home-sort-label" }, TH().sort), sortSelect),
       shown,
     );
