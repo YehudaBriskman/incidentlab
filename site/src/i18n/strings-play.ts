@@ -11,7 +11,6 @@ const heCount = (n: number, one: string, two: string, many: string): string => (
 export const TP = defineStrings({
   en: {
     // shared controls (lib/dom.ts)
-    cancel: "Cancel",
     copy: "Copy",
     copied: "Copied",
     copyFailed: "Copy failed",
@@ -69,6 +68,7 @@ export const TP = defineStrings({
     // full commands
     cmdPrompt: (cost: number, stage: number, clean: number, cleanOpen: boolean): string =>
       `Spend ${cost} pts on stage ${stage}?${cleanOpen ? ` It's your first spend on this stage, so it also ends the +${clean} clean bonus.` : ""}`,
+    cmdTitle: "Reveal the full command?",
     cmdConfirm: (cost: number): string => `Yes, spend ${cost} pts`,
 
     // reveal the answer
@@ -78,6 +78,7 @@ export const TP = defineStrings({
       completionOpen
         ? `Reveal the answer to stage ${stage}? This stage scores 0 and you lose the +${completion} completion bonus.`
         : `Reveal the answer to stage ${stage}? This stage scores 0 (the completion bonus is already gone).`,
+    revealTitle: "Reveal the answer?",
     revealConfirm: "Yes, reveal the answer",
     keepTrying: "Keep trying",
 
@@ -99,6 +100,7 @@ export const TP = defineStrings({
     firstTaken: "another player solved it first",
 
     // hint confirm
+    hintTitle: "Take a hint?",
     hintPrompt: (i: number, cost: number, clean: number, cleanOpen: boolean): string =>
       `Spend ${cost} pts on hint ${i}?${cleanOpen ? ` It's your first spend on this stage, so it also ends the +${clean} clean bonus.` : ""}`,
 
@@ -125,7 +127,6 @@ export const TP = defineStrings({
     jumpTo: "Jump to a section",
   },
   he: {
-    cancel: "ביטול",
     copy: "העתקה",
     copied: "הועתק",
     copyFailed: "ההעתקה נכשלה",
@@ -177,6 +178,7 @@ export const TP = defineStrings({
 
     cmdPrompt: (cost: number, stage: number, clean: number, cleanOpen: boolean): string =>
       `להוציא ${cost} נק' על חשבון שלב ${stage}?${cleanOpen ? ` זו ההוצאה הראשונה בשלב, ולכן היא מבטלת גם את בונוס הפתרון הנקי (${ltr(`+${clean}`)}).` : ""}`,
+    cmdTitle: "לחשוף את הפקודה המלאה?",
     cmdConfirm: (cost: number): string => `כן, להוציא ${cost} נק'`,
 
     revealAnswer: (completion: number, completionOpen: boolean): string =>
@@ -185,6 +187,7 @@ export const TP = defineStrings({
       completionOpen
         ? `לחשוף את התשובה לשלב ${stage}? השלב יקבל 0 ותאבדו את בונוס הסיום (${ltr(`+${completion}`)}).`
         : `לחשוף את התשובה לשלב ${stage}? השלב יקבל 0 (בונוס הסיום כבר אבד).`,
+    revealTitle: "לחשוף את התשובה?",
     revealConfirm: "כן, לחשוף את התשובה",
     keepTrying: "להמשיך לנסות",
 
@@ -203,6 +206,7 @@ export const TP = defineStrings({
       `אבד בגלל: ${[hint ? "רמז" : null, command ? "פקודה" : null, wrong ? "תשובה שגויה" : null].filter((x) => x !== null).join(", ")}`,
     firstTaken: "שחקן אחר פתר ראשון",
 
+    hintTitle: "לקחת רמז?",
     hintPrompt: (i: number, cost: number, clean: number, cleanOpen: boolean): string =>
       `להוציא ${cost} נק' על רמז ${i}?${cleanOpen ? ` זו ההוצאה הראשונה בשלב, ולכן היא מבטלת גם את בונוס הפתרון הנקי (${ltr(`+${clean}`)}).` : ""}`,
 

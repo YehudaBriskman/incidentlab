@@ -1,7 +1,7 @@
-// The ⚙ display settings menu: a button and a Popover API panel with one radio group per setting.
-// Self-contained on purpose: the overlay module (#61) will absorb the popover plumbing (positioning,
-// light dismiss, focus return) into its shared primitives.
+// The ⚙ display settings menu: a button and a non-modal panel with one radio group per setting.
+// The popover plumbing (top layer, placement, light dismiss, focus return) is popover() in lib/overlay.ts.
 import { h, html, setChildren } from "../lib/dom";
+import { popover } from "../lib/overlay";
 import { locale } from "../i18n/i18n";
 import { TS } from "../i18n/strings-shell";
 import { loadSettings, MOTIONS, onSettingsChange, SPACINGS, TEXT_SCALES, THEMES, updateSettings, type Settings } from "./settings";
@@ -12,8 +12,6 @@ const GEAR_SVG =
 
 type Option = { value: string; label: string };
 type Group = { name: string; legend: string; options: Option[]; current: string; apply: (value: string) => void };
-
-const supportsPopover = (): boolean => typeof HTMLElement.prototype.showPopover === "function";
 
 function percent(scale: number): string {
   return new Intl.NumberFormat(locale(), { style: "percent", maximumFractionDigits: 1 }).format(scale / 100);
@@ -110,25 +108,8 @@ function renderGroup(g: Group): HTMLFieldSetElement {
 export function createSettingsMenu(): HTMLElement[] {
   // An inline SVG gear (currentColor), not the ⚙ character: many systems draw that as a colour emoji.
   const icon = html("span", { class: "icon", "aria-hidden": "true" }, GEAR_SVG);
-  const button = h("button", { type: "button", class: "settings-btn", "aria-controls": PANEL_ID, "aria-expanded": "false" }, icon);
+  const button = h("button", { type: "button", class: "settings-btn" }, icon);
   const panel = h("div", { id: PANEL_ID, class: "settings-panel", role: "dialog", "aria-labelledby": `${PANEL_ID}-title` });
-  const popover = supportsPopover();
-  if (popover) {
-    panel.setAttribute("popover", "auto");
-    button.setAttribute("popovertarget", PANEL_ID);
-  } else {
-    panel.hidden = true;
-  }
-
-  const isOpen = (): boolean => (popover ? panel.matches(":popover-open") : !panel.hidden);
-  const hide = (): void => {
-    if (!isOpen()) return;
-    if (popover) panel.hidePopover();
-    else {
-      panel.hidden = true;
-      onClosed();
-    }
-  };
 
   const draw = (): void => {
     const focused = document.activeElement;
@@ -144,50 +125,11 @@ export function createSettingsMenu(): HTMLElement[] {
     if (focusName !== null) panel.querySelector<HTMLInputElement>(`input[name="${focusName}"]:checked`)?.focus();
   };
 
-  // Anchored under the button, its inline-end edge on the button's (so it grows away from the screen edge).
-  const place = (): void => {
-    const rect = button.getBoundingClientRect();
-    const width = document.documentElement.clientWidth;
-    const rtl = document.documentElement.dir === "rtl";
-    const edge = Math.max(8, rtl ? rect.left : width - rect.right);
-    panel.style.insetBlockStart = `${Math.round(rect.bottom + 8)}px`;
-    panel.style.insetInlineEnd = `${Math.round(edge)}px`;
-  };
-
-  function onOpened(): void {
-    button.setAttribute("aria-expanded", "true");
-    place();
-    panel.querySelector<HTMLInputElement>("input:checked")?.focus();
-  }
-  function onClosed(): void {
-    button.setAttribute("aria-expanded", "false");
-    const active = document.activeElement;
-    if (active === null || active === document.body || panel.contains(active)) button.focus();
-  }
-
-  if (popover) {
-    panel.addEventListener("toggle", (ev) => {
-      if (!(ev instanceof ToggleEvent)) return;
-      if (ev.newState === "open") onOpened();
-      else onClosed();
-    });
-  } else {
-    button.addEventListener("click", () => {
-      panel.hidden = !panel.hidden;
-      if (panel.hidden) onClosed();
-      else onOpened();
-    });
-    panel.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape") hide();
-    });
-  }
-  // Tabbing out of the panel closes it (it is not modal), so focus never sits behind an open panel.
-  panel.addEventListener("focusout", (ev) => {
-    const next = ev.relatedTarget;
-    if (next instanceof Node && !panel.contains(next) && next !== button) hide();
-  });
-  window.addEventListener("resize", () => {
-    if (isOpen()) place();
+  // Anchored under the button, its inline-end edge on the button's (it grows away from the screen edge).
+  // Focus starts on the checked option of the first group; Escape, an outside click or Tabbing out closes it.
+  popover(button, panel, {
+    align: "end",
+    onOpen: () => panel.querySelector<HTMLInputElement>("input:checked")?.focus(),
   });
   window.addEventListener("hashchange", draw); // re-label on language change
   onSettingsChange(() => {

@@ -3,6 +3,7 @@ import { applyLang, isRelabel, noteRoute } from "./i18n/i18n";
 import { T } from "./i18n/strings-player";
 import { caseSummary, loadAllCases, loadCase } from "./content/load";
 import { h, setChildren } from "./lib/dom";
+import { closeOverlays, toast } from "./lib/overlay";
 import { TA } from "./i18n/strings-account";
 import { TO } from "./i18n/strings-onboard";
 import { renderHome } from "./views/home";
@@ -28,52 +29,14 @@ const appRoot: HTMLElement = root;
 new MutationObserver(() => applyPendingRestore()).observe(appRoot, { childList: true, subtree: true });
 
 /* ---------- global safety net: never white-screen ---------- */
-/*
- * Error toasts (the global safety net): one polite host, no per-toast role, so nothing is announced twice.
- * The same message is never stacked: a repeat bumps a "×n" counter. They stay until dismissed (WCAG 2.2.1,
- * errors never auto-dismiss); at most 3 on screen, the oldest goes first.
- */
-const TOAST_MAX = 3;
-const toastHost = h("div", { class: "toast-host", "aria-live": "polite" });
-document.body.append(toastHost);
-type ToastEntry = { el: HTMLElement; count: number; countEl: HTMLElement };
-const toasts = new Map<string, ToastEntry>();
-
-function removeToast(message: string): void {
-  const entry = toasts.get(message);
-  if (entry === undefined) return;
-  const hadFocus = entry.el.contains(document.activeElement);
-  entry.el.remove();
-  toasts.delete(message);
-  if (hadFocus) document.getElementById("app")?.focus({ preventScroll: true });
-}
-
-function toast(message: string): void {
-  const existing = toasts.get(message);
-  if (existing !== undefined) {
-    existing.count++;
-    existing.countEl.textContent = TO().toastCount(existing.count);
-    existing.countEl.hidden = false;
-    return;
-  }
-  const countEl = h("span", { class: "toast-count", hidden: true });
-  const close = h("button", { type: "button", class: "toast-close", "aria-label": TO().toastDismiss, onclick: () => removeToast(message) }, "×");
-  const el = h("div", { class: "toast toast-error" }, h("p", { class: "toast-text" }, message, " ", countEl), close);
-  toasts.set(message, { el, count: 1, countEl });
-  toastHost.append(el);
-  while (toasts.size > TOAST_MAX) {
-    const oldest = toasts.keys().next().value;
-    if (oldest === undefined) break;
-    removeToast(oldest);
-  }
-}
+// Uncaught errors become error toasts (lib/overlay.ts): they stay until dismissed and repeats count up.
 window.addEventListener("error", (ev) => {
   console.error(ev.error ?? ev.message);
-  toast(T().toastError);
+  toast({ tone: "error", text: T().toastError });
 });
 window.addEventListener("unhandledrejection", (ev) => {
   console.error(ev.reason);
-  toast(T().toastRequestFailed);
+  toast({ tone: "error", text: T().toastRequestFailed });
 });
 
 function notFound(message: string): void {
@@ -143,7 +106,10 @@ function route(): void {
   caseViews?.stopCaseTimers();
   authView?.stopAuthTimers();
   stopLeaderboard();
-  if (!isRelabel()) window.scrollTo(0, 0);
+  if (!isRelabel()) {
+    closeOverlays(); // a dialog or menu belongs to the page it was opened on
+    window.scrollTo(0, 0);
+  }
 
   try {
     if (parts.length === 0) {

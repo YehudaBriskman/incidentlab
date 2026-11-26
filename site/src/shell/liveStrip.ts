@@ -8,6 +8,7 @@ import { onConnectivity } from "../lib/api";
 import type { LiveEvent } from "../../shared/contract";
 import { cachedEvent, formatCountdown, onEventChange, serverNow, startEventPolling } from "../lib/event";
 import { h } from "../lib/dom";
+import { banner } from "../lib/overlay";
 import { caseSummary } from "../content/load";
 import { eventDisplayPhase, eventLine, eventWhen } from "../views/leaderboard";
 import { cachedToday, msUntilNextDay, onTodayChange, refreshToday } from "./today";
@@ -86,38 +87,37 @@ function createEventClock(onChange: () => void): { el: HTMLElement; tick: () => 
   return { el, tick };
 }
 
+/** The admin's announcement: a dismissible banner (lib/overlay.ts); a dismissed text stays dismissed. */
 function createAnnouncement(): HTMLElement {
   let dismissedText = readDismissed();
   let currentText: string | null = null;
-  const text = h("p", { class: "announce-text", dir: "auto" });
-  const label = h("span", { class: "announce-label" });
-  const close = h("button", { type: "button", class: "announce-close", "aria-label": TG().dismiss }, "×");
-  const banner = h("div", { class: "announce", role: "region", hidden: true }, h("div", { class: "announce-inner", "aria-live": "polite" }, label, text), close);
-  close.addEventListener("click", () => {
-    if (currentText !== null) {
+  const notice = banner({
+    tone: "info",
+    text: "",
+    dismissible: true,
+    label: TG().announcement,
+    className: "announce",
+    onDismiss: () => {
+      if (currentText === null) return;
       dismissedText = currentText;
       writeDismissed(currentText);
-    }
-    banner.hidden = true;
-    document.getElementById("app")?.focus({ preventScroll: true });
+    },
   });
+  notice.hide();
   const show = (event: LiveEvent | null): void => {
     const a = event?.announcement ?? null;
     currentText = a?.text ?? null;
     if (a === null || a.text === dismissedText) {
-      banner.hidden = true;
+      notice.hide();
       return;
     }
-    banner.className = `announce announce-${a.level}`;
-    banner.setAttribute("aria-label", TG().announcement);
-    label.textContent = a.level === "warning" ? "⚠ " : "📣 ";
-    if (text.textContent !== a.text) text.textContent = a.text; // textContent only: admin-authored text
-    close.setAttribute("aria-label", TG().dismiss);
-    banner.hidden = false;
+    notice.el.setAttribute("aria-label", TG().announcement);
+    notice.update({ tone: a.level === "warning" ? "warning" : "info", text: a.text });
+    notice.show();
   };
   show(cachedEvent()); // a remembered event draws at first paint (no layout shift); polling then updates it
   onEventChange(show);
-  return banner;
+  return notice.el;
 }
 
 /** Fills .live-strip inside the header and puts the announcement banner right after the header. */
