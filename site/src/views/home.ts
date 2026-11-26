@@ -12,7 +12,7 @@ import { fetchMyStats } from "../lib/api";
 import { h, setChildren, type Child } from "../lib/dom";
 import { cachedAccount, isAccountKnown, loadAccount, loadToday } from "../lib/session";
 import { cachedEvent, isEventActive, onEventChange } from "../lib/event";
-import { popover } from "../lib/overlay";
+import { popover, tooltip } from "../lib/overlay";
 import { recentVisits, visitHref, type Visit } from "../lib/recent";
 import {
   activeFilterCount,
@@ -141,21 +141,27 @@ function visitPlace(v: Visit): Place | null {
   if (c === undefined) return null;
   const kind = v.kind === "toolbox" ? TH().placeToolbox : v.kind === "explorer" ? TH().placeExplorer : TH().placeCase;
   const name: Child = v.kind === "explorer" && v.file !== null ? h("bdi", { class: "mono home-row-file", dir: "ltr" }, v.file) : titleNode(c.title);
-  return { key: `v:${v.kind}:${v.caseId}`, href: visitHref(v), kind, name, meta: h("span", { title: exactTime(v.at) }, timeAgo(v.at)), title: `${kind} · ${c.title}${v.file ? ` · ${v.file}` : ""}`, at: v.at };
+  return { key: `v:${v.kind}:${v.caseId}`, href: visitHref(v), kind, name, meta: timeAgo(v.at), title: `${kind} · ${c.title}${v.file ? ` · ${v.file}` : ""} · ${exactTime(v.at)}`, at: v.at };
+}
+
+/** `el` with `text` as its tooltip (hover and keyboard focus; lib/overlay.ts). */
+function withTip<E extends HTMLElement>(el: E, text: string): E {
+  tooltip(el, text);
+  return el;
 }
 
 function placeRow(p: Place): HTMLElement {
   return h(
     "li",
     {},
-    h(
+    withTip(h(
       "a",
-      { class: "home-row", href: p.href, title: p.title },
+      { class: "home-row", href: p.href },
       h("span", { class: "home-row-kind" }, p.kind),
       h("span", { class: "home-row-name" }, p.name),
       h("span", { class: "home-row-meta" }, p.meta),
       h("span", { class: "home-row-go", "aria-hidden": "true" }, "›"),
-    ),
+    ), p.title),
   );
 }
 
@@ -256,7 +262,7 @@ function todayCard(state: HomeState, signedIn: boolean, retry: () => void): HTML
     const stats = state.stats.get(c.id);
     const st = statusOf(stats);
     return [
-      h("a", { class: "home-today-title", href: `#/case/${c.id}`, title: c.subtitle }, titleNode(c.title)),
+      h("a", { class: "home-today-title", href: `#/case/${c.id}` }, titleNode(c.title)),
       h("p", { class: "home-today-sub" }, keepPrefix(c.subtitle)),
       h(
         "p",
@@ -405,12 +411,12 @@ function columns(isPlayer: boolean): Column<Row>[] {
         h(
           "span",
           { class: "home-case" },
-          h("a", { class: "home-case-link", href: `#/case/${r.c.id}`, title: r.c.subtitle }, titleNode(r.c.title)),
+          withTip(h("a", { class: "home-case-link", href: `#/case/${r.c.id}` }, titleNode(r.c.title)), r.c.subtitle),
           r.isToday ? h("span", { class: "chip pill-info home-today-chip" }, TO().todayTag) : null,
         ),
       sortValue: (r) => r.c.title.toLocaleLowerCase(),
     },
-    { id: "difficulty", header: TH().colDifficulty, cell: (r) => difficultyCell(r.c.difficulty), sortValue: (r) => DIFF_RANK[r.c.difficulty] },
+    { id: "difficulty", header: TH().colDifficulty, className: "home-col-nowrap", cell: (r) => difficultyCell(r.c.difficulty), sortValue: (r) => DIFF_RANK[r.c.difficulty] },
     { id: "minutes", header: TH().colMinutes, numeric: true, cell: (r) => h("bdi", {}, TO().minutes(r.c.estMinutes)), sortValue: (r) => r.c.estMinutes },
     {
       id: "stages",
@@ -423,7 +429,7 @@ function columns(isPlayer: boolean): Column<Row>[] {
   ];
   if (isPlayer) {
     cols.push(
-      { id: "status", header: TH().colStatus, cell: statusChip, sortValue: (r) => STATUS_RANK[statusOf(r.stats)] },
+      { id: "status", header: TH().colStatus, className: "home-col-nowrap", cell: statusChip, sortValue: (r) => STATUS_RANK[statusOf(r.stats)] },
       {
         id: "score",
         header: TH().colScore,
