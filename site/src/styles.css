@@ -824,7 +824,7 @@ main.app-content {
 /* fit pages (dashboards): the page fills the content area and its panels scroll inside themselves */
 @media (min-width: 641px) {
   .app-content[data-layout="fit"] { overflow: hidden; padding-block-end: var(--space-4); }
-  .app-content[data-layout="fit"] .page-body { flex: 1; min-block-size: 0; display: flex; flex-direction: column; }
+  .app-content[data-layout="fit"] .page-body { flex: 1; min-block-size: 0; display: flex; flex-direction: column; align-items: stretch; } /* fill the width, not shrink to content */
   .app-content[data-layout="fit"] #app { flex: 1; min-block-size: 0; display: flex; flex-direction: column; }
 }
 /* the announcement: one compact dismissible notice at the top of the content area */
