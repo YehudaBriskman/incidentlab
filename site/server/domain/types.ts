@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { AccountStatusSchema, QuestionIdSchema, StageProgressSchema } from "../../shared/contract.ts";
 import type { QuestionId } from "../../shared/contract.ts";
+import { CaseSealedSchema } from "../../shared/case-records.ts";
 
 /**
  * Data-safety rules (see docs/DATA.md): record changes are additive with defaults, so old records still parse;
@@ -53,25 +54,8 @@ export const ProgressRecordSchema = z.object({
 });
 export type ProgressRecord = z.infer<typeof ProgressRecordSchema>;
 
-const QuestionConfigSchema = z.object({
-  points: z.number().int().positive(),
-  hintCosts: z.array(z.number().int().min(0)),
-  targetSeconds: z.number().int().positive(),
-});
-const LocalizedTextSchema = z.object({ en: z.string(), he: z.string().nullable() });
-
-export const CaseSecretsSchema = z.object({
-  title: z.string(),
-  answers: z.record(QuestionIdSchema, z.string()),
-  debrief: z.string(),
-  debriefHe: z.string().nullable(),
-  questions: z.record(QuestionIdSchema, QuestionConfigSchema),
-  /** hint texts, in order, per question */
-  hints: z.record(QuestionIdSchema, z.array(LocalizedTextSchema)),
-  /** full runnable commands by toolbox item id */
-  tools: z.record(z.string(), z.object({ command: z.string(), powershell: z.string().nullable() })),
-  estMinutes: z.number().int().positive(),
-});
+/** Per-case answer key and paid content (generated/secrets.json). The shape is shared: see shared/case-records.ts. */
+export const CaseSecretsSchema = CaseSealedSchema;
 export type CaseSecrets = z.infer<typeof CaseSecretsSchema>;
 
 export const SecretsSchema = z.object({ cases: z.record(z.string(), CaseSecretsSchema) });

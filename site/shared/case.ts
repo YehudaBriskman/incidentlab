@@ -3,6 +3,10 @@
 // `CaseSchema` is the authored per-language case file (site/src/content/cases/<id>(.he).json). It still
 // carries the paid fields (hint texts, runnable commands); vite.config.ts strips those before the browser
 // ever sees them. Case JSON validates against it; docs/CASE_CONTRACT.md is the author-facing contract.
+//
+// The public, sealed, record and package schemas built on it are in ./case-records.ts. They are a separate
+// module because the browser imports this one: zod schema definitions are not tree-shaken, so anything
+// defined here ships in the entry chunk.
 import { z } from "zod";
 
 export const HintSchema = z.object({
