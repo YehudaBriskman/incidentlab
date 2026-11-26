@@ -1,8 +1,10 @@
 /* Instructor dashboard (#/admin). Uses only the shared roles and scales from styles.css (see DESIGN.md):
    accent = brand/selection, warning = needs attention, info = live/today/session, success, danger. */
+/* Fills the main area at every width (no centred cap); the gutter padding stays. */
+/* The fit-layout page body is a column flexbox with align-items: start (styles.css), which shrinks #app, and the
+   dashboard with it, to its content width. Stretch it on the admin page so the dashboard spans the main area. */
+.page-body:has(> #app > .view > .admin) { align-items: stretch; }
 .admin {
-  max-width: var(--page-wide);
-  margin: 0 auto;
   padding: var(--space-5) var(--gutter) var(--space-8);
   color: var(--text);
   font-family: var(--font-sans);
@@ -300,7 +302,7 @@ input.admin-input[type="search"] {
 }
 .tab-badge[hidden] { display: none; }
 .count-badge.is-zero { --pill-fg: var(--text-muted); --pill-bg: var(--surface-2); --pill-line: var(--border-strong); }
-.admin-hint { margin: -6px 0 var(--space-3); }
+.admin-hint { margin: -6px 0 var(--space-3); max-inline-size: var(--measure); }
 
 /* ---- accounts ---- */
 .pending-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
