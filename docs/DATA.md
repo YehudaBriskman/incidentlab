@@ -7,33 +7,62 @@ click may lose it. This document is the contract for anyone changing stored reco
 
 | Store | What | Notes |
 |---|---|---|
-| `incidentlab-v2` | Live data: `account:`, `username:`, `session:`, `progress:<case>:<account>`, `config:*` (schedule, settings, event, migrations ledger), `firstblood:`, `audit:`, `trash:`, `legacy:`, `ratelimit:`, `case:`, `evidence:` (binary) | Never rename. A new name means an empty store. That's how round-1 players were orphaned. |
+| `incidentlab-v2` | Live data: `account:`, `username:`, `session:`, `progress:<case>:<account>`, `config:*` (schedule, settings, event, migrations ledger), `firstblood:`, `audit:`, `trash:`, `legacy:`, `ratelimit:`, `case:`, `evidence:` (binary), `upload:` | Never rename. A new name means an empty store. That's how round-1 players were orphaned. |
 | `incidentlab-backups` | `daily/<YYYY-MM-DD>.json` snapshots, 30 days | Written by the scheduled function `backup-daily` |
 | `incidentlab-players` | Round-1 anonymous players (pre-accounts) | Read-only. Migration 002 copies it to `legacy:<id>` |
 | `~/.incidentlab-backups/` (your machine) | Pre-deploy, pre-migrate, pre-restore and manual snapshots | Mode 600, never in the repo |
 
-`session:` and `ratelimit:` keys are ephemeral and never backed up or restored. `evidence:` keys are binary
-and are left out of the JSON snapshots too (see below).
+`session:`, `ratelimit:` and `upload:` keys are ephemeral and never backed up or restored. `evidence:` keys
+are binary and are left out of the JSON snapshots too (see below).
 
-### DB-stored cases (`case:` and `evidence:`, in use since #64)
+### DB-stored cases (`case:`, `evidence:` and `upload:`, since #64 and #66)
 
 Written through `CaseRepository` / `EvidenceChunkRepository` (`site/server/repositories/case-repository.ts`)
 with the schemas in `site/shared/case-records.ts`. Every read is validated; a corrupt record is logged and
-treated as missing, never thrown. Nothing writes these keys in production yet: the upload routes are #66
-and the import of the bundled cases is #68.
+treated as missing, never thrown. The author upload routes (#66, `docs/API.md`) write them; the import of
+the bundled cases is #68.
 
 | Key | Holds | Notes |
 |---|---|---|
-| `case:<id>:meta` | `CaseMeta` | The current `version` and its `status` (`draft`, `published`, `trashed`). Written with `setIfMatch`. Public routes see only `version` while `status` is `published`. |
+| `case:<id>:meta` | `CaseMeta` | One per case, written with `setIfMatch` (concurrent finalizes and publishes cannot overwrite each other). Fields below. |
 | `case:<id>:v<n>:content:<lang>` | `CaseContent` | Public content per language (`en`, `he`); no hint texts or runnable commands. |
 | `case:<id>:v<n>:sealed` | `CaseSealed` | Server-only: answers, hint texts, commands, debriefs, scoring. |
 | `case:<id>:v<n>:evidence-index` | `EvidenceEntry[]` | Every evidence file: path, size, sha256, chunk count. |
 | `case:<id>:v<n>:evidence-zip` | `EvidenceEntry` | The prebuilt evidence zip. |
 | `evidence:<sha256>:<chunk#>` | raw bytes | 4 MiB chunks (`EVIDENCE_CHUNK_BYTES`), the last one shorter. Content-addressed: identical files share chunks across cases and versions. Binary, through `ByteStore` (`site/server/repositories/ByteStore.ts`), not `KvStore`. |
 
+| `upload:<uploadId>` | `UploadRecord` | An upload in progress (`site/server/repositories/upload-repository.ts`): owner, manifest, evidence zip, `expiresAt` (24 h), and after finalize the draft version and diff. |
+| `upload:<uploadId>:verified:<sha256>` | `{at}` | This file's stored chunks hashed to its sha256 during this upload. |
+| `upload:<uploadId>:part:<name>` | raw bytes | One named part (content JSON, sealed parts, debriefs), at most 1 MiB. Deleted after finalize. |
+
+**`CaseMeta` fields** (schemaVersion 2 since #66; draft and published are separate):
+- `publishedVersion` (number or null): the version public routes and the evidence Edge Function serve,
+  only while `status` is `published`; null until the first publish.
+- `latestVersion`: the highest stored version, drafts included. An upload's finalize writes `latestVersion + 1`
+  as a draft; publishing sets `publishedVersion`; a rollback publishes an older one.
+- `status`: `draft` (nothing published yet), `published`, or `trashed` (soft-deleted; restore puts back the
+  previous status).
+- `versions`: every stored version with its `langs`, `title`, `difficulty`, `tags`, `answerFingerprint`,
+  `contentSha`, `createdBy`, `createdAt`, `evidenceFiles` and `evidenceBytes`.
+- `createdBy`: the case owner, the account id of the author who first uploaded the id, or `admin`. Authors
+  may only manage their own cases. `createdAt`, `updatedAt`.
+- `version`, `langs`, `title`, `difficulty`, `tags`, `answerFingerprint`, `contentSha` describe
+  `publishedVersion` (or `latestVersion` while nothing is published). They are kept so the #64 readers keep
+  working.
+
+Metas written by #64 have only `version`: they still parse, as `publishedVersion = version` (null for a
+`draft`), `latestVersion = version` and one entry in `versions` (`server/test/case-schema.test.ts`).
+
 Versioned keys are immutable once written: a change is a new version. `evidence:` chunks are **not** in
 JSON snapshots (they are binary, and rebuilt from the case package), so a restore never touches them,
-even with `--prune`. Still planned, for #66: `upload:` (in-progress chunked uploads).
+even with `--prune`. Neither are `upload:` keys: they expire after 24 hours, and starting an upload sweeps
+expired ones.
+
+**Deleting a case** is soft: its meta becomes `trashed` (every public route answers 404), a `trash:` entry
+of kind `case` records the status to restore, and nothing else is removed. After the 7 days the trash entry
+goes and the case stays trashed. Evidence chunks are never deleted on delete, because cases and versions
+share them; a later garbage collection can reclaim chunks no version references (and chunks from abandoned
+uploads).
 
 Their input is the **case package** (`build/packages/<id>-v<n>.case.zip`, format in `docs/CASE_CONTRACT.md`).
 Packages are build artefacts: `scripts/build-all.sh` writes and validates them under the gitignored `build/`.
@@ -53,10 +82,11 @@ They contain the answer keys, so they are never committed, deployed or put under
    - never delete or rename keys.
    - Never edit or remove one that ran in production: the `config:migrations` ledger has it.
    - Every migration gets a test with fixture records from older versions (`server/test/data-safety.test.ts`).
-4. **Deletes are soft.** Deleting an account and resetting progress both write a `trash:` entry first. It can
+4. **Deletes are soft.** Deleting an account or a case and resetting progress all write a `trash:` entry first. It can
    be restored from the admin panel for 7 days (Recently deleted). Restores never overwrite newer data.
 5. **Answer keys are data too.** Changing a released case's answers, points or hint costs re-scores players
-   mid-case. `deploy.sh` refuses such a deploy unless you reset the case or pass `--accept-answer-changes`.
+   mid-case. `deploy.sh` refuses such a deploy unless you reset the case or pass `--accept-answer-changes`, and
+   publishing an uploaded version refuses the same change (409 `answer-drift`) unless `acceptAnswerChanges` is set.
 
 ## Runbook
 
