@@ -1,6 +1,7 @@
 // Validates a case package (`<id>-v<n>.case.zip`, format in docs/CASE_CONTRACT.md "Case package").
 // Used at build time by scripts/check-packages.mts; written against web APIs only (shared/zip.ts,
-// crypto.subtle, TextDecoder) so the upload flow (#66) can run the same checks in the browser and server.
+// crypto.subtle, TextDecoder) so the upload flow (#66) runs the same checks in the browser, the CLI and the
+// server: validateCasePackage() on a whole zip, validatePackageParts() on the parts an upload received.
 //
 // Error messages never quote answers, hint texts or commands: they name the question or tool instead.
 import type { z } from "zod";
@@ -54,8 +55,24 @@ const sha256Hex = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> =>
 const issues = (where: string, error: z.ZodError): string[] =>
   error.issues.slice(0, 10).map((i) => `${where}: ${i.path.length ? i.path.join(".") : "(root)"}: ${i.message}`);
 
-async function readJson(zip: ZipArchive, name: string, errors: string[]): Promise<unknown> {
-  if (!zip.get(name)) {
+/**
+ * The package's non-evidence entries by name (manifest.json, content.<lang>.json, sealed/*). A zip archive
+ * is one source; the chunked upload (#66) is another, where the server holds the parts it received.
+ */
+export interface PackageParts {
+  readonly names: readonly string[];
+  has(name: string): boolean;
+  read(name: string): Promise<Uint8Array>;
+}
+
+const zipParts = (zip: ZipArchive): PackageParts => ({
+  names: zip.entries.map((e) => e.name),
+  has: (name) => zip.get(name) !== undefined,
+  read: (name) => zip.read(name),
+});
+
+async function readJson(zip: PackageParts, name: string, errors: string[]): Promise<unknown> {
+  if (!zip.has(name)) {
     errors.push(`missing ${name}`);
     return undefined;
   }
@@ -142,7 +159,7 @@ async function checkEvidence(zip: ZipArchive, manifest: CasePackageManifest, err
 }
 
 /** No answer, hint text or command may appear in a public file (content.<lang>.json, manifest.json). */
-async function checkLeaks(zip: ZipArchive, publicFiles: string[], sealed: CaseSealed, errors: string[]): Promise<void> {
+async function checkLeaks(parts: PackageParts, publicFiles: string[], sealed: CaseSealed, errors: string[]): Promise<void> {
   const paid: { label: string; text: string }[] = [];
   for (const [qid, hints] of Object.entries(sealed.hints)) {
     hints.forEach((hint, i) => {
@@ -155,7 +172,13 @@ async function checkLeaks(zip: ZipArchive, publicFiles: string[], sealed: CaseSe
     if (tool.powershell) paid.push({ label: `PowerShell command of tool ${id}`, text: tool.powershell });
   }
   for (const name of publicFiles) {
-    const haystack = text(await zip.read(name));
+    let haystack: string;
+    try {
+      haystack = text(await parts.read(name));
+    } catch {
+      errors.push(`${name}: not valid UTF-8, so it cannot be scanned for leaks`);
+      continue;
+    }
     const hasAnswer = createAnswerScan(haystack);
     const hasText = createTextScan(haystack);
     for (const [qid, answer] of Object.entries(sealed.answers)) {
@@ -167,6 +190,58 @@ async function checkLeaks(zip: ZipArchive, publicFiles: string[], sealed: CaseSe
   }
 }
 
+/**
+ * Checks everything in a package except its evidence bytes: the content files and sealed parts against
+ * their schemas, the answer-leak scan of the public files (manifest.json, content.<lang>.json) against the
+ * sealed answers, hint texts and commands, and that the sealed half agrees with the English content.
+ * Problems go onto `errors`. Returns the parsed package when every part parsed, even if a leak or a
+ * cross-check failed, so callers must still look at `errors`.
+ */
+export async function validatePackageParts(parts: PackageParts, manifest: CasePackageManifest, errors: string[]): Promise<CasePackage | undefined> {
+  const content: Partial<Record<CaseLang, CaseContent>> = {};
+  for (const name of parts.names) {
+    const lang = CONTENT_ENTRY.exec(name)?.[1];
+    if (lang !== undefined && !manifest.langs.some((l) => l === lang)) errors.push(`${name}: language ${lang} is not in manifest langs`);
+  }
+  for (const lang of manifest.langs) {
+    const name = contentEntry(lang);
+    const parsed = parse(CaseContentSchema, await readJson(parts, name, errors), name, errors);
+    if (!parsed) continue;
+    if (parsed.id !== manifest.id) errors.push(`${name}: id ${parsed.id} does not match manifest id ${manifest.id}`);
+    content[lang] = parsed;
+  }
+
+  const debrief = async (name: string): Promise<string | null> => {
+    if (!parts.has(name)) return null;
+    try {
+      return text(await parts.read(name));
+    } catch {
+      errors.push(`${name}: not valid UTF-8`);
+      return null;
+    }
+  };
+  const scoring = await readJson(parts, PACKAGE_ENTRIES.scoring, errors);
+  const debriefEn = await debrief(PACKAGE_ENTRIES.debriefEn);
+  if (!parts.has(PACKAGE_ENTRIES.debriefEn)) errors.push(`missing ${PACKAGE_ENTRIES.debriefEn}`);
+  const sealedRaw = {
+    ...(typeof scoring === "object" && scoring !== null ? scoring : {}),
+    answers: await readJson(parts, PACKAGE_ENTRIES.answers, errors),
+    hints: await readJson(parts, PACKAGE_ENTRIES.hints, errors),
+    tools: await readJson(parts, PACKAGE_ENTRIES.commands, errors),
+    debrief: debriefEn,
+    debriefHe: await debrief(PACKAGE_ENTRIES.debriefHe),
+  };
+  const sealed = parse(CaseSealedSchema, sealedRaw, "sealed", errors);
+  if (!sealed) return undefined;
+
+  // The leak scan reads the raw public files, so it runs even when their schema check failed.
+  const publicFiles = [PACKAGE_ENTRIES.manifest, ...parts.names.filter((n) => CONTENT_ENTRY.test(n))].filter((n) => parts.has(n));
+  await checkLeaks(parts, publicFiles, sealed, errors);
+  if (!content.en) return undefined;
+  crossCheck(content.en, sealed, errors);
+  return { manifest, content, sealed };
+}
+
 export async function validateCasePackage(bytes: Uint8Array, options: { fileName?: string } = {}): Promise<PackageReport> {
   const errors: string[] = [];
   let zip: ZipArchive;
@@ -175,6 +250,7 @@ export async function validateCasePackage(bytes: Uint8Array, options: { fileName
   } catch (err) {
     return { ok: false, errors: [err instanceof Error ? err.message : String(err)] };
   }
+  const parts = zipParts(zip);
 
   const fixed = new Set<string>(Object.values(PACKAGE_ENTRIES));
   for (const entry of zip.entries) {
@@ -183,46 +259,15 @@ export async function validateCasePackage(bytes: Uint8Array, options: { fileName
     }
   }
 
-  const manifest = parse(CasePackageManifestSchema, await readJson(zip, PACKAGE_ENTRIES.manifest, errors), PACKAGE_ENTRIES.manifest, errors);
+  const manifest = parse(CasePackageManifestSchema, await readJson(parts, PACKAGE_ENTRIES.manifest, errors), PACKAGE_ENTRIES.manifest, errors);
   if (!manifest) return { ok: false, errors };
   if (options.fileName !== undefined && options.fileName !== packageFileName(manifest.id, manifest.version)) {
     errors.push(`file name ${options.fileName} does not match manifest (${packageFileName(manifest.id, manifest.version)})`);
   }
 
-  const content: Partial<Record<CaseLang, CaseContent>> = {};
-  for (const entry of zip.entries) {
-    const lang = CONTENT_ENTRY.exec(entry.name)?.[1];
-    if (lang !== undefined && !manifest.langs.some((l) => l === lang)) errors.push(`${entry.name}: language ${lang} is not in manifest langs`);
-  }
-  for (const lang of manifest.langs) {
-    const name = contentEntry(lang);
-    const parsed = parse(CaseContentSchema, await readJson(zip, name, errors), name, errors);
-    if (!parsed) continue;
-    if (parsed.id !== manifest.id) errors.push(`${name}: id ${parsed.id} does not match manifest id ${manifest.id}`);
-    content[lang] = parsed;
-  }
-
-  const debrief = async (name: string): Promise<string | null> => (zip.get(name) ? text(await zip.read(name)) : null);
-  const scoring = await readJson(zip, PACKAGE_ENTRIES.scoring, errors);
-  const debriefEn = await debrief(PACKAGE_ENTRIES.debriefEn);
-  if (debriefEn === null) errors.push(`missing ${PACKAGE_ENTRIES.debriefEn}`);
-  const sealedRaw = {
-    ...(typeof scoring === "object" && scoring !== null ? scoring : {}),
-    answers: await readJson(zip, PACKAGE_ENTRIES.answers, errors),
-    hints: await readJson(zip, PACKAGE_ENTRIES.hints, errors),
-    tools: await readJson(zip, PACKAGE_ENTRIES.commands, errors),
-    debrief: debriefEn,
-    debriefHe: await debrief(PACKAGE_ENTRIES.debriefHe),
-  };
-  const sealed = parse(CaseSealedSchema, sealedRaw, "sealed", errors);
-
   await checkEvidence(zip, manifest, errors);
-  if (!sealed) return { ok: false, errors };
-
-  // The leak scan reads the raw public files, so it runs even when their schema check failed.
-  const publicFiles = [PACKAGE_ENTRIES.manifest, ...zip.entries.map((e) => e.name).filter((n) => CONTENT_ENTRY.test(n))];
-  await checkLeaks(zip, publicFiles, sealed, errors);
-  if (!content.en) return { ok: false, errors };
-  crossCheck(content.en, sealed, errors);
-  return { ok: errors.length === 0, errors, parsed: { manifest, content, sealed } };
+  const parsed = await validatePackageParts(parts, manifest, errors);
+  if (!parsed) return { ok: false, errors };
+  return { ok: errors.length === 0, errors, parsed };
 }
+
