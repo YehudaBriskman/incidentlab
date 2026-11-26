@@ -2,16 +2,19 @@
 import type { LiveEvent, Settings } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
 import type { EventRepository, SettingsRepository } from "../repositories/config-repositories.ts";
+import { noopCachePurger, type CachePurger } from "./CachePurger.ts";
 
 export class EventService {
   private readonly events: EventRepository;
   private readonly settingsRepo: SettingsRepository;
   private readonly now: () => Date;
+  private readonly purger: CachePurger;
 
-  constructor(deps: { events: EventRepository; settings: SettingsRepository; now: () => Date }) {
+  constructor(deps: { events: EventRepository; settings: SettingsRepository; now: () => Date; purger?: CachePurger }) {
     this.events = deps.events;
     this.settingsRepo = deps.settings;
     this.now = deps.now;
+    this.purger = deps.purger ?? noopCachePurger;
   }
 
   async get(): Promise<{ event: LiveEvent; serverTime: string }> {
@@ -24,6 +27,8 @@ export class EventService {
     if (freezeAt !== null && endsAt !== null && Date.parse(freezeAt) > Date.parse(endsAt)) throw new AppError(400, "freeze the leaderboard before the event ends");
     if (event.enforceWindow && (startsAt === null || endsAt === null)) throw new AppError(400, "set a start and an end to enforce the window");
     await this.events.save(event);
+    // Both public GETs read the event: /api/event directly, /api/leaderboard through the freeze moment.
+    await this.purger.purge(["event", "leaderboard"]);
     return this.get();
   }
 

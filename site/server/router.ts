@@ -31,6 +31,7 @@ import { UploadRepository } from "./repositories/upload-repository.ts";
 import { AuthorAuthService } from "./services/AuthorAuthService.ts";
 import { CaseAuthoringService } from "./services/CaseAuthoringService.ts";
 import { CaseUploadService } from "./services/CaseUploadService.ts";
+import type { CachePurger } from "./services/CachePurger.ts";
 
 export type AppDeps = {
   readonly store: KvStore;
@@ -44,6 +45,8 @@ export type AppDeps = {
   readonly staticSecrets?: Secrets;
   readonly adminKey: () => string | undefined; // read per request so env changes apply
   readonly now?: () => Date;
+  /** CDN purge after instructor writes (api.mts passes Netlify's); tests and the local server use the no-op. */
+  readonly cachePurger?: CachePurger;
 };
 
 export type App = { handle(req: Request, ip: string): Promise<Response> };
@@ -67,8 +70,8 @@ export const createApp = (deps: AppDeps): App => {
 
   const limiter = new RateLimiter(repos.rateLimits, now);
   const auth = new AuthService({ repos, settings: settingsRepo, limiter, adminKey: deps.adminKey, now });
-  const events = new EventService({ events: new EventRepository(deps.store), settings: settingsRepo, now });
-  const schedule = new ScheduleService({ repository: repos.schedule, releasedCaseIds: () => Object.keys(secrets.cases), now });
+  const events = new EventService({ events: new EventRepository(deps.store), settings: settingsRepo, now, purger: deps.cachePurger });
+  const schedule = new ScheduleService({ repository: repos.schedule, releasedCaseIds: () => Object.keys(secrets.cases), now, purger: deps.cachePurger });
   const game = new GameService({ repository: repos.progress, firstBlood, secrets, schedule, events, now });
   const stats = new StatsService({ repos, secrets, now });
   const trashRepo = new TrashRepository(deps.store);

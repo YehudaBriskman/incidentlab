@@ -2,6 +2,7 @@
 import type { Schedule, TodayResponse } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
 import type { ScheduleRepository } from "../repositories/repositories.ts";
+import { noopCachePurger, type CachePurger } from "./CachePurger.ts";
 
 export const isValidTimeZone = (timezone: string): boolean => {
   try {
@@ -10,6 +11,14 @@ export const isValidTimeZone = (timezone: string): boolean => {
   } catch {
     return false;
   }
+};
+
+/** Whole seconds from `date` to the next midnight in `timezone` (1..86400), so a cached "today" never outlives its day. */
+export const secondsUntilNextDay = (date: Date, timezone: string): number => {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: timezone, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(date);
+  const part = (type: string): number => Number(parts.find((p) => p.type === type)?.value ?? "0");
+  const elapsed = part("hour") * 3600 + part("minute") * 60 + part("second");
+  return Math.max(1, 86_400 - elapsed);
 };
 
 /** YYYY-MM-DD of `date` as seen in `timezone`. */
@@ -21,11 +30,13 @@ export class ScheduleService {
   /** read per call: the DB-published cases (#68), so a publish releases a case without a redeploy */
   private readonly releasedCaseIds: () => readonly string[];
   private readonly now: () => Date;
+  private readonly purger: CachePurger;
 
-  constructor(deps: { repository: ScheduleRepository; releasedCaseIds: () => readonly string[]; now: () => Date }) {
+  constructor(deps: { repository: ScheduleRepository; releasedCaseIds: () => readonly string[]; now: () => Date; purger?: CachePurger }) {
     this.repository = deps.repository;
     this.releasedCaseIds = deps.releasedCaseIds;
     this.now = deps.now;
+    this.purger = deps.purger ?? noopCachePurger;
   }
 
   get(): Promise<Schedule> {
@@ -42,6 +53,7 @@ export class ScheduleService {
     const days = Object.fromEntries(Object.entries(schedule.days).filter(([day]) => day >= cutoff).sort(([a], [b]) => a.localeCompare(b)));
     const cleaned: Schedule = { ...schedule, days };
     await this.repository.save(cleaned);
+    await this.purger.purge(["today"]); // the public, CDN-cached GET /api/today
     return cleaned;
   }
 
@@ -51,6 +63,11 @@ export class ScheduleService {
     const scheduled = schedule.days[date] ?? schedule.defaultCaseId;
     const caseId = scheduled !== null && this.releasedCaseIds().includes(scheduled) ? scheduled : null;
     return { date, timezone: schedule.timezone, caseId, lockToToday: schedule.lockToToday, releasedCaseIds: [...this.releasedCaseIds()] };
+  }
+
+  /** Seconds until the schedule's next day starts: the most a cached "today" may be served for. */
+  secondsUntilNextDay(timezone: string): number {
+    return secondsUntilNextDay(this.now(), timezone);
   }
 
   async canStart(caseId: string): Promise<boolean> {

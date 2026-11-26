@@ -7,6 +7,7 @@ import { BlobsKvStore, InMemoryKvStore } from "../../server/repositories/KvStore
 import type { KvStore } from "../../server/repositories/KvStore.ts";
 import { createApp } from "../../server/router.ts";
 import type { App } from "../../server/router.ts";
+import { netlifyCachePurger, noopCachePurger } from "../../server/services/CachePurger.ts";
 
 type Stores = { readonly kv: KvStore; readonly bytes: ByteStore };
 
@@ -26,7 +27,9 @@ export const appStores = (): Stores => {
 
 const getApp = (): App => {
   const { kv, bytes } = appStores();
-  app ??= createApp({ store: kv, bytes, adminKey: () => process.env.ADMIN_KEY });
+  // Purge the CDN only where there is one: the in-memory store is the local server and the tests.
+  const cachePurger = process.env.INCIDENTLAB_STORE === "memory" ? noopCachePurger : netlifyCachePurger;
+  app ??= createApp({ store: kv, bytes, adminKey: () => process.env.ADMIN_KEY, cachePurger });
   return app;
 };
 

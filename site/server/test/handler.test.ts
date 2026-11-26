@@ -15,7 +15,9 @@ test("entry point serves /api/today; an empty store releases no case", async () 
   resetAppForTests();
   const res = await handler(new Request("http://localhost/api/today"), { ip: "10.0.0.1" });
   assert.equal(res.status, 200);
-  assert.equal(res.headers.get("cache-control"), "no-store");
+  // public and CDN-cacheable since #140; browsers always revalidate
+  assert.equal(res.headers.get("cache-control"), "public, max-age=0, must-revalidate");
+  assert.match(res.headers.get("netlify-cdn-cache-control") ?? "", /^public, durable, max-age=\d+/);
   const body = TodayResponseSchema.parse(await res.json());
   assert.deepEqual(body.releasedCaseIds, []);
 });
