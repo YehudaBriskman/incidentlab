@@ -79,6 +79,7 @@ at base + 30 + 10, plus 50); first blood can push a score above par. Each solved
 | PUT | `/api/admin/schedule` | `Schedule` | `{schedule}` (case ids must be released; time zone must be valid) |
 | GET | `/api/admin/stats` | | `{generatedAt, cases: CaseSummary[]}` |
 | POST | `/api/admin/accounts/:id/reset-password` | `{}` | `{temporaryPassword}` |
+| PUT | `/api/admin/accounts/:id/role` | admin | `{role: "player"\|"author"}` | `{account}`; audited as `account.role`. Authors may manage cases they created (upload routes arrive in #66). |
 | POST | `/api/admin/accounts/approve-all` | `{}` | `{approved}` |
 | GET/PUT | `/api/admin/settings` | `{inviteCode}` | `{settings}` |
 | GET/PUT | `/api/admin/event` | `LiveEvent` | `{event, serverTime}` (window, freeze, announcement; `enforceWindow` refuses answers, hints and reveals outside it) |

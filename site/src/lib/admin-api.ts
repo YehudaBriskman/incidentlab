@@ -23,6 +23,7 @@ import {
   TodayResponseSchema,
   TrashResponseSchema,
   TrashRestoreResponseSchema,
+  type AccountRecordRole,
   type AccountView,
   type AuditEntry,
   type LeaderboardResponse,
@@ -167,6 +168,13 @@ export async function fetchAccounts(): Promise<AdminAccountsResult> {
 export async function setAccountStatus(id: string, action: "approve" | "reject"): Promise<AccountView> {
   const path = `/api/admin/accounts/${seg(id)}/${action}`;
   const body = await parseJson(await adminFetch(path, jsonInit("POST", {})), AccountResponseSchema, path);
+  return body.account;
+}
+
+/** Grants or revokes the author role (who may upload cases). */
+export async function setAccountRole(id: string, role: AccountRecordRole): Promise<AccountView> {
+  const path = `/api/admin/accounts/${seg(id)}/role`;
+  const body = await parseJson(await adminFetch(path, jsonInit("PUT", { role })), AccountResponseSchema, path);
   return body.account;
 }
 

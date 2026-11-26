@@ -8,6 +8,7 @@ import { getLang } from "../i18n/i18n";
 import {
   QUESTION_ORDER,
   TRASH_RETENTION_DAYS,
+  type AccountRecordRole,
   type AccountStatus,
   type AdminProgress,
   type AuditEntry,
@@ -52,6 +53,7 @@ import {
   saveEvent,
   saveSchedule,
   saveSettings,
+  setAccountRole,
   setAccountStatus,
   setAccountsStatus,
   setAdminKey,
@@ -1928,6 +1930,26 @@ export function renderAdmin(root: HTMLElement): void {
     }
   }
 
+  async function changeRole(account: UserStats, role: AccountRecordRole): Promise<void> {
+    const busyKey = `status:${account.accountId}`;
+    state.busy.add(busyKey);
+    renderAccounts();
+    try {
+      const updated = await setAccountRole(account.accountId, role);
+      if (state.accounts) {
+        state.accounts = {
+          ...state.accounts,
+          accounts: state.accounts.accounts.map((a) => (a.accountId === updated.id && updated.role !== "admin" ? { ...a, role: updated.role } : a)),
+        };
+      }
+    } catch (err: unknown) {
+      showActionError(err);
+    } finally {
+      state.busy.delete(busyKey);
+      if (state.accounts) renderAccounts();
+    }
+  }
+
   /** Bulk approve/reject of the ticked pending sign-ups (per-account calls; partial failures are reported). */
   async function bulkStatus(action: "approve" | "reject"): Promise<void> {
     const ids = [...state.pendingSelected];
@@ -1965,6 +1987,7 @@ export function renderAdmin(root: HTMLElement): void {
     if (a.status !== "approved") items.push({ label: T().admApprove, run: () => void changeStatus(a, "approve") });
     if (a.status === "approved") items.push({ label: T().admRevoke, run: () => void changeStatus(a, "reject") });
     else if (a.status === "pending") items.push({ label: T().admReject, run: () => void changeStatus(a, "reject") });
+    items.push(a.role === "author" ? { label: T().admRemoveAuthor, run: () => void changeRole(a, "player") } : { label: T().admMakeAuthor, run: () => void changeRole(a, "author") });
     items.push({
       label: T().admResetPwItem,
       run: () =>
@@ -2013,6 +2036,11 @@ export function renderAdmin(root: HTMLElement): void {
 
   function statusPill(status: AccountStatus): HTMLElement {
     return h("span", { class: `status-pill is-${status}` }, T().admAcctStatus(status));
+  }
+
+  /** The author pill sits beside the status; players get none. */
+  function rolePill(a: UserStats): Child {
+    return a.role === "author" ? [" ", h("span", { class: "status-pill is-author" }, T().admAuthorPill)] : null;
   }
 
   function renderPending(list: readonly UserStats[]): void {
@@ -2310,7 +2338,7 @@ export function renderAdmin(root: HTMLElement): void {
       "tr",
       { class: `acct-row is-${a.status}${expanded ? " is-expanded" : ""}`, "data-id": a.accountId },
       h("td", { class: "col-name" }, acctToggle(a, detailId)),
-      h("td", {}, statusPill(a.status)),
+      h("td", {}, statusPill(a.status), rolePill(a)),
       state.acctCols.map((id) => ACCT_COL_DEFS[id].cell(a, now)),
       h("td", { class: "col-actions" }, acctMenu(a)),
     );
@@ -2358,7 +2386,7 @@ export function renderAdmin(root: HTMLElement): void {
         "li",
         { class: `acct-card is-${a.status}${expanded ? " is-expanded" : ""}`, "data-id": a.accountId },
         h("div", { class: "pc-head" }, acctToggle(a, detailId), acctMenu(a)),
-        h("p", { class: "ac-facts" }, statusPill(a.status), " ", facts.join(" · ")),
+        h("p", { class: "ac-facts" }, statusPill(a.status), rolePill(a), " ", facts.join(" · ")),
         h("p", { class: "muted small ac-seen", title: formatDateTime(a.lastSeenAt) }, T().admSeenLine(relativeAgo(a.lastSeenAt, now))),
         expanded ? h("div", { class: "ac-detail", id: detailId }, caseStatsList(a.cases), h("p", { class: "muted small" }, acctExtras(a))) : null,
       ),
