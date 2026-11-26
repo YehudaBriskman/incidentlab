@@ -18,6 +18,7 @@ cd site && npm run build           # tsc + vite build -> site/dist
 cd site && npm run test:server     # node:test over site/server/test/*.test.ts (in-memory store)
 cd site && node --test --experimental-strip-types server/test/auth.test.ts   # one server test file
 cd site && node --test --experimental-strip-types src/explorer/              # Explorer core tests
+cd site && npm run test:client     # Explorer core, components and overlay rules (no browser)
 
 bash solutions/solve.sh                         # 3am-outage solver (compares to build/truth/answers.json)
 bash solutions/<case-id>/solve.sh               # other cases
@@ -62,6 +63,7 @@ git worktree, copy them from the main checkout instead.
 - i18n: EN + HE (RTL) through `defineStrings`, split across several `i18n/strings-*.ts` files.
 - The Evidence Explorer (`views/explorer.ts`, `explorer/*`) is a web worker plus a virtual list over the files in
   `/evidence/<case>/files/`.
+- Dialogs, confirms, sheets, popovers, menus, toasts and banners come from `lib/overlay.ts`; never build them inline.
 - Styling: plain CSS on a token system. Use the tokens and components recorded in `DESIGN.md`, not raw colours or px values.
 
 **Cases**: `3am-outage` uses the legacy generators in `generator/*.py`. Every other case follows

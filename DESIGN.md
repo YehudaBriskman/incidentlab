@@ -99,7 +99,7 @@ components:
   Open work goes in GitHub issues, never in this file.
 -->
 
-# IncidentLab design system v1.0.0
+# IncidentLab design system v1.1.0
 
 ## Overview
 
@@ -111,7 +111,7 @@ IncidentLab is a learning game for engineers: each case is a fictional outage wi
   - Consumer/game: students on phones (390px is a real case), Hebrew users, achievements, streaks, time bonus and a leaderboard. So: 17px reading body, 44px touch targets, expressive motion only at key moments (solve pop, wrong-answer shake).
   - Real-time: event clock, live admin funnel, leaderboard refresh. Numbers use tabular figures and status is never colour-only.
   - Projector: `body.projector` and the admin board need large type and the high-contrast theme.
-- **Token set version:** 1.0.0
+- **Token set version:** 1.1.0
 
 ### Design brief
 
@@ -151,6 +151,7 @@ IncidentLab is a learning game for engineers: each case is a fictional outage wi
 - 4px spacing base, 8 steps (`--space-1…8`: 4, 8, 12, 16, 24, 32, 48, 64). `--gutter` 16px.
 - Widths: `--read` 760 (stage, prose), `--page` 1080 (chrome, main), `--page-narrow` 900 (stats, leaderboard), `--page-wide` 1280 (admin).
 - Density: comfortable everywhere; admin tables use the same scale with smaller type.
+- **Layers:** modals and popovers open in the top layer (ordered by open order). What stays in the page is ordered by tokens: `--z-sidebar` 30 (folded nav panel, the #60 sidebar) < `--z-sheet` 40 < `--z-dialog` 50 < `--z-popover` 55 < `--z-toast` 60; the skip link sits one above the toasts. Local sticky offsets inside a view (table headers, tab bars) stay small literals.
 - **App shell:** a grid of navbar, announcement, a reserved sidebar column (#60), main and footer. The navbar row is 56px (`--control-md` + `--space-3`) and spans `--page`; the live strip under it (today's case, event clock, connectivity) hides when empty.
 - **Narrow header (≤1024px):** navigation, account and language fold behind a menu button; the row keeps logo, menu and ⚙ (DOM order = visual order). Signed in at 390px the header is the navbar row plus the live strip.
 
@@ -167,7 +168,7 @@ IncidentLab is a learning game for engineers: each case is a fictional outage wi
 
 - Durations: `--motion-dur-short` 150ms (micro), `-medium` 240ms, `-long` 400ms (progress, shake), `-data` 900ms (time-bonus meter). Easings: `--motion-ease-standard`, `--motion-ease-enter`.
 - Budget: subtle. Expressive only for solve (pop) and wrong answer (shake).
-- `prefers-reduced-motion: reduce` removes shake, pop, pulses, the skeleton shimmer and every width transition (progress, meter, funnel, caret, explorer progress).
+- `prefers-reduced-motion: reduce` removes shake, pop, pulses, the skeleton shimmer and every width transition (progress, meter, funnel, caret, explorer progress), and the overlay enter/exit (dialogs, sheets, popovers, toasts appear and leave at once). `[data-motion=reduce]` from the ⚙ menu does the same.
 
 ## Voice & Content Strategy
 
@@ -184,10 +185,26 @@ IncidentLab is a learning game for engineers: each case is a fictional outage wi
 | Focus ring | global `:focus-visible` | `--focus-width` 2px solid `--focus-ring`, offset `--focus-offset` 2px; inset (-2px) only inside clipped scrollers (shell tabs, explorer rows); `Highlight` in forced colours; `--code-accent` inside the code island |
 | Tabs | `.shell-tab[aria-selected]`, `.admin-tab.is-active` | accent tint + 2–3px accent underline; Highlight fill/underline in forced colours |
 | Navbar | `.navbar`, `.nav-link[aria-current]`, `.nav-toggle`, `.settings-btn` | 56px row; current page = 2px accent underline (3px inline-start bar in the folded menu, `--dir`); underline in forced colours |
-| Display settings | `.settings-panel` (Popover API), `.settings-option` | `--shadow-lg`, `--radius-lg`; checked option = accent tint + accent edge. Applies `data-theme`, `data-text-scale`, `data-motion`, `data-contrast`, `data-spacing` on `<html>` (token overrides only) |
+| Display settings | `.settings-panel` (an `.ov-popover` from `popover()`), `.settings-option` | `--shadow-lg`, `--radius-lg`; checked option = accent tint + accent edge. Applies `data-theme`, `data-text-scale`, `data-motion`, `data-contrast`, `data-spacing` on `<html>` (token overrides only) |
 | Data table | `dataTable()` in `src/components/dataTable.ts` → `.dt-wrap.table-wrap` > `table.stats-table.data-table`; `.dt-sort` header buttons with `aria-sort`; `.dt-opt` columns; `.dt-stack` phone cards; `.dt-message`, `.dt-skeleton` | sticky `thead`; numbers `.num` end-aligned with tabular figures; missing values sort last both ways; `.dt-opt` hides below 640px; `.dt-stack` turns each row into a labelled card below 600px (`data-label` per cell); loading = skeleton rows + a `role=status` label; error = `role=alert` + retry. Used by My stats and the leaderboard (admin tables move after the overlay work, #61/#62) |
 | Stat tile | `statTile()`, `statGrid()`, `statTileSkeleton()` in `src/components/statGrid.ts` → `.kpi-grid` > `.stat-tile.kpi` | label `--step--2` uppercase muted; value 1.6rem 700 tabular; context lines `.stat-sub` (`.is-up` success, `.is-down` danger); skeleton keeps the tile's footprint |
 | Progress | `.progress-*`, `.meter-*`, `.bar*`, `.funnel-*`, `.cell.*` | fills on `--surface-3`/`--border`; forced colours: Canvas track + CanvasText edge + Highlight fill; revealed cells hatched |
+
+### Overlays (`site/src/lib/overlay.ts`)
+
+Every dialog, sheet, menu, popover, toast and banner comes from this module; views never build their own `<dialog>`, `popover` or toast host. Shared rules: modals use the native `<dialog>` with `showModal()` (the page behind is inert), Tab is trapped explicitly, Escape closes, `html.has-modal` locks page scroll with a stable gutter, and focus returns to the opener (or to `returnFocus()` when the opener was re-rendered, else `#app`). A modal opened from a modal (a confirm whose action shows the one-time password) inherits the first one's opener. Enter/exit transitions (`--motion-dur-medium`, `@starting-style`, `allow-discrete`) run only when `prefers-reduced-motion` and `[data-motion=reduce]` both allow them. RTL comes from logical properties; anchored placement mirrors `start`/`end` in script. The DOM-free rules (focus wrap, menu keys, typeahead, placement, modal stack, toast queue) live in `overlay-logic.ts` with unit tests (`npm run test:client`).
+
+| Primitive | API | Anatomy | Tokens | States |
+|---|---|---|---|---|
+| Dialog | `openDialog({size, title, body, actions})` → `Promise<value \| null>`; `showDialog()` returns a handle (`el`, `body`, `close`, `result`) for dialogs that re-render (projector board) | `dialog.ov-dialog.is-{sm,md,lg,full}` > `header.ov-head` (`h2.ov-title`, optional `.ov-close` ×) + `.ov-body` + `footer.ov-actions` (`.btn` per action, `data-action=value`) | widths `--dialog-sm/md/lg` (30rem / 40rem / `--read`), `full` fills the viewport on `--canvas`; `--surface`, `--border-strong`, `--radius-lg`, `--shadow-lg`, `::backdrop` `--scrim`; `--z-dialog` | open, closing (fade + 8px rise), busy (`aria-busy`, actions disabled, busy label, Escape ignored); below 480px the actions stack full width, primary on top |
+| Confirm | `confirm({title, body, confirmLabel, cancelLabel?, tone: "default" \| "danger", typedName?, note?, run?, busyLabel?})` → `Promise<boolean>` | an `sm` dialog, `role=alertdialog` described by its body; Cancel (ghost, focused first) + confirm (primary, or `.btn-danger` for `danger`); with `typedName`: label "Type `name` to confirm", `.ov-typed-input`, hint | as Dialog; `.ov-typed-name` mono on `--surface-2` | confirm disabled until the typed text equals `typedName` exactly; `run` keeps the dialog open and busy until it settles; a rejection closes it and rejects the promise |
+| Sheet | `openSheet({side: "start" \| "end" \| "bottom", title, body})` → handle | `dialog.ov-sheet.is-{start,end,bottom}` with the Dialog parts; × always shown; a backdrop click closes it | `--sheet-size` 24rem (side), 85dvh max (bottom, `--radius-xl` top corners); `--z-sheet` | slides in from its edge (mirrored by `--dir`), fades with reduced motion off |
+| Popover | `popover(anchor, panel, {align, onOpen})` | any panel + `.ov-popover`; anchor gets `aria-controls`/`aria-expanded` | `--surface`, `--border-strong`, `--radius-md`, `--shadow-lg`; `--z-popover` (fallback when the Popover API is missing) | top layer, light dismiss (outside click, Escape), closes when focus leaves it; placed under the anchor, inline-end aligned, flipped above near the bottom, 8px inside the viewport |
+| Menu | `menu(anchor, items, {label})`; `MenuItem = {label, tone?: "danger", disabled?, run}` | one shared `#ov-menu.ov-menu[role=menu]` of `.ov-menu-item[role=menuitem]` buttons; anchor `aria-haspopup=menu` | min 12rem; items `--control-sm` tall, `--step--1`; danger items `--danger-fg` after a `--border` divider | APG menu button: Enter/Space/ArrowDown open on the first item, ArrowUp on the last; arrows wrap, Home/End, typeahead (repeat a letter to cycle); Escape closes and refocuses the anchor; Tab closes; choosing refocuses the anchor before the item runs |
+| Toast | `toast({tone, text, action?, timeout?})` → `{dismiss}` | one polite `aria-live` `.toast-host` (bottom inline-end); `.toast[data-tone]` = icon + text (visually hidden tone word) + ×n count + optional action + × | `--toast-size` 22.5rem; `--surface`, 4px inline-start edge in the tone's `-fg`; `--shadow-lg`; `--z-toast` | success and info dismiss after 6s (paused on hover/focus); warning and error stay until dismissed; the same tone+text bumps "×n" instead of stacking; at most 3, the oldest goes first. A modal's top layer covers the host, so a toast raised during a modal is read and usable once it closes |
+| Banner | `banner({tone, text, dismissible, label?, onDismiss?})` → `{el, update, show, hide}` | `.banner[data-tone]` = icon + live text + optional ×; `role=region` when labelled (the announcement) | tone `-bg` fill and `-fg` edge, `--radius-md`, `--step--1` | placed inline by the caller (announcement under the navbar, admin status under the tabs); `update()` changes text in place so it is announced; dismiss moves focus to `#app` |
+
+Tones (toast and banner) map to the status roles: `success`, `info`, `warning`, `error` → `--success-*`, `--info-*`, `--warning-*`, `--danger-*`, always with an icon shape and a hidden tone word, never colour alone.
 
 ## Do's and Don'ts
 
@@ -266,6 +283,7 @@ Report: 300 pairs verified (WCAG 2 text 4.5:1, non-text 3:1; APCA Lc 75 body / 6
 
 ## Decision log
 
+- **1.1.0 (2026-11-26):** overlay system (#61): new tokens `--dialog-sm/md/lg`, `--sheet-size`, `--toast-size` and the layer scale `--z-sidebar/-sheet/-dialog/-popover/-toast`; one module for dialogs, confirms, sheets, popovers, menus, toasts and banners. Removed the inline two-step confirm (`confirmButton`, `.confirm-*`), `.admin-dialog`, `.row-menu`, the projector's `role=dialog` div and the `window.confirm` prompts. The announcement and the admin status line are banners; the announcement's warning tone moved from the danger fill to the warning fill.
 - **1.0.1 (2026-11-25):** admin below 900px uses 44px controls and card layouts (Page overrides); the 18px admin checkboxes became 24px with a 44px hit area on touch.
 - **1.0.0 (2026-11-25):** initial system from the generator inputs above, mapped onto the existing CSS through an alias layer. Light accent #a85f00 → #855602; warm light neutrals replaced by the hue-250 family; one control-height scale, pill, table header and focus ring; forced-colours and print layers; logical properties for RTL; self-hosted fonts.
 
