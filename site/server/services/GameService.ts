@@ -15,6 +15,8 @@ const WRONG_ANSWER_WINDOW_MS = 60_000;
 const MAX_WRONG_PER_WINDOW = 5;
 const MAX_WRITE_RETRIES = 3;
 const LAST_SEEN_RESOLUTION_MS = 15_000;
+/** The answer field's own limit (maxlength in views/case.ts); the request body cap is larger. */
+const MAX_SOLVED_ANSWER_CHARS = 200;
 
 type Mutation<T> = { result: T; changed: boolean };
 export type Player = Pick<AccountRecord, "id" | "username">;
@@ -35,6 +37,7 @@ export const emptyStage = (): StageProgress => ({
   revealedAnswer: null,
   commandsRevealed: 0,
   breakdown: null,
+  solvedAnswer: null,
 });
 
 /** Par score (see scoring.ts). Kept under this name for callers that only need "the max". */
@@ -141,7 +144,9 @@ export class GameService {
           solveSeconds,
           isFirstBlood,
         });
-        this.finishStage(record, questionId, { ...stage, status: "solved", points: breakdown.total, breakdown });
+        // The player's own answer, as typed, so the solved stage can show it back to them (#133).
+        const solvedAnswer = input.answer.trim().slice(0, MAX_SOLVED_ANSWER_CHARS);
+        this.finishStage(record, questionId, { ...stage, status: "solved", points: breakdown.total, breakdown, solvedAnswer });
         record.wrongAnswerTimestamps[questionId] = [];
       } else {
         record.stages[questionId] = { ...stage, wrongAttempts: stage.wrongAttempts + 1 };
@@ -204,7 +209,7 @@ export class GameService {
 
   toAdminView(record: ProgressRecord, player: Player & { lastSeenAt: string | null }): AdminProgress {
     const now = this.now();
-    const view = this.toView(record, { player, caseId: record.caseId, lang: "en" }, { includeUnlocked: false });
+    const view = this.toView(record, { player, caseId: record.caseId, lang: "en" }, { includeUnlocked: false, includeOwnAnswers: false });
     let currentStage: AdminProgress["currentStage"];
     let since: string | null;
     if (record.setupDoneAt === null) {
@@ -223,9 +228,21 @@ export class GameService {
     return { ...view, lastSeenAt, currentStage, stuckMinutes };
   }
 
-  toView(record: ProgressRecord, ctx: PlayContext, options: { includeUnlocked: boolean } = { includeUnlocked: true }): ProgressView {
+  /**
+   * One record as a view. `includeOwnAnswers: false` blanks every stage's `solvedAnswer`: only the player
+   * themselves may see what they answered (#133).
+   */
+  toView(
+    record: ProgressRecord,
+    ctx: PlayContext,
+    options: { includeUnlocked: boolean; includeOwnAnswers: boolean } = { includeUnlocked: true, includeOwnAnswers: true },
+  ): ProgressView {
     const secrets = this.caseSecrets(record.caseId);
-    const stages = Object.fromEntries(QUESTION_ORDER.map((q) => [q, this.stage(record, q)])) as Record<QuestionId, StageProgress>;
+    const stageView = (q: QuestionId): StageProgress => {
+      const stage = this.stage(record, q);
+      return options.includeOwnAnswers ? stage : { ...stage, solvedAnswer: null };
+    };
+    const stages = Object.fromEntries(QUESTION_ORDER.map((q) => [q, stageView(q)])) as Record<QuestionId, StageProgress>;
     const isComplete = record.completedAt !== null;
     const hints: ProgressView["unlocked"]["hints"] = {};
     const commands: ProgressView["unlocked"]["commands"] = {};

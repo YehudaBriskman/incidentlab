@@ -1,4 +1,5 @@
 import { defineStrings, formatNumber as num } from "./i18n";
+import type { IconName } from "../shell/icons";
 
 // Round 2 player UI: paid commands, scoring v2, events, leaderboard, achievements, password changes.
 const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
@@ -54,7 +55,7 @@ export const TG = defineStrings({
     bdTime: "Time bonus",
     bdTimeDetail: (solve: string, target: string): string => `solved in ${solve} / target ${target}`,
     bdClean: "Clean solve",
-    bdFirstBlood: "First blood 🩸",
+    bdFirstBlood: "First blood",
     bdTotal: "Stage total",
     pts: (n: number): string => signed(n),
     // score vs par: par (maxScore) is a target, not a maximum; first blood and bonuses can beat it
@@ -183,7 +184,7 @@ export const TG = defineStrings({
     bdTime: "בונוס זמן",
     bdTimeDetail: (solve: string, target: string): string => `נפתר ב-${solve} / יעד ${target}`,
     bdClean: "פתרון נקי",
-    bdFirstBlood: "ראשונים לפתור 🩸",
+    bdFirstBlood: "ראשונים לפתור",
     bdTotal: "סה\"כ לשלב",
     pts: (n: number): string => signed(n),
     ptsUnit: "נק'",
@@ -264,30 +265,31 @@ export const TG = defineStrings({
   },
 });
 
-export type AchievementInfo = { icon: string; label: string; description: string };
+/** `icon` names an icon in shell/icons.ts (decorative; the label beside it names the achievement). */
+export type AchievementInfo = { icon: IconName; label: string; description: string };
 
 const ACHIEVEMENTS = {
   en: {
-    "first-blood": { icon: "🩸", label: "First blood", description: "Be the first player to solve a stage." },
-    "clean-case": { icon: "✨", label: "Clean case", description: "Solve every stage of a case without hints, commands or reveals." },
-    speedrun: { icon: "⚡", label: "Speedrun", description: "Finish a case within its estimated time." },
-    "no-hints-5": { icon: "🧠", label: "No hints needed", description: "Solve 5 stages without a single hint." },
-    "all-cases": { icon: "🏆", label: "Case closed", description: "Complete every released case." },
-    "streak-3": { icon: "🔥", label: "On a roll", description: "Finish the incident of the day 3 days in a row." },
-    "streak-7": { icon: "📅", label: "On call all week", description: "Finish the incident of the day 7 days in a row." },
+    "first-blood": { icon: "drop", label: "First blood", description: "Be the first player to solve a stage." },
+    "clean-case": { icon: "sparkle", label: "Clean case", description: "Solve every stage of a case without hints, commands or reveals." },
+    speedrun: { icon: "bolt", label: "Speedrun", description: "Finish a case within its estimated time." },
+    "no-hints-5": { icon: "bulb", label: "No hints needed", description: "Solve 5 stages without a single hint." },
+    "all-cases": { icon: "trophy", label: "Case closed", description: "Complete every released case." },
+    "streak-3": { icon: "flame", label: "On a roll", description: "Finish the incident of the day 3 days in a row." },
+    "streak-7": { icon: "calendar", label: "On call all week", description: "Finish the incident of the day 7 days in a row." },
   },
   he: {
-    "first-blood": { icon: "🩸", label: "ראשונים לפתור", description: "היו הראשונים לפתור שלב." },
-    "clean-case": { icon: "✨", label: "תיק נקי", description: "פתרו את כל השלבים בתיק בלי רמזים, פקודות או חשיפות." },
-    speedrun: { icon: "⚡", label: "ספידראן", description: "סיימו תיק בתוך הזמן המשוער שלו." },
-    "no-hints-5": { icon: "🧠", label: "בלי רמזים", description: "פתרו 5 שלבים בלי אף רמז." },
-    "all-cases": { icon: "🏆", label: "כל התיקים סגורים", description: "השלימו את כל התיקים שפורסמו." },
-    "streak-3": { icon: "🔥", label: "ברצף", description: "סיימו את התקלה של היום 3 ימים ברצף." },
-    "streak-7": { icon: "📅", label: "כוננות שבועית", description: "סיימו את התקלה של היום 7 ימים ברצף." },
+    "first-blood": { icon: "drop", label: "ראשונים לפתור", description: "היו הראשונים לפתור שלב." },
+    "clean-case": { icon: "sparkle", label: "תיק נקי", description: "פתרו את כל השלבים בתיק בלי רמזים, פקודות או חשיפות." },
+    speedrun: { icon: "bolt", label: "ספידראן", description: "סיימו תיק בתוך הזמן המשוער שלו." },
+    "no-hints-5": { icon: "bulb", label: "בלי רמזים", description: "פתרו 5 שלבים בלי אף רמז." },
+    "all-cases": { icon: "trophy", label: "כל התיקים סגורים", description: "השלימו את כל התיקים שפורסמו." },
+    "streak-3": { icon: "flame", label: "ברצף", description: "סיימו את התקלה של היום 3 ימים ברצף." },
+    "streak-7": { icon: "calendar", label: "כוננות שבועית", description: "סיימו את התקלה של היום 7 ימים ברצף." },
   },
 } as const satisfies Record<"en" | "he", Record<string, AchievementInfo>>;
 
 export function achievementInfo(lang: "en" | "he", id: string): AchievementInfo {
   const table: Readonly<Record<string, AchievementInfo>> = ACHIEVEMENTS[lang];
-  return table[id] ?? { icon: "🏅", label: id, description: "" };
+  return table[id] ?? { icon: "medal", label: id, description: "" };
 }

@@ -10,7 +10,8 @@ import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { withApprovedAccount } from "./auth";
 import { renderInstructorPreview } from "./present";
-import { announce, copyButton, ensureAnnouncer, h, html, setChildren } from "../lib/dom";
+import { announce, copyButton, ensureAnnouncer, h, html, setChildren, type Child } from "../lib/dom";
+import { ICONS, type IconName } from "../shell/icons";
 import { confirm, tooltip } from "../lib/overlay";
 import "../player.css";
 import { md, mdInline } from "../lib/markdown";
@@ -42,9 +43,14 @@ const cooldowns = new Map<string, number>();
 /** The stage last shown, so a language switch (which re-renders the route) keeps the player where they were. */
 let lastView: { caseId: string; stage: StageKey } | null = null;
 
+/** Observers of the stage on screen (the sticky answer bar): disconnected with the timers on every redraw. */
+const cleanups = new Set<() => void>();
+
 export function stopCaseTimers(): void {
   for (const t of timers) window.clearInterval(t);
   timers.clear();
+  for (const stop of cleanups) stop();
+  cleanups.clear();
 }
 
 function every(ms: number, fn: () => void): number {
@@ -70,6 +76,9 @@ function writePref(key: string, value: string): void {
 }
 
 const errorMessage = playErrorText;
+
+/** A decorative stroke icon (shell/icons.ts) before a text label, which carries the meaning (#137). */
+const inlineIcon = (name: IconName): HTMLElement => html("span", { class: "inline-icon", "aria-hidden": "true" }, ICONS[name]);
 
 /* ---------- scoring v2 helpers (mirror server/services/scoring.ts; display only) ---------- */
 
@@ -636,7 +645,11 @@ function renderQuestionStage(
         "div",
         { class: `result-panel ${solved ? "is-solved" : "is-revealed"}${justSolved ? " pop" : ""}` },
         // Focus target after a solve or a reveal; the result itself is announced through the shared region.
-        h("p", { class: "result-title", tabindex: "-1" }, solved ? T().solvedPts(s.points) : T().revealedPts),
+        h("p", { class: "result-title with-icon", tabindex: "-1" }, solved ? null : inlineIcon("eye"), solved ? T().solvedPts(s.points) : T().revealedPts),
+        // The player's own answer (#133): only in their own progress; stages solved before it have none.
+        solved && s.solvedAnswer !== null
+          ? h("p", { class: "answer-line own-answer" }, T().yourAnswerLabel, h("code", { class: "answer-code", dir: "ltr" }, s.solvedAnswer))
+          : null,
         solved && s.breakdown !== null ? breakdownTable(s.breakdown) : null,
         !solved && answer !== null
           ? h("p", { class: "answer-line" }, T().answerLabel, h("code", { class: "answer-code" }, answer), copyButton(() => answer))
@@ -748,18 +761,21 @@ function renderQuestionStage(
     feedback,
     costNote,
   );
+  const bar = answerBar(index, form, input, submit, feedback);
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
     if (busy || submit.disabled) return;
+    // Sent from the phone's sticky bar: errors keep focus there instead of scrolling to the field.
+    const field = bar.el.contains(document.activeElement) ? bar.input : input;
     const answer = canonicalAnswer(q.answerFormat, input.value);
     if (answer.length === 0) {
       setInvalid(T().typeFirst);
-      input.focus();
+      field.focus();
       return;
     }
     if (!matchesFormat(q.answerFormat, answer)) {
       setInvalid(TP().formatMismatch(q.answerFormat));
-      input.focus();
+      field.focus();
       return;
     }
     busy = true;
@@ -789,7 +805,7 @@ function renderQuestionStage(
         form.classList.remove("shake");
         void form.offsetWidth;
         form.classList.add("shake");
-        input.select();
+        field.select();
       })
       .catch((err: unknown) => {
         done();
@@ -876,38 +892,15 @@ function renderQuestionStage(
   const meter = stageMeter(c, q, s);
   every(1000, () => meter.tick());
 
-  // Phones: one tap from the top of the stage to the answer field.
-  const jump = h(
-    "button",
-    {
-      type: "button",
-      class: "btn btn-ghost btn-sm answer-jump",
-      onclick: () => {
-        form.scrollIntoView({ block: "center", behavior: "auto" });
-        input.focus({ preventScroll: true });
-      },
-    },
-    TP().jumpToAnswer,
-  );
-
   return h(
     "div",
     { class: "stage" },
     kicker,
     goal,
-    jump,
     lookFor,
     meter.el,
     h("div", { class: "question-box" }, prose("prose prompt", q.prompt), form),
-    tools.length > 0
-      ? h(
-          "div",
-          { class: "block" },
-          h("h3", {}, T().usefulCommands),
-          h("p", { class: "muted small" }, TG().toolboxCostNote(SCORING.COMMAND_COST, index)),
-          h("div", { class: "tool-list" }, tools.map((tool) => commandCard(tool, commandCtx))),
-        )
-      : h("p", { class: "muted small" }, T().needCommands, h("a", { class: "stage-link", href: `#/case/${c.id}/toolbox` }, T().browseCommands), "."),
+    // The Explorer tip sits right under the question it helps with (#132), before the commands.
     stage?.explorerTip
       ? h(
           "div",
@@ -917,6 +910,15 @@ function renderQuestionStage(
           h("a", { class: "stage-link", href: `#/case/${c.id}/explorer` }, T().openExplorer),
         )
       : null,
+    tools.length > 0
+      ? h(
+          "div",
+          { class: "block" },
+          h("h3", {}, T().usefulCommands),
+          h("p", { class: "muted small" }, TG().toolboxCostNote(SCORING.COMMAND_COST, index)),
+          h("div", { class: "tool-list" }, tools.map((tool) => collapsibleOnPhone(commandCard(tool, commandCtx), tool.title))),
+        )
+      : h("p", { class: "muted small" }, T().needCommands, h("a", { class: "stage-link", href: `#/case/${c.id}/toolbox` }, T().browseCommands), "."),
     h(
       "div",
       { class: "block hints" },
@@ -926,7 +928,121 @@ function renderQuestionStage(
       hintError,
     ),
     h("div", { class: "reveal" }, reveal, revealError),
+    bar.el,
   );
+}
+
+/* ---------- phones (#132): the sticky answer bar and collapsed command cards ---------- */
+
+type AnswerBar = { readonly el: HTMLFormElement; readonly input: HTMLInputElement };
+
+/**
+ * A sticky `[input][Check]` bar at the bottom of the stage, shown on phones while the real answer field is off
+ * screen (an IntersectionObserver on the form). It is a second way into the same form: typing fills the same
+ * draft, Check submits the real form, and the form's feedback and button state are copied in. The copy is
+ * aria-hidden, because the form's own status region already announces them. Hidden with `visibility`, so it
+ * keeps its place and showing it never shifts the page; CSS removes it above 640px.
+ */
+function answerBar(index: number, form: HTMLFormElement, input: HTMLInputElement, submit: HTMLButtonElement, feedback: HTMLElement): AnswerBar {
+  const barInput = h("input", {
+    class: "input mono answer-bar-input",
+    type: "text",
+    dir: "ltr",
+    autocomplete: "off",
+    autocapitalize: "off",
+    autocorrect: "off",
+    spellcheck: "false",
+    enterkeyhint: "go",
+    inputmode: input.inputMode || "text",
+    maxlength: "200",
+    placeholder: input.placeholder || null,
+    "aria-label": TP().answerBarInput(index),
+  });
+  barInput.value = input.value;
+  const barSubmit = h("button", { type: "submit", class: "btn btn-primary answer-bar-submit" }, TP().answerBarCheck);
+  const note = h("p", { class: "answer-bar-note", "aria-hidden": "true" });
+  const el = h(
+    "form",
+    { class: "answer-bar", "aria-label": TP().answerBarLabel, novalidate: true, "data-shown": "false" },
+    h("div", { class: "answer-bar-row" }, barInput, barSubmit),
+    note,
+  );
+
+  barInput.addEventListener("input", () => {
+    input.value = barInput.value;
+    input.dispatchEvent(new Event("input")); // the real field's listener keeps the draft and clears the error mark
+  });
+  input.addEventListener("input", () => {
+    if (barInput.value !== input.value) barInput.value = input.value;
+  });
+  el.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    input.value = barInput.value;
+    form.requestSubmit();
+  });
+
+  // Mirror the form's state: feedback text and tone, the error mark, the button's label and disabled state.
+  const mirror = (): void => {
+    note.textContent = feedback.textContent ?? "";
+    note.classList.toggle("is-wrong", feedback.classList.contains("is-wrong"));
+    if (input.getAttribute("aria-invalid") === "true") barInput.setAttribute("aria-invalid", "true");
+    else barInput.removeAttribute("aria-invalid");
+    barSubmit.disabled = submit.disabled;
+    if (submit.getAttribute("aria-disabled") === "true") barSubmit.setAttribute("aria-disabled", "true");
+    else barSubmit.removeAttribute("aria-disabled");
+    const label = submit.textContent ?? "";
+    barSubmit.textContent = label === TP().checkAnswer ? TP().answerBarCheck : label;
+  };
+  const watcher = new MutationObserver(mirror);
+  for (const target of [feedback, submit, input]) watcher.observe(target, { childList: true, characterData: true, subtree: true, attributes: true });
+  mirror();
+  cleanups.add(() => watcher.disconnect());
+
+  // Shown while the real field is off screen; never hidden under the player's fingers (focus inside the bar).
+  let formOnScreen = true;
+  const sync = (): void => {
+    const show = !formOnScreen || el.contains(document.activeElement);
+    el.dataset.shown = String(show);
+    el.inert = !show;
+  };
+  el.addEventListener("focusout", () => window.requestAnimationFrame(sync));
+  if (typeof IntersectionObserver === "function") {
+    const io = new IntersectionObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      if (entry === undefined) return;
+      formOnScreen = entry.isIntersecting;
+      sync();
+    });
+    io.observe(form);
+    cleanups.add(() => io.disconnect());
+  }
+  sync();
+  return { el, input: barInput };
+}
+
+let cmdSeq = 0;
+
+/**
+ * Phones (#132): a command card shows its title and syntax; the explanation and the reveal action fold behind a
+ * "Details" toggle. Above 640px the toggle is hidden and everything shows, as before.
+ */
+function collapsibleOnPhone(card: HTMLElement, title: string): HTMLElement {
+  const more = h("div", { class: "cmd-more", id: `cmd-more-${++cmdSeq}` });
+  for (const part of card.querySelectorAll<HTMLElement>(":scope > .prose, :scope > .cmd-actions")) more.append(part);
+  if (more.childElementCount === 0) return card;
+  const toggle = h(
+    "button",
+    { type: "button", class: "btn btn-ghost btn-sm cmd-more-toggle", "aria-expanded": "false", "aria-controls": more.id, "aria-label": TP().cmdDetailsFor(title) },
+    TP().cmdDetails,
+  );
+  toggle.addEventListener("click", () => {
+    const open = !card.classList.contains("is-open");
+    card.classList.toggle("is-open", open);
+    toggle.setAttribute("aria-expanded", String(open));
+  });
+  card.classList.add("is-collapsible");
+  card.append(toggle, more);
+  return card;
 }
 
 /* ================= Debrief ================= */
@@ -1018,7 +1134,7 @@ function renderDebrief(c: Case, player: ProgressView): HTMLElement {
 const mmss = (seconds: number): string => formatElapsed(seconds * 1000);
 
 function breakdownTable(b: ScoreBreakdown): HTMLElement {
-  const row = (label: string, value: number, detail?: string, extra = ""): HTMLElement =>
+  const row = (label: Child, value: number, detail?: string, extra = ""): HTMLElement =>
     h(
       "tr",
       { class: `${value === 0 ? "is-zero" : value < 0 ? "is-minus" : "is-plus"}${extra}` },
@@ -1039,7 +1155,7 @@ function breakdownTable(b: ScoreBreakdown): HTMLElement {
       row(TG().bdTime, b.time, TG().bdTimeDetail(mmss(b.solveSeconds), mmss(b.targetSeconds))),
       // A bonus that scored 0 says why, so the table explains itself.
       row(TG().bdClean, b.clean, b.clean === 0 && (b.hints < 0 || b.commands < 0 || b.wrong < 0) ? TP().cleanLost(b.hints < 0, b.commands < 0, b.wrong < 0) : undefined),
-      row(TG().bdFirstBlood, b.firstBlood, b.firstBlood === 0 ? TP().firstTaken : undefined),
+      row(h("span", { class: "with-icon" }, inlineIcon("drop"), TG().bdFirstBlood), b.firstBlood, b.firstBlood === 0 ? TP().firstTaken : undefined),
     ),
     h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().bdTotal), h("td", { class: "num" }, formatNumber(b.total)))),
   );

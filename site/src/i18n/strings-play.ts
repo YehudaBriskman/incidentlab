@@ -26,7 +26,12 @@ export const TP = defineStrings({
       `0 of ${total} stages · Score ${score} pts · par ${par} · Clock starts at Stage 1`,
 
     // focus targets and announcements
-    jumpToAnswer: "Jump to the answer ↓",
+    // phones: the sticky answer bar (shown while the answer field is off screen) and collapsed command cards
+    answerBarLabel: "Answer this stage",
+    answerBarInput: (n: number): string => `Your answer for stage ${n}`,
+    answerBarCheck: "Check",
+    cmdDetails: "Details",
+    cmdDetailsFor: (title: string): string => `Details, ${title}`,
     solvedAnnounce: (pts: number): string => `Solved. +${pts} points.`,
     revealedAnnounce: (answer: string): string => `Answer revealed: ${answer}. This stage scores 0.`,
     hintAnnounce: (i: number, cost: number): string => `Hint ${i} revealed, −${cost} points.`,
@@ -141,7 +146,11 @@ export const TP = defineStrings({
     progressLineSetup: (total: number, score: string, par: string): string =>
       `0 מתוך ${total} שלבים · ניקוד ${score} נק' · יעד ${par} · השעון מתחיל בשלב 1`,
 
-    jumpToAnswer: "↓ לתשובה",
+    answerBarLabel: "תשובה לשלב",
+    answerBarInput: (n: number): string => `התשובה שלכם לשלב ${n}`,
+    answerBarCheck: "בדיקה",
+    cmdDetails: "פרטים",
+    cmdDetailsFor: (title: string): string => `פרטים, ${title}`,
     solvedAnnounce: (pts: number): string => `נפתר. ${ltr(`+${pts}`)} נקודות.`,
     revealedAnnounce: (answer: string): string => `התשובה נחשפה: ${answer}. השלב מקבל 0.`,
     hintAnnounce: (i: number, cost: number): string => `רמז ${i} נחשף, ${ltr(`−${cost}`)} נקודות.`,

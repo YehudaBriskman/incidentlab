@@ -1,5 +1,6 @@
 // Home: a dashboard in the Cloudflare-console sense. Two fixed-height cards on top ("Continue" at the start edge,
-// "Today's case" at the end edge; RTL mirrors them), then the cases table, which scrolls inside its own panel so
+// "Today's case" at the end edge; RTL mirrors them; only the Today card, full width, when Continue would just repeat
+// today's case, #125), then the cases table, which scrolls inside its own panel so
 // the page itself fits the viewport on desktop. Signed out, a compact intro above the cards carries the value
 // statement and the sign-up call to action. Filters, search and sort live in the URL query (#/?difficulty=hard).
 import "../home.css";
@@ -176,6 +177,49 @@ function skeletonRows(n: number): HTMLElement {
   return h("ul", { class: "home-rows", "aria-hidden": "true" }, Array.from({ length: n }, () => h("li", {}, h("span", { class: "home-row is-skeleton" }, h("span", { class: "dt-skeleton" })))));
 }
 
+/** Today's case id, once the today answer is in and the catalog knows the case. */
+function todayCaseId(state: HomeState): string | null {
+  const id = state.today?.caseId ?? null;
+  return id !== null && caseSummary(id) !== undefined ? id : null;
+}
+
+type ContinuePlaces = {
+  readonly progress: readonly Place[];
+  readonly visits: readonly Place[];
+  /** today's case was in the list and was left out: the Today card already resumes it (#125) */
+  readonly droppedToday: boolean;
+};
+
+/**
+ * The Continue card's rows: cases in progress, then recent places. Today's case (in progress, or a plain case
+ * visit) is left out, because the Today card next to it resumes the same case; its Toolbox and Explorer visits stay.
+ */
+function continuePlaces(state: HomeState): ContinuePlaces {
+  const today = todayCaseId(state);
+  const all = inProgressPlaces(state);
+  const progress = all.filter((p) => p.key !== `p:${today}`).slice(0, 3);
+  const listed = new Set(progress.map((p) => p.key.slice(2)));
+  const recent = recentVisits();
+  const isTodayVisit = (v: Visit): boolean => v.kind === "case" && v.caseId === today;
+  const visits = recent
+    .filter((v) => !(v.kind === "case" && listed.has(v.caseId)) && !isTodayVisit(v))
+    .map(visitPlace)
+    .filter((p): p is Place => p !== null)
+    .slice(0, Math.max(3, 6 - progress.length));
+  const droppedToday = today !== null && (all.some((p) => p.key === `p:${today}`) || recent.some(isTodayVisit));
+  return { progress, visits, droppedToday };
+}
+
+/**
+ * One card instead of two (#125): signed in, loaded, and the only thing Continue would list is today's case.
+ * The Today card then takes the whole row (at the start edge, where Continue was).
+ */
+function isSingleCard(state: HomeState, signedIn: boolean): boolean {
+  if (!signedIn || state.loading || state.statsFailed || state.todayFailed) return false;
+  const places = continuePlaces(state);
+  return places.droppedToday && places.progress.length === 0 && places.visits.length === 0;
+}
+
 function continueCard(state: HomeState, signedIn: boolean): HTMLElement {
   const body = ((): Child => {
     if (signedIn && state.loading) return skeletonRows(3);
@@ -191,13 +235,7 @@ function continueCard(state: HomeState, signedIn: boolean): HTMLElement {
         steps.map(([title, text], i) => h("li", {}, h("span", { class: "home-step-n", "aria-hidden": "true" }, String(i + 1)), h("span", {}, h("strong", {}, title), " ", h("span", { class: "muted" }, text)))),
       );
     }
-    const progress = inProgressPlaces(state).slice(0, 3);
-    const listed = new Set(progress.map((p) => p.key.slice(2)));
-    const visits = recentVisits()
-      .filter((v) => !(v.kind === "case" && listed.has(v.caseId)))
-      .map(visitPlace)
-      .filter((p): p is Place => p !== null)
-      .slice(0, Math.max(3, 6 - progress.length));
+    const { progress, visits } = continuePlaces(state);
     return [
       state.statsFailed ? h("p", { class: "home-card-note", role: "alert" }, TH().statsError) : null,
       progress.length > 0 ? h("ul", { class: "home-rows", "aria-label": TH().inProgress }, progress.map(placeRow)) : null,
@@ -569,7 +607,10 @@ export function renderHome(root: HTMLElement): void {
     // Before /api/me answers, lay out for the likely state (lib/session.ts hint) so nothing shifts when it does.
     const signedIn = likelySignedIn();
     setChildren(intro, signedIn ? null : introStrip());
-    setChildren(top, continueCard(state, signedIn), todayCard(state, signedIn, reload));
+    const single = isSingleCard(state, signedIn);
+    top.classList.toggle("is-single", single);
+    if (single) setChildren(top, todayCard(state, signedIn, reload));
+    else setChildren(top, continueCard(state, signedIn), todayCard(state, signedIn, reload));
     if (state.loading) {
       // Keep rows already shown (a retry): only the first load draws skeleton rows.
       if (table === null) buildTable().setState({ kind: "loading", label: TH().loadingCases, rows: Math.min(6, Math.max(3, caseSummaries().length)) });
