@@ -74,6 +74,8 @@ import {
 } from "../lib/admin-api";
 
 const POLL_MS = 5000;
+/** The dashboard poll refetches /api/today at most this often (see load()). */
+const TODAY_REFRESH_MS = 60_000;
 const MAX_BACKOFF_MS = 60000;
 const STUCK_WARN_MIN = 8;
 const STUCK_ALERT_MIN = 15;
@@ -698,6 +700,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   const urlState = readUrlState();
 
   let pollId: number | null = null;
+  let todayFetchedAt = 0;
   let tickId: number | null = null;
   let disposed = false;
 
@@ -3230,6 +3233,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       } catch {
         // the next poll will pick it up
       }
+      todayFetchedAt = 0; // refetch on the next tick too, in case the CDN purge was still on its way
     } catch (err: unknown) {
       if (disposed || handleAuthError(err)) return;
       sch.error = errMessage(err);
@@ -4534,9 +4538,12 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     const trashReq: Promise<TrashEntry[] | AdminApiError | Error> | null =
       tab === "accounts" ? fetchTrash().catch((err: unknown) => (err instanceof Error ? err : new Error(T().admUnknownError))) : null;
     try {
+      // Today's case changes at most once a day (or on a schedule save, which reloads it itself): once a minute
+      // is plenty, and it halves the dashboard's calls per tick.
+      const todayDue = Date.now() - todayFetchedAt >= TODAY_REFRESH_MS;
       const [accounts, today, progress, stats, settings, event, audit] = await Promise.all([
         fetchAccounts(),
-        fetchToday(),
+        todayDue ? fetchToday() : Promise.resolve(null),
         tab === "live" && liveCase ? fetchProgress(liveCase) : Promise.resolve(null),
         tab === "stats" ? fetchCaseStats() : Promise.resolve(null),
         tab === "accounts" ? fetchSettings() : Promise.resolve(null),
@@ -4545,7 +4552,10 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       ]);
       if (disposed) return;
       state.accounts = accounts;
-      state.today = today;
+      if (today) {
+        state.today = today;
+        todayFetchedAt = Date.now();
+      }
       if (progress && progress.caseId === state.liveCaseId) state.progress = progress;
       if (stats) {
         state.stats = stats;
@@ -4603,6 +4613,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       if (disposed) return;
       state.accounts = accounts;
       state.today = today;
+      todayFetchedAt = Date.now();
       state.settings.server = settings;
       ensureLiveCase();
       state.lastUpdated = Date.now();
