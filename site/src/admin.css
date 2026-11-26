@@ -766,29 +766,7 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
   .player-card.is-warn, .player-card.is-alert, .help-item { border-inline-start-color: CanvasText; }
 }
 
-/* ---- sidebar (#60): quick actions, grouped sections, the rail ---- */
-.admin-side .admin-updated { display: block; }
-.admin-quick { gap: var(--space-2); }
-.admin-quick-row { display: flex; gap: var(--space-2); }
-.admin-quick-row > .btn { flex: 1 1 0; min-inline-size: 0; }
-.admin-quick-board { inline-size: 100%; }
-.admin-side-nav { display: flex; flex-direction: column; gap: var(--space-4); }
-.admin-side-link { justify-content: space-between; gap: var(--space-2); }
-.admin-side-label { min-inline-size: 0; overflow-wrap: anywhere; }
-.admin-rail { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }
-.admin-rail-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
-.admin-rail-link {
-  position: relative; display: inline-flex; align-items: center; justify-content: center;
-  min-block-size: var(--control-sm); min-inline-size: var(--control-sm); padding: 0;
-  border: 1px solid transparent; border-radius: var(--radius-md); background: none; color: var(--text-muted); cursor: pointer;
-}
-.admin-rail-link:hover { color: var(--text); background: var(--hover); }
-.admin-rail-link[aria-current] { color: var(--accent-strong); background: var(--accent-soft); box-shadow: inset calc(var(--dir) * 3px) 0 0 var(--edge-selected); }
-.admin-rail > .admin-rail-link { margin-block-start: var(--space-2); }
-.admin-rail-badge {
-  position: absolute; inset-block-start: 0; inset-inline-end: 0; min-inline-size: 1.25rem; padding: 0 var(--space-1);
-  border-radius: var(--radius-full); background: var(--accent); color: var(--on-accent);
-  font-family: var(--font-mono); font-size: var(--step--2); font-weight: 700; line-height: 1.25rem; text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.admin-rail-badge[hidden] { display: none; }
+/* ---- in the app frame: sections are nested items in the global nav (shell/nav.ts); the page header holds
+   the quick actions on one row ---- */
+.admin-head-actions .admin-updated { white-space: nowrap; }
+.admin-head-actions .admin-quick-board { white-space: nowrap; }

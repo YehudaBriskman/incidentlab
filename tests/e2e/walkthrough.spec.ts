@@ -25,7 +25,8 @@ const ui = {
   revealConfirm: (p: Page) => p.getByRole("button", { name: /^(yes|confirm)\b/i }),
   stageCurrent: (p: Page, n: number) => p.getByRole("button", { name: new RegExp(`^Stage ${n}:.*\\(current\\)`) }),
   totalScore: (p: Page) => p.locator(".stat-tile", { hasText: /total score/i }).locator(".stat-value"),
-  signOut: (p: Page) => p.getByRole("button", { name: /^sign out$/i }).first(),
+  account: (p: Page) => p.getByRole("button", { name: /^account:/i }),
+  signOut: (p: Page) => p.getByRole("dialog", { name: "Account" }).getByRole("button", { name: /^sign out$/i }),
   headerSignIn: (p: Page) => p.getByRole("banner").getByRole("link", { name: /^sign in$/i }),
   adminKeyPrompt: (p: Page) => p.getByLabel(/admin key/i),
   adminDashboard: (p: Page) => p.getByRole("heading", { name: /class dashboard/i }),
@@ -116,6 +117,7 @@ test("player walkthrough: sign up to first solved stage, then admin sign-in", as
   });
 
   await test.step("sign out", async () => {
+    await ui.account(page).click();
     await ui.signOut(page).click();
     // Wait for the signed-out header before navigating, so the app's own redirect can't race us.
     await ui.headerSignIn(page).click();

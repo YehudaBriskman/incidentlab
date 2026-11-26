@@ -18,6 +18,8 @@ import { T } from "../i18n/strings-player";
 import { TP } from "../i18n/strings-play";
 import { TS } from "../i18n/strings-shell";
 import type { ViewResult } from "../shell/types";
+import { contentScrollTop, scrollContentTo } from "../shell/scroll";
+import { createCaseNav } from "./caseNav";
 import { withApprovedAccount } from "./auth";
 
 type ToolItem = Case["toolbox"][number]["items"][number];
@@ -205,10 +207,10 @@ type PageState =
   | { kind: "player"; progress: ProgressView; locked: LockedToday | null }
   | { kind: "error"; message: string };
 
-/** The toolbox page's sidebar content (contents, shell switch, filter), set by toolboxView. */
+/** The toolbox page's panel content (contents, shell switch, filter), set by toolboxView. */
 let sideEl: HTMLElement | null = null;
 
-/** The toolbox as a shell view: commands in main; contents, the Bash/PowerShell switch and the filter in the sidebar. */
+/** The toolbox as a frame view: commands in main; contents, the Bash/PowerShell switch and the filter in the page panel. */
 export function toolboxView(c: Case): ViewResult {
   const main = h("div", { class: "view" });
   const side = h("div", { class: "side-stack tb-side" });
@@ -217,7 +219,7 @@ export function toolboxView(c: Case): ViewResult {
     recordVisit({ kind: "toolbox", caseId: c.id }); // the home page's "Continue" card
     renderToolbox(main, c);
   };
-  return { main, sidebar: { label: TS().tbSide, trigger: TS().tbSideTrigger, content: side }, start };
+  return { main, nav: createCaseNav(c, "toolbox").section, aside: { label: TS().tbSide, trigger: TS().tbSideTrigger, content: side }, start };
 }
 
 export function renderToolbox(root: HTMLElement, c: Case): void {
@@ -289,9 +291,9 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
     progress: state.kind === "player" ? state.progress : null,
     locked: state.kind === "player" && state.locked !== null,
     onProgress: (next) => {
-      const y = window.scrollY;
+      const y = contentScrollTop();
       drawToolbox(root, c, { kind: "player", progress: next, locked: null });
-      window.scrollTo(0, y);
+      scrollContentTo(y);
     },
   };
 
@@ -357,7 +359,7 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
       }
       sec.el.hidden = inSection === 0;
       const link = tocLinks[i];
-      // In the sidebar each link sits in an <li>: hide the item, not only the link.
+      // In the page panel each link sits in an <li>: hide the item, not only the link.
       if (link !== undefined) (link.parentElement instanceof HTMLLIElement ? link.parentElement : link).hidden = inSection === 0;
       shown += inSection;
     });
@@ -380,7 +382,7 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
     filter,
     count,
   );
-  // Without the shell sidebar (never on the toolbox route today) the controls stay above the commands.
+  // Without the page panel (never on the toolbox route today) the controls stay above the commands.
   const side = sideEl !== null && sideEl.isConnected ? sideEl : null;
   const toc =
     side === null
@@ -392,9 +394,9 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
   }
   applyFilter(false);
   const redraw = (): void => {
-    const y = window.scrollY;
+    const y = contentScrollTop();
     drawToolbox(root, c, state);
-    window.scrollTo(0, y);
+    scrollContentTo(y);
   };
 
   setChildren(

@@ -20,6 +20,8 @@ import { TP } from "../i18n/strings-play";
 import { TS } from "../i18n/strings-shell";
 import { getLang } from "../i18n/i18n";
 import type { ViewResult } from "../shell/types";
+import { scrollContentTo } from "../shell/scroll";
+import { createCaseNav, type CaseNav } from "./caseNav";
 
 type StageKey = "setup" | QuestionId | "debrief";
 type StepState = "locked" | "active" | "solved" | "revealed";
@@ -89,35 +91,19 @@ function wrongPenalty(wrong: number): number {
 
 /* ================= entry ================= */
 
-/** The case page's sidebar parts, set by caseView: the full content and the icon rail. */
-let side: { content: HTMLElement; rail: HTMLElement } | null = null;
+/** The case page's nested nav items (stages, Toolbox, Explorer), set by caseView. */
+let caseNav: CaseNav | null = null;
 
-/** Links to the toolbox and the Explorer: in the sidebar from the first paint, before progress loads. */
-function toolLinks(c: Case): HTMLElement {
-  return h(
-    "section",
-    { class: "side-group", "aria-labelledby": "side-tools-h" },
-    h("h2", { class: "side-h", id: "side-tools-h" }, TS().sideTools),
-    h(
-      "ul",
-      { class: "side-links" },
-      h("li", {}, h("a", { class: "side-link", href: `#/case/${c.id}/toolbox` }, TS().sideToolbox)),
-      h("li", {}, h("a", { class: "side-link", href: `#/case/${c.id}/explorer` }, TS().sideExplorer)),
-    ),
-  );
-}
-
-/** The case as a shell view: the stage in main; stages, score, tools and the hint budget in the sidebar. */
+/** The case as a frame view: the stage in main; the stages, Toolbox and Explorer under Cases in the global nav. */
 export function caseView(c: Case): ViewResult {
   const main = h("div", { class: "view" });
-  const content = h("div", { class: "side-stack case-side" }, toolLinks(c));
-  const rail = h("div", { class: "case-rail" });
-  side = { content, rail };
+  const nav = createCaseNav(c, "case");
+  caseNav = nav;
   const start = (): void => {
     recordVisit({ kind: "case", caseId: c.id }); // the home page's "Continue" card
     renderCase(main, c);
   };
-  return { main, sidebar: { label: TS().caseSide, trigger: TS().caseSideTrigger, content, rail }, start };
+  return { main, nav: nav.section, start };
 }
 
 export function renderCase(root: HTMLElement, c: Case): void {
@@ -250,17 +236,18 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, l
 
   const stepName = (key: StageKey): string => (key === "setup" ? T().setup : key === "debrief" ? T().debrief : stageLabel(c, key));
 
-  /** "list": the sidebar's labelled steps (or the old row without a sidebar); "rail": icons only. */
-  const stepper = (variant: "row" | "list" | "rail"): HTMLElement => {
+  /** "list": the labelled steps in the global nav (icons only in its rail); "row": the phone row in the case header. */
+  const stepper = (variant: "row" | "list"): HTMLElement => {
     const current = currentStage(player);
+    const inNav = variant === "list";
     return h(
       "ol",
-      { class: `stepper${variant === "row" ? "" : variant === "list" ? " side-steps" : " rail-steps"}`, "aria-label": T().stagesLabel },
+      { class: `stepper${inNav ? " nav-steps" : " is-phone-row"}`, "aria-label": T().stagesLabel },
       STAGE_KEYS.map((key, i) => {
         const state = stepState(player, key);
         const label = stepName(key);
         const num = key === "setup" ? "0" : key === "debrief" ? "★" : String(i);
-        const icon = state === "solved" ? "✓" : state === "revealed" ? "👁" : num;
+        const icon = state === "solved" ? "✓" : state === "revealed" ? "–" : num;
         const stateText = { locked: T().stLocked, active: T().stCurrent, solved: T().stSolved, revealed: T().stRevealed }[state];
         const isViewing = key === viewing;
         const locked = state === "locked";
@@ -270,12 +257,13 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, l
           "button",
           {
             type: "button",
-            class: `step step-${state}${isViewing ? " is-viewing" : ""}${key === current ? " is-current" : ""}`,
+            class: `step step-${state}${isViewing ? " is-viewing" : ""}${key === current ? " is-current" : ""}${inNav ? " nav-sub-link" : ""}`,
             "aria-disabled": locked ? "true" : null,
             "aria-current": key === current ? "step" : null,
             "aria-label": `${key === "setup" || key === "debrief" ? "" : T().stageN(i)}${label} (${stateText})${isViewing ? `, ${TP().viewing}` : ""}`,
-            title: label,
-            "data-sidebar-close": locked ? null : "",
+            title: inNav ? null : label,
+            "data-nav-tip": inNav ? label : null,
+            "data-nav-close": locked ? null : "",
             onclick: () => {
               if (locked) return;
               viewing = key;
@@ -284,8 +272,8 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, l
               draw();
             },
           },
-          h("span", { class: "step-icon", "aria-hidden": "true" }, icon),
-          h("span", { class: "step-label" }, label),
+          h("span", { class: `step-icon${inNav ? " nav-sub-icon is-glyph" : ""}`, "aria-hidden": "true" }, icon),
+          h("span", { class: `step-label${inNav ? " nav-label" : ""}` }, label),
         );
         return h("li", {}, btn);
       }),
@@ -298,29 +286,18 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, l
     return h("p", { class: "step-now", "aria-hidden": "true" }, TP().stepNow(QUESTION_ORDER.indexOf(viewing) + 1, QUESTION_ORDER.length, stepName(viewing)));
   };
 
-  /** The sidebar: stages, score meter, tools and the hint budget (null without the shell sidebar). */
-  const sidebar = (): boolean => {
-    if (side === null || !side.content.isConnected) return false;
-    setChildren(
-      side.content,
-      h("section", { class: "side-group", "aria-labelledby": "side-stages-h" }, h("h2", { class: "side-h", id: "side-stages-h" }, TS().sideStages), stepper("list")),
-      h(
-        "section",
-        { class: "side-group", "aria-labelledby": "side-score-h" },
-        h("h2", { class: "side-h", id: "side-score-h" }, TS().sideScore),
-        h("div", { class: "progress side-progress" }, h("div", { class: "progress-track", "aria-hidden": "true" }, elFill), elStats),
-      ),
-      toolLinks(c),
-      hintBudget(c, player),
-    );
-    setChildren(side.rail, stepper("rail"));
+  /** The stages under the case in the global nav (false before the frame has the case's nav on screen). */
+  const navStages = (): boolean => {
+    const nav = caseNav;
+    if (nav === null || !nav.section.content.isConnected) return false;
+    nav.setStages(stepper("list"));
     return true;
   };
 
   const draw = (): void => {
     stopCaseTimers();
     lastView = { caseId: c.id, stage: viewing };
-    const inSidebar = sidebar();
+    navStages();
     const header = h(
       "header",
       { class: "case-head" },
@@ -343,9 +320,11 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, l
         h("h1", {}, c.title),
         h("a", { class: "btn btn-ghost btn-sm", href: `#/case/${c.id}/toolbox` }, T().allCommands),
       ),
-      inSidebar ? null : stepper("row"),
+      // The nav carries the labelled stages; phones (nav in a drawer) keep the compact row here.
+      stepper("row"),
       stepNow(),
-      inSidebar ? null : h("div", { class: "progress" }, h("div", { class: "progress-track", "aria-hidden": "true" }, elFill), elStats),
+      h("div", { class: "progress" }, h("div", { class: "progress-track", "aria-hidden": "true" }, elFill), elStats),
+      hintBudget(c, player),
     );
 
     const main = h("section", { class: "stage-wrap", id: "stage", tabindex: "-1" });
@@ -363,10 +342,10 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView, l
   };
 
   draw();
-  if (!isRelabel()) window.scrollTo(0, 0);
+  if (!isRelabel()) scrollContentTo(0);
 }
 
-/** Hints (and paid commands) used so far and what the active stage has left: the sidebar's hint budget. */
+/** Hints (and paid commands) used so far and what the active stage has left: one line in the case header. */
 function hintBudget(c: Case, player: ProgressView): HTMLElement {
   let used = 0;
   let total = 0;
@@ -387,13 +366,13 @@ function hintBudget(c: Case, player: ProgressView): HTMLElement {
   const next = q?.hints[revealedNow];
   return h(
     "section",
-    { class: "side-group", "aria-labelledby": "side-budget-h" },
-    h("h2", { class: "side-h", id: "side-budget-h" }, TS().sideBudget),
-    h("p", { class: "side-meta" }, TS().sideHintsUsed(used, total, hintPts)),
-    commands > 0 ? h("p", { class: "side-meta" }, TS().sideCommandsUsed(commands, commands * SCORING.COMMAND_COST)) : null,
+    { class: "case-budget", "aria-labelledby": "case-budget-h" },
+    h("h2", { class: "case-budget-h", id: "case-budget-h" }, TS().sideBudget),
+    h("span", { class: "case-budget-item" }, TS().sideHintsUsed(used, total, hintPts)),
+    commands > 0 ? h("span", { class: "case-budget-item" }, TS().sideCommandsUsed(commands, commands * SCORING.COMMAND_COST)) : null,
     q === undefined
       ? null
-      : h("p", { class: "side-meta" }, next !== undefined ? TS().sideStageHints(q.hints.length - revealedNow, next.cost) : TS().sideStageNoHints),
+      : h("span", { class: "case-budget-item" }, next !== undefined ? TS().sideStageHints(q.hints.length - revealedNow, next.cost) : TS().sideStageNoHints),
   );
 }
 

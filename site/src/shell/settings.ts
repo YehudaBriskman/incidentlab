@@ -1,5 +1,5 @@
 // Display settings (the ⚙ menu): theme, text size, motion, contrast and text spacing, plus the desktop
-// sidebar's collapse state (shell/sidebar.ts). They are kept in
+// nav's collapse state (shell/nav.ts; `sidebarCollapsed` is the retired per-page sidebar's, kept so old values parse). They are kept in
 // localStorage under SETTINGS_KEY and applied as data-* attributes on <html>. public/settings-boot.js applies
 // the same key and shape before first paint (the CSP blocks inline scripts), so keep the two in step.
 import { z } from "zod";
@@ -20,6 +20,8 @@ export const SettingsSchema = z.object({
   spacing: z.enum(SPACINGS).catch("normal"),
   /** Desktop sidebar folded to its icon rail (#60). Added later: stored settings without it read as false. */
   sidebarCollapsed: z.boolean().catch(false),
+  /** The global nav folded to its icon rail (app frame). Added later: stored settings without it read as false. */
+  navCollapsed: z.boolean().catch(false),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 export type Theme = Settings["theme"];
@@ -58,7 +60,7 @@ export function applySettings(settings: Settings): void {
   setAttr("data-motion", settings.reducedMotion === "reduce" ? "reduce" : null);
   setAttr("data-contrast", settings.highContrast ? "more" : null);
   setAttr("data-spacing", settings.spacing === "wide" ? "wide" : null);
-  setAttr("data-sidebar", settings.sidebarCollapsed ? "collapsed" : null);
+  setAttr("data-nav", settings.navCollapsed ? "collapsed" : null);
 }
 
 const listeners = new Set<(settings: Settings) => void>();

@@ -4,35 +4,37 @@ import { T } from "./i18n/strings-player";
 import { caseSummary, catalogReady, loadAllCases, loadCase, onCatalogChange } from "./content/load";
 import { h, setChildren } from "./lib/dom";
 import type { View, ViewResult } from "./shell/types";
-import { initSidebar, reserveSidebar, showSidebar } from "./shell/sidebar";
 import { closeOverlays, toast } from "./lib/overlay";
 import { TA } from "./i18n/strings-account";
 import { TO } from "./i18n/strings-onboard";
 import { homeView } from "./views/home";
 import { renderLeaderboard, stopLeaderboard } from "./views/leaderboard";
-import { applyPendingRestore, labelStatic, mountNavbar } from "./shell/navbar";
-import { mountLiveStrip } from "./shell/liveStrip";
+import { applyPendingRestore, labelStatic } from "./shell/lang";
+import { mountNav } from "./shell/nav";
+import { mountTopbar } from "./shell/topbar";
+import { initFrame, reserveAside, resetContentScroll, showPage } from "./shell/frame";
 import { applySettings, loadSettings } from "./shell/settings";
 
 applySettings(loadSettings()); // settings-boot.js already did this before first paint; resync in case it failed
 applyLang();
 labelStatic();
 
-/* ---------- app shell: navbar, live strip, announcement (src/shell/) ---------- */
-const header = document.querySelector("header.navbar");
-if (header instanceof HTMLElement) {
-  mountNavbar(header);
-  mountLiveStrip(header);
-}
-
 const root = document.getElementById("app");
 if (!(root instanceof HTMLElement)) throw new Error("#app root missing");
 const appRoot: HTMLElement = root;
 
-/* ---------- per-page sidebar (src/shell/sidebar.ts) ---------- */
-const sidebarEl = document.getElementById("sidebar");
+/* ---------- app frame: global nav, top bar, content area (src/shell/) ---------- */
+const navEl = document.getElementById("app-nav");
+if (navEl instanceof HTMLElement) mountNav(navEl);
+const topbarEl = document.querySelector("header.topbar");
+if (topbarEl instanceof HTMLElement) mountTopbar(topbarEl);
+const contentEl = document.querySelector("main.app-content");
 const pageHeaderEl = document.querySelector(".page-header");
-if (sidebarEl instanceof HTMLElement && pageHeaderEl instanceof HTMLElement) initSidebar(sidebarEl, pageHeaderEl);
+const asideEl = document.querySelector("aside.page-aside");
+const noticeEl = document.querySelector(".app-notice");
+if (contentEl instanceof HTMLElement && pageHeaderEl instanceof HTMLElement && asideEl instanceof HTMLElement && noticeEl instanceof HTMLElement) {
+  initFrame({ content: contentEl, header: pageHeaderEl, aside: asideEl, notice: noticeEl });
+}
 new MutationObserver(() => applyPendingRestore()).observe(appRoot, { childList: true, subtree: true });
 
 /* ---------- global safety net: never white-screen ---------- */
@@ -46,7 +48,7 @@ window.addEventListener("unhandledrejection", (ev) => {
   toast({ tone: "error", text: T().toastRequestFailed });
 });
 
-/** Puts a view on screen: its main content in #app, its sidebar and page header in the shell, then starts it. */
+/** Puts a view on screen: its main content in #app, its nav section, page panel and header in the frame, then starts it. */
 function mount(view: ViewResult): void {
   // A language switch re-renders the route: the new view starts from the old page's nodes, as views did
   // when they drew into #app itself, so they can carry over what was typed (auth's draft, field restore).
@@ -56,7 +58,7 @@ function mount(view: ViewResult): void {
     view.main.append(...old.childNodes);
   }
   setChildren(appRoot, view.main);
-  showSidebar(view.sidebar ?? null, view.header ?? null);
+  showPage(view);
   view.start?.();
 }
 
@@ -70,7 +72,7 @@ function legacy(render: (root: HTMLElement) => void): View {
 
 function notFound(message: string): void {
   document.title = T().notFoundTitle;
-  showSidebar(null);
+  showPage(null);
   setChildren(
     appRoot,
     h(
@@ -134,16 +136,13 @@ function isKnownCase(id: string): boolean {
 }
 
 /**
- * Routes whose view has a sidebar: home, a case, its toolbox and its Explorer, and admin. Their column is reserved
- * while the view loads (a DB case may not be in the catalog yet; an unknown id releases it on the 404).
+ * Routes whose view has a page panel: a case's toolbox and its Explorer. The column is reserved while the view
+ * loads (a DB case may not be in the catalog yet; an unknown id releases it on the 404).
  * public/settings-boot.js runs the same test before first paint; keep them in step.
  */
-function sidebarRoute(parts: readonly string[]): boolean {
-  if (parts.length === 0) return false; // home: a dashboard without a sidebar
-  // Admin: its sign-in gate releases the column again (views/admin.ts); the signed-in dashboard doesn't shift.
-  if (parts.length === 1 && parts[0] === "admin") return true;
+function asideRoute(parts: readonly string[]): boolean {
   const [section, id, sub] = parts;
-  return section === "case" && id !== undefined && parts.length <= 3 && (sub === undefined || sub === "toolbox" || sub === "explorer");
+  return section === "case" && id !== undefined && parts.length === 3 && (sub === "toolbox" || sub === "explorer");
 }
 
 function route(): void {
@@ -159,14 +158,15 @@ function route(): void {
   stopLeaderboard();
   if (!isRelabel()) {
     closeOverlays(); // a dialog or menu belongs to the page it was opened on
-    window.scrollTo(0, 0);
-    // The next page's column is there (or gone) before its code loads, so it never shifts in.
-    if (sidebarRoute(parts)) reserveSidebar(true);
-    else showSidebar(null);
+    resetContentScroll();
+    // The next page's panel column is there (or gone) before its code loads, so it never shifts in.
+    if (asideRoute(parts)) reserveAside(true);
+    else showPage(null);
   }
 
   try {
-    if (parts.length === 0) {
+    // #/cases is the catalog entry of the nav; until home splits it out it shows the same dashboard.
+    if (parts.length === 0 || (parts[0] === "cases" && parts.length === 1)) {
       mount(homeView());
       return;
     }
@@ -205,7 +205,7 @@ function route(): void {
     }
     if (parts[0] === "admin" && parts.length === 1) {
       // Admin shows titles and question names of every case: load them all (in parallel with its code).
-      // Its sections are sidebar navigation (#60); the view re-attaches the same dashboard on #/admin?tab=… changes.
+      // Its sections are nested items in the global nav; the view re-attaches the same dashboard on #/admin?tab=… changes.
       lazyView(() => Promise.all([import("./views/admin"), loadAllCases()]).then(([m]): View => m.adminView));
       return;
     }
