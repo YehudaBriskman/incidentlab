@@ -86,3 +86,15 @@ test("toast queue: repeats count up, at most 3, the oldest goes first", () => {
   assert.equal(q.delete("c"), true);
   assert.equal(q.size, 2);
 });
+
+test("anchorOrigin: popups grow from the trigger's centre on the side they opened", () => {
+  const { anchorOrigin } = logic;
+  const anchor = { left: 500, right: 540, top: 100, bottom: 130 };
+  const panel = { width: 200, height: 120 };
+  // opened below, panel starting 400px in: origin at the trigger's centre (520 - 400) on the top edge
+  assert.deepEqual(anchorOrigin(anchor, { left: 400, top: 134 }, panel), { side: "bottom", origin: "120px 0" });
+  // opened above: bottom edge
+  assert.deepEqual(anchorOrigin(anchor, { left: 400, top: -24 }, panel), { side: "top", origin: "120px 100%" });
+  // clamped inside the panel when the trigger lies beyond it
+  assert.equal(anchorOrigin(anchor, { left: 0, top: 134 }, { width: 100, height: 50 }).origin, "100px 0");
+});

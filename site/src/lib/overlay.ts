@@ -11,7 +11,7 @@
 // The DOM-free rules (focus wrap, menu keys, typeahead, placement, modal stack, toast queue) are in overlay-logic.ts.
 import { appendChildren, h, type Child } from "./dom";
 import { TV } from "../i18n/strings-overlay";
-import { menuKeyTarget, ModalStack, placeAnchored, ToastQueue, trapTarget, typeaheadMatch } from "./overlay-logic";
+import { anchorOrigin, menuKeyTarget, ModalStack, placeAnchored, ToastQueue, trapTarget, typeaheadMatch } from "./overlay-logic";
 
 const supportsPopover = (): boolean => typeof HTMLElement.prototype.showPopover === "function";
 const isRtl = (): boolean => document.documentElement.dir === "rtl";
@@ -429,6 +429,10 @@ function anchoredPanel(panel: HTMLElement, opts: AnchoredOptions = {}): Anchored
     const pos = placeAnchored(a, p, { width: root.clientWidth, height: window.innerHeight }, { align: opts.align ?? "end", rtl: isRtl() });
     panel.style.left = `${pos.left}px`;
     panel.style.top = `${pos.top}px`;
+    // grow from the trigger: the CSS enter/exit transform scales around this point (Soft UI motion)
+    const from = anchorOrigin(a, pos, p);
+    panel.dataset.side = from.side;
+    panel.style.transformOrigin = from.origin;
   };
 
   const opened = (): void => {
