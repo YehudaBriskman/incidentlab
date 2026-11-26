@@ -9,6 +9,8 @@ import { cachedEvent, isEventActive, onEventChange } from "../lib/event";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { TO } from "../i18n/strings-onboard";
+import { TS } from "../i18n/strings-shell";
+import type { ViewResult } from "../shell/types";
 import { eventDisplayPhase, eventWhen } from "./leaderboard";
 import { T } from "../i18n/strings-player";
 
@@ -168,7 +170,12 @@ function caseCard(c: CaseSummary, state: HomeState): HTMLElement {
   const isToday = state.today?.caseId === c.id;
   return h(
     "article",
-    { class: `case-card${isToday ? " is-today" : ""}` },
+    {
+      class: `case-card${isToday ? " is-today" : ""}`,
+      // read by the sidebar filters (applyFilters)
+      "data-case": c.id,
+      "data-status": state.stats.get(c.id)?.status ?? "not-started",
+    },
     h("div", { class: "case-card-top" }, caseMeta(c), isToday ? h("span", { class: "chip today-chip" }, TO().todayTag) : null),
     h("h3", { class: "case-card-title" }, titleNode(c.title)),
     h("p", { class: "muted case-card-sub" }, keepPrefix(c.subtitle)),
@@ -288,6 +295,11 @@ function hero(account: AccountView | null, state: HomeState, resume: { c: CaseSu
 }
 
 function draw(root: HTMLElement, state: HomeState): void {
+  drawPage(root, state);
+  sidebarOf?.(state);
+}
+
+function drawPage(root: HTMLElement, state: HomeState): void {
   const released = state.today?.releasedCaseIds;
   const playable = caseSummaries().filter((c) => released === undefined || released.includes(c.id));
   const todayCase = state.today?.caseId ? caseSummary(state.today.caseId) : undefined;
@@ -321,7 +333,7 @@ function draw(root: HTMLElement, state: HomeState): void {
       state.loading
         ? h("div", { class: "case-grid" }, caseSummaries().map(() => caseSkeleton()))
         : playable.length > 0
-          ? h("div", { class: "case-grid" }, playable.map((c) => caseCard(c, state)))
+          ? [h("div", { class: "case-grid" }, playable.map((c) => caseCard(c, state))), h("p", { class: "muted case-filter-none", hidden: true }, TS().filterNoCases)]
           : h("p", { class: "muted" }, T().noCases),
     ),
     h(
@@ -345,6 +357,126 @@ function draw(root: HTMLElement, state: HomeState): void {
       : null,
   );
 }
+
+/* ================= sidebar: filters by difficulty, topic and status ================= */
+
+type Difficulty = CaseSummary["difficulty"];
+type StatusFilter = "any" | CaseStats["status"];
+const DIFFICULTIES: readonly Difficulty[] = ["easy", "medium", "hard"];
+const STATUSES: readonly StatusFilter[] = ["any", "not-started", "in-progress", "completed"];
+
+/** The filters survive redraws, language switches and visits to a case and back (this page load only). */
+const filters: { difficulty: Set<Difficulty>; tags: Set<string>; status: StatusFilter } = { difficulty: new Set(), tags: new Set(), status: "any" };
+
+/** Hides the case cards the filters rule out and says how many are left. */
+function applyFilters(root: HTMLElement, side: HomeSidebar): void {
+  const cards = [...root.querySelectorAll<HTMLElement>(".case-card[data-case]")];
+  let shown = 0;
+  for (const card of cards) {
+    const c = caseSummary(card.dataset.case ?? "");
+    const ok =
+      c !== undefined &&
+      (filters.difficulty.size === 0 || filters.difficulty.has(c.difficulty)) &&
+      (filters.tags.size === 0 || c.tags.some((tag) => filters.tags.has(tag))) &&
+      (filters.status === "any" || !side.statusShown() || card.dataset.status === filters.status);
+    card.hidden = !ok;
+    if (ok) shown += 1;
+  }
+  const none = root.querySelector<HTMLElement>(".case-filter-none");
+  if (none !== null) none.hidden = cards.length === 0 || shown > 0;
+  side.count(cards.length === 0 ? null : TS().filterShown(shown, cards.length));
+}
+
+type HomeSidebar = { content: HTMLElement; count: (text: string | null) => void; showStatus: (on: boolean) => void; statusShown: () => boolean };
+
+/** Tags across the catalog, most used first (ties alphabetical), at most 12. */
+function catalogTags(): string[] {
+  const counts = new Map<string, number>();
+  for (const c of caseSummaries()) for (const tag of c.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 12).map(([tag]) => tag);
+}
+
+function homeSidebar(onChange: () => void): HomeSidebar {
+  const check = (name: string, value: string, label: Child, checked: boolean, change: (on: boolean) => void): HTMLElement => {
+    const input = h("input", { type: "checkbox", name, value, checked });
+    input.addEventListener("change", () => {
+      change(input.checked);
+      onChange();
+    });
+    return h("label", { class: "side-option" }, input, h("span", {}, label));
+  };
+  const present = new Set(caseSummaries().map((c) => c.difficulty));
+  const difficulty = h(
+    "fieldset",
+    { class: "side-group" },
+    h("legend", { class: "side-h" }, TS().filterDifficulty),
+    DIFFICULTIES.filter((d) => present.has(d)).map((d) =>
+      check("f-difficulty", d, TO().difficulty(d), filters.difficulty.has(d), (on) => (on ? filters.difficulty.add(d) : filters.difficulty.delete(d))),
+    ),
+  );
+  const tags = catalogTags();
+  const topics =
+    tags.length > 0
+      ? h(
+          "fieldset",
+          { class: "side-group" },
+          h("legend", { class: "side-h" }, TS().filterTags),
+          h(
+            "div",
+            { class: "side-chips" },
+            tags.map((tag) => check("f-tag", tag, h("bdi", { class: "mono" }, tag), filters.tags.has(tag), (on) => (on ? filters.tags.add(tag) : filters.tags.delete(tag)))),
+          ),
+        )
+      : null;
+  const statusLabel = (st: StatusFilter): string =>
+    st === "any" ? TS().statusAny : st === "not-started" ? TS().statusNew : st === "in-progress" ? TS().statusProgress : TS().statusDone;
+  const statusRadios = STATUSES.map((st) => {
+    const input = h("input", { type: "radio", name: "f-status", value: st, checked: filters.status === st });
+    input.addEventListener("change", () => {
+      if (!input.checked) return;
+      filters.status = st;
+      onChange();
+    });
+    return { st, input, el: h("label", { class: "side-option" }, input, h("span", {}, statusLabel(st))) };
+  });
+  const status = h("fieldset", { class: "side-group", hidden: true }, h("legend", { class: "side-h" }, TS().filterStatus), statusRadios.map((r) => r.el));
+  const count = h("p", { class: "side-meta", role: "status" });
+  const clear = h("button", { type: "button", class: "link-btn small" }, TS().filterClear);
+  clear.addEventListener("click", () => {
+    filters.difficulty.clear();
+    filters.tags.clear();
+    filters.status = "any";
+    for (const input of content.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) input.checked = false;
+    for (const r of statusRadios) r.input.checked = r.st === "any";
+    onChange();
+  });
+  const content = h("div", { class: "side-stack home-side" }, difficulty, topics, status, h("div", { class: "side-foot" }, count, clear));
+  return {
+    content,
+    count: (text) => {
+      count.textContent = text ?? "";
+      count.hidden = text === null;
+    },
+    showStatus: (on) => {
+      status.hidden = !on;
+    },
+    statusShown: () => !status.hidden,
+  };
+}
+
+/** Home as a shell view: the page in main, the case filters in the sidebar. */
+export function homeView(): ViewResult {
+  const main = h("div", { class: "view" });
+  const side = homeSidebar(() => applyFilters(main, side));
+  sidebarOf = (state) => {
+    side.showStatus(state.isSignedIn && !state.loading);
+    applyFilters(main, side);
+  };
+  return { main, sidebar: { label: TS().homeSide, content: side.content }, start: () => renderHome(main) };
+}
+
+/** Set by homeView: keeps the filters in step after every draw. */
+let sidebarOf: ((state: HomeState) => void) | null = null;
 
 export function renderHome(root: HTMLElement): void {
   document.title = T().homeTitle;

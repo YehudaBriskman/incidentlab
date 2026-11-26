@@ -8,7 +8,7 @@ import { initSidebar, reserveSidebar, showSidebar } from "./shell/sidebar";
 import { closeOverlays, toast } from "./lib/overlay";
 import { TA } from "./i18n/strings-account";
 import { TO } from "./i18n/strings-onboard";
-import { renderHome } from "./views/home";
+import { homeView } from "./views/home";
 import { renderLeaderboard, stopLeaderboard } from "./views/leaderboard";
 import { applyPendingRestore, labelStatic, mountNavbar } from "./shell/navbar";
 import { mountLiveStrip } from "./shell/liveStrip";
@@ -165,7 +165,7 @@ function route(): void {
 
   try {
     if (parts.length === 0) {
-      mount(legacy(renderHome)());
+      mount(homeView());
       return;
     }
     if ((parts[0] === "login" || parts[0] === "signup") && parts.length === 1) {
