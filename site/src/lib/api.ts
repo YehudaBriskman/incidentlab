@@ -188,6 +188,11 @@ export async function changePassword(input: { currentPassword: string; newPasswo
   return (await request("POST", "/api/me/password", AccountResponseSchema, input)).account;
 }
 
+/** A public GET validated with `schema` (DB-stored case catalog and content, see content/db-cases.ts). */
+export async function fetchPublic<S extends z.ZodType>(path: string, schema: S): Promise<z.infer<S>> {
+  return request("GET", path, schema);
+}
+
 export async function fetchToday(): Promise<TodayResponse> {
   return request("GET", "/api/today", TodayResponseSchema);
 }

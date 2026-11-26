@@ -2,6 +2,7 @@ import catalogRaw from "virtual:case-catalog";
 import { getLang, type Lang } from "../i18n/i18n";
 import { CatalogSchema, TeasersSchema, type CaseSummary, type CatalogEntry, type Teaser } from "./catalog-schema";
 import { CaseSchema, type Case } from "../../shared/case";
+import { fetchDbCatalog, loadDbCase } from "./db-cases";
 
 /*
  * Two layers of content:
@@ -47,7 +48,38 @@ function parseTeasers(): Teaser[] {
   return result.data;
 }
 
-const catalog: ReadonlyMap<string, CatalogEntry> = new Map(parseCatalog().map((e) => [e.en.id, e]));
+/** Bundled cases first; DB-published cases (content/db-cases.ts) join or replace them when /api/cases answers. */
+const catalog = new Map<string, CatalogEntry>(parseCatalog().map((e) => [e.en.id, e]));
+const dbIds = new Set<string>();
+const catalogListeners = new Set<() => void>();
+
+/** How long the first DB catalog fetch may hold back a case route before it falls back to bundled cases. */
+const DB_CATALOG_WAIT_MS = 4000;
+
+/** Resolves once the DB catalog has been merged in (or could not be fetched, or took too long). */
+export const catalogReady: Promise<void> = Promise.race([
+  fetchDbCatalog().then((entries) => {
+    let changed = false;
+    for (const entry of entries) {
+      dbIds.add(entry.en.id);
+      const before = catalog.get(entry.en.id);
+      if (before === undefined || JSON.stringify(before) !== JSON.stringify(entry)) changed = true;
+      catalog.set(entry.en.id, entry);
+    }
+    if (changed) for (const fn of catalogListeners) fn();
+  }),
+  new Promise<void>((resolve) => setTimeout(resolve, DB_CATALOG_WAIT_MS)),
+]);
+
+/** Called when DB cases change the catalog after the first render (new or retitled cases). */
+export function onCatalogChange(fn: () => void): void {
+  catalogListeners.add(fn);
+}
+
+/** True for a case served from the DB (its evidence lives under /evidence/db/). */
+export function isDbCase(id: string): boolean {
+  return dbIds.has(id);
+}
 export const teasers: readonly Teaser[] = parseTeasers();
 
 /* ---------- catalog (synchronous) ---------- */
@@ -113,7 +145,8 @@ export function loadCase(id: string, lang: Lang = getLang()): Promise<Case | und
   if (existing !== undefined) return existing;
   const entry = catalog.get(id);
   if (entry === undefined) return Promise.resolve(undefined);
-  const promise = (lang === "he" ? importHebrew(entry) : importEnglish(entry)).then(
+  const source = dbIds.has(id) ? loadDbCase(id, lang) : lang === "he" ? importHebrew(entry) : importEnglish(entry);
+  const promise = source.then(
     (c) => {
       if (c !== undefined) loaded.set(key, c);
       return c;

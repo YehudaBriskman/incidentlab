@@ -1,4 +1,5 @@
 import { englishEvidenceFormats } from "../content/evidence-formats";
+import { dbCaseVersion, dbEnglishFormats } from "../content/db-cases";
 import type { Case } from "../../shared/case";
 import { T } from "../i18n/strings-tools";
 import type { StepKind } from "./core";
@@ -82,7 +83,7 @@ const plainText = (markdown: string): string => markdown.replace(/[`*_]/g, "");
 /** Sidebar catalog for a case: README first, then the case JSON's evidence list in order. */
 export function evidenceFilesFor(c: Case): EvidenceFile[] {
   // Format labels may be translated, so the mode always comes from the English case.
-  const englishFormat = new Map((englishEvidenceFormats(c.id) ?? []).map((f) => [f.path, f.format]));
+  const englishFormat = new Map((englishFormatsOf(c.id) ?? []).map((f) => [f.path, f.format]));
   const localFormat = new Map(c.evidence.map((f) => [f.path, f.format]));
   const build = (path: string, size: string, description: string): EvidenceFile => {
     const en = englishFormat.get(path) ?? localFormat.get(path) ?? "";
@@ -96,13 +97,22 @@ export function evidenceFilesFor(c: Case): EvidenceFile[] {
   return files.sort((a, b) => Number(b.path === "README_FIRST.txt") - Number(a.path === "README_FIRST.txt"));
 }
 
+/** Where an evidence file is served: the versioned DB path for DB cases, the bundled static path otherwise. */
 export function evidenceUrl(caseId: string, path: string): string {
-  return `${import.meta.env.BASE_URL}evidence/${encodeURIComponent(caseId)}/files/${path.split("/").map(encodeURIComponent).join("/")}`;
+  const file = path.split("/").map(encodeURIComponent).join("/");
+  const version = dbCaseVersion(caseId);
+  return version === undefined
+    ? `${import.meta.env.BASE_URL}evidence/${encodeURIComponent(caseId)}/files/${file}`
+    : `${import.meta.env.BASE_URL}evidence/db/${encodeURIComponent(caseId)}/v${version}/files/${file}`;
 }
+
+/** English format labels (they pick each file's parser), from the bundle or from the DB case's English content. */
+const englishFormatsOf = (caseId: string): ReadonlyArray<{ path: string; format: string }> | undefined =>
+  dbEnglishFormats(caseId) ?? englishEvidenceFormats(caseId);
 
 /** Zones a case's evidence is written in, from its English format labels (UTC is always offered first). */
 export function caseZones(c: Case): string[] {
-  const labels = (englishEvidenceFormats(c.id) ?? c.evidence).map((f) => f.format).join(" ");
+  const labels = (englishFormatsOf(c.id) ?? c.evidence).map((f) => f.format).join(" ");
   const zones: string[] = [];
   if (/\bEST\b|-0500/.test(labels)) zones.push("America/New_York");
   if (/\bCET\b/.test(labels)) zones.push("Europe/Paris");
