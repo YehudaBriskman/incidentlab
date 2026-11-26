@@ -74,6 +74,8 @@ if [[ "$BUILD_SITE" -eq 1 ]]; then
     npm ci || npm install
     npm run build
   )
+  banner "Check: colour contrast, WCAG 2 + APCA (scripts/check-contrast.mts)"
+  node --experimental-strip-types scripts/check-contrast.mts
   banner "Check: no paid content in the bundle (scripts/check-bundle.mjs)"
   node scripts/check-bundle.mjs
   if (cd site && node -e 'process.exit(require("./package.json").scripts?.["test:server"] ? 0 : 1)'); then

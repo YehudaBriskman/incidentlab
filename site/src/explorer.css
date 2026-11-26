@@ -10,7 +10,7 @@
 /* The evidence files and the time converter live in the shell sidebar (.ex-side, #60): the layout is one column. */
 .ex-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); align-items: start; }
 .ex-side { display: flex; flex-direction: column; }
-.ex-side-h { font-size: var(--step--2); text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted); margin: var(--space-1) 0 var(--space-2); }
+.ex-side-h { font-size: var(--step--2); text-transform: var(--label-case); letter-spacing: var(--type-label-track); color: var(--text-muted); margin: var(--space-1) 0 var(--space-2); }
 .ex-file-search { width: 100%; margin: 0 0 var(--space-2); }
 .ex-no-files { margin: 0 0 var(--space-4); font-size: var(--step--1); }
 .ex-match-nav { display: inline-flex; align-items: center; gap: var(--space-2); }
@@ -19,7 +19,7 @@
 .ex-files { list-style: none; margin: 0 0 var(--space-4); padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
 .ex-file { width: 100%; text-align: start; display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); border: 1px solid transparent; background: transparent; color: var(--text); cursor: pointer; font: inherit; }
 .ex-file:hover { background: var(--surface-2); }
-.ex-file.is-active { border-color: var(--accent); background: var(--accent-soft); }
+.ex-file.is-active { border-color: var(--edge-selected); background: var(--accent-soft); }
 .ex-file-name { font-size: var(--step--1); overflow-wrap: anywhere; }
 .ex-file-meta { font-size: var(--step--2); color: var(--text-muted); display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; }
 .ex-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--success-fg); margin-inline-start: var(--space-2); }
@@ -35,7 +35,7 @@
 .ex-time-out { display: grid; grid-template-columns: auto 1fr; gap: var(--space-1) var(--space-3); margin: 2px 0 0; font-size: var(--step--2); }
 .ex-time-out dt { color: var(--text-muted); white-space: nowrap; }
 .ex-time-out dd { margin: 0; word-break: break-all; font-family: var(--font-mono); }
-.ex-zone-tag { color: var(--accent); }
+.ex-zone-tag { color: var(--accent-text); }
 
 /* head */
 .ex-main { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
@@ -70,7 +70,7 @@
 .ex-chips { display: flex; gap: var(--space-2); flex-wrap: wrap; margin: var(--space-2) 0; }
 .ex-chips:empty { display: none; }
 .ex-chip { min-height: var(--control-xs); padding: 2px var(--space-3); font-family: inherit; font-weight: 500; cursor: pointer; }
-.ex-chip:hover { --pill-line: var(--accent); --pill-fg: var(--text); }
+.ex-chip:hover { --pill-line: var(--edge-selected); --pill-fg: var(--text); }
 .ex-jsonbar { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .ex-jsonbar label { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--step--2); color: var(--text-muted); }
 .ex-jsonbar[hidden] { display: none; }
@@ -100,14 +100,14 @@
 .ex-row.is-cursor { background: color-mix(in oklab, var(--code-accent) 24%, transparent); box-shadow: inset 3px 0 0 var(--code-accent); }
 .ex-row:focus-visible { outline: var(--focus-width) solid var(--code-accent); outline-offset: calc(-1 * var(--focus-width)); }
 .ex-ln { flex: none; width: 7ch; padding-right: 1ch; text-align: right; color: var(--code-muted); user-select: none; position: sticky; left: 0; background: var(--code-bg); z-index: 1; }
-.ex-row.is-cursor .ex-ln { color: var(--code-accent); }
+.ex-row.is-cursor .ex-ln { color: var(--code-accent-text); }
 .ex-text { padding-right: 16px; }
-.ex-row mark { background: var(--code-accent); color: var(--code-on-accent); border-radius: 2px; }
+.ex-row mark { background: var(--code-mark); color: var(--code-on-accent); border-radius: 2px; }
 .ex-cell { flex: none; width: 14ch; overflow: hidden; text-overflow: ellipsis; padding-right: 1ch; }
 .ex-cell-wide { width: 28ch; }
 .ex-cell.is-blank { color: var(--code-muted); }
 /* Sticky INSIDE the scroller: it scrolls sideways with its columns and stays on top vertically. */
-.ex-colhead { position: sticky; top: 0; z-index: 2; width: max-content; min-width: 100%; color: var(--code-accent); background: var(--code-bg); border-bottom: 1px solid var(--code-border); font-weight: 600; }
+.ex-colhead { position: sticky; top: 0; z-index: 2; width: max-content; min-width: 100%; color: var(--code-accent-text); background: var(--code-bg); border-bottom: 1px solid var(--code-border); font-weight: 600; }
 .ex-colhead[hidden] { display: none; }
 .ex-colhead .ex-ln { z-index: 3; }
 .ex-viewport.is-wrap .ex-rows { width: 100%; min-width: 0; }
@@ -148,7 +148,7 @@
 .ex-err { color: var(--danger-fg); font-size: var(--step--1); margin: var(--space-2) 0; }
 .ex-err[hidden] { display: none; }
 .ex-big { font-size: var(--step--1); margin: var(--space-2) 0; }
-.ex-big strong { font-size: 1.6rem; color: var(--accent); }
+.ex-big strong { font-size: 1.6rem; color: var(--accent-text); }
 .ex-table-wrap { max-height: 320px; overflow: auto; }
 .ex-table { width: 100%; border-collapse: collapse; font-size: var(--step--1); }
 .ex-table td { padding: 2px var(--space-2); border-bottom: 1px solid var(--border); word-break: break-all; }
@@ -156,11 +156,11 @@
 .ex-table .ex-th-start, .ex-table .ex-th-start .ex-th { text-align: start; }
 .ex-table .num, .ex-table th.num .ex-th { text-align: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ex-th { background: none; border: 0; color: inherit; cursor: pointer; font: inherit; font-weight: 600; text-transform: inherit; letter-spacing: inherit; min-height: var(--target-min); padding: var(--space-1) var(--space-2); width: 100%; }
-.ex-th:hover { color: var(--accent); }
+.ex-th:hover { color: var(--accent-text); }
 th[aria-sort="ascending"] .ex-th::after { content: " ▲"; }
 th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
 .ex-linkish { background: none; border: 0; color: var(--text); cursor: pointer; text-align: start; padding: 0; min-height: var(--target-min); font-size: var(--step--2); }
-.ex-linkish:hover { color: var(--accent); text-decoration: underline; }
+.ex-linkish:hover { color: var(--accent-text); text-decoration: underline; }
 .ex-hist { max-height: 360px; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
 .ex-hist-row { display: grid; grid-template-columns: minmax(0, 18ch) 1fr 7ch; gap: var(--space-2); align-items: center; font-size: var(--step--2); }
 .ex-hist-key { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
@@ -232,7 +232,7 @@ th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
 .ex-drawer-tools { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 .ex-detail-body { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
 .ex-detail-body > .ex-muted { margin: 0; }
-.ex-detail-sub { margin: var(--space-2) 0 0; font-size: var(--step--2); text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted); }
+.ex-detail-sub { margin: var(--space-2) 0 0; font-size: var(--step--2); text-transform: var(--label-case); letter-spacing: var(--type-label-track); color: var(--text-muted); }
 .ex-detail-fields { max-height: 300px; }
 .ex-detail-fields .ex-table th, .ex-detail-fields .ex-table td { vertical-align: top; }
 .ex-detail-fields thead th { padding: var(--space-1) var(--space-2); text-align: start; }
@@ -244,7 +244,7 @@ th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
 .ex-detail-times dt { color: var(--text-muted); }
 .ex-detail-times dd { margin: 0; }
 .ex-detail-raw { margin: 0; padding: var(--space-2) var(--space-3); background: var(--code-bg); color: var(--code-text); border-radius: var(--radius-md); font-family: var(--font-mono); font-size: var(--step--1); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto; text-align: left; } /* LTR code island */
-.ex-detail-raw mark { background: var(--code-accent); color: var(--code-on-accent); border-radius: 2px; }
+.ex-detail-raw mark { background: var(--code-mark); color: var(--code-on-accent); border-radius: 2px; }
 .ex-detail-raw:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); }
 
 @media (min-width: 1180px) {
