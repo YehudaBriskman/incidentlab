@@ -83,7 +83,8 @@ The zod schemas are the source of truth for every case shape (there is no separa
 | `CaseSchema` | `site/shared/case.ts` | The authored case JSON above, paid fields included. The browser bundle gets it with the paid fields stripped. |
 | `CaseContentSchema` | `site/shared/case-records.ts` | The public form: hints are `{cost}` only, toolbox items have no `command`/`powershell`. Derived from `CaseSchema`; `stripPaidContent()` turns one into the other. |
 | `CaseSealedSchema` | `site/shared/case-records.ts` | The server-only half: normalized answers, hint texts, commands, debriefs, points and hint costs. Each case in `site/server/generated/secrets.json` has this shape. |
-| `CaseMetaSchema`, `EvidenceEntrySchema`, `CasePackageManifestSchema` | `site/shared/case-records.ts` | Case records and the upload package manifest (evidence in `EVIDENCE_CHUNK_BYTES` = 4 MiB chunks). Planned in #64/#65; nothing uses them yet. |
+| `EvidenceEntrySchema`, `CasePackageManifestSchema` | `site/shared/case-records.ts` | The case package manifest (below), evidence in `EVIDENCE_CHUNK_BYTES` = 4 MiB chunks. |
+| `CaseMetaSchema` | `site/shared/case-records.ts` | The stored case record. Planned in #64; nothing stores it yet. |
 
 Answers are normalized by `normalizeAnswer()` in `site/shared/normalize.ts`. `scripts/make_flags.py` mirrors it
 and checks itself against `site/shared/normalize-vectors.json` on every build.
@@ -94,9 +95,53 @@ and checks itself against `site/shared/normalize-vectors.json` on every build.
 tools (grep, awk, sed, sort, uniq, jq, date, git) on the evidence, it derives all six answers, prints `qN=value`,
 then compares them with `build/truth/<id>.answers.json` (normalized) and exits 1 on any mismatch. It must not read generator code or constants.
 
+## Case package
+
+Every build also turns each case into one upload package, `build/packages/<id>-v<n>.case.zip`
+(`scripts/make_package.py`, default version 1). It is the unit that DB-stored cases are uploaded and stored
+as (#64, #66). **It contains the answers**: it lives only under the gitignored `build/`, and is never served
+or committed.
+
+| Entry | What | Schema |
+|---|---|---|
+| `manifest.json` | `schemaVersion` (1), `id`, `version`, `langs` (unique, includes `en`), and `evidence`: one entry per file with `path`, `format`, `size`, `sha256`, `chunks` and `explorer` | `CasePackageManifestSchema` |
+| `content.<lang>.json` | Public content, one per manifest language: the case JSON with hint texts and `command`/`powershell` removed (`stripPaidContent`) | `CaseContentSchema` |
+| `sealed/answers.json` | `{qN: answer}`, normalized with `normalizeAnswer` | `CaseSealedSchema.answers` |
+| `sealed/hints.json` | `{qN: [{en, he}]}`, hint texts in order (`he` is `null` without a translation) | `CaseSealedSchema.hints` |
+| `sealed/commands.json` | `{toolId: {command, powershell}}` | `CaseSealedSchema.tools` |
+| `sealed/scoring.json` | `{title, estMinutes, questions: {qN: {points, hintCosts, targetSeconds}}}` | the rest of `CaseSealedSchema` |
+| `sealed/debrief.en.md`, `sealed/debrief.he.md` | The sealed debriefs (Hebrew only when `content-sealed/<id>.debrief.he.md` exists) | `debrief`, `debriefHe` |
+| `evidence.zip` | The player download, exactly as `scripts/package.sh` built it (one top-level folder `<id>/`), stored uncompressed | |
+| `evidence/<path>` | Every raw file in `build/evidence/<id>/`, binaries (`.pcap`, `.bundle`) included | listed in `manifest.evidence` |
+
+Manifest evidence entries:
+- `path` is relative to `build/evidence/<id>/` (POSIX, no leading `/`, no `.` or `..` segments) and unique;
+- `format` comes from the case JSON's `evidence` list, or from the extension for binaries it does not list;
+- `chunks` is `ceil(size / 4 MiB)`; `explorer` is false for the binary extensions the Explorer skips.
+
+The sealed files together are exactly the case's entry in `site/server/generated/secrets.json`
+(`make_package.py` reuses `make_flags.py` to build them).
+
+Packages are **deterministic**: entries sorted by name, fixed timestamps (2026-11-13 08:00) and mode 0644,
+deflate level 9. The same inputs give a byte-identical zip, so its sha256 identifies a version.
+
+`scripts/check-packages.mts` (run by `build-all.sh`) opens every package with `site/shared/zip.ts` and checks it
+with `validateCasePackage()` in `site/shared/case-package.ts`:
+- no unexpected entries, and the file name matches `<id>-v<version>.case.zip`;
+- manifest, content and sealed parts against the schemas above, and the sealed points, hint costs and tool ids
+  against `content.en.json`;
+- every evidence file's size, sha256 and chunk count against the manifest, no unlisted files, and
+  `evidence.zip` holding the same files;
+- no answer, hint text or command in `manifest.json` or any `content.<lang>.json`, using the rules in
+  `site/shared/leak-scan.ts` (shared with `check-bundle.mjs`). Answers are matched as normalized whole tokens,
+  so a raw answer in any case or spacing is caught; answers shorter than 4 characters are not scanned;
+- against the build inputs: each `content.<lang>.json` equals `stripPaidContent` of the authored JSON, and the
+  sealed part equals the server secrets.
+
 ## Pipeline (for reference; you don't edit it)
 
 `scripts/build-all.sh` runs every `generator/cases/*/build.py`, then `scripts/make_flags.py` merges every
 `build/truth/<id>.answers.json` and `content-sealed/<id>.debrief*.md` into the server secrets, then
 `scripts/package.sh` zips `build/evidence/<id>/` to `site/public/evidence/<id>-evidence.zip` and copies the
-Explorer files to `site/public/evidence/<id>/files/`, then runs every `solutions/*/solve.sh`.
+Explorer files to `site/public/evidence/<id>/files/`, then `scripts/make_package.py` and
+`scripts/check-packages.mts` build and check the case packages, then it runs every `solutions/*/solve.sh`.

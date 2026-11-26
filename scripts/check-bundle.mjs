@@ -7,11 +7,11 @@
 // case's free debrief text must be found in what it read, or the check fails as blind.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { PAID_MIN_LENGTH, createTextScan } from "../site/shared/leak-scan.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const DIST = join(ROOT, "site/dist");
 const CASES = join(ROOT, "site/src/content/cases");
-const MIN_LENGTH = 16; // shorter strings (e.g. `ls -laR`) are too generic to be a meaningful leak signal
 
 const walk = (dir) => readdirSync(dir).flatMap((name) => {
   const path = join(dir, name);
@@ -23,17 +23,8 @@ const shipped = walk(DIST).filter((f) => /\.(js|css|html|json|map)$/.test(f) && 
 const jsChunks = shipped.filter((f) => f.startsWith(join(DIST, "assets")) && f.endsWith(".js"));
 const haystack = shipped.map((f) => readFileSync(f, "utf8")).join("\n");
 
-/*
- * Bundlers embed strings in more than one way: JSON-style "..." (\" and \n escapes), or template literals
- * (\` and \${ escapes, raw or escaped newlines). Normalizing escapes and whitespace on both sides finds a
- * string whatever quoting the bundler picked.
- */
-const normalize = (text) => text.replace(/\\[nrt]/g, " ").replace(/\\/g, "").replace(/\s+/g, " ");
-const normalizedHaystack = normalize(haystack);
-const isShipped = (text) => {
-  const escaped = JSON.stringify(text).slice(1, -1);
-  return haystack.includes(text) || haystack.includes(escaped) || normalizedHaystack.includes(normalize(text));
-};
+// Raw, JSON-escaped or escape-normalized: whatever quoting the bundler picked (site/shared/leak-scan.ts).
+const isShipped = createTextScan(haystack);
 
 const caseFiles = readdirSync(CASES).filter((f) => f.endsWith(".json") && !f.startsWith("_"));
 const secrets = [];
@@ -50,7 +41,7 @@ for (const file of caseFiles) {
 }
 
 // A command is "leaked" if it appears in any of the encodings above.
-const leaks = secrets.filter(({ text }) => text.length >= MIN_LENGTH && isShipped(text));
+const leaks = secrets.filter(({ text }) => text.length >= PAID_MIN_LENGTH && isShipped(text));
 const forbiddenFiles = walk(DIST).filter((f) => /secrets|answers/i.test(f));
 
 if (leaks.length > 0 || forbiddenFiles.length > 0 || unseen.length > 0) {

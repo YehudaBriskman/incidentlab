@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Full IncidentLab build: generators (3am-outage + generator/cases/*) -> server answer keys -> evidence zip + Explorer files -> solver test -> site -> server tests.
+# Full IncidentLab build: generators (3am-outage + generator/cases/*) -> server answer keys -> evidence zip + Explorer files
+# -> case packages (build/packages/, checked) -> solver test -> site -> server tests.
 # Usage: ./scripts/build-all.sh [--no-site]
 set -euo pipefail
 
@@ -47,6 +48,13 @@ banner "Answer keys -> server secrets (scripts/make_flags.py)"
 
 banner "Package evidence + Explorer  (scripts/package.sh)"
 "$ROOT/scripts/package.sh"
+
+banner "Package cases                (scripts/make_package.py -> build/packages/)"
+"$PYTHON" scripts/make_package.py
+
+banner "Check packages               (scripts/check-packages.mts)"
+(cd site && { [[ -d node_modules ]] || npm ci || npm install; })
+node --experimental-strip-types scripts/check-packages.mts
 
 banner "Test: official solver        (solutions/solve.sh)"
 bash solutions/solve.sh
