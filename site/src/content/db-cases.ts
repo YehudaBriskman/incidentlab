@@ -1,48 +1,53 @@
-// Cases published in the DB (#64/#66), next to the bundled ones. The catalog comes from GET /api/cases and
-// each case's content from GET /api/cases/:id/content, validated with the same CaseSchema as bundled cases
-// (DB content is the public part, so hint texts and full commands are simply absent). Evidence of a DB case
-// lives under /evidence/db/<id>/v<version>/…, so the version each case was served at is remembered here.
+// The content API client (#68): the catalog from GET /api/cases and each case's public content from
+// GET /api/cases/:id/content, validated with the same CaseSchema the authoring tools use (hint texts and full
+// commands are simply absent). Each content response also says where that version's evidence lives
+// (content/evidence.ts); the English format labels are kept because the Explorer picks a file's parser from them.
 import { z } from "zod";
 import { CaseSchema, type Case } from "../../shared/case";
+import { EvidenceLocationSchema } from "../../shared/case-records";
 import { CasesResponseSchema } from "../../shared/contract";
 import type { CatalogEntry } from "./catalog-schema";
 import { fetchPublic } from "../lib/api";
 import type { Lang } from "../i18n/i18n";
+import { rememberEvidence, evidenceZipUrl } from "./evidence";
 
-const DbContentSchema = z.object({ id: z.string(), version: z.number().int().min(1), lang: z.enum(["en", "he"]), content: CaseSchema });
+const ContentResponseSchema = z.object({
+  id: z.string(),
+  version: z.number().int().min(1),
+  lang: z.enum(["en", "he"]),
+  content: CaseSchema,
+  evidence: EvidenceLocationSchema.optional(),
+});
 
-const versions = new Map<string, number>();
 const englishFormats = new Map<string, ReadonlyArray<{ path: string; format: string }>>();
 
-/** Published DB cases; an empty list when the API can't be reached (bundled cases keep working). */
-export async function fetchDbCatalog(): Promise<CatalogEntry[]> {
+/** Published cases, or null when the API can't be reached (the caller shows an error with a retry). */
+export async function fetchDbCatalog(): Promise<CatalogEntry[] | null> {
   try {
     return (await fetchPublic("/api/cases", CasesResponseSchema)).cases;
   } catch (err: unknown) {
-    console.warn("[content] DB case catalog unavailable; showing bundled cases only", err);
-    return [];
+    console.warn("[content] case catalog unavailable", err);
+    return null;
   }
 }
 
-const zipUrl = (id: string, version: number): string => `${import.meta.env.BASE_URL}evidence/db/${encodeURIComponent(id)}/v${version}.zip`;
-
-/** A DB case in `lang` (the server falls back to English). Rejects on network errors so a later visit retries. */
-export async function loadDbCase(id: string, lang: Lang): Promise<Case | undefined> {
+/**
+ * A case in `lang` (the server falls back to English). `version` is the catalog's: it goes into the URL so
+ * the HTTP cache keeps one entry per published version. Rejects on network errors so a later visit retries.
+ */
+export async function loadDbCase(id: string, lang: Lang, version: number | undefined): Promise<Case | undefined> {
   // The Explorer picks a file's parser from its English format label, whatever the UI language: load the
   // English content first (once) so a Hebrew session parses files the same way.
-  if (lang !== "en" && !englishFormats.has(id)) await loadDbCase(id, "en");
-  const res = await fetchPublic(`/api/cases/${encodeURIComponent(id)}/content?lang=${lang}`, DbContentSchema);
+  if (lang !== "en" && !englishFormats.has(id)) await loadDbCase(id, "en", version);
+  const v = version === undefined ? "" : `&v=${version}`;
+  const res = await fetchPublic(`/api/cases/${encodeURIComponent(id)}/content?lang=${lang}${v}`, ContentResponseSchema);
   if (res.id !== id) return undefined;
-  versions.set(id, res.version);
+  rememberEvidence(id, res.version, res.evidence);
   if (res.lang === "en") englishFormats.set(id, res.content.evidence.map((e) => ({ path: e.path, format: e.format })));
-  return { ...res.content, evidenceZip: zipUrl(id, res.version) };
+  return { ...res.content, evidenceZip: evidenceZipUrl(id) ?? res.content.evidenceZip };
 }
 
-/** The version a DB case was served at (undefined for bundled cases and before its content loaded). */
-export function dbCaseVersion(id: string): number | undefined {
-  return versions.get(id);
-}
-
+/** A case's English evidence format labels (undefined before its content loaded). */
 export function dbEnglishFormats(id: string): ReadonlyArray<{ path: string; format: string }> | undefined {
   return englishFormats.get(id);
 }

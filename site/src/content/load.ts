@@ -1,92 +1,77 @@
-import catalogRaw from "virtual:case-catalog";
 import { getLang, type Lang } from "../i18n/i18n";
-import { CatalogSchema, TeasersSchema, type CaseSummary, type CatalogEntry, type Teaser } from "./catalog-schema";
-import { CaseSchema, type Case } from "../../shared/case";
+import { TeasersSchema, type CaseSummary, type CatalogEntry, type Teaser } from "./catalog-schema";
+import type { Case } from "../../shared/case";
 import { fetchDbCatalog, loadDbCase } from "./db-cases";
+import teasersRaw from "./teasers.json";
 
 /*
- * Two layers of content:
+ * Case content comes only from the content API (#68); nothing about a case is in the bundle.
  *
- * 1. The catalog (virtual:case-catalog, generated in vite.config.ts): id, title, subtitle, difficulty,
- *    estMinutes, tags and question count per case and language. It is in the entry chunk, so the home page,
- *    leaderboard and stats render without loading any case.
- * 2. Full cases: each `cases/<id>.json` and `cases/<id>.he.json` is its own lazy chunk, fetched by
- *    `loadCase` only when a case route opens, in the active language only (Hebrew falls back to English when
- *    its file is missing or invalid). Each file is validated with zod when it loads.
- *
- * The paid-content strip plugin in vite.config.ts transforms every case JSON module, so it applies to each
- * of these chunks. `_dev-sample.json` is only reachable under `vite dev`: its loader glob sits behind
- * `import.meta.env.DEV` (dead-code-eliminated in production builds) and the catalog leaves it out of builds.
+ * 1. The catalog: GET /api/cases, fetched once per page load (`catalogReady`). It lists every published
+ *    case with its version and the few fields the home page, leaderboard and stats need, per language.
+ *    The router waits for it before it decides whether a case id exists.
+ * 2. Full cases: GET /api/cases/<id>/content, fetched by `loadCase` only when a case route opens, in the
+ *    active language (content/db-cases.ts), and cached per id, version and language. Hint texts and
+ *    runnable commands are never in it: the server hands them out in `progress.unlocked` after charging.
  */
-const enLoaders = import.meta.glob<unknown>(["./cases/*.json", "!./cases/_*.json", "!./cases/*.he.json"], { import: "default" });
-const devLoaders: Record<string, () => Promise<unknown>> = import.meta.env.DEV
-  ? import.meta.glob<unknown>("./cases/_*.json", { import: "default" })
-  : {};
-const heLoaders = import.meta.glob<unknown>("./cases/*.he.json", { import: "default" });
-
-const teaserModules = import.meta.glob<unknown>("./teasers.json", { eager: true, import: "default" });
 
 export const FEATURED_CASE_ID = "3am-outage";
 
-function parseCatalog(): CatalogEntry[] {
-  const result = CatalogSchema.safeParse(catalogRaw);
-  if (!result.success) {
-    console.error("[content] case catalog failed schema validation", result.error.issues);
-    return [];
-  }
-  return result.data;
-}
-
 function parseTeasers(): Teaser[] {
-  const raw = Object.values(teaserModules)[0];
-  if (raw === undefined) return [];
-  const result = TeasersSchema.safeParse(raw);
+  const result = TeasersSchema.safeParse(teasersRaw);
   if (!result.success) {
     console.error("[content] teasers.json failed schema validation", result.error.issues);
     return [];
   }
   return result.data;
 }
+export const teasers: readonly Teaser[] = parseTeasers();
 
-/** Bundled cases first; DB-published cases (content/db-cases.ts) join or replace them when /api/cases answers. */
-const catalog = new Map<string, CatalogEntry>(parseCatalog().map((e) => [e.en.id, e]));
-const dbIds = new Set<string>();
+/* ---------- catalog ---------- */
+
+let catalog = new Map<string, CatalogEntry>();
+let catalogState: "loading" | "ready" | "failed" = "loading";
 const catalogListeners = new Set<() => void>();
 
-/** How long the first DB catalog fetch may hold back a case route before it falls back to bundled cases. */
-const DB_CATALOG_WAIT_MS = 4000;
+async function fetchCatalog(): Promise<void> {
+  const entries = await fetchDbCatalog();
+  if (entries === null) {
+    catalogState = "failed";
+  } else {
+    catalog = new Map(entries.map((e) => [e.en.id, e]));
+    catalogState = "ready";
+  }
+  for (const fn of catalogListeners) fn();
+}
 
-/** Resolves once the DB catalog has been merged in (or could not be fetched, or took too long). */
-export const catalogReady: Promise<void> = Promise.race([
-  fetchDbCatalog().then((entries) => {
-    let changed = false;
-    for (const entry of entries) {
-      dbIds.add(entry.en.id);
-      const before = catalog.get(entry.en.id);
-      if (before === undefined || JSON.stringify(before) !== JSON.stringify(entry)) changed = true;
-      catalog.set(entry.en.id, entry);
-    }
-    if (changed) for (const fn of catalogListeners) fn();
-  }),
-  new Promise<void>((resolve) => setTimeout(resolve, DB_CATALOG_WAIT_MS)),
-]);
+/** Resolves once the catalog has loaded, or could not be fetched (`catalogFailed()`); it never rejects. */
+export let catalogReady: Promise<void> = fetchCatalog();
 
-/** Called when DB cases change the catalog after the first render (new or retitled cases). */
+/** True when the last catalog fetch failed (the API could not be reached). */
+export function catalogFailed(): boolean {
+  return catalogState === "failed";
+}
+
+/** True until the first catalog fetch has answered. */
+export function catalogLoading(): boolean {
+  return catalogState === "loading";
+}
+
+/** Fetch the catalog again (a retry after `catalogFailed()`); listeners run when it answers. */
+export function reloadCatalog(): Promise<void> {
+  catalogState = "loading";
+  catalogReady = fetchCatalog();
+  return catalogReady;
+}
+
+/** Called whenever the catalog answers (first load or a retry). */
 export function onCatalogChange(fn: () => void): void {
   catalogListeners.add(fn);
 }
 
-/** True for a case served from the DB (its evidence lives under /evidence/db/). */
-export function isDbCase(id: string): boolean {
-  return dbIds.has(id);
-}
-export const teasers: readonly Teaser[] = parseTeasers();
-
-/* ---------- catalog (synchronous) ---------- */
-
 const summaryIn = (entry: CatalogEntry, lang: Lang): CaseSummary => (lang === "he" ? (entry.he ?? entry.en) : entry.en);
 
-/** A case's catalog card in the active language, or undefined for an unknown id. */
+/** A case's catalog card in the active language, or undefined for an unknown id (or before the catalog loaded). */
 export function caseSummary(id: string): CaseSummary | undefined {
   const entry = catalog.get(id);
   return entry === undefined ? undefined : summaryIn(entry, getLang());
@@ -106,38 +91,16 @@ export function caseSummaries(): CaseSummary[] {
     .map((e) => summaryIn(e, lang));
 }
 
-/* ---------- full cases (lazy, one chunk per case and language) ---------- */
+/* ---------- full cases (lazy, per id, version and language) ---------- */
 
 const pending = new Map<string, Promise<Case | undefined>>();
 const loaded = new Map<string, Case>();
-const cacheKey = (id: string, lang: Lang): string => `${lang}:${id}`;
-
-async function importEnglish(entry: CatalogEntry): Promise<Case | undefined> {
-  const path = `./cases/${entry.file}.json`;
-  const load = enLoaders[path] ?? devLoaders[path];
-  if (load === undefined) return undefined;
-  const result = CaseSchema.safeParse(await load());
-  if (!result.success) {
-    console.error(`[content] ${path} failed schema validation`, result.error.issues);
-    return undefined;
-  }
-  return result.data.id === entry.en.id ? result.data : undefined;
-}
-
-async function importHebrew(entry: CatalogEntry): Promise<Case | undefined> {
-  const path = `./cases/${entry.file}.he.json`;
-  const load = heLoaders[path];
-  if (load !== undefined) {
-    const result = CaseSchema.safeParse(await load());
-    if (result.success && result.data.id === entry.en.id) return result.data;
-    console.warn(`[content] ${path} failed schema validation; using English`, result.error?.issues);
-  }
-  return loadCase(entry.en.id, "en");
-}
+/** The catalog's version is part of the key, so a newly published version is fetched fresh. */
+const cacheKey = (id: string, lang: Lang): string => `${lang}:${id}:v${catalog.get(id)?.version ?? 0}`;
 
 /**
- * The full case in `lang` (default: the active language), validated. Resolves undefined for an unknown or
- * invalid case; rejects only when the chunk could not be fetched (a later call retries).
+ * The full case in `lang` (default: the active language), validated. Resolves undefined for an id the
+ * catalog does not list or the API does not serve; rejects only on a network failure (a later call retries).
  */
 export function loadCase(id: string, lang: Lang = getLang()): Promise<Case | undefined> {
   const key = cacheKey(id, lang);
@@ -145,8 +108,7 @@ export function loadCase(id: string, lang: Lang = getLang()): Promise<Case | und
   if (existing !== undefined) return existing;
   const entry = catalog.get(id);
   if (entry === undefined) return Promise.resolve(undefined);
-  const source = dbIds.has(id) ? loadDbCase(id, lang) : lang === "he" ? importHebrew(entry) : importEnglish(entry);
-  const promise = source.then(
+  const promise = loadDbCase(id, lang, entry.version).then(
     (c) => {
       if (c !== undefined) loaded.set(key, c);
       return c;
@@ -162,6 +124,7 @@ export function loadCase(id: string, lang: Lang = getLang()): Promise<Case | und
 
 /** Load every catalog case in the active language (the admin dashboard needs all titles and questions). */
 export async function loadAllCases(): Promise<void> {
+  await catalogReady;
   await Promise.all([...catalog.keys()].map((id) => loadCase(id)));
 }
 
