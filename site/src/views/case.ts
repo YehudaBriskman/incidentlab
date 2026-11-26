@@ -1,6 +1,7 @@
 import { QUESTION_ORDER, SCORING, type ProgressView, type QuestionId, type ScoreBreakdown, type StageProgress } from "../../shared/contract";
 import type { Case, Question } from "../../shared/case";
 import { ApiError, getDebrief, getProgress, revealAnswer, revealHint, setupDone, submitAnswer } from "../lib/api";
+import { recordVisit } from "../lib/recent";
 import { playErrorText } from "../lib/errors";
 import { loadAccount, loadToday, setAccount, signOut } from "../lib/session";
 import { caseSummary } from "../content/load";
@@ -112,7 +113,11 @@ export function caseView(c: Case): ViewResult {
   const content = h("div", { class: "side-stack case-side" }, toolLinks(c));
   const rail = h("div", { class: "case-rail" });
   side = { content, rail };
-  return { main, sidebar: { label: TS().caseSide, trigger: TS().caseSideTrigger, content, rail }, start: () => renderCase(main, c) };
+  const start = (): void => {
+    recordVisit({ kind: "case", caseId: c.id }); // the home page's "Continue" card
+    renderCase(main, c);
+  };
+  return { main, sidebar: { label: TS().caseSide, trigger: TS().caseSideTrigger, content, rail }, start };
 }
 
 export function renderCase(root: HTMLElement, c: Case): void {
