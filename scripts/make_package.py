@@ -5,7 +5,7 @@
   content.<lang>.json      public case content (CaseContentSchema): the case JSON without hint texts or commands
   sealed/answers.json      normalized answers {qN: answer}
   sealed/hints.json        hint texts {qN: [{en, he}]}
-  sealed/commands.json     runnable toolbox commands {toolId: {command, powershell}}
+  sealed/commands.json     runnable toolbox commands {toolId: {command, powershell, lab}}
   sealed/scoring.json      {title, estMinutes, questions: {qN: {points, hintCosts, targetSeconds}}}
   sealed/debrief.en.md     the sealed debrief (and sealed/debrief.he.md when there is one)
   evidence.zip             the download, exactly as scripts/package.sh built it
@@ -57,7 +57,7 @@ def fail(message: str) -> "None":
 
 def strip_paid_content(raw: object) -> object:
     """Mirrors stripPaidContent() in site/shared/case-records.ts: hints keep only `cost`, toolbox items lose
-    `command` and `powershell`. scripts/check-packages.mts checks the result against the TypeScript version."""
+    `command`, `powershell` and `lab`. scripts/check-packages.mts checks the result against the TypeScript version."""
     if not isinstance(raw, dict):
         return raw
     out = dict(raw)
@@ -70,7 +70,7 @@ def strip_paid_content(raw: object) -> object:
     if isinstance(raw.get("toolbox"), list):
         out["toolbox"] = [
             {**s, "items": [
-                {k: v for k, v in item.items() if k not in ("command", "powershell")} if isinstance(item, dict) else item
+                {k: v for k, v in item.items() if k not in ("command", "powershell", "lab")} if isinstance(item, dict) else item
                 for item in s["items"]
             ]}
             if isinstance(s, dict) and isinstance(s.get("items"), list) else s

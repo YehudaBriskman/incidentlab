@@ -26,6 +26,8 @@ export const TG = defineStrings({
 
     // command cards
     syntaxLabel: "Syntax",
+    labTab: "Lab",
+    labNote: "Lab: for the lab image, a Linux shell with tcpdump, dig, jq and gawk and this case's evidence at /case. Run it from /case.",
     syntaxHelp: "Fill in the <placeholders> yourself, or reveal the exact command.",
     revealCommand: (cost: number): string => `Reveal full command (−${cost} pts)`,
     revealing: "Revealing…",
@@ -40,6 +42,7 @@ export const TG = defineStrings({
     toolboxCompleted: "Case completed: every command is unlocked for free.",
     toolboxCostNote: (cost: number, stage: number): string => `Each full command costs ${cost} pts, charged to stage ${stage} (the one you're on).`,
     toolboxNotStarted: "Start the case to reveal exact commands. Until then you can read every command's syntax.",
+    toolboxRetry: "Retry",
     stageShort: (n: number): string => `stage ${n}`,
 
     // scoring
@@ -153,6 +156,8 @@ export const TG = defineStrings({
     openAdmin: "לפאנל הניהול",
 
     syntaxLabel: "תחביר",
+    labTab: "מעבדה",
+    labNote: "מעבדה: לאימג' המעבדה, מעטפת לינוקס עם tcpdump, dig, jq ו-gawk והראיות של התיק ב-/case. מריצים מתוך /case.",
     syntaxHelp: "השלימו את ה-<placeholders> בעצמכם, או חשפו את הפקודה המדויקת.",
     revealCommand: (cost: number): string => `חשיפת הפקודה המלאה (−${cost} נק')`,
     revealing: "חושפים…",
@@ -167,6 +172,7 @@ export const TG = defineStrings({
     toolboxCompleted: "התיק הושלם: כל הפקודות פתוחות בחינם.",
     toolboxCostNote: (cost: number, stage: number): string => `כל פקודה מלאה עולה ${cost} נק', על חשבון שלב ${stage} (השלב הנוכחי).`,
     toolboxNotStarted: "התחילו את התיק כדי לחשוף פקודות מדויקות. עד אז אפשר לקרוא את התחביר של כל פקודה.",
+    toolboxRetry: "ניסיון חוזר",
     stageShort: (n: number): string => `שלב ${n}`,
 
     breakdownCaption: "פירוט הניקוד",

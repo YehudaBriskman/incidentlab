@@ -238,7 +238,8 @@ export class GameService {
       const toolIds = isComplete ? Object.keys(secrets.tools) : Object.keys(record.commandsRevealed);
       for (const id of toolIds) {
         const tool = secrets.tools[id];
-        if (tool) commands[id] = tool;
+        // One paid reveal unlocks every variant of the item (bash, PowerShell, lab).
+        if (tool) commands[id] = { command: tool.command, powershell: tool.powershell, lab: tool.lab };
       }
     }
     return {

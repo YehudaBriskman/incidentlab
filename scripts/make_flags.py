@@ -172,7 +172,7 @@ def case_config(case_id: str) -> dict:
             tool_id, command = item.get("id"), item.get("command")
             if not tool_id or not command:
                 continue
-            tools[tool_id] = {"command": command, "powershell": item.get("powershell") or None}
+            tools[tool_id] = {"command": command, "powershell": item.get("powershell") or None, "lab": item.get("lab") or None}
     return {
         "title": str(data.get("title", case_id)),
         "estMinutes": est_minutes,
