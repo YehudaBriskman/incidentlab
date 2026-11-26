@@ -223,7 +223,7 @@ function route(): void {
       // The case's content is its own chunk (per language), fetched only now.
       const missing: View = () => ({ main: h("div", { class: "view" }), start: () => notFound(T().caseMissing(id)) });
       if (sub === "explorer") {
-        lazyView(() => Promise.all([loadCase(id), import("./views/explorer")]).then(([c, m]): View => (c === undefined ? missing : legacy((root) => m.renderExplorer(root, c)))));
+        lazyView(() => Promise.all([loadCase(id), import("./views/explorer")]).then(([c, m]): View => (c === undefined ? missing : () => m.explorerView(c))));
       } else {
         lazyView(() =>
           Promise.all([loadCase(id), loadCaseViews()]).then(([c, views]): View => {
