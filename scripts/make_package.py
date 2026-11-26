@@ -15,7 +15,7 @@ The sealed part is the same record make_flags.py writes to the server secrets (i
 Packages contain ANSWERS: they are written only under build/ (gitignored) and must never be served.
 
 Deterministic: sorted entries, fixed timestamps and permissions, so the same inputs give the same sha256.
-Needs scripts/make_flags.py's inputs plus scripts/package.sh's output (site/public/evidence/<id>-evidence.zip).
+Needs scripts/make_flags.py's inputs plus scripts/package.sh's output (build/evidence-zips/<id>-evidence.zip).
 
 Usage: python3 scripts/make_package.py [--version N] [case-id ...]   (default: every case)
 Python 3 stdlib only.
@@ -37,7 +37,7 @@ import make_flags  # noqa: E402
 
 ROOT = make_flags.ROOT
 EVIDENCE_DIR = ROOT / "build" / "evidence"
-EVIDENCE_ZIPS = ROOT / "site" / "public" / "evidence"
+EVIDENCE_ZIPS = ROOT / "build" / "evidence-zips"
 OUT_DIR = ROOT / "build" / "packages"
 
 # Keep in step with site/shared/case-records.ts.
