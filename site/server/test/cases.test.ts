@@ -339,10 +339,11 @@ test("parseRange follows RFC 9110 for single ranges", () => {
   assert.equal(parseRange("bytes=-", 10), null);
 });
 
-test("the Edge Function import map pins the same npm versions as site/package.json", async () => {
+test("the Edge Function's root package.json pins the same npm versions as site/package.json", async () => {
   const readJson = async (path: string): Promise<unknown> => JSON.parse(await readFile(new URL(path, import.meta.url), "utf8"));
-  const { dependencies } = z.object({ dependencies: z.record(z.string(), z.string()) }).parse(await readJson("../../package.json"));
-  const { imports } = z.object({ imports: z.record(z.string(), z.string()) }).parse(await readJson("../../netlify/edge-functions/import_map.json"));
-  assert.ok(Object.keys(imports).length > 0);
-  for (const [name, target] of Object.entries(imports)) assert.equal(target, `npm:${name}@${dependencies[name] ?? "missing"}`, name);
+  const Deps = z.object({ dependencies: z.record(z.string(), z.string()) });
+  const site = Deps.parse(await readJson("../../package.json")).dependencies;
+  const edge = Deps.parse(await readJson("../../../package.json")).dependencies;
+  assert.deepEqual(Object.keys(edge).sort(), ["@netlify/blobs", "zod"]);
+  for (const [name, version] of Object.entries(edge)) assert.equal(version, site[name], name);
 });

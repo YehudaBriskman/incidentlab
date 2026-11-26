@@ -1,0 +1,10 @@
+{
+  "name": "incidentlab-edge",
+  "private": true,
+  "description": "Dependencies of the Netlify Edge Function (site/netlify/edge-functions). Netlify's edge bundler resolves npm imports from the repo root, so they live here; keep the versions equal to site/package.json.",
+  "type": "module",
+  "dependencies": {
+    "@netlify/blobs": "11.1.9",
+    "zod": "4.6.7"
+  }
+}

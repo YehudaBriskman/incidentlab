@@ -62,6 +62,8 @@ fi
 echo "[deploy] using $(printf '%s\n' "$cli_version" | grep -m1 '^netlify-cli/' || printf '%s\n' "$cli_version" | tail -n1)"
 
 echo "[deploy] building (scripts/build-all.sh)"
+# The Edge Function's npm imports resolve from the repo root's node_modules (see netlify.toml).
+(cd "$ROOT" && npm ci --no-audit --no-fund --silent)
 "$ROOT/scripts/build-all.sh"
 
 [[ -f "$ROOT/site/server/generated/secrets.json" ]] || { echo "[deploy] ERROR: site/server/generated/secrets.json missing" >&2; exit 1; }
