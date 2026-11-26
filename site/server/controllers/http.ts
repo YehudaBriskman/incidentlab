@@ -11,15 +11,35 @@ export const json = (status: number, body: unknown, extraHeaders: Record<string,
 
 export const noContent = (): Response => new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
 
-export const errorResponse = (status: number, error: string, options: { code?: string; retryAfterSeconds?: number } = {}): Response => {
-  const body = { error, ...(options.code === undefined ? {} : { code: options.code }), ...(options.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: options.retryAfterSeconds }) };
+export const errorResponse = (
+  status: number,
+  error: string,
+  options: { code?: string | undefined; retryAfterSeconds?: number | undefined; details?: readonly string[] | undefined } = {},
+): Response => {
+  const body = {
+    error,
+    ...(options.code === undefined ? {} : { code: options.code }),
+    ...(options.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: options.retryAfterSeconds }),
+    ...(options.details === undefined ? {} : { details: options.details }),
+  };
   return json(status, body, options.retryAfterSeconds === undefined ? {} : { "retry-after": String(options.retryAfterSeconds) });
 };
 
 export const toErrorResponse = (error: unknown): Response => {
-  if (error instanceof AppError) return errorResponse(error.status, error.message, { code: error.code, retryAfterSeconds: error.retryAfterSeconds });
+  if (error instanceof AppError) return errorResponse(error.status, error.message, { code: error.code, retryAfterSeconds: error.retryAfterSeconds, details: error.details });
   console.error("[incidentlab-api] unhandled error", error);
   return errorResponse(500, "internal");
+};
+
+/** Reads a raw binary body (application/octet-stream), refusing more than `maxBytes` with 413 "too-large". */
+export const readBytes = async (req: Request, maxBytes: number): Promise<Uint8Array> => {
+  const contentType = req.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().startsWith("application/octet-stream")) throw new AppError(415, "content-type must be application/octet-stream");
+  const declared = Number(req.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declared) && declared > maxBytes) throw new AppError(413, "request body too large", { code: "too-large" });
+  const bytes = new Uint8Array(await req.arrayBuffer());
+  if (bytes.byteLength > maxBytes) throw new AppError(413, "request body too large", { code: "too-large" });
+  return bytes;
 };
 
 /** Reads the body (enforcing size + content-type) and validates it with a zod schema. */

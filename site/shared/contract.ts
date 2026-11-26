@@ -272,15 +272,15 @@ export const AuditEntrySchema = z.object({
 export type AuditEntry = z.infer<typeof AuditEntrySchema>;
 
 // ---- trash (soft deletes) ---------------------------------------------------
-// Deleting an account or resetting progress moves the data to the trash first. Entries can be restored
+// Deleting an account or a case, or resetting progress, moves the data to the trash first. Entries can be restored
 // for TRASH_RETENTION_DAYS; restore never overwrites newer data (409 or "skipped").
 
 export const TRASH_RETENTION_DAYS = 7;
 
 export const TrashEntrySchema = z.object({
   id: z.string(),
-  kind: z.enum(["account", "progress"]),
-  /** what was removed, for humans: "account dana_k", "progress of 3am-outage (12 players)" */
+  kind: z.enum(["account", "progress", "case"]),
+  /** what was removed, for humans: "account dana_k", "progress of 3am-outage (12 players)", "case my-case" */
   label: z.string(),
   deletedAt: z.string(),
   expiresAt: z.string(),
@@ -299,7 +299,13 @@ export const TrashRestoreResponseSchema = z.object({ restored: z.number().int().
 // Admin auth: header X-Admin-Key: <ADMIN_KEY env var>.
 // Errors: non-2xx with body ErrorBody. 400 validation, 401 auth, 403 forbidden/locked/not approved, 404, 409, 429 rate limit.
 
-export const ErrorBodySchema = z.object({ error: z.string(), code: z.string().optional(), retryAfterSeconds: z.number().optional() });
+export const ErrorBodySchema = z.object({
+  error: z.string(),
+  code: z.string().optional(),
+  retryAfterSeconds: z.number().optional(),
+  /** itemized problems (a rejected case upload lists every failed check) */
+  details: z.array(z.string()).optional(),
+});
 
 // POST /api/auth/register  -> 201 {account} + cookie (status "pending" until the admin approves,
 //                             "approved" right away with a valid inviteCode). 409 code "reserved" / "username-taken".

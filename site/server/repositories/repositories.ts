@@ -95,6 +95,10 @@ export class ProgressRepository {
   private async listKeys(caseId?: string): Promise<string[]> {
     return this.kv.listKeys(caseId === undefined ? "progress:" : `progress:${caseId}:`);
   }
+  /** True when any player has a progress record on the case (the answer-drift guard). */
+  async hasAny(caseId: string): Promise<boolean> {
+    return (await this.listKeys(caseId)).length > 0;
+  }
   async list(caseId?: string): Promise<ProgressRecord[]> {
     const keys = await this.listKeys(caseId);
     const rows = await mapWithConcurrency(keys, async (key) => parseVersioned(await this.kv.get(key), ProgressRecordSchema)?.data ?? null);

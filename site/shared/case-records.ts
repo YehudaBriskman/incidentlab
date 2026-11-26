@@ -96,15 +96,43 @@ export type CaseSealed = z.infer<typeof CaseSealedSchema>;
 // Case records and the upload package manifest (stored under `case:` and `evidence:` keys, see
 // server/repositories/case-repository.ts).
 
-const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, "expected a lowercase hex SHA-256");
+export const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, "expected a lowercase hex SHA-256");
 
 export const CaseStatusSchema = z.enum(["draft", "published", "trashed"]);
 export type CaseStatus = z.infer<typeof CaseStatusSchema>;
 
-export const CaseMetaSchema = z.object({
+/** One stored version of a case: what its records hold, for listings, diffs and the publish checks. */
+export const CaseVersionInfoSchema = z.object({
+  version: z.number().int().min(1),
+  langs: z.array(CaseLangSchema).min(1),
+  title: z.string(),
+  difficulty: CaseSchema.shape.difficulty,
+  tags: z.array(z.string()).default([]),
+  /** answerFingerprint() of the version's sealed part: it changes when publishing would re-score players */
+  answerFingerprint: z.string(),
+  /** SHA-256 over the version's public content files */
+  contentSha: Sha256Schema,
+  /** account id of the uploader, or "admin" */
+  createdBy: z.string(),
+  createdAt: z.string(), // ISO timestamp
+  evidenceFiles: z.number().int().min(0).default(0),
+  evidenceBytes: z.number().int().min(0).default(0),
+});
+export type CaseVersionInfo = z.infer<typeof CaseVersionInfoSchema>;
+
+const CaseMetaRecordSchema = z.object({
   schemaVersion: z.number().int().min(1).default(1),
   id: CaseIdSchema,
+  /**
+   * The version the descriptive fields below (langs ... contentSha) belong to: `publishedVersion` when there
+   * is one, else `latestVersion`. Kept so readers written for #64 keep working.
+   */
   version: z.number().int().min(1),
+  /** the version public routes serve while `status` is "published"; null until the first publish */
+  publishedVersion: z.number().int().min(1).nullable(),
+  /** the highest stored version, drafts included; the next upload becomes latestVersion + 1 */
+  latestVersion: z.number().int().min(1),
+  /** "draft": nothing published yet; "published": publishedVersion is live; "trashed": soft-deleted (7-day restore) */
   status: CaseStatusSchema,
   langs: z.array(CaseLangSchema).min(1),
   title: z.string(),
@@ -114,10 +142,88 @@ export const CaseMetaSchema = z.object({
   answerFingerprint: z.string(),
   /** SHA-256 over the package's public content files */
   contentSha: Sha256Schema,
+  /** owner of the case id: the account id of the author who first uploaded it, or "admin" */
   createdBy: z.string(),
   createdAt: z.string(), // ISO timestamp
+  updatedAt: z.string(), // ISO timestamp
+  /** every stored version, oldest first */
+  versions: z.array(CaseVersionInfoSchema).min(1),
+}).refine((m) => m.latestVersion >= (m.publishedVersion ?? 0) && m.version === (m.publishedVersion ?? m.latestVersion), {
+  message: "version must equal publishedVersion (latestVersion while nothing is published) and not exceed latestVersion",
+  path: ["version"],
+}).refine((m) => m.versions.some((v) => v.version === m.version), {
+  message: "versions must include the described version",
+  path: ["versions"],
 });
+
+/**
+ * #64 wrote metas with a single `version` and no draft/published split. They parse as: that version is the
+ * latest and, unless its status was "draft", the published one, with one entry in `versions`.
+ */
+const upgradeLegacyMeta = (raw: unknown): unknown => {
+  if (!isObject(raw) || "latestVersion" in raw) return raw;
+  const version = raw["version"];
+  return {
+    ...raw,
+    publishedVersion: raw["status"] === "draft" ? null : version,
+    latestVersion: version,
+    updatedAt: raw["updatedAt"] ?? raw["createdAt"],
+    versions: [{
+      version,
+      langs: raw["langs"],
+      title: raw["title"],
+      difficulty: raw["difficulty"],
+      tags: raw["tags"],
+      answerFingerprint: raw["answerFingerprint"],
+      contentSha: raw["contentSha"],
+      createdBy: raw["createdBy"],
+      createdAt: raw["createdAt"],
+    }],
+  };
+};
+
+export const CaseMetaSchema = z.preprocess(upgradeLegacyMeta, CaseMetaRecordSchema);
 export type CaseMeta = z.infer<typeof CaseMetaSchema>;
+/** Metas written since #66 (draft/published split) carry this schemaVersion. */
+export const CASE_META_SCHEMA_VERSION = 2;
+
+/**
+ * Builds a consistent meta from its versions: `version` and the descriptive fields follow `publishedVersion`
+ * (or the latest version while nothing is published).
+ */
+export const composeCaseMeta = (input: {
+  readonly id: string;
+  readonly versions: readonly CaseVersionInfo[];
+  readonly publishedVersion: number | null;
+  readonly status: CaseStatus;
+  readonly createdBy: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}): CaseMeta => {
+  const versions = [...input.versions].sort((a, b) => a.version - b.version);
+  const latest = versions[versions.length - 1];
+  if (!latest) throw new Error("a case meta needs at least one version");
+  const described = versions.find((v) => v.version === (input.publishedVersion ?? latest.version));
+  if (!described) throw new Error(`version ${String(input.publishedVersion)} is not stored`);
+  return CaseMetaSchema.parse({
+    schemaVersion: CASE_META_SCHEMA_VERSION,
+    id: input.id,
+    version: described.version,
+    publishedVersion: input.publishedVersion,
+    latestVersion: latest.version,
+    status: input.status,
+    langs: described.langs,
+    title: described.title,
+    difficulty: described.difficulty,
+    tags: described.tags,
+    answerFingerprint: described.answerFingerprint,
+    contentSha: described.contentSha,
+    createdBy: input.createdBy,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+    versions,
+  });
+};
 
 /** Evidence is stored and transferred in chunks of this many bytes (Netlify Function payload limits). */
 export const EVIDENCE_CHUNK_BYTES = 4 * 1024 * 1024;

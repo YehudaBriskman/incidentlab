@@ -1,6 +1,6 @@
 // DB-stored cases (#64). JSON records go through KvStore, evidence bytes through ByteStore, both on the
 // `incidentlab-v2` store:
-//   case:<id>:meta                       CaseMeta (the current version and its status; written with setIfMatch)
+//   case:<id>:meta                       CaseMeta (publishedVersion, latestVersion, status, every version; setIfMatch)
 //   case:<id>:v<n>:content:<lang>        CaseContent  (public: no hint texts, no runnable commands)
 //   case:<id>:v<n>:sealed                CaseSealed   (server-only: answers, hint texts, commands, debriefs)
 //   case:<id>:v<n>:evidence-index        EvidenceEntry[]  (every file of the evidence pack)
@@ -146,5 +146,20 @@ export class EvidenceChunkRepository {
 
   async putChunk(sha256: string, index: number, bytes: Uint8Array): Promise<void> {
     await this.bytes.setBytes(caseKeys.chunk(sha256, index), bytes);
+  }
+
+  /** The chunk indexes stored for a file (content addressing: any case or version may have stored them). */
+  async storedChunks(sha256: string): Promise<Set<number>> {
+    const prefix = `evidence:${sha256}:`;
+    const indexes = (await this.bytes.listKeys(prefix)).map((key) => key.slice(prefix.length)).filter((rest) => /^(0|[1-9][0-9]*)$/.test(rest)).map(Number);
+    return new Set(indexes);
+  }
+
+  /**
+   * Drops every chunk of a file. Only for a file whose stored bytes failed their sha256 check (so no case
+   * version can be serving it correctly); chunks are otherwise never deleted, because they are shared.
+   */
+  async deleteChunks(sha256: string): Promise<void> {
+    for (const index of await this.storedChunks(sha256)) await this.bytes.deleteBytes(caseKeys.chunk(sha256, index));
   }
 }

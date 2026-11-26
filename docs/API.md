@@ -7,10 +7,10 @@ both the browser and the function import it.
 
 ## Conventions
 
-- Request and response bodies are JSON. POST/PUT bodies must send `content-type: application/json` (otherwise 415) and be at most 4 KB (64 KB for the schedule; otherwise 413).
+- Request and response bodies are JSON. POST/PUT bodies must send `content-type: application/json` (otherwise 415) and be at most 4 KB (64 KB for the schedule, 512 KB to start an upload; otherwise 413). The upload chunk and part PUTs are the exception: raw `application/octet-stream` bodies.
 - Every response carries `cache-control: no-store`, except the two public DB-content routes below
   (`GET /api/cases`, `GET /api/cases/:caseId/content`), which carry no account data and are cacheable.
-- Errors are non-2xx with body `{ "error": string, "code"?: string, "retryAfterSeconds"?: number }`. Status codes: 400 validation, 401 signed out, 403 forbidden (see codes), 404, 405, 409 conflict (username taken, already finished, no more hints, concurrent update: retry), 413, 415, 429 rate limit (also sends `Retry-After`), 500 `{"error":"internal"}`, 503 admin disabled.
+- Errors are non-2xx with body `{ "error": string, "code"?: string, "retryAfterSeconds"?: number, "details"?: string[] }` (`details` lists every failed check of a rejected upload). Status codes: 400 validation, 401 signed out, 403 forbidden (see codes), 404, 405, 409 conflict (username taken, already finished, no more hints, concurrent update: retry), 413, 415, 429 rate limit (also sends `Retry-After`), 500 `{"error":"internal"}`, 503 admin disabled.
 - Error codes the UI acts on: `signed-out`, `bad-credentials`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `not-today`, `event-closed`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`.
 
 ## Accounts and sessions
@@ -69,8 +69,8 @@ at base + 30 + 10, plus 50); first blood can push a score above par. Each solved
 
 Served only from the `case:` records (see Storage). Until #68 imports the bundled cases the store is
 empty, so `GET /api/cases` returns `{cases: []}` and the client still uses the build-time content.
-Only the version a case's meta points at, and only while it is `published`, is visible; drafts and
-trashed cases are 404.
+Only a case's `publishedVersion`, and only while its status is `published`, is visible; drafts, older
+versions and trashed cases are 404.
 
 | Method | Path | Auth | Response |
 |---|---|---|---|
@@ -103,6 +103,47 @@ each route sets its own `Cache-Control` (`http.ts` defaults to `no-store`). The 
 content routes for 60 s (they vary only by URL, including `?lang`). The Edge Function does not opt in
 to CDN caching (`cache = "manual"` is unset), so its responses are cached by browsers only.
 
+### Author: upload, publish, rollback, delete (#66)
+
+Contract: `site/shared/author-contract.ts`. Every `/api/author/*` route takes the admin (`X-Admin-Key`
+header, as the CLI sends it, or the admin session) or an approved author session (`requireAuthor`:
+`403 not-author` for players, `401` signed out). An author acts only on cases whose `createdBy` is their
+account id (`403 not-owner`); the admin acts on any case. A new case id becomes the uploader's; an
+author cannot claim a bundled case id (`409 id-taken`). Every mutation except the single chunk and part
+PUTs is audited (`case.upload`, `case.draft`, `case.publish`, `case.rollback`, `case.delete`,
+`case.restore`; the detail names the author).
+
+A package travels in pieces so every body stays at or under 4 MiB (the Function limit is about 6 MB):
+evidence files and `evidence.zip` as content-addressed chunks, the small entries as named parts.
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| POST | `/api/author/uploads` | `{manifest, evidenceZip: {sha256, size}}` (≤ 512 KB) | 201 `{uploadId, caseId, expiresAt, chunkBytes, missingChunks: [{sha256, index}], parts}`. Chunks already stored (any case, any version) are not listed: re-POSTing after a failure is how an upload resumes. 413 `too-large` (over 100 MiB of evidence) or `too-many-files` (over 500); 409 `trashed`; 429 (30 per uploader per hour). |
+| PUT | `/api/author/uploads/:uploadId/chunks/:sha256/:index` | raw bytes, `application/octet-stream`, exactly the chunk's size (4 MiB, the last one shorter) | `{stored, fileComplete, verified}`. Idempotent: a stored chunk is never overwritten. When a file's last chunk arrives the whole file is hashed; a mismatch drops its chunks and answers 422 `sha-mismatch`. 400 `chunk-size`, 413 above 4 MiB, 415 another content type. |
+| PUT | `/api/author/uploads/:uploadId/parts/:name` | raw bytes (≤ 1 MiB) | `{name, size}`. Names: `content.en.json`, `content.he.json` (only for manifest languages), `sealed.answers.json`, `sealed.hints.json`, `sealed.commands.json`, `sealed.scoring.json`, `sealed.debrief.en.md`, `sealed.debrief.he.md` (the package entry with `/` as `.`); 400 `part-not-allowed` otherwise. |
+| POST | `/api/author/uploads/:uploadId/finalize` | `{}` | `{caseId, version, status: "draft", diff}`. Runs the package checks of `validatePackageParts()` (schemas, cross-checks, the answer-leak scan of the public content against the sealed answers, hint texts and commands), checks every chunk is stored and every file's sha256, then writes version `latestVersion + 1` as a **draft**. 422 `invalid-package` / 409 `missing-parts` / `missing-chunks` with `details`; 422 `sha-mismatch`. A repeated finalize returns the same result. |
+| GET | `/api/author/cases` | | `{cases: AuthorCase[]}`: the cases the caller may manage (trashed ones included), each with every version and its state (`published`, `draft`, `previous`). |
+| POST | `/api/author/cases/:caseId/publish` | `{version, acceptAnswerChanges?}` | `{caseId, publishedVersion, previousVersion, rollback, changed}`. Rollback is publishing an older version. 409 `answer-drift` (below), `conflict` (another publish won: the meta is written with `setIfMatch`), `trashed`, `incomplete-version`; 404 unknown version. |
+| DELETE | `/api/author/cases/:caseId` | | `{caseId, trashId, expiresAt}`: soft delete. Every public route answers 404 at once; the records stay. |
+| POST | `/api/author/cases/:caseId/restore` | `{}` | `{caseId, status}`: back to `published` or `draft`. The admin can also restore it from `/api/admin/trash`. 404 after the 7 days. |
+
+`diff` (finalize) compares with the published version: `contentChanged` (`"<lang>:<path>"`, at most 200,
+`contentTruncated`), `evidenceAdded`/`Removed`/`Changed` (paths), `evidenceZipChanged` and
+`answerFingerprintChanged` (null when there is nothing to compare).
+
+**Answer drift.** The answer fingerprint (`site/shared/answer-fingerprint.ts`, identical to
+`answer_fingerprint()` in `scripts/make_flags.py`) hashes the answers, points, hint costs and target
+times. Publishing a version whose fingerprint differs from the published one (before a case's first DB
+publish: from the bundled case's answer key) while any `progress:<caseId>:*` record exists is refused with
+409 `answer-drift`, unless `acceptAnswerChanges` is true. This is the rule `deploy.sh` enforces. It
+matters because a published version is what the game checks answers against: `CaseSecretsProvider` overlays
+published DB cases on the bundled answer keys, and a publish, rollback, delete or restore reloads it at once
+on the instance that served it (other instances within a minute).
+
+Unfinished uploads expire after 24 h; starting an upload sweeps expired `upload:` records. Evidence chunks
+are never deleted by a case delete, because versions and cases share them (a later garbage collection
+may reclaim unreferenced ones). CLI: `scripts/data.ts upload` (see `docs/CASE_CONTRACT.md`).
+
 ### Admin (`X-Admin-Key: <ADMIN_KEY>` or the `admin` session cookie)
 
 | Method | Path | Body | Response |
@@ -118,14 +159,14 @@ to CDN caching (`cache = "manual"` is unset), so its responses are cached by bro
 | PUT | `/api/admin/schedule` | `Schedule` | `{schedule}` (case ids must be released; time zone must be valid) |
 | GET | `/api/admin/stats` | | `{generatedAt, cases: CaseSummary[]}` |
 | POST | `/api/admin/accounts/:id/reset-password` | `{}` | `{temporaryPassword}` |
-| PUT | `/api/admin/accounts/:id/role` | admin | `{role: "player"\|"author"}` | `{account}`; audited as `account.role`. Authors may manage cases they created (upload routes arrive in #66). |
+| PUT | `/api/admin/accounts/:id/role` | admin | `{role: "player"\|"author"}` | `{account}`; audited as `account.role`. Authors may manage cases they created (the Author routes above). |
 | POST | `/api/admin/accounts/approve-all` | `{}` | `{approved}` |
 | GET/PUT | `/api/admin/settings` | `{inviteCode}` | `{settings}` |
 | GET/PUT | `/api/admin/event` | `LiveEvent` | `{event, serverTime}` (window, freeze, announcement; `enforceWindow` refuses answers, hints and reveals outside it) |
 | GET | `/api/admin/export.csv` | | CSV, one row per account per opened case |
 | GET | `/api/admin/audit?limit=` | | `{entries}` newest first (every admin mutation is recorded) |
-| GET | `/api/admin/trash` | | `{entries}` soft-deleted accounts and progress resets, newest first (expire after 7 days) |
-| POST | `/api/admin/trash/:id/restore` | `{}` | `{restored, skipped}` (never overwrites newer data; 409 `conflict` if the account or username exists again) |
+| GET | `/api/admin/trash` | | `{entries}` soft-deleted accounts, cases and progress resets, newest first (expire after 7 days) |
+| POST | `/api/admin/trash/:id/restore` | `{}` | `{restored, skipped}` (never overwrites newer data; 409 `conflict` if the account or username exists again, or the case is no longer deleted) |
 
 ## Schedule ("incident of the day")
 
@@ -148,8 +189,8 @@ Rules for changing stored data, backups, restores and migrations: see `docs/DATA
 
 One Netlify Blobs store, `incidentlab-v2`, with key prefixes: `account:`, `username:` (index),
 `session:`, `progress:<caseId>:<accountId>`, `config:schedule`, `config:settings`, `config:event`,
-`firstblood:<caseId>:<questionId>`, `audit:<iso>:<rand>`, `ratelimit:`, and for DB-stored cases `case:`
-and `evidence:` (shapes in `docs/DATA.md`). Records written before scoring v2
+`firstblood:<caseId>:<questionId>`, `audit:<iso>:<rand>`, `ratelimit:`, and for DB-stored cases `case:`,
+`evidence:` and `upload:` (shapes in `docs/DATA.md`). Records written before scoring v2
 still parse (new fields have defaults); stages solved before it keep their points. The pre-accounts store
 `incidentlab-players` is no longer read.
 

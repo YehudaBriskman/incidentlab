@@ -1,6 +1,7 @@
 // Fixtures for DB-stored cases: valid content, sealed and meta records, and a writer that stores a whole
 // case version (records + evidence chunks) straight through the repositories. Used by the server tests
 // and by tests/local-server.ts --seed-db-case (dev only; never against production).
+import { CaseMetaSchema } from "../../shared/case-records.ts";
 import type { CaseContent, CaseLang, CaseMeta, CaseSealed, CaseStatus, EvidenceEntry } from "../../shared/case-records.ts";
 import type { CaseRepository, EvidenceChunkRepository } from "../repositories/case-repository.ts";
 
@@ -48,7 +49,16 @@ export const sealedFixture = (id: string): CaseSealed => ({
   estMinutes: 45,
 });
 
-export const metaFixture = (id: string, overrides: Partial<CaseMeta> = {}): CaseMeta => ({
+/** A meta in the shape #64 wrote (one `version`, no draft/published split). */
+export type LegacyMeta = {
+  schemaVersion: number; id: string; version: number; status: CaseStatus; langs: CaseLang[]; title: string;
+  difficulty: CaseMeta["difficulty"]; tags: string[]; answerFingerprint: string; contentSha: string; createdBy: string; createdAt: string;
+};
+
+/** A meta as stored by #64, parsed into today's shape (the legacy `version` becomes publishedVersion unless a draft). */
+export const metaFixture = (id: string, overrides: Partial<LegacyMeta> = {}): CaseMeta => CaseMetaSchema.parse(legacyMetaFixture(id, overrides));
+
+export const legacyMetaFixture = (id: string, overrides: Partial<LegacyMeta> = {}): LegacyMeta => ({
   schemaVersion: 1,
   id,
   version: 1,

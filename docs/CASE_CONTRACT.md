@@ -138,6 +138,39 @@ with `validateCasePackage()` in `site/shared/case-package.ts`:
 - against the build inputs: each `content.<lang>.json` equals `stripPaidContent` of the authored JSON, and the
   sealed part equals the server secrets.
 
+### Uploading a package
+
+A package becomes a stored case version through the author API (`docs/API.md`, "Author"): the instructor
+(admin) or an author account the admin approved. Upload stores a **draft**; nothing changes for players until
+that version is published. From the command line:
+
+```bash
+# local server first (tests/local-server.ts on :8888 is the default target; any port with --url)
+node --experimental-strip-types scripts/data.ts upload build/packages/<id>-v1.case.zip
+node --experimental-strip-types scripts/data.ts upload build/packages/<id>-v1.case.zip --publish
+
+# publish a stored version, or roll back by publishing an older one
+node --experimental-strip-types scripts/data.ts publish <id> <version>
+
+# production: only with an explicit --url; the admin key comes from ADMIN_KEY or ~/.incidentlab-admin-key
+node --experimental-strip-types scripts/data.ts upload build/packages/<id>-v1.case.zip --url https://<site>
+```
+
+- The CLI runs `validateCasePackage()` locally first, prints where it is about to write, then sends the
+  evidence in 4 MiB chunks (at most 4 at once, each retried) and the small entries as named parts.
+- If it fails midway, run the same command again: the server lists only the chunks it does not have yet, so
+  nothing is sent twice. Evidence that another case or version already stored is never sent at all.
+- Finalize re-checks everything on the server (schemas, cross-checks, the answer-leak scan, every file's
+  sha256) and prints a diff against the published version: changed content keys, evidence added, removed or
+  changed, and whether the answer key changed.
+- Publishing a version whose answers, points, hint costs or target times differ from the live ones is refused
+  while players have progress on the case (like `deploy.sh`). Pass `--accept-answer-changes` to do it anyway,
+  or reset the case first.
+- The server assigns version numbers (`latestVersion + 1`); the package's `manifest.version` only names the
+  file.
+- Limits: 100 MiB of evidence, 500 evidence files, 1 MiB per content or sealed part; unfinished uploads expire
+  after 24 hours.
+
 ## Pipeline (for reference; you don't edit it)
 
 `scripts/build-all.sh` runs every `generator/cases/*/build.py`, then `scripts/make_flags.py` merges every

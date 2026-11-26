@@ -1,0 +1,136 @@
+{
+  "_comment": "answer_fingerprint() test vectors, shared by site/shared/answer-fingerprint.ts (server/test/answer-fingerprint.test.ts) and scripts/make_flags.py. Made-up inputs only: never put a real case answer here.",
+  "vectors": [
+    {
+      "input": {
+        "answers": {
+          "q1": "made-up-1"
+        },
+        "questions": {
+          "q1": {
+            "points": 100,
+            "hintCosts": [
+              10,
+              20
+            ],
+            "targetSeconds": 600
+          }
+        }
+      },
+      "fingerprint": "c89defe689a412d493e86072acc9f39bd1c102ffa5af377290351f6651e7d720"
+    },
+    {
+      "input": {
+        "answers": {
+          "q2": "b",
+          "q1": "a"
+        },
+        "questions": {
+          "q2": {
+            "points": 150,
+            "hintCosts": [],
+            "targetSeconds": 300
+          },
+          "q1": {
+            "points": 100,
+            "hintCosts": [
+              0,
+              5,
+              40
+            ],
+            "targetSeconds": 600
+          }
+        }
+      },
+      "fingerprint": "c545b31b37219cbf3d90bc3b5b197e21ab43075527040c391b1d2977cc802ffb"
+    },
+    {
+      "input": {
+        "answers": {
+          "q1": "07:15:42",
+          "q2": "say \"hi\" \\ back",
+          "q3": "tab\there\nnewline\r\b\f",
+          "q4": "\u0001ctl"
+        },
+        "questions": {
+          "q1": {
+            "points": 100,
+            "hintCosts": [
+              10
+            ],
+            "targetSeconds": 600
+          },
+          "q2": {
+            "points": 100,
+            "hintCosts": [
+              10
+            ],
+            "targetSeconds": 600
+          },
+          "q3": {
+            "points": 100,
+            "hintCosts": [
+              10
+            ],
+            "targetSeconds": 600
+          },
+          "q4": {
+            "points": 100,
+            "hintCosts": [
+              10
+            ],
+            "targetSeconds": 600
+          }
+        }
+      },
+      "fingerprint": "03369219e8b3707787d3a8e2c27c92363f4694e7d691da179c614cc661d70413"
+    },
+    {
+      "input": {
+        "answers": {
+          "q1": "שלום עולם",
+          "q2": "café ünïcode",
+          "q3": "emoji 🔥 x",
+          "q4": " sep"
+        },
+        "questions": {
+          "q1": {
+            "points": 100,
+            "hintCosts": [
+              10
+            ],
+            "targetSeconds": 600
+          },
+          "q2": {
+            "points": 120,
+            "hintCosts": [
+              10,
+              30
+            ],
+            "targetSeconds": 600
+          },
+          "q3": {
+            "points": 100,
+            "hintCosts": [],
+            "targetSeconds": 600
+          },
+          "q4": {
+            "points": 1,
+            "hintCosts": [
+              1
+            ],
+            "targetSeconds": 600
+          }
+        }
+      },
+      "fingerprint": "5d0a5e61b6455dd9d3ed2285858fb88c140e40b6f0ef6163e82017b8e5fd285c"
+    },
+    {
+      "input": {
+        "answers": {},
+        "questions": {}
+      },
+      "fingerprint": "965d95eff4aa5ea0204b86231e87b774cdffcd1f267ec374846bae4421e23f85"
+    }
+  ]
+}

@@ -70,10 +70,13 @@ export class AppError extends Error {
   readonly status: number;
   readonly code: string | undefined;
   readonly retryAfterSeconds: number | undefined;
-  constructor(status: number, message: string, options: { code?: string; retryAfterSeconds?: number } = {}) {
+  /** itemized problems, e.g. every check a case upload failed */
+  readonly details: readonly string[] | undefined;
+  constructor(status: number, message: string, options: { code?: string; retryAfterSeconds?: number; details?: readonly string[] } = {}) {
     super(message);
     this.status = status;
     this.code = options.code;
     this.retryAfterSeconds = options.retryAfterSeconds;
+    this.details = options.details;
   }
 }
