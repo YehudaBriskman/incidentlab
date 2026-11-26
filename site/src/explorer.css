@@ -315,3 +315,7 @@ th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
 [dir=rtl] .ex-time-out { text-align: left; }
 /* Translated UI text that the global `.mono` rule would otherwise force LTR. */
 [dir=rtl] .ex-count, [dir=rtl] .ex-file-meta { direction: rtl; unicode-bidi: normal; }
+
+/* Phones: the filters open in the shared bottom sheet (#61); the fieldset moves in and back out. */
+.ex-filter-sheet .ex-fieldset { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
+.ex-filter-sheet .ex-step .ex-input { min-width: 0; flex-basis: 100%; }

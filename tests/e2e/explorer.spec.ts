@@ -215,3 +215,23 @@ test("explorer cache: a worker restart reloads a big file without downloading it
   await expect(ui.count(page)).toHaveText(LOADED, { timeout: 60_000 });
   expect(fetched).toHaveLength(1);
 });
+
+test("explorer on a phone: filters open in a bottom sheet, apply live, and focus returns to the Filters button", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${ROUTE}?f=deploys/deploys.log`);
+  await expect(ui.count(page)).toHaveText(LOADED, { timeout: 60_000 });
+  const before = await countOf(page);
+  const summary = page.locator(".ex-controls-sum");
+  await summary.click();
+  const sheet = page.getByRole("dialog", { name: "Filters" });
+  await expect(sheet).toBeVisible();
+  await sheet.getByRole("textbox", { name: "Step 1 filter text" }).fill("DEPLOY");
+  await sheet.getByRole("button", { name: "Show results" }).click();
+  await expect(sheet).toBeHidden();
+  await expect(summary).toBeFocused();
+  await expect.poll(() => countOf(page)).toBeLessThan(before);
+  // the fieldset is back in the page, with the value kept
+  await expect(page.locator(".ex-controls .ex-fieldset")).toHaveCount(1);
+  // (inside the collapsed inline panel, so query by attribute rather than by role)
+  await expect(page.locator('.ex-controls [aria-label="Step 1 filter text"]')).toHaveValue("DEPLOY");
+});
