@@ -83,10 +83,10 @@ jobs:
             site/package-lock.json
             tests/e2e/package-lock.json
 
-      - name: Install system tools and git identity
+      # zip ships with the runner image; apt only runs if it ever goes missing (gawk is for the build lane's checks).
+      - name: System tools and git identity
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends zip gawk
+          command -v zip > /dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends zip; }
           git config --global user.name "IncidentLab CI"
           git config --global user.email "ci@incidentlab.invalid"
           git config --global init.defaultBranch main
@@ -106,16 +106,21 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('tests/e2e/package-lock.json') }}
+          # the browser binaries only; restore-keys would bring back a mismatched version, so none
 
       - name: Install Chromium (cache miss)
         if: steps.pw-cache.outputs.cache-hit != 'true'
         working-directory: tests/e2e
         run: npx playwright install --with-deps chromium
 
-      - name: Install Chromium system libraries (cache hit)
+      # On a hit, skip apt (install-deps runs apt-get update, the slow part) unless Chromium can't actually launch:
+      # the runner image normally has every library, and a missing one installs here instead of failing later.
+      - name: Check Chromium launches (cache hit)
         if: steps.pw-cache.outputs.cache-hit == 'true'
         working-directory: tests/e2e
-        run: npx playwright install-deps chromium
+        run: |
+          node -e "require('@playwright/test').chromium.launch().then((b) => b.close())" \
+            || npx playwright install-deps chromium
 
       - name: Start local server
         run: |
