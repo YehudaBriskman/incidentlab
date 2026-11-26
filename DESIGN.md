@@ -99,7 +99,7 @@ components:
   Open work goes in GitHub issues, never in this file.
 -->
 
-# IncidentLab design system v1.1.0
+# IncidentLab design system v1.2.0
 
 ## Overview
 
@@ -111,7 +111,7 @@ IncidentLab is a learning game for engineers: each case is a fictional outage wi
   - Consumer/game: students on phones (390px is a real case), Hebrew users, achievements, streaks, time bonus and a leaderboard. So: 17px reading body, 44px touch targets, expressive motion only at key moments (solve pop, wrong-answer shake).
   - Real-time: event clock, live admin funnel, leaderboard refresh. Numbers use tabular figures and status is never colour-only.
   - Projector: `body.projector` and the admin board need large type and the high-contrast theme.
-- **Token set version:** 1.1.0
+- **Token set version:** 1.2.0
 
 ### Design brief
 
@@ -151,8 +151,9 @@ IncidentLab is a learning game for engineers: each case is a fictional outage wi
 - 4px spacing base, 8 steps (`--space-1…8`: 4, 8, 12, 16, 24, 32, 48, 64). `--gutter` 16px.
 - Widths: `--read` 760 (stage, prose), `--page` 1080 (chrome, main), `--page-narrow` 900 (stats, leaderboard), `--page-wide` 1280 (admin).
 - Density: comfortable everywhere; admin tables use the same scale with smaller type.
-- **Layers:** modals and popovers open in the top layer (ordered by open order). What stays in the page is ordered by tokens: `--z-sidebar` 30 (folded nav panel, the #60 sidebar) < `--z-sheet` 40 < `--z-dialog` 50 < `--z-popover` 55 < `--z-toast` 60; the skip link sits one above the toasts. Local sticky offsets inside a view (table headers, tab bars) stay small literals.
-- **App shell:** a grid of navbar, announcement, a reserved sidebar column (#60), main and footer. The navbar row is 56px (`--control-md` + `--space-3`) and spans `--page`; the live strip under it (today's case, event clock, connectivity) hides when empty.
+- **Layers:** modals and popovers open in the top layer (ordered by open order). What stays in the page is ordered by tokens: `--z-sidebar` 30 (folded nav panel; the sticky sidebar itself needs no z-index) < `--z-sheet` 40 < `--z-dialog` 50 < `--z-popover` 55 < `--z-toast` 60; the skip link sits one above the toasts. Local sticky offsets inside a view (table headers, tab bars) stay small literals.
+- **App shell:** a grid of navbar, announcement, sidebar, main and footer. The navbar row is 56px (`--control-md` + `--space-3`) and spans `--page`; the live strip under it (today's case, event clock, connectivity) hides when empty.
+- **Sidebar (#60):** `--sidebar-size` 264px above 1024px (collapsible to the rail; the choice is a display setting), `--rail-size` 64px at 641–1024px, and no column at 640px and below (a page-header button opens the same content in a start-edge Sheet). Pages without a sidebar keep the full-width layout. `html[data-sidebar-page]` reserves the column before the view loads, so nothing shifts when it fills.
 - **Narrow header (≤1024px):** navigation, account and language fold behind a menu button; the row keeps logo, menu and ⚙ (DOM order = visual order). Signed in at 390px the header is the navbar row plus the live strip.
 
 ## Elevation & Depth
@@ -190,6 +191,7 @@ IncidentLab is a learning game for engineers: each case is a fictional outage wi
 | Stat tile | `statTile()`, `statGrid()`, `statTileSkeleton()` in `src/components/statGrid.ts` → `.kpi-grid` > `.stat-tile.kpi` | label `--step--2` uppercase muted; value 1.6rem 700 tabular; context lines `.stat-sub` (`.is-up` success, `.is-down` danger); skeleton keeps the tile's footprint |
 | Reading layout | `readingLayout()` in `src/components/readingLayout.ts` → `.reading` > `details.toc` + content | `--read` measure; "On this page" contents (`.toc-list`, h3 as `.toc-sub`) only with ≥3 h2/h3 headings; links scroll and focus the heading without touching the hash route; used by the debrief |
 | Form field | `formField()`, `formSection()`, `formActions()` in `src/components/formLayout.ts` → `.field`, `.field-label`, `.field-help`, `.field-error`, `.form-section`, `.form-actions` | order: label, hint, error, control; hint + error in `aria-describedby`, error sets `aria-invalid`; `.form-section` = fieldset with legend, `--radius-lg` edge; used by sign-in/sign-up, ready for the upload form |
+| Sidebar | `showSidebar()` / `openDrawer()` in `src/shell/sidebar.ts`; views return `{ main, sidebar: { label, trigger?, content, rail? }, header?, start? }` (`src/shell/types.ts`) → `aside#sidebar.sidebar[aria-label]` > `.sidebar-head` (`.sidebar-collapse` desktop, `.sidebar-open` rail) + `.sidebar-body` + `.sidebar-rail`; phone button `.sidebar-trigger` in `.page-header`; content parts `.side-stack`, `.side-group`, `.side-h`, `.side-meta`, `.side-links` > `.side-link[aria-current]`, `.side-option`, `.side-chips`, `.side-foot`; case stages `.stepper.side-steps` (labelled) and `.stepper.rail-steps` (icons) | `--surface` column, `--border` inline-end divider, sticky full height with its own scroll; `.side-h` = label style (`--step--2` uppercase muted); current link = `--accent-soft` + 3px inline-start accent bar (`--dir`); width change animates `--motion-dur-medium` only with motion allowed; forced colours: Highlight for the current item; hidden in print. Content moves (never cloned) into a `.sidebar-sheet` Sheet at ≤1024px; `a[href]` and `[data-sidebar-close]` inside close it. Collapse state: `sidebarCollapsed` in settings → `html[data-sidebar=collapsed]` (also set by `settings-boot.js`). Admin is not on it yet (its tabs become sections in a follow-up) |
 | Progress | `.progress-*`, `.meter-*`, `.bar*`, `.funnel-*`, `.cell.*` | fills on `--surface-3`/`--border`; forced colours: Canvas track + CanvasText edge + Highlight fill; revealed cells hatched |
 
 ### Overlays (`site/src/lib/overlay.ts`)
@@ -285,6 +287,7 @@ Report: 300 pairs verified (WCAG 2 text 4.5:1, non-text 3:1; APCA Lc 75 body / 6
 
 ## Decision log
 
+- **1.2.0 (2026-11-26):** contextual sidebar (#60): new tokens `--sidebar-size` (264px) and `--rail-size` (64px); views return a `ViewResult` and the shell mounts their sidebar. The case stepper and score meter, the toolbox contents and filter (plus a Bash/PowerShell switch), the Explorer's file list and time converter, and new case filters on home moved into it. The Explorer's own `.ex-sidebar` and its "Files & time" toggle are gone.
 - **1.1.0 (2026-11-26):** overlay system (#61): new tokens `--dialog-sm/md/lg`, `--sheet-size`, `--toast-size` and the layer scale `--z-sidebar/-sheet/-dialog/-popover/-toast`; one module for dialogs, confirms, sheets, popovers, menus, toasts and banners. Removed the inline two-step confirm (`confirmButton`, `.confirm-*`), `.admin-dialog`, `.row-menu`, the projector's `role=dialog` div and the `window.confirm` prompts. The announcement and the admin status line are banners; the announcement's warning tone moved from the danger fill to the warning fill.
 - **1.0.1 (2026-11-25):** admin below 900px uses 44px controls and card layouts (Page overrides); the 18px admin checkboxes became 24px with a 44px hit area on touch.
 - **1.0.0 (2026-11-25):** initial system from the generator inputs above, mapped onto the existing CSS through an alias layer. Light accent #a85f00 → #855602; warm light neutrals replaced by the hue-250 family; one control-height scale, pill, table header and focus ring; forced-colours and print layers; logical properties for RTL; self-hosted fonts.
