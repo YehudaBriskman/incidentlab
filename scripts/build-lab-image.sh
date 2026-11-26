@@ -12,7 +12,14 @@
 #   4. run the case's solver INSIDE the image against /case, with the solver and the answer key mounted
 #      read-only for this check only (they are never part of an image).
 # Env: BASE_TAG (default incidentlab/lab-base:local), CASE_TAG (default incidentlab/lab-<id>:local),
-#      CASE_VERSION (default 1). Nothing is pushed: publishing is a separate workflow (#151).
+#      CASE_VERSION (default 1).
+# Publishing (#151, run by the IncidentsLab/labs workflow, never by this repo's CI):
+#      BASE_FROM_REGISTRY=1  pull BASE_TAG (already pushed for every platform) instead of building it, so the
+#                            gated image and the pushed ones share the exact published base;
+#      PUSH=1                after the checks, push CASE_TAG (and EXTRA_TAGS, space-separated) for PLATFORMS
+#                            (default linux/amd64,linux/arm64) from the SAME vetted context, then pull every
+#                            pushed platform back and run the leak gate on it again.
+#      SOURCE_URL            the org.opencontainers.image.source label (links the package to its repo).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -31,8 +38,13 @@ trap 'rm -rf "$WORK"' EXIT
 CTX="$WORK/context"   # the ONLY directory docker sees for the case image
 mkdir -p "$CTX"
 
-echo "[lab] 1/4 base image $BASE_TAG"
-docker build --quiet --tag "$BASE_TAG" "$ROOT/lab/base" >/dev/null
+if [[ "${BASE_FROM_REGISTRY:-0}" == "1" ]]; then
+  echo "[lab] 1/4 base image $BASE_TAG (from the registry)"
+  docker pull --quiet --platform linux/amd64 "$BASE_TAG" >/dev/null
+else
+  echo "[lab] 1/4 base image $BASE_TAG"
+  docker build --quiet --tag "$BASE_TAG" "$ROOT/lab/base" >/dev/null
+fi
 
 echo "[lab] 2/4 clean context from $(basename "$ZIP")"
 (cd "$WORK" && unzip -q "$ZIP")
@@ -64,3 +76,23 @@ if grep -q " FAIL" "$WORK/solver.out" || ! grep -q " PASS" "$WORK/solver.out"; t
   exit 1
 fi
 echo "[lab] OK: $CASE_TAG holds exactly the public evidence, and the solver passes inside it"
+
+[[ "${PUSH:-0}" == "1" ]] || exit 0
+
+PLATFORMS="${PLATFORMS:-linux/amd64,linux/arm64}"
+echo "[lab] push $CASE_TAG ${EXTRA_TAGS:-} for $PLATFORMS"
+tags=(--tag "$CASE_TAG")
+for t in ${EXTRA_TAGS:-}; do tags+=(--tag "$t"); done
+labels=()
+[[ -n "${SOURCE_URL:-}" ]] && labels+=(--label "org.opencontainers.image.source=$SOURCE_URL")
+docker buildx build --quiet --push --platform "$PLATFORMS" "${tags[@]}" "${labels[@]}" \
+  --build-arg "BASE=$BASE_TAG" --build-arg "CASE_ID=$CASE_ID" --build-arg "CASE_VERSION=$CASE_VERSION" \
+  "$CTX" >/dev/null
+# What a player pulls is what was checked: every pushed platform goes through the gate again.
+for platform in ${PLATFORMS//,/ }; do
+  docker run --rm --pull always --platform "$platform" --entrypoint sh "$CASE_TAG" \
+    -c 'cd /case && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum' > "$WORK/pushed.listing"
+  python3 "$GATE" check "$ZIP" "$WORK/pushed.listing"
+  echo "[lab] pushed $platform passes the gate"
+done
+echo "[lab] OK: pushed $CASE_TAG"
