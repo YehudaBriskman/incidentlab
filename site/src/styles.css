@@ -1935,3 +1935,181 @@ html { scrollbar-gutter: stable; }
     border-color: CanvasText;
   }
 }
+
+/* =====================================================================
+   Soft UI sweep A (#97): the shared controls and overlay internals, after the Liba recipes (DESIGN.md 3.0.0
+   "Component recipes"). Sizes here are the recipe sizes (40 / 36 / 44 controls); the token block's older
+   --control-* scale stays for the views until their sweeps.
+   ===================================================================== */
+
+/* ---- buttons: 40 / sm 36 / lg 44; 14px medium; tinted by default ---- */
+.btn {
+  --btn-h: 40px;
+  min-height: var(--btn-h); padding: 0 var(--space-4); gap: var(--space-2);
+  font-size: var(--type-small-size); font-weight: 500; line-height: 1.25;
+}
+.btn-sm { --btn-h: 36px; padding-inline: var(--space-3); font-size: var(--type-small-size); }
+.btn-lg { --btn-h: 44px; padding-inline: var(--space-6); font-size: var(--type-small-size); }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.btn:hover:not(:disabled) { background: color-mix(in oklab, var(--fill-track) 80%, var(--fill-inset)); }
+.btn-copy { --btn-h: 28px; padding-inline: var(--space-3); font-size: var(--type-label-size); }
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn-primary:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 90%, var(--level-1)); }
+/* outline: the 3:1 control edge over no fill; hover takes the soft accent fill */
+.btn-outline { background: transparent; border-color: var(--edge-control); }
+.btn-outline:hover:not(:disabled) { border-color: var(--edge-control); background: var(--accent-soft); color: var(--accent-strong); }
+.btn-ghost { background: transparent; border-color: transparent; }
+.btn-ghost:hover:not(:disabled) { border-color: transparent; background: var(--hover-fill); }
+.btn-danger { background: var(--danger-fg); color: var(--on-danger); }
+.btn-danger:hover:not(:disabled) { background: color-mix(in oklab, var(--danger-fg) 90%, var(--level-1)); }
+/* icon buttons: a 40px square, 8px corners; on touch the hit area reaches 44px */
+.btn-icon { --btn-h: 40px; inline-size: var(--btn-h); min-inline-size: var(--btn-h); padding: 0; position: relative; }
+.btn-icon.btn-sm { --btn-h: 36px; }
+@media (pointer: coarse) {
+  :is(.btn-icon, .ov-close, .toast-close, .banner-close)::after { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: 44px; block-size: 44px; translate: -50% -50%; }
+  [dir="rtl"] :is(.btn-icon, .ov-close, .toast-close, .banner-close)::after { translate: 50% -50%; }
+}
+
+/* ---- inputs and selects: 40px, 8px corners, the 3:1 control edge, 12px inline padding;
+        16px text on phones (no iOS zoom on focus), 14px from 768px ---- */
+.input, select.input {
+  min-height: 40px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-control);
+  border: 1px solid var(--edge-control); background: var(--level-1); font-size: 1rem; line-height: 1.4;
+  transition: border-color var(--motion-settle) var(--ease-standard);
+}
+.input-lg { min-height: 44px; }
+@media (min-width: 768px) { .input, select.input { font-size: var(--type-small-size); } }
+.input:disabled { opacity: 0.5; cursor: not-allowed; }
+.input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.input[aria-invalid="true"] { border-color: var(--danger-fg); }
+/* search fields: a leading magnifier (a mid grey that holds on both themes; decorative) */
+input.input[type="search"] {
+  padding-inline-start: calc(var(--space-3) + 16px + var(--space-2));
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23878079' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-size: 16px 16px; background-position: left var(--space-3) center;
+}
+[dir="rtl"] input.input[type="search"] { background-position: right var(--space-3) center; }
+
+/* ---- checkboxes: 16px, 4px corners, accent fill with an ink check when checked; radios take the accent ---- */
+input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none; position: relative; flex: none;
+  display: inline-grid; place-content: center; inline-size: 16px; block-size: 16px; margin: 0;
+  border: 1px solid var(--edge-control); border-radius: var(--radius-mark); background: var(--level-1);
+  cursor: pointer; vertical-align: middle;
+  transition: background-color var(--motion-settle) var(--ease-standard), border-color var(--motion-settle) var(--ease-standard);
+}
+input[type="checkbox"]::before {
+  content: ""; inline-size: 10px; block-size: 10px; background: var(--on-accent); transform: scale(0);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+/* the box is 16px; its hit area reaches the 24px minimum (WCAG 2.5.8) */
+input[type="checkbox"]::after { content: ""; position: absolute; inset: -5px; }
+input[type="checkbox"]:checked, input[type="checkbox"]:indeterminate { background: var(--accent); border-color: var(--accent); }
+input[type="checkbox"]:checked::before { transform: scale(1); }
+input[type="checkbox"]:indeterminate::before { transform: scale(1); -webkit-mask: none; mask: none; block-size: 2px; border-radius: 1px; }
+input[type="checkbox"]:disabled { opacity: 0.5; cursor: not-allowed; }
+input[type="checkbox"]:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+input[type="radio"] { inline-size: 16px; block-size: 16px; accent-color: var(--accent); cursor: pointer; }
+.dt-select-box, .dt-check input { inline-size: 16px; block-size: 16px; }
+@media (forced-colors: active) {
+  input[type="checkbox"] { border-color: CanvasText; }
+  input[type="checkbox"]:checked { background: Highlight; border-color: Highlight; }
+  input[type="checkbox"]::before { background: HighlightText; }
+}
+
+/* ---- tabs and segmented controls: a muted track (8px, 4px padding); the active segment is the card colour,
+        lifted, with 4px corners. Nothing slides. (.seg lives in admin.css.) ---- */
+.shell-tabs {
+  display: inline-flex; align-items: center; gap: 2px; padding: var(--space-1);
+  border: 0; border-radius: var(--radius-control); background: var(--fill-track);
+}
+.shell-tab {
+  min-height: 28px; padding: 0 var(--space-3); border-radius: var(--radius-mark);
+  font-size: var(--type-small-size); font-weight: 500; color: var(--text-2);
+  transition: background-color var(--motion-settle) var(--ease-standard), color var(--motion-settle) var(--ease-standard);
+}
+.shell-tab:hover { color: var(--text-1); }
+.shell-tab[aria-selected="true"] { background: var(--level-2); color: var(--text-1); font-weight: 500; box-shadow: var(--surface-lift); }
+.shell-tab:focus-visible { outline-offset: 2px; }
+
+/* ---- pills (chips, badges, status): 12px semibold, no edge unless the tone needs one ---- */
+.chip, .meter-item, .event-clock, .stuck-badge, .status-pill, .via-pill, .today-tag, .hardest-badge,
+.tab-badge, .count-badge, .admin-session-tag, .ex-chip, .board-frozen-chip, .board-live-chip {
+  border-radius: var(--radius-pill); border-color: transparent; padding: 2px 10px;
+  font-size: var(--type-label-size); font-weight: 600; text-transform: none; letter-spacing: 0;
+}
+.chip-muted { border-color: var(--edge-subtle); background: transparent; }
+/* status dots: 8px circles; warning is a ring, so status never rests on colour alone */
+.status-dot { display: inline-block; flex: none; inline-size: 8px; block-size: 8px; border-radius: var(--radius-pill); background: var(--text-3); }
+.status-dot.is-success { background: var(--success-fg); }
+.status-dot.is-danger { background: var(--danger-fg); }
+.status-dot.is-info { background: var(--info-fg); }
+.status-dot.is-warning { background: transparent; box-shadow: inset 0 0 0 2px var(--warning-fg); }
+
+/* ---- dialog: 24px padding, 16px gaps; fixed header and footer, only the body scrolls ---- */
+.ov-dialog:not(.is-full) { max-block-size: calc(100dvh - 2rem); }
+.ov-head { flex: none; position: relative; align-items: center; padding: var(--space-5) calc(var(--space-5) + 28px) 0 var(--space-5); }
+.ov-title { font-size: 1.125rem; font-weight: 600; line-height: 1.35; text-align: start; letter-spacing: 0; }
+.ov-body { padding: var(--space-4) var(--space-5) var(--space-5); }
+.ov-dialog > .ov-body:first-child, .ov-dialog > .ov-close + .ov-body { padding-block-start: var(--space-5); }
+.ov-actions { flex: none; gap: var(--space-2); padding: 0 var(--space-5) var(--space-5); border-block-start: 0; justify-content: flex-end; }
+.ov-confirm .ov-body { padding-block-end: var(--space-4); }
+.ov-confirm .ov-actions { padding-block-start: 0; }
+/* the × sits at the top end: 4px corners, quiet until hovered or focused */
+.ov-close {
+  position: absolute; inset-block-start: var(--space-4); inset-inline-end: var(--space-4); margin: 0;
+  min-inline-size: 28px; min-block-size: 28px; border-radius: var(--radius-mark);
+  color: var(--text-1); opacity: 0.7; transition: opacity var(--motion-settle) var(--ease-standard), background-color var(--motion-settle) var(--ease-standard);
+}
+.ov-close:hover, .ov-close:focus-visible { opacity: 1; }
+@media (max-width: 480px) {
+  .ov-actions { flex-direction: column-reverse; align-items: stretch; }
+  .ov-head { padding-inline: var(--space-4) calc(var(--space-4) + 28px); }
+  .ov-body, .ov-actions { padding-inline: var(--space-4); }
+}
+
+/* ---- menu: 32px rows, 8px corners, soft accent hover; a check gutter when any row is checkable;
+        full-bleed separators; the focus ring is inset and only shows when the row is not hovered ---- */
+.ov-menu { min-inline-size: 8rem; max-block-size: calc(100dvh - 2 * var(--space-2)); overflow-y: auto; }
+.ov-menu-item { position: relative; min-block-size: 32px; padding-block: 6px; padding-inline: var(--space-2); font-size: var(--type-small-size); gap: var(--space-2); }
+.ov-menu-item:hover:not([aria-disabled="true"]), .ov-menu-item:focus-visible { background: var(--accent-soft); color: var(--accent-strong); }
+.ov-menu-item:focus-visible:not(:hover) { outline: 2px solid var(--focus-ring); outline-offset: -2px; box-shadow: none; }
+.ov-menu-item:focus-visible:hover { outline: none; }
+.ov-menu-item[aria-disabled="true"] { opacity: 0.5; }
+.ov-menu-item.is-danger:hover:not([aria-disabled="true"]), .ov-menu-item.is-danger:focus-visible { background: var(--danger-bg); color: var(--danger-fg); }
+.ov-menu:has([aria-checked]) .ov-menu-item { padding-inline-start: 32px; }
+.ov-menu-check { position: absolute; inset-block: 0; inset-inline-start: 0; inline-size: 32px; display: grid; place-items: center; }
+.ov-menu-item[aria-checked="false"] .ov-menu-check { visibility: hidden; }
+/* the separator above the danger row runs edge to edge across the 4px panel padding */
+.ov-menu-item.is-danger:not(:first-child) { border-block-start: 0; border-radius: var(--radius-control); margin-block-start: 9px; }
+.ov-menu-item.is-danger:not(:first-child)::before {
+  content: ""; position: absolute; inset-block-start: -5px; inset-inline: calc(-1 * var(--space-1)); block-size: 1px; background: var(--edge-subtle);
+}
+
+/* ---- tooltip: 14px ---- */
+.ov-tooltip { font-size: var(--type-small-size); line-height: 1.45; }
+.ov-tooltip .tip-meta { font-size: var(--type-label-size); }
+
+/* ---- toast: an elevation-2 card, 12px corners; the tone icon carries the tone (no side stripe) ---- */
+.toast { border: 1px solid var(--edge-subtle); border-radius: var(--radius-card); background: var(--level-3); font-size: var(--type-small-size); }
+.toast-icon, .banner-icon { background: var(--tone-fg); color: var(--level-1); }
+.toast-close, .banner-close { position: relative; border-radius: var(--radius-mark); color: var(--text-1); opacity: 0.7; transition: opacity var(--motion-settle) var(--ease-standard); }
+.toast-close:hover, .banner-close:hover, .toast-close:focus-visible, .banner-close:focus-visible { opacity: 1; }
+
+/* ---- banner: a soft tone fill, no heavy edge ---- */
+.banner { border-color: transparent; border-radius: var(--radius-card); background: var(--tone-bg); font-size: var(--type-small-size); }
+@media (forced-colors: active) { .banner, .toast { border-color: CanvasText; } }
+
+/* ---- tables: a muted header band (sentence case), 60% row rules, muted hover and selected fills, no zebra ---- */
+:is(.stats-table, .data-table) thead th {
+  background: color-mix(in oklab, var(--fill-inset) 70%, transparent); color: var(--text-2);
+  font-size: var(--type-label-size); font-weight: 600; text-transform: none; letter-spacing: 0;
+  border-bottom: 1px solid color-mix(in oklab, var(--edge-subtle) 60%, transparent);
+}
+:is(.stats-table, .data-table) :is(tbody th, tbody td) { border-bottom: 1px solid color-mix(in oklab, var(--edge-subtle) 60%, transparent); }
+:is(.stats-table, .data-table) tbody tr { transition: background-color var(--motion-settle) var(--ease-standard); }
+:is(.stats-table, .data-table) tbody tr:not(.dt-spacer, .dt-detail):hover { background: color-mix(in oklab, var(--fill-track) 40%, transparent); }
+.data-table tr.is-selected > * { background: color-mix(in oklab, var(--fill-track) 60%, transparent); }
+.data-table tr.dt-detail > td { background: color-mix(in oklab, var(--fill-inset) 50%, transparent); }
