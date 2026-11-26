@@ -5,9 +5,9 @@
 (function () {
   "use strict";
   var root = document.documentElement;
-  // Same route test as sidebarRoute() in site/src/main.ts: home, a case, its toolbox and its Explorer.
+  // Same route test as sidebarRoute() in site/src/main.ts: home, a case, its toolbox and its Explorer, and admin.
   var path = window.location.hash.replace(/^#\/?/, "").split("?")[0] || "";
-  if (/^(case\/[^/]+(\/(toolbox|explorer))?\/?)?$/.test(path)) root.setAttribute("data-sidebar-page", "");
+  if (/^(admin\/?|case\/[^/]+(\/(toolbox|explorer))?\/?)?$/.test(path)) root.setAttribute("data-sidebar-page", "");
   var raw = null;
   try {
     raw = window.localStorage.getItem("il.settings");

@@ -1,8 +1,9 @@
 // Contextual sidebar (#60): the per-page <aside> landmark and its aria-current marks on desktop, the collapse
 // state kept across a reload, the phone drawer (a Sheet: focus trap, Escape returns focus), Hebrew RTL at
-// 390px without horizontal overflow, and moving between case stages from the sidebar.
+// 390px without horizontal overflow, moving between case stages from the sidebar, and the admin sections in the
+// phone drawer.
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { answerFor, approveAccount, randomUsername, scheduleToday } from "./support";
+import { ADMIN_KEY, ADMIN_USERNAME, answerFor, approveAccount, randomUsername, scheduleToday } from "./support";
 
 const CASE_ID = "ghost-in-the-network";
 const PASSWORD = "e2e-password-123";
@@ -150,6 +151,35 @@ test.describe("phone", () => {
       const box = await drawer.boundingBox();
       return box === null ? null : { leftGap: box.x > 24, rightEdge: box.x + box.width >= 390 - 16 };
     }).toEqual({ leftGap: true, rightEdge: true });
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+  });
+
+  test("admin: the sections open in the drawer; a pick closes it, focuses the section and renames the button", async ({ page }) => {
+    const login = await page.request.post("/api/auth/login", { data: { username: ADMIN_USERNAME, password: ADMIN_KEY } });
+    expect(login.status(), await login.text()).toBe(200);
+    await freshSettings(page);
+    await page.goto("/#/admin?tab=accounts");
+    await expect(page.locator("#admin-panel-accounts")).toBeVisible();
+    await expect(ui.aside(page, "Dashboard menu")).toBeHidden();
+    const trigger = ui.trigger(page, "Sections: Accounts");
+    await trigger.click();
+    const drawer = ui.drawer(page, "Dashboard menu");
+    await expect(drawer.getByRole("navigation", { name: "Dashboard sections" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(drawer).toBeHidden();
+    await expect(trigger).toBeFocused();
+
+    await trigger.click();
+    await drawer.getByRole("link", { name: "Audit log" }).click();
+    await expect(drawer).toBeHidden();
+    await expect(page.locator("#admin-panel-audit")).toBeVisible();
+    await expect(page.locator("#admin-panel-audit")).toBeFocused();
+    await expect(ui.trigger(page, "Sections: Audit log")).toBeVisible();
+
+    await page.goBack();
+    await expect(page.locator("#admin-panel-accounts")).toBeVisible();
+    await expect(ui.trigger(page, "Sections: Accounts")).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
   });

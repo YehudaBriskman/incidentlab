@@ -8,8 +8,6 @@
   font-family: var(--font-sans);
   display: grid;
   gap: var(--space-5);
-  /* Height of the sticky tab bar: sticky bits below it (the accounts search) and focus scrolling start here. */
-  --adm-tabs-h: calc(var(--control-md) + 1px);
 }
 
 .admin .panel,
@@ -59,7 +57,7 @@
 .admin-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-3); }
 .admin-head-title .eyebrow { margin: 0; }
 .admin-head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
-.admin-updated { font-family: var(--font-mono); font-size: var(--step--1); color: var(--text-muted); margin-inline-end: var(--space-1); }
+.admin-updated { font-family: var(--font-mono); font-size: var(--step--1); color: var(--text-muted); }
 .admin-updated.is-stale { color: var(--warning-fg); }
 
 /* ---- tiles ---- */
@@ -251,42 +249,7 @@
 .board-time { font-family: var(--font-mono); font-size: 0.7em; }
 .board-score { font-family: var(--font-mono); font-weight: 700; text-align: end; }
 
-/* ---- tabs ---- */
-/* The tab bar sticks to the top while a tab scrolls, in one row (it scrolls sideways on phones). */
-.admin-tabs {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: var(--space-1);
-  border-bottom: 1px solid var(--border-strong);
-  margin-bottom: -8px;
-  position: sticky;
-  top: 0;
-  z-index: 6;
-  background: var(--canvas);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-html.admin-sticky-tabs { scroll-padding-top: calc(var(--adm-tabs-h, 45px) + var(--control-md) + var(--space-4)); }
-.admin-tab {
-  font: inherit;
-  font-weight: 600;
-  color: var(--text-2);
-  background: none;
-  border: 0;
-  border-bottom: 3px solid transparent;
-  padding: var(--space-2) var(--space-3);
-  margin-bottom: -1px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: var(--control-md);
-  flex: none;
-  white-space: nowrap;
-}
-.admin-tab:focus-visible { outline-offset: -2px; }
-.admin-tab:hover { color: var(--text); }
-.admin-tab.is-active { color: var(--text); border-bottom-color: var(--accent); }
+/* ---- sections (#60): one visible at a time; the links live in the shell sidebar ---- */
 .admin-tabpanel { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-5); min-width: 0; }
 .admin-tabpanel[hidden] { display: none; }
 .tab-badge, .count-badge {
@@ -537,7 +500,6 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
   .cell { width: 14px; height: 14px; }
   .admin-board-row { grid-template-columns: 1.8em minmax(0, 1fr) 3em; }
   .board-time { display: none; }
-  .admin-tab { padding: var(--space-2) var(--space-3); }
   .admin-toolbar .admin-input { min-width: 0; flex: 1 1 100%; }
   /* Phones: the month becomes a list (weekday, date, full-width picker): seven 40px columns can't show a case title. */
   .cal-grid { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
@@ -553,7 +515,7 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 /* ---- accounts: search stays in view, column chooser ---- */
 .acct-searchbar {
   position: sticky;
-  top: var(--adm-tabs-h);
+  top: 0;
   z-index: 4;
   margin-inline: calc(-1 * var(--space-2));
   padding: var(--space-2);
@@ -617,7 +579,6 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 .case-line-title { font-weight: 600; }
 
 /* ---- phones and tablets: compact chrome, cards, 44px targets ---- */
-[data-menu="head:more"] { display: none; }
 @media (max-width: 900px) {
   /* Same values the pointer: coarse layer uses: every control here is a 44px target. */
   .admin { --control-xs: var(--control-md); --control-sm: var(--control-md); --target-min: var(--control-md); gap: var(--space-4); padding-top: var(--space-3); }
@@ -625,9 +586,6 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
   .admin-head-title .eyebrow, .admin-session-tag { display: none; }
   .admin-title { font-size: var(--step-1); margin: 0; }
   .admin-head-actions { flex-wrap: nowrap; gap: var(--space-1); }
-  .admin-head-actions > .head-wide { display: none; }
-  [data-menu="head:more"] { display: inline-flex; }
-  .admin-updated { display: none; }
   .tiles-toggle { display: flex; }
   .tiles-fold.is-folded .admin-tiles { display: none; }
   .admin-tiles { gap: var(--space-2); }
@@ -790,9 +748,8 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
   .funnel-track { forced-color-adjust: none; background: Canvas; border: 1px solid CanvasText; }
   .funnel-reached { forced-color-adjust: none; background: Canvas; box-shadow: inset 0 0 0 2px CanvasText; }
   .funnel-done { forced-color-adjust: none; background: Highlight; opacity: 1; }
-  .admin-tab { border-bottom-color: Canvas; }
-  .admin-tab.is-active { border-bottom-color: Highlight; text-decoration: underline; text-underline-offset: 6px; }
-  .admin-tabs { border-bottom-color: CanvasText; }
+  .admin-rail-link[aria-current] { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+  .admin-rail-badge { border: 1px solid CanvasText; }
   .admin-table tr.is-warn > :first-child, .admin-table tr.is-alert > :first-child,
   .stats-q-table tr.is-hardest > :first-child { border-inline-start: 3px solid CanvasText; }
   .help-item, .pending-item { border-inline-start-color: CanvasText; }
@@ -806,3 +763,30 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
   .seg-btn[aria-pressed="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; }
   .player-card.is-warn, .player-card.is-alert, .help-item { border-inline-start-color: CanvasText; }
 }
+
+/* ---- sidebar (#60): quick actions, grouped sections, the rail ---- */
+.admin-side .admin-updated { display: block; }
+.admin-quick { gap: var(--space-2); }
+.admin-quick-row { display: flex; gap: var(--space-2); }
+.admin-quick-row > .btn { flex: 1 1 0; min-inline-size: 0; }
+.admin-quick-board { inline-size: 100%; }
+.admin-side-nav { display: flex; flex-direction: column; gap: var(--space-4); }
+.admin-side-link { justify-content: space-between; gap: var(--space-2); }
+.admin-side-label { min-inline-size: 0; overflow-wrap: anywhere; }
+.admin-rail { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }
+.admin-rail-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.admin-rail-link {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  min-block-size: var(--control-sm); min-inline-size: var(--control-sm); padding: 0;
+  border: 1px solid transparent; border-radius: var(--radius-md); background: none; color: var(--text-muted); cursor: pointer;
+}
+.admin-rail-link:hover { color: var(--text); background: var(--hover); }
+.admin-rail-link[aria-current] { color: var(--accent-strong); background: var(--accent-soft); box-shadow: inset calc(var(--dir) * 3px) 0 0 var(--accent); }
+.admin-rail > .admin-rail-link { margin-block-start: var(--space-2); }
+.admin-rail-badge {
+  position: absolute; inset-block-start: 0; inset-inline-end: 0; min-inline-size: 1.25rem; padding: 0 var(--space-1);
+  border-radius: var(--radius-full); background: var(--accent); color: var(--on-accent);
+  font-family: var(--font-mono); font-size: var(--step--2); font-weight: 700; line-height: 1.25rem; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.admin-rail-badge[hidden] { display: none; }

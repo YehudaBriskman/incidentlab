@@ -30,7 +30,10 @@ import { dataTable, type Column } from "../components/dataTable";
 import { statGrid, statTile } from "../components/statGrid";
 import { formActions, formField } from "../components/formLayout";
 import type { SortState } from "../components/table-core";
-import { copyButton, h, setChildren, type Child } from "../lib/dom";
+import { copyButton, h, html, setChildren, type Child } from "../lib/dom";
+import { TS } from "../i18n/strings-shell";
+import { setSidebarTrigger, showSidebar } from "../shell/sidebar";
+import type { SidebarSpec, ViewResult } from "../shell/types";
 import { banner, closeMenu, confirm, menu, openDialog, showDialog, toast, type ConfirmOptions, type DialogHandle, type MenuItem } from "../lib/overlay";
 import {
   AdminApiError,
@@ -90,6 +93,19 @@ const DEFAULT_TIMEZONE = "Asia/Jerusalem";
 type TabId = "accounts" | "live" | "event" | "schedule" | "stats" | "audit";
 const TABS: readonly TabId[] = ["accounts", "live", "event", "schedule", "stats", "audit"];
 const isTabId = (v: string | null): v is TabId => TABS.some((t) => t === v);
+
+/** Rail icons (decorative: the link carries the name). 24px grid, stroke drawn in currentColor. */
+const svgIcon = (paths: string): string =>
+  `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true">${paths}</svg>`;
+const SECTION_ICONS: Readonly<Record<TabId, string>> = {
+  accounts: svgIcon('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/>'),
+  live: svgIcon('<path d="M3 12h4l3-8 4 16 3-8h4"/>'),
+  stats: svgIcon('<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/>'),
+  event: svgIcon('<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M9 2h6"/>'),
+  schedule: svgIcon('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/>'),
+  audit: svgIcon('<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 12h7"/><path d="M9 16h7"/>'),
+};
+const PROJECTOR_ICON = svgIcon('<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>');
 const AUDIT_LIMIT = 100;
 const EVENT_QUICK_MINUTES = 60;
 const INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O, 1/I/L: easy to read aloud and type
@@ -614,6 +630,7 @@ let activeCleanup: (() => void) | null = null;
  */
 type AdminInstance = {
   container: HTMLElement;
+  side: AdminSide;
   lang: string;
   alive: () => boolean;
   reattach: () => void;
@@ -621,10 +638,30 @@ type AdminInstance = {
 };
 let activeInstance: AdminInstance | null = null;
 
-export function renderAdmin(root: HTMLElement): void {
+/** The sidebar parts of one dashboard instance: they live as long as it does (reused when the router re-attaches it). */
+type AdminSide = { content: HTMLElement; rail: HTMLElement };
+
+/** The live instance the router will re-attach on this URL, if any (same language, still inside #/admin). */
+function reusableInstance(): AdminInstance | null {
+  const prev = activeInstance;
+  return prev !== null && prev.alive() && isAdminHash(location.hash) && prev.lang === getLang() ? prev : null;
+}
+
+/**
+ * The dashboard as a shell view (#60): the sections are sidebar navigation (People, Live, Event, Audit) under the
+ * quick actions; the active section is in main. The sign-in gate releases the sidebar while it is on screen.
+ */
+export function adminView(): ViewResult {
+  const main = h("div", { class: "view" });
+  const side: AdminSide = reusableInstance()?.side ?? { content: h("div", { class: "side-stack admin-side" }), rail: h("div", { class: "admin-rail" }) };
+  const sidebar: SidebarSpec = { label: TS().adminSide, trigger: TS().adminSideTrigger, content: side.content, rail: side.rail };
+  return { main, sidebar, start: () => renderAdmin(main, side) };
+}
+
+function renderAdmin(root: HTMLElement, side: AdminSide): void {
   const prev = activeInstance;
   if (prev && prev.alive()) {
-    if (isAdminHash(location.hash) && prev.lang === getLang()) {
+    if (prev === reusableInstance()) {
       root.replaceChildren(prev.container);
       prev.reattach();
       return;
@@ -752,7 +789,7 @@ export function renderAdmin(root: HTMLElement): void {
     document.removeEventListener("visibilitychange", onVisibility);
     document.removeEventListener("focusin", onFocusIn);
     document.removeEventListener("click", onDocClick, { capture: true });
-    document.documentElement.classList.remove("admin-savebar-open", "admin-sticky-tabs");
+    document.documentElement.classList.remove("admin-savebar-open");
     boardDialog?.close(null);
     narrowMq.removeEventListener("change", onNarrowChange);
     if (activeCleanup === dispose) activeCleanup = null;
@@ -837,10 +874,13 @@ export function renderAdmin(root: HTMLElement): void {
 
   activeInstance = {
     container,
+    side,
     lang: getLang(),
     alive: () => !disposed,
     reattach: () => {
+      syncShellSidebar();
       if (state.accounts) applyUrlState();
+      setSidebarTrigger(side.content, triggerText());
       if (lastFocused && lastFocused.isConnected) lastFocused.focus({ preventScroll: true });
     },
     dirtyDrafts: () => ({ schedule: scheduleDirty() ? state.schedule.draft : null, event: eventDirty() ? state.event.draft : null }),
@@ -889,6 +929,8 @@ export function renderAdmin(root: HTMLElement): void {
     stopTimers();
     state.accounts = null;
     state.auth = null;
+    gateShown = true;
+    syncShellSidebar();
     const input = h("input", {
       type: "password",
       id: "admin-key",
@@ -970,8 +1012,8 @@ export function renderAdmin(root: HTMLElement): void {
   const updatedEl = h("span", { class: "admin-updated", "aria-live": "off" });
   const pauseBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admPause);
   const refreshBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admRefresh);
-  const boardBtn = h("button", { type: "button", class: "btn btn-primary btn-sm head-wide" }, T().admLeaderboard);
-  const logoutBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm head-wide" }, T().admSignOut);
+  const boardBtn = h("button", { type: "button", class: "btn btn-primary btn-sm admin-quick-board", "data-sidebar-close": "" }, TS().adminProjector);
+  const logoutBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admSignOut);
   // Connection problems and failed actions: one dismissible banner under the tabs (lib/overlay.ts).
   const statusBanner = banner({ tone: "warning", text: "", dismissible: true, className: "admin-banner", onDismiss: () => void (state.banner = null) });
   statusBanner.hide();
@@ -1032,47 +1074,113 @@ export function renderAdmin(root: HTMLElement): void {
     }
   };
 
+  // ---- the sections: sidebar navigation (#60) ----------------------------------------------
+  // Links, not a tablist: each section has its own URL (#/admin?tab=…), so the browser's Back, "open in a new
+  // tab" and copy-link work, and aria-current marks the one on screen. A plain click is handled here (pushState,
+  // so the router doesn't rebuild the page) and goes through selectTab's unsaved-edits guard.
   const pendingTabBadge = h("span", { class: "tab-badge" });
   pendingTabBadge.hidden = true;
-  const tabButtons = new Map<TabId, HTMLButtonElement>();
+  const pendingRailBadge = h("span", { class: "admin-rail-badge", "aria-hidden": "true" });
+  pendingRailBadge.hidden = true;
+  const sectionLinks = new Map<TabId, HTMLAnchorElement[]>();
   const tabPanels = new Map<TabId, HTMLElement>();
-  for (const tab of TABS) {
-    const btn = h(
-      "button",
-      { type: "button", role: "tab", id: `admin-tab-${tab}`, class: "admin-tab", "aria-controls": `admin-panel-${tab}` },
-      tabLabel(tab),
-      tab === "accounts" ? pendingTabBadge : null,
-    );
-    btn.addEventListener("click", () => selectTab(tab));
-    tabButtons.set(tab, btn);
-    tabPanels.set(tab, h("div", { role: "tabpanel", id: `admin-panel-${tab}`, class: "admin-tabpanel", "aria-labelledby": `admin-tab-${tab}` }));
-  }
-  const tabList = h("div", { class: "admin-tabs", role: "tablist", "aria-label": T().admTabsLabel }, [...tabButtons.values()]);
-  tabList.addEventListener("keydown", (e) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Home" && e.key !== "End") return;
-    const rtl = document.documentElement.dir === "rtl";
-    const idx = TABS.indexOf(state.tab);
-    let next = idx;
-    if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = TABS.length - 1;
-    else next = (idx + ((e.key === "ArrowRight") !== rtl ? 1 : -1) + TABS.length) % TABS.length;
-    const tab = TABS[next];
-    if (!tab) return;
+  const sidebarSpec: SidebarSpec = { label: TS().adminSide, trigger: TS().adminSideTrigger, content: side.content, rail: side.rail };
+  /** The sign-in gate is on screen: the sidebar column is released until the dashboard is back. */
+  let gateShown = false;
+
+  function onSectionClick(tab: TabId, e: MouseEvent, fromRail: boolean): void {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
-    selectTab(tab);
-    tabButtons.get(tab)?.focus();
-  });
+    // From the drawer (it has already closed): focus follows to the section. The column and the rail keep it.
+    const focusPanel = !fromRail && window.matchMedia("(max-width: 1024px)").matches;
+    if (selectTab(tab) && focusPanel) tabPanels.get(tab)?.focus({ preventScroll: true });
+  }
+
+  function sectionLink(tab: TabId, fromRail: boolean): HTMLAnchorElement {
+    const label = tabLabel(tab);
+    const link = fromRail
+      ? h(
+          "a",
+          { href: adminHash(tab, null), class: "admin-rail-link", "aria-label": label, title: label },
+          html("span", { class: "sidebar-icon", "aria-hidden": "true" }, SECTION_ICONS[tab]),
+          tab === "accounts" ? pendingRailBadge : null,
+        )
+      : h("a", { href: adminHash(tab, null), class: "side-link admin-side-link" }, h("span", { class: "admin-side-label" }, label), tab === "accounts" ? pendingTabBadge : null);
+    link.addEventListener("click", (e) => onSectionClick(tab, e, fromRail));
+    const list = sectionLinks.get(tab) ?? [];
+    list.push(link);
+    sectionLinks.set(tab, list);
+    return link;
+  }
+
+  for (const tab of TABS) {
+    tabPanels.set(tab, h("section", { id: `admin-panel-${tab}`, class: "admin-tabpanel", "aria-label": tabLabel(tab), tabindex: "-1" }));
+  }
+
+  const sectionGroups: ReadonlyArray<{ id: string; label: string; tabs: readonly TabId[] }> = [
+    { id: "people", label: TS().adminGroupPeople, tabs: ["accounts"] },
+    { id: "live", label: TS().adminGroupLive, tabs: ["live", "stats"] },
+    { id: "event", label: TS().adminGroupEvent, tabs: ["event", "schedule"] },
+    { id: "audit", label: TS().adminGroupAudit, tabs: ["audit"] },
+  ];
+
+  /** Fills the sidebar once per instance: quick actions on top, then the grouped sections; icons in the rail. */
+  function buildSidebar(): void {
+    sectionLinks.clear();
+    const quickId = "admin-side-quick";
+    setChildren(
+      side.content,
+      h(
+        "section",
+        { class: "side-group admin-quick", "aria-labelledby": quickId },
+        h("h2", { class: "side-h", id: quickId }, TS().adminQuick),
+        updatedEl,
+        h("div", { class: "admin-quick-row" }, pauseBtn, refreshBtn),
+        boardBtn,
+        h("a", { href: "#/author", class: "side-link admin-side-author" }, TS().navAuthor),
+      ),
+      h(
+        "nav",
+        { class: "admin-side-nav", "aria-label": T().admTabsLabel },
+        sectionGroups.map((g) =>
+          h(
+            "div",
+            { class: "side-group" },
+            h("h2", { class: "side-h", id: `admin-side-${g.id}` }, g.label),
+            h("ul", { class: "side-links", "aria-labelledby": `admin-side-${g.id}` }, g.tabs.map((tab) => h("li", {}, sectionLink(tab, false)))),
+          ),
+        ),
+      ),
+    );
+    const railBoard = h("button", { type: "button", class: "admin-rail-link", "aria-label": TS().adminProjector, title: TS().adminProjector });
+    railBoard.addEventListener("click", () => boardBtn.click());
+    railBoard.append(html("span", { class: "sidebar-icon", "aria-hidden": "true" }, PROJECTOR_ICON));
+    setChildren(
+      side.rail,
+      h("nav", { class: "admin-rail-nav", "aria-label": T().admTabsLabel }, h("ul", { class: "admin-rail-list" }, sectionGroups.flatMap((g) => g.tabs).map((tab) => h("li", {}, sectionLink(tab, true))))),
+      railBoard,
+    );
+  }
+
+  /** Shows (or, at the sign-in gate, releases) this dashboard's sidebar in the shell, when it is the page on screen. */
+  function syncShellSidebar(): void {
+    if (disposed || !container.isConnected) return;
+    sidebarSpec.trigger = triggerText();
+    showSidebar(gateShown ? null : sidebarSpec);
+  }
+
+  /** The phone's drawer button names the section on screen ("Sections: Live"): there is no tab bar to show it. */
+  const triggerText = (): string => TS().adminSideTriggerOn(tabLabel(state.tab));
 
   function syncTabs(): void {
+    setSidebarTrigger(side.content, triggerText());
     for (const tab of TABS) {
       const selected = tab === state.tab;
-      const btn = tabButtons.get(tab);
-      const panel = tabPanels.get(tab);
-      if (btn) {
-        btn.setAttribute("aria-selected", String(selected));
-        btn.tabIndex = selected ? 0 : -1;
-        btn.classList.toggle("is-active", selected);
+      for (const link of sectionLinks.get(tab) ?? []) {
+        if (selected) link.setAttribute("aria-current", "page");
+        else link.removeAttribute("aria-current");
       }
+      const panel = tabPanels.get(tab);
       if (panel) panel.hidden = !selected;
     }
   }
@@ -1091,7 +1199,7 @@ export function renderAdmin(root: HTMLElement): void {
         if (!ok || disposed || state.tab !== leaving) return;
         if (leaving === "schedule") discardSchedule();
         else discardEvent();
-        if (selectTab(tab)) tabButtons.get(tab)?.focus();
+        if (selectTab(tab)) tabPanels.get(tab)?.focus({ preventScroll: true });
       });
       return false;
     }
@@ -1099,7 +1207,6 @@ export function renderAdmin(root: HTMLElement): void {
     storeTab(tab);
     if (!opts.fromUrl) setUrl(adminHash(tab, state.liveCaseId), "push");
     syncTabs();
-    if (state.narrow) tabButtons.get(tab)?.scrollIntoView({ block: "nearest", inline: "nearest" });
     syncSaveBarClass();
     renderActiveTab();
     if (tab === "schedule" && !state.schedule.draft) void loadSchedule();
@@ -1131,23 +1238,15 @@ export function renderAdmin(root: HTMLElement): void {
           "div",
           { class: "admin-head-actions" },
           state.auth === "session" ? h("span", { class: "admin-session-tag" }, T().admSignedInAsAdmin) : null,
-          updatedEl,
-          pauseBtn,
-          refreshBtn,
-          boardBtn,
           logoutBtn,
-          // Phones/tablets: the projector board and Sign out fold into one menu so the header is one short row.
-          menuButton(T().admMoreLabel, "head:more", () => [
-            { label: T().admLeaderboard, run: () => boardBtn.click() },
-            { label: T().admSignOut, run: () => logoutBtn.click() },
-          ], T().admMore),
         ),
       ),
-      tabList,
       statusBanner.el,
       [...tabPanels.values()],
     );
-    document.documentElement.classList.add("admin-sticky-tabs");
+    buildSidebar();
+    gateShown = false;
+    syncShellSidebar();
     buildAccountsPanel();
     buildLivePanel();
     buildStatsPanel();
@@ -2047,6 +2146,10 @@ export function renderAdmin(root: HTMLElement): void {
     pendingTabBadge.textContent = fmtInt(pending.length);
     pendingTabBadge.hidden = pending.length === 0;
     pendingTabBadge.setAttribute("aria-label", T().admPendingBadge(pending.length));
+    pendingRailBadge.textContent = fmtInt(pending.length);
+    pendingRailBadge.hidden = pending.length === 0;
+    const railLabel = pending.length === 0 ? tabLabel("accounts") : `${tabLabel("accounts")}, ${T().admPendingBadge(pending.length)}`;
+    for (const link of sectionLinks.get("accounts") ?? []) if (link.classList.contains("admin-rail-link")) link.setAttribute("aria-label", railLabel);
     pendingStatusEl.textContent = state.approvedMsg ?? "";
     pendingStatusEl.hidden = state.approvedMsg === null;
     pendingStatusEl.tabIndex = -1;

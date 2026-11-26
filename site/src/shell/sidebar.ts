@@ -27,6 +27,7 @@ let rail: HTMLElement | null = null;
 let pageHeader: HTMLElement | null = null;
 let collapseBtn: HTMLButtonElement | null = null;
 let openBtn: HTMLButtonElement | null = null;
+let triggerLabel: HTMLElement | null = null;
 let current: SidebarSpec | null = null;
 let drawer: Drawer | null = null;
 
@@ -91,12 +92,23 @@ export function showSidebar(spec: SidebarSpec | null, header: Child = null): voi
   drawHeader(spec, header);
 }
 
+/**
+ * Renames the phone's drawer button while the sidebar whose content is `content` is on screen (the admin names
+ * the section being shown). Nothing else is redrawn, so focus and the drawer stay as they are.
+ */
+export function setSidebarTrigger(content: HTMLElement, text: string): void {
+  if (current === null || current.content !== content) return;
+  current.trigger = text;
+  if (triggerLabel !== null) triggerLabel.textContent = text;
+}
+
 function drawHeader(spec: SidebarSpec | null, header: Child): void {
   if (pageHeader === null) return;
+  triggerLabel = spec === null ? null : h("span", {}, spec.trigger ?? spec.label);
   const trigger =
     spec === null
       ? null
-      : h("button", { type: "button", class: "btn btn-sm btn-ghost sidebar-trigger", "aria-haspopup": "dialog", onclick: openDrawer }, icon(MENU_ICON, "sidebar-icon"), spec.trigger ?? spec.label);
+      : h("button", { type: "button", class: "btn btn-sm btn-ghost sidebar-trigger", "aria-haspopup": "dialog", onclick: openDrawer }, icon(MENU_ICON, "sidebar-icon"), triggerLabel);
   setChildren(pageHeader);
   appendChildren(pageHeader, [trigger, header]);
   // Shown by CSS: always with view content (.has-header), on phones whenever the page has a sidebar.
