@@ -21,6 +21,10 @@
 [functions]
   directory = "site/netlify/functions"
   node_bundler = "esbuild"
+  # The edge bundler resolves bare npm imports from the repo root, which has no node_modules (they are in
+  # site/). This map pins zod and @netlify/blobs to the versions in site/package.json for the Edge Function.
+  # Keep the versions in step with site/package.json.
+  deno_import_map = "./site/netlify/edge-functions/import_map.json"
 
 # DB-stored evidence (#64): an Edge Function streams the 4 MiB chunks from Blobs, with Range support, so
 # files past the Function payload limits (40 MB today) work. Its own prefix, so the static /evidence/*
