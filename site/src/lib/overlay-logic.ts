@@ -87,6 +87,16 @@ export function placeAnchored(
   return { left: Math.round(left), top: Math.round(Math.max(margin, top)) };
 }
 
+/**
+ * Where a popup grows from (Soft UI motion): the side it opened on relative to its anchor, and a
+ * transform-origin at the anchor's centre on the panel's near edge, in panel coordinates.
+ */
+export function anchorOrigin(anchor: Rect, pos: { left: number; top: number }, panel: Size): { side: "top" | "bottom"; origin: string } {
+  const side = pos.top + panel.height <= anchor.top + 1 ? "top" : "bottom";
+  const x = Math.min(Math.max(0, anchor.left + (anchor.right - anchor.left) / 2 - pos.left), panel.width);
+  return { side, origin: `${Math.round(x)}px ${side === "top" ? "100%" : "0"}` };
+}
+
 /* ---------- modal stack ---------- */
 
 /**

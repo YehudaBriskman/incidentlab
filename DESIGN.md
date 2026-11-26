@@ -300,8 +300,11 @@ Where the numbers stop short, and why:
 
 ## Typography
 
-- **Families:** IBM Plex Sans (variable, wght 100-700), IBM Plex Sans Hebrew (400/500/600/700), IBM Plex Mono (400/600): one superfamily for Latin, Hebrew and code. OFL, self-hosted as WOFF2 subsets from `@fontsource` 5.3.0 in `site/public/fonts/` (96 KB in all: sans 45 KB, Hebrew 4 × 5.5 KB, mono 2 × 15 KB). The Latin face is preloaded; Hebrew and mono load by `unicode-range`, so an English page never fetches Hebrew. Fallbacks `Plex Sans Fallback` and `Plex Mono Fallback` are metric-matched to Arial and Courier New from the capsize metrics. The CSP needs only `font-src 'self'`.
-- **Stacks:** Plex Sans Hebrew follows the Latin face in `--font-sans` and `--font-mono`, so Hebrew names and labels render in Plex on every OS. `[dir=rtl] body` uses `--font-sans-he` (Hebrew first).
+- **Families (3.0.0):**
+  - The interface uses the **system font**: `system-ui, -apple-system, "Segoe UI", "Noto Sans Hebrew", "Noto Sans", Roboto, Arial, sans-serif`. That is SF Pro on Apple, Segoe UI on Windows and Noto elsewhere, which carries most of the Apple feel, and it costs no download.
+  - Code and logs use IBM Plex Mono (400/600, OFL, self-hosted in `site/public/fonts/`, 30 KB, loaded by `unicode-range`), with a metric-matched `Plex Mono Fallback`.
+  - Plex Sans and Plex Sans Hebrew were removed. The CSP still needs only `font-src 'self'`.
+- **Tracking:** tightens as size grows: h1 −0.015em, h2 −0.01em, h3 −0.005em, 18px and up negative, 12–14px slightly positive. `:lang(he)` resets tracking to normal and never uppercases.
 - **Mono means "you can copy this":** commands, code, IDs, log lines. Not labels, clocks or decoration (the sweeps remove those uses).
 
 ### Type roles
@@ -350,33 +353,64 @@ Each role is four tokens: `--type-<role>-size`, `-lh`, `-weight`, `-track`. Noth
 
 ## Elevation & Depth
 
-Surface tone first, then a shadow only when something floats. One light source (y offset only).
+**Soft UI (3.0.0, after Liba):** surfaces separate by tone and a soft two-layer shadow, not by hairlines. Shadows use negative spread and are inked in our warm graphite (`--elevation-ink`: L 0.2, chroma 0.012, hue 65) in light and black in dark. In dark mode shadows barely show, so depth is lighter surfaces (`--level-1..4`) plus a 1px top highlight (`--elevation-edge`).
 
-| Level | Used for | Surface | Light shadow (`--elev-N`) | Dark shadow + highlight |
-|---|---|---|---|---|
-| 0 canvas | the page | `--level-0`: L 0.972 / 0.165 | none | none |
-| 1 card | cards, panels, tiles, briefing, table wrapper | `--level-1`: white / L 0.205 | `0 1px 2px` 7% + `0 1px 3px` 5% warm graphite | 30% + 20% black, `inset 0 1px 0` white 4% |
-| 2 raised | sticky bars, phone nav panel, drawers | `--level-2`: white / L 0.235 | `0 1px 2px` 7% + `0 4px 8px -2px` 10% | 35% + 40% black, highlight 5% |
-| 3 floating | popover, menu, ⚙ panel, toast | `--level-3`: white / L 0.265 | three layers, 7% / 12% / 10% | 40% / 45% / 35% black, highlight 6% |
-| 4 modal | dialog, sheet | `--level-4`: white / L 0.295 | three layers, 7% / 16% / 18% | 45% / 50% / 45% black, highlight 7% |
+| Token | Used for | Light | Dark |
+|---|---|---|---|
+| `--surface-lift` | resting card, tile, panel, table shell | `0 1px 2px 0` ink/.08 + `0 4px 10px -2px` ink/.12 | black .30 / .35 + highlight |
+| `--elevation-1` | top bar, tooltip, switch thumb | `0 1px 2px 0` + `0 1px 1px -1px` ink/.08 | black .30 + highlight |
+| `--elevation-2` | menu, popover, select, toast; hovered action card | `0 4px 12px -2px` ink/.12 + `0 2px 4px -2px` ink/.08 | black .40 / .30 + highlight |
+| `--elevation-3` | dialog, sheet | `0 12px 32px -4px` ink/.18 + `0 4px 8px -4px` ink/.12 | black .55 / .40 + highlight |
+| `--shadow-edge` | sticky header divider (travels with the header) | `0 1px 0 0 var(--border)` | same |
 
-- Dark mode: each level is lighter than the one below (checked by the contrast script), shadows are at least 30% black, and the inset top highlight marks the lit edge. High contrast dark steps 0.10 → 0.265.
-- `--fill-inset` and `--fill-track` are inset fills (table headers, chips, tracks), not elevation.
-- Scrims: `--scrim` 40% warm graphite in light, 50% black in dark; the dialog then reads 2.7:1 (light) and 1.4:1 plus its highlight edge (dark) against the dimmed page.
-- **Forced colours** remove shadows, so every raised surface (`.ov-dialog`, `.ov-sheet`, `.ov-popover`, `.ov-menu`, `.toast`, `.settings-panel`, `.nav-panel`, `.ex-drawer`, `.col-chooser-pop`) keeps a `CanvasText` edge (base rule in the forced-colours block).
-- The deprecated `--shadow-sm`, `--shadow-md`, `--shadow-lg` and `--shadow` point at `--elev-1`, `--elev-2`, `--elev-3` and `--elev-2`.
+- **Canvas versus card:** light canvas `--level-0` L 0.955 under near-white cards (`--level-1` L 0.993), so borderless cards read. Dark is 0.165 → 0.21 and up the levels.
+- **Borders, almost none:**
+  - no border on cards, tiles, panels, table shells, sidebar or the top bar;
+  - 1px subtle `--border` only on floating surfaces (dialog, menu, popover, tooltip, toast);
+  - `--edge-control` (3:1 or more) only on inputs, selects and checkboxes;
+  - table rows use a faint rule;
+  - empty states use a dashed edge.
+- **Glass:**
+  - top bar `.navbar` / `.surface-chrome`: surface at 92% with `blur(20px) saturate(140%)` and `--elevation-1`;
+  - modal scrim: ink at 40% with `blur(12px) saturate(120%)`, never carrying text;
+  - glass turns opaque under `prefers-reduced-transparency` and `[data-contrast=more]`.
+- **Forced colours** remove shadows, so cards, tiles, buttons and every floating surface get a `CanvasText` border back.
+- Old names map onto the ladder: `--elev-0..4` → none / surface-lift / elevation-1 / -2 / -3; `--shadow-sm` → surface-lift, `--shadow-md` → elevation-2, `--shadow-lg` → elevation-3, `--shadow` → surface-lift.
 
 ## Shapes
 
-- **Radius:** one 4px base, five steps (×0.5 / 0.75 / 1 / 1.5 / 2): `--radius-xs` 2 (inline code, marks, tracks) · `-sm` 3 · `-md` 4 (controls, panels, code panes) · `-lg` 6 (cards, popover, menu, toast) · `-xl` 8 (dialog, sheet) · `-full` (pills). `--radius` is an alias of `-lg`.
-- **Nesting:** inner = outer − padding, never below `xs`: `--radius-inner-lg` and `--radius-inner-xl` for the 4px-padded cases; anything else writes the same `max(var(--radius-xs), calc(outer - padding))`.
-- **Edges:** `--edge-width` 1px everywhere; one state stripe width, `--stripe-width` 3px, drawn as an inset box-shadow with `--dir` (plus a forced-colours border), never as a thick one-side border on a rounded box.
+Radius is set by role, not by size (Soft UI 3.0.0, after Liba).
+
+| Token | Value | Used by |
+|---|---|---|
+| `--radius-mark` | 4px | checkbox, tab trigger, close ×, progress rail |
+| `--radius-control` | 8px | button, icon button (a square, not a circle), input, select, menu item, tooltip, skeleton |
+| `--radius-card` | 12px | card, KPI tile, table shell, panel, empty state |
+| `--radius-surface` | 16px | dialog (from 640px; square on phones), menu, popover, sheet edge |
+| `--radius-pill` | full | avatar, account button, switch, badge, chip, status dot |
+
+- **Nesting:** inner radius = outer − padding. A 16px menu with 4px padding holds 8px items (`--radius-inner-xl`).
+- **Old names:** `-xs` → mark, `-sm` → 6px, `-md` → control, `-lg` → card, `-xl` → surface, `-full` → pill.
 
 ## Motion
 
-- Durations: `--motion-dur-short` 150ms (micro), `-medium` 240ms, `-long` 400ms (progress, shake), `-data` 900ms (time-bonus meter). Easings: `--motion-ease-standard`, `--motion-ease-enter`.
-- Budget: subtle. Expressive only for solve (pop) and wrong answer (shake).
-- `prefers-reduced-motion: reduce` removes shake, pop, pulses, the skeleton shimmer and every width transition (progress, meter, funnel, caret, explorer progress), and the overlay enter/exit (dialogs, sheets, popovers, toasts appear and leave at once). `[data-motion=reduce]` from the ⚙ menu does the same.
+Four durations and three curves, with no springs and no page transitions (after Liba).
+
+| Token | Value | Used for |
+|---|---|---|
+| `--motion-tap` | 80ms | press |
+| `--motion-settle` | 150ms | hover, focus, selection, tint |
+| `--motion-enter` | 220ms | menu, popover, tooltip, toast |
+| `--motion-surface` | 300ms | dialog, sheet |
+| `--ease-standard` | `cubic-bezier(0.2,0,0,1)` | entering |
+| `--ease-exit` | `cubic-bezier(0.4,0,1,1)` | leaving |
+| `--ease-lift` | `cubic-bezier(0.2,0.9,0.3,1)` | lifts |
+
+- **Popups:** fade plus `scale(var(--enter-scale))` 0.95 plus `--enter-travel` 8px from the trigger side. `lib/overlay.ts` sets `data-side` and `transform-origin` at the trigger's centre (`anchorOrigin()` in `overlay-logic.ts`).
+- **Dialogs:** fade plus scale 0.95 over 300ms, leaving on `--ease-exit`. The scrim fades over 150ms. **Sheets:** slide fully from their edge.
+- **Buttons:** `:active` scales to `--press-scale` 0.97 over 80ms. **Action cards:** lift by `--lift-raise` (−1px) to `--elevation-2` on hover.
+- **Not animated:** routes, list stagger, tab indicators.
+- **Reduced motion** (OS setting or `[data-motion=reduce]`): zero travel and scale (`--press-scale` 1, `--enter-scale` 1, `--enter-travel` 0, `--lift-raise` 0) and instant overlays. Colour and opacity changes stay. Old `--motion-dur-*` and `--motion-ease-*` names alias the new tokens.
 
 ## Voice & Content Strategy
 
@@ -511,6 +545,11 @@ Check: `node --experimental-strip-types scripts/check-contrast.mts [--markdown] 
 
 ## Decision log
 
+- **3.0.0 (2026-11-26): Soft UI design language (owner decision, after the Liba frontend).** Breaking for the look, not the API: the Night Shift colour roles stay (warm graphite, pager amber, APCA-verified text).
+  - Geometry, depth, borders, type and motion change: radius by role (4/8/12/16/full), two-layer soft shadows, borderless cards, glass top bar and scrim, and the motion ladder above.
+  - The interface font is now the **system font** (SF Pro, Segoe UI, Noto); Plex Sans and Plex Sans Hebrew were removed (−67 KB) and Plex Mono stays for code.
+  - The light canvas is darker (L 0.955) so cards separate by tone, and the light danger and warning text darkened slightly to keep APCA Lc 75 on it.
+  - This supersedes "hairline rules instead of cards" and the 4px radius from 2.0.0. The per-area sweeps apply the recipes (#97).
 - **2.0.0 (2026-11-26): Night Shift foundation (#97, from audits #89 #92 #93 #96).** Breaking: role names and values change, with aliases for every old name (Stack mapping).
   - Colour: warm graphite neutrals; one `#f5a524` fill in every theme with dark text; `--accent-text` for rare amber text; links text-coloured with an amber underline; warning moved to orange; fg/bg/line per status; edge roles (subtle, control, strong, selected); two-colour focus ring; scrims 40%/50%; code and terminal roles. Each role written once with `light-dark()`; the eight pasted theme copies became one block plus one high-contrast block. Dark small text now clears Lc 75 (was 43% below).
   - Depth: five elevation levels with dark-mode tone steps, ≥30% black shadows and a top highlight; forced-colours edges on raised surfaces; radius from a 4px base with the nesting rule.

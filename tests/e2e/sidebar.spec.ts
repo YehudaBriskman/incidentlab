@@ -139,7 +139,7 @@ test.describe("phone", () => {
       await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
       await expect(page.locator(".page-header .sidebar-trigger")).toBeVisible();
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-      expect(overflow, `${hash} scrolls sideways`).toBe(0);
+      expect(overflow, `${hash} scrolls sideways`).toBeLessThanOrEqual(0); // a reserved scrollbar gutter makes it negative
     }
     await page.goto(`/#/case/${CASE_ID}`);
     await page.locator(".page-header .sidebar-trigger").click();
