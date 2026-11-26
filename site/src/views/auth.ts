@@ -4,6 +4,7 @@ import { formField, type FormField } from "../components/formLayout";
 import { PasswordSchema, UsernameSchema, type AccountView } from "../../shared/contract";
 import { ApiError, changePassword, login, register } from "../lib/api";
 import { h, setChildren } from "../lib/dom";
+import "../player.css";
 import { getLang, isRelabel } from "../i18n/i18n";
 import { isAdmin, loadAccount, setAccount, signOut } from "../lib/session";
 import { TA } from "../i18n/strings-account";
@@ -113,7 +114,7 @@ export function withApprovedAccount(
   const again = (): void => withApprovedAccount(root, context, onReady, options);
   // A language switch re-renders this route: keep what was typed (the loading card below would wipe it).
   draft = isRelabel() ? captureDraft(root) : null;
-  setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, T().loading)));
+  setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted" }, T().loading)));
   loadAccount()
     .then((account) => {
       if (account === null) {
@@ -360,7 +361,7 @@ export function renderAuthForm(
     "form",
     { class: "center-card gate", novalidate: true, "data-mode": opts.mode },
     summary.el,
-    h("p", { class: "eyebrow mono" }, opts.context),
+    h("p", { class: "eyebrow" }, opts.context),
     h("h1", {}, isSignUp ? TA().authTitleSignUp : (opts.signInTitle ?? TA().authTitleSignIn)),
     h("p", { class: "muted" }, isSignUp ? TA().authHelpSignUp : TA().authHelpSignIn),
     // A class link (`?code=`) leads with the prefilled code: it is why this student skips the approval wait.
@@ -567,7 +568,7 @@ function renderForcedPasswordChange(root: HTMLElement, context: string, onDone: 
     h(
       "section",
       { class: "center-card gate" },
-      h("p", { class: "eyebrow mono" }, context),
+      h("p", { class: "eyebrow" }, context),
       h("h1", {}, TG().pwTitleForced),
       h("p", { class: "muted" }, carried ? TO().pwHelpForcedCarried : TG().pwHelpForced),
       form,
@@ -596,7 +597,7 @@ function renderAdminCard(root: HTMLElement, onSignedOut: () => void): void {
     h(
       "section",
       { class: "center-card" },
-      h("p", { class: "eyebrow mono" }, "admin"),
+      h("p", { class: "eyebrow" }, "admin"),
       h("h1", {}, TG().adminTitle),
       h("p", { class: "muted" }, TG().adminBody),
       h(
