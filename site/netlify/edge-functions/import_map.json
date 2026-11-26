@@ -1,6 +1,0 @@
-{
-  "imports": {
-    "zod": "npm:zod@4.6.7",
-    "@netlify/blobs": "npm:@netlify/blobs@11.1.9"
-  }
-}
