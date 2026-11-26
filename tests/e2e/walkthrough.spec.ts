@@ -83,11 +83,16 @@ test("player walkthrough: sign up to first solved stage, then admin sign-in", as
       test.info().annotations.push({ type: "skipped-step", description: "No 'Reveal full command' button in this UI build" });
       return;
     }
+    const before = await ui.revealCommand(page).count();
     page.once("dialog", (dialog) => void dialog.accept()); // native confirm()
     await reveal.click();
     const confirm = ui.revealConfirm(page).first();
     if (await confirm.isVisible({ timeout: 2_000 }).catch(() => false)) await confirm.click(); // in-page confirm
     await expect.poll(async () => (await fetchProgress(page)).stages.q1?.commandsRevealed ?? 0).toBe(1);
+    // Wait for the page, not only the API: the reveal response redraws the stage, and typing an answer
+    // before that redraw lands goes into an input that is about to be replaced (the click then submits an
+    // empty field, "Type an answer first", and no wrong answer is counted).
+    await expect(ui.revealCommand(page)).toHaveCount(before - 1);
     revealedCommand = true;
   });
 

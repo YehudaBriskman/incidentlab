@@ -32,7 +32,9 @@ check("catalog lists the case", catalog?.cases?.some((c) => c.en?.id === caseId)
 const contentRes = await fetch(`${base}/api/cases/${caseId}/content?lang=en`);
 const content = contentRes.status === 200 ? await contentRes.json() : null;
 check("case content served", content?.id === caseId && Array.isArray(content?.content?.questions), String(contentRes.status));
-check("case content carries no paid content", content !== null && !JSON.stringify(content).includes('"command"') && !JSON.stringify(content).includes('"text"'));
+const hintTexts = (content?.content?.questions ?? []).flatMap((q) => (q.hints ?? []).filter((h) => "text" in h));
+const commands = (content?.content?.toolbox ?? []).flatMap((s) => (s.items ?? []).filter((it) => "command" in it || "powershell" in it));
+check("case content carries no paid content (hint texts, commands)", content !== null && hintTexts.length === 0 && commands.length === 0, `${hintTexts.length} hint texts, ${commands.length} commands`);
 const location = content?.evidence;
 check("content names its evidence location", typeof location?.filesBase === "string" && typeof location?.zip === "string", JSON.stringify(location));
 const abs = (url) => new URL(url, base + "/").toString();
