@@ -7,6 +7,10 @@
 //   node --experimental-strip-types scripts/data.ts restore <file.json | daily/YYYY-MM-DD.json> [--apply] [--prune]
 //   node --experimental-strip-types scripts/data.ts migrate [--apply]
 //   node --experimental-strip-types scripts/data.ts migrate --check        (exit 3 when migrations are pending)
+//   node --experimental-strip-types scripts/data.ts upload <package.case.zip> [--publish] [--accept-answer-changes] [--url <base>]
+//   node --experimental-strip-types scripts/data.ts publish <case-id> <version> [--accept-answer-changes] [--url <base>]
+//     upload/publish go through the HTTP API (scripts/upload-case.ts), not Blobs: the URL defaults to the
+//     local server, production needs an explicit --url.
 //
 // Credentials: NETLIFY_AUTH_TOKEN (or ~/.netlify-token) and the site id from .netlify/state.json.
 // Local backups go to ~/.incidentlab-backups/ (mode 600), never into the repo.
@@ -19,6 +23,7 @@ import { BACKUP_STORE, BlobsKvStore, LEGACY_STORE, PRIMARY_STORE } from "../site
 import type { BlobsCredentials } from "../site/server/repositories/KvStore.ts";
 import { SnapshotSchema, diffSnapshot, restoreSnapshot, takeSnapshot } from "../site/server/services/BackupService.ts";
 import type { Snapshot, SnapshotDiff } from "../site/server/services/BackupService.ts";
+import { runPublishCli, runUploadCli } from "./upload-case.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const args = process.argv.slice(2);
@@ -117,8 +122,16 @@ const main = async (): Promise<void> => {
       if (!apply) console.log("[data] dry run: nothing written. Re-run with --apply.");
       return;
     }
+    case "upload": {
+      await runUploadCli(args.slice(1));
+      return;
+    }
+    case "publish": {
+      await runPublishCli(args.slice(1));
+      return;
+    }
     default:
-      die("commands: backup | list-backups | restore <src> [--apply] [--prune] | migrate [--apply|--check]", 2);
+      die("commands: backup | list-backups | restore <src> [--apply] [--prune] | migrate [--apply|--check] | upload <package> [--publish] [--accept-answer-changes] [--url <base>] | publish <case-id> <version> [--accept-answer-changes] [--url <base>]", 2);
   }
 };
 
