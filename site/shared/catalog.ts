@@ -15,7 +15,7 @@ export const CaseSummarySchema = z.object({
 });
 
 export const CatalogEntrySchema = z.object({
-  /** the case id (kept from the build-time catalog, where it was the file stem) */
+  /** the case id (the field predates #68, when it named a bundled file) */
   file: z.string(),
   /** the published version (#68): the browser caches a case's content per version */
   version: z.number().int().min(1).optional(),

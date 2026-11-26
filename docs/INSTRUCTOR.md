@@ -28,7 +28,7 @@ Session shape: **10 min orientation, 40 min solve (pairs), then debrief and lect
 - [ ] `deploy.sh` backs up production before deploying, and a nightly backup runs too. For a manual snapshot
       before the session: `node --experimental-strip-types scripts/data.ts backup`. See `docs/DATA.md`.
 - [ ] Want to rehearse without touching production? Run a local preview:
-      `node --experimental-strip-types tests/local-server.ts`, then (another terminal)
+      `node --experimental-strip-types tests/local-server.ts` (it loads every case package from `build/packages/`), then (another terminal)
       `node tests/seed-demo.mjs http://localhost:8888` for demo players, a schedule, an event and a class code.
 - [ ] In `#/admin` → **Schedule**, set the session date to the case you're running (or turn on
       **Lock to today's case** so nobody wanders into another case).

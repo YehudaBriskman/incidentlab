@@ -65,7 +65,9 @@ Evidence rules:
 
 ## Case JSON fields
 
-- `id` = `<id>`; `evidenceZip` = `/evidence/<id>-evidence.zip` (the zip has one top-level folder `<id>/`).
+- `id` = `<id>`; `evidenceZip` = `/evidence/<id>-evidence.zip` (the zip has one top-level folder `<id>/`). The site
+  ignores this value since #68 and links the zip at the location the content API names; it downloads as
+  `<id>-evidence.zip`, the name the toolbox commands unzip.
 - `evidence`: **every** text file in the pack, with its path relative to `build/evidence/<id>/`. This list drives the Explorer sidebar.
 - `setupChecklist`: 4–5 items (get the pack or open the Explorer, read README_FIRST, time zones, pick bash/PowerShell/browser).
 - `rules`: reuse the 3am-outage rules, adapted.
@@ -175,6 +177,6 @@ node --experimental-strip-types scripts/data.ts upload build/packages/<id>-v1.ca
 
 `scripts/build-all.sh` runs every `generator/cases/*/build.py`, then `scripts/make_flags.py` merges every
 `build/truth/<id>.answers.json` and `content-sealed/<id>.debrief*.md` into the server secrets, then
-`scripts/package.sh` zips `build/evidence/<id>/` to `site/public/evidence/<id>-evidence.zip` and copies the
-Explorer files to `site/public/evidence/<id>/files/`, then `scripts/make_package.py` and
+`scripts/package.sh` zips `build/evidence/<id>/` to `build/evidence-zips/<id>-evidence.zip` (nothing goes under
+`site/`: the site serves evidence from the DB), then `scripts/make_package.py` and
 `scripts/check-packages.mts` build and check the case packages, then it runs every `solutions/*/solve.sh`.
