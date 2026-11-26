@@ -4,6 +4,7 @@
 import type { z } from "zod";
 import {
   AccountResponseSchema,
+  SessionResponseSchema,
   AdminAccountsResponseSchema,
   AdminProgressResponseSchema,
   AdminResetRequestSchema,
@@ -139,15 +140,10 @@ export async function fetchToday(): Promise<TodayResponse> {
   return parseJson(await apiFetch(path, { admin: false }), TodayResponseSchema, path);
 }
 
-/** The signed-in account from the session cookie, or null when nobody is signed in (401). */
+/** The signed-in account from the session cookie, or null when nobody is signed in. */
 export async function fetchMe(): Promise<AccountView | null> {
-  const path = "/api/me";
-  try {
-    return (await parseJson(await apiFetch(path, { admin: false }), AccountResponseSchema, path)).account;
-  } catch (err: unknown) {
-    if (err instanceof AdminApiError && err.status === 401) return null;
-    throw err;
-  }
+  const path = "/api/session";
+  return (await parseJson(await apiFetch(path, { admin: false }), SessionResponseSchema, path)).account;
 }
 
 /** Ends the cookie session (admin signed in on the sign-in page). */

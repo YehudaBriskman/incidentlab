@@ -306,6 +306,8 @@ export const LoginRequestSchema = z.object({ username: z.string().trim().min(1).
 export const AccountResponseSchema = z.object({ account: AccountViewSchema });
 // POST /api/auth/logout (body {}) -> 204, clears the cookie
 // GET  /api/me -> {account}   (401 when not signed in)
+// GET  /api/session -> {account | null}   (always 200: the signed-out probe the browser uses, so a visitor's console stays clean)
+export const SessionResponseSchema = z.object({ account: AccountViewSchema.nullable() });
 
 // GET /api/today -> public
 export const TodayResponseSchema = z.object({

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AccountResponseSchema, AdminAccountsResponseSchema, UsernameSchema, usernameKey } from "../../shared/contract.ts";
+import { AccountResponseSchema, AdminAccountsResponseSchema, SessionResponseSchema, UsernameSchema, usernameKey } from "../../shared/contract.ts";
 import { hashPassword, verifyPassword } from "../services/crypto.ts";
 import { createHarness, expectStatus } from "./helpers.ts";
 
@@ -101,4 +101,22 @@ test("garbage cookies and admin auth", async () => {
   await expectStatus(app.handle(new Request("http://localhost/api/me", { method: "DELETE" }), "1.1.1.1"), 405);
   await expectStatus(client().call("/auth/register", { body: { username: "<b>x</b>", password: "password1" } }), 400);
   await expectStatus(client().call("/auth/register", { body: { username: "shorty", password: "short" } }), 400);
+});
+
+test("/session answers 200 with null when signed out, and the account when signed in", async () => {
+  const { client } = createHarness();
+  const visitor = client();
+  const anon = await visitor.call("/session");
+  assert.equal(anon.status, 200);
+  assert.equal((await visitor.json(anon, SessionResponseSchema)).account, null);
+  await expectStatus(visitor.call("/me"), 401);
+
+  const dana = client();
+  await dana.call("/auth/register", { body: { username: "Dana", password: "hunter2hunter2" } });
+  const signedIn = await dana.call("/session");
+  assert.equal(signedIn.status, 200);
+  assert.equal((await dana.json(signedIn, SessionResponseSchema)).account?.username, "Dana");
+
+  await dana.call("/auth/logout", { body: {} });
+  assert.equal((await dana.json(await dana.call("/session"), SessionResponseSchema)).account, null);
 });

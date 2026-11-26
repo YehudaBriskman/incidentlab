@@ -47,6 +47,16 @@ export class AuthController {
     return renewed ? withCookie(res, sessionCookie(req, renewed)) : res;
   }
 
+  /** Like `me`, but a missing, expired or revoked session is `{account: null}` with 200 instead of a 401. */
+  async session(req: Request): Promise<Response> {
+    try {
+      return await this.me(req);
+    } catch (error: unknown) {
+      if (error instanceof AppError && error.status === 401) return json(200, { account: null });
+      throw error;
+    }
+  }
+
   async changePassword(req: Request): Promise<Response> {
     const body = await parseBody(req, ChangePasswordRequestSchema);
     const { account, session } = await this.auth.changePassword(sessionToken(req), body);
