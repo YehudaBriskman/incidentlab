@@ -27,7 +27,7 @@ test("live strip: a reload draws the remembered announcement before /api/event a
   expect(put.status(), await put.text()).toBe(200);
   try {
     await page.goto("/#/");
-    await expect(page.locator(".announce-text")).toHaveText(text); // first load: fetched, then remembered
+    await expect(page.locator(".announce .banner-text-body")).toHaveText(text); // first load: fetched, then remembered
 
     // Hold /api/event for 3 s: the banner must already be there from the snapshot.
     await page.route("**/api/event", async (route) => {
@@ -35,7 +35,7 @@ test("live strip: a reload draws the remembered announcement before /api/event a
       await route.continue();
     });
     await page.reload();
-    await expect(page.locator(".announce-text")).toHaveText(text, { timeout: 1500 });
+    await expect(page.locator(".announce .banner-text-body")).toHaveText(text, { timeout: 1500 });
   } finally {
     await request.put("/api/admin/event", { headers: adminHeaders, data: original });
   }
