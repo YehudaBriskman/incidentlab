@@ -1,0 +1,27 @@
+{
+  "_comment": "Answer normalization test vectors, shared by site/shared/normalize.ts (server/test/normalize.test.ts) and scripts/make_flags.py. Made-up inputs only: never put a real case answer here.",
+  "vectors": [
+    { "input": "", "expected": "" },
+    { "input": "abc", "expected": "abc" },
+    { "input": "  12:34:56  ", "expected": "12:34:56" },
+    { "input": "ABC123def", "expected": "abc123def" },
+    { "input": "Example-Bot", "expected": "example-bot" },
+    { "input": "a  b", "expected": "a b" },
+    { "input": "a\tb", "expected": "a b" },
+    { "input": "a \t\n\r\fb", "expected": "a b" },
+    { "input": "\n\nline one\nline two\n", "expected": "line one line two" },
+    { "input": "a\u000bb", "expected": "a b" },
+    { "input": "a b", "expected": "a b" },
+    { "input": " padded ", "expected": "padded" },
+    { "input": "a b　c", "expected": "a b c" },
+    { "input": "a b c", "expected": "a b c" },
+    { "input": "﻿bom", "expected": "bom" },
+    { "input": "a​b", "expected": "a​b" },
+    { "input": "a\u001cb", "expected": "a\u001cb" },
+    { "input": "ÄÖÜ Straße", "expected": "äöü straße" },
+    { "input": "שלום World", "expected": "שלום world" },
+    { "input": "192.0.2.7:8443", "expected": "192.0.2.7:8443" },
+    { "input": "s3://Example-Bucket/Path", "expected": "s3://example-bucket/path" },
+    { "input": "  Mixed   CASE  value ", "expected": "mixed case value" }
+  ]
+}
