@@ -17,8 +17,8 @@ const ui = {
   row: (p: Page, id: string) => p.locator(`table.home-cases-table tbody tr[data-case="${id}"]`),
   search: (p: Page) => p.getByRole("searchbox", { name: "Search cases" }),
   filterButton: (p: Page) => p.getByRole("button", { name: /^Filter/ }),
-  filterPanel: (p: Page) => p.getByRole("dialog", { name: "Filter cases" }),
-  clearFilters: (p: Page) => ui.filterPanel(p).getByRole("button", { name: "Clear filters" }),
+  filterPanel: (p: Page) => p.getByRole("dialog", { name: "Filters" }),
+  clearFilters: (p: Page) => ui.filterPanel(p).getByRole("button", { name: "Clear all" }),
   shown: (p: Page) => p.locator(".home-shown"),
 };
 
@@ -45,8 +45,10 @@ test("signed out: intro with a sign-up action, how-it-works card, today's card a
   await expect(ui.todayCard(page)).toContainText("Ghost in the Network");
   await expect(ui.todayCard(page).getByRole("link", { name: "Sign in to play" })).toBeVisible();
   await expect(ui.table(page).getByRole("columnheader", { name: /status/i })).toHaveCount(0);
-  // the home page has no sidebar any more
-  await expect(page.locator("#sidebar")).toBeHidden();
+  // home puts nothing in the page panel (filters live in the toolbar popover); #sidebar no longer exists, so
+  // check the frame's real panel and that the shared filter button is the one in the toolbar
+  await expect(page.locator("aside.page-aside")).toBeEmpty();
+  await expect(page.locator(".page-aside-trigger, .aside-trigger")).toHaveCount(0);
 });
 
 test("signed in: progress shows in the Continue card, the today card and the table", async ({ page, request }) => {
@@ -81,7 +83,7 @@ test("search and the filter popover by keyboard, with the count badge, clear and
   await hard.focus();
   await page.keyboard.press("Space");
   await expect(hard).toBeChecked();
-  await expect(ui.filterButton(page)).toHaveAccessibleName(/Filter \(1\)/);
+  await expect(ui.filterButton(page)).toHaveAccessibleName("Filter, 1 active");
   await expect(page).toHaveURL(/difficulty=hard/);
   for (const text of await ui.rows(page).locator("td:first-of-type").allTextContents()) expect(text).toContain("Hard");
   const hardRows = await ui.rows(page).count();
@@ -94,7 +96,7 @@ test("search and the filter popover by keyboard, with the count badge, clear and
   // The URL alone restores the view
   await page.reload();
   await expect(ui.rows(page)).toHaveCount(hardRows);
-  await expect(ui.filterButton(page)).toHaveAccessibleName(/Filter \(1\)/);
+  await expect(ui.filterButton(page)).toHaveAccessibleName("Filter, 1 active");
 
   await ui.filterButton(page).click();
   await ui.clearFilters(page).click();
