@@ -17,7 +17,8 @@ const ui = {
   drawer: (p: Page) => p.locator("#ex-drawer"),
   drawerHeading: (p: Page) => p.locator("#ex-detail-h"),
   drawerPos: (p: Page) => p.locator(".ex-detail-pos"),
-  detailsBtn: (p: Page) => p.locator(".ex-actions").getByRole("button", { name: "Line details" }),
+  moreBtn: (p: Page) => p.locator(".ex-actions").getByRole("button", { name: "More line actions" }),
+  menuItem: (p: Page, name: string) => p.getByRole("menu", { name: "More line actions" }).getByRole("menuitem", { name }),
   colHeader: (p: Page, name: string) => p.getByRole("group", { name: /^Columns/ }).getByRole("button", { name: new RegExp(`^${name}:`) }),
   plot: (p: Page) => p.getByRole("button", { name: "Plot", exact: true }),
   bars: (p: Page) => p.locator("svg.ex-chart rect"),
@@ -56,7 +57,6 @@ test("explorer drawer: Enter opens line details, N and the buttons step, Escape 
   await expect(ui.drawerHeading(page)).toBeFocused();
   await expect(ui.drawerHeading(page)).toHaveText("Line 1");
   await expect(ui.drawerPos(page)).toHaveText(/^Match 1 of [\d,]+$/);
-  await expect(ui.detailsBtn(page)).toHaveAttribute("aria-expanded", "true");
   // key=value pairs of the line are a field table, and the raw line is shown in full
   await expect(ui.drawer(page).getByRole("rowheader", { name: "service" })).toBeVisible();
   await expect(ui.drawer(page).locator(".ex-detail-raw")).toContainText("DEPLOY");
@@ -76,10 +76,22 @@ test("explorer drawer: Enter opens line details, N and the buttons step, Escape 
   await page.keyboard.press("Escape");
   await expect(ui.drawer(page)).toBeHidden();
   await expect(ui.cursorRow(page)).toBeFocused();
-  await expect(ui.detailsBtn(page)).toHaveAttribute("aria-expanded", "false");
+
+  // The toolbar keeps only match stepping; the rest sits in the ⋯ menu (#112).
+  const actions = page.locator(".ex-actions");
+  await expect(actions.getByRole("button", { name: "Previous match" })).toBeVisible();
+  await expect(actions.getByRole("button", { name: "Next match" })).toBeVisible();
+  await expect(actions.getByRole("button", { name: /^(Line details|Copy line|Link to line|Copy lines|Copy link|First match|Last match)$/ })).toHaveCount(0);
+  await ui.moreBtn(page).click();
+  await expect(ui.moreBtn(page)).toHaveAttribute("aria-expanded", "true");
+  await expect(ui.menuItem(page, "First match")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(ui.moreBtn(page)).toBeFocused();
 
   // A field's Filter button adds a step for that key=value.
-  await ui.detailsBtn(page).click();
+  await ui.moreBtn(page).click();
+  await ui.menuItem(page, "Line details").click();
+  await expect(ui.drawer(page)).toBeVisible();
   await ui.drawer(page).getByRole("button", { name: /^Keep lines where service is / }).click();
   await expect(ui.stepText(page, 2)).toHaveValue(/^service=/);
   await page.getByRole("button", { name: "Close details" }).click();

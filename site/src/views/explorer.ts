@@ -1,7 +1,8 @@
 import "../explorer.css";
 import { h } from "../lib/dom";
 import { recordVisit } from "../lib/recent";
-import { openSheet, tooltip } from "../lib/overlay";
+import { menu, openSheet, tooltip } from "../lib/overlay";
+import type { MenuItem } from "../lib/overlay";
 import type { ViewResult } from "../shell/types";
 import { createCaseNav } from "./caseNav";
 import { getLang } from "../i18n/i18n";
@@ -326,23 +327,18 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     h("p", { class: "ex-sr", id: "ex-detail-keys" }, T().exDetailKeys),
     h("div", { class: "ex-drawer-tools", role: "group", "aria-label": T().exMatchNav }, detailPrev, detailNext, detailCopy, detailLink),
     detailBody);
-  const detailBtn = h("button", { class: "btn btn-sm btn-outline", type: "button", "aria-expanded": "false", "aria-controls": "ex-drawer", "aria-keyshortcuts": "Enter" }, T().exDetails);
   view.prepend(h("div", { class: "ex-head" }, h("div", { class: "ex-head-title" }, title, fileFormat), countEl));
   const work = h("div", { class: "ex-work" }, view, drawer);
 
-  const firstBtn = h("button", { class: "btn btn-sm btn-outline", type: "button" }, T().exFirst);
-  const lastBtn = h("button", { class: "btn btn-sm btn-outline", type: "button" }, T().exLast);
-  const copyBtn = h("button", { class: "btn btn-sm btn-outline", type: "button" }, T().exCopyLines);
-  const shareBtn = h("button", { class: "btn btn-sm btn-ghost", type: "button" }, T().exCopyLink);
-  const copyLineBtn = h("button", { class: "btn btn-sm btn-outline", type: "button" }, T().exCopyLine);
-  const linkLineBtn = h("button", { class: "btn btn-sm btn-ghost", type: "button" }, T().exLinkLine);
+  // Everything but match stepping lives behind one ⋯ menu (#112); the line keys (Enter, C, L) still reach it all.
+  const moreBtn = h("button", { class: "btn btn-sm btn-ghost btn-icon ex-more", type: "button", "aria-label": T().exMoreActions }, "⋯");
   const wrapCb = h("input", { type: "checkbox", id: "ex-wrap" });
   wrapCb.checked = wrap;
   const prevMatchBtn = h("button", { class: "btn btn-sm btn-outline", type: "button", "aria-keyshortcuts": "Shift+N" }, T().exPrevMatch);
   const nextMatchBtn = h("button", { class: "btn btn-sm btn-outline", type: "button", "aria-keyshortcuts": "N" }, T().exNextMatch);
   const matchPos = h("span", { class: "ex-match-pos", "aria-live": "polite", "aria-atomic": "true" });
   const matchNav = h("div", { class: "ex-match-nav", role: "group", "aria-label": T().exMatchNav, hidden: true }, prevMatchBtn, matchPos, nextMatchBtn);
-  const actionButtons = [firstBtn, lastBtn, prevMatchBtn, nextMatchBtn, copyBtn, shareBtn, copyLineBtn, linkLineBtn, detailBtn];
+  const actionButtons = [prevMatchBtn, nextMatchBtn, moreBtn];
 
   const makeAgg = (kind: Agg["kind"], label: string, placeholder: string): Agg => {
     const id = `ex-${kind}`;
@@ -525,10 +521,9 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
         void copyText(msg.text).then((ok) => {
           if (!ok) showNotice(T().exClipBlocked);
           else if (copyKind === "line") {
-            flashButton(detailOpen && drawer.contains(document.activeElement) ? detailCopy : copyLineBtn);
+            if (detailOpen && drawer.contains(document.activeElement)) flashButton(detailCopy);
             showNotice(T().exCopiedLine(fmtCount(cursorLine + 1)), "info");
           } else {
-            flashButton(copyBtn);
             showNotice(fillText(T().exCopied(plural(msg.count), msg.capped), { n: fmtCount(msg.count) }), "info");
           }
         });
@@ -1319,13 +1314,6 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
 
   function updateLineButtons(): void {
     const on = file !== null && cursor >= 0 && cursorLine >= 0;
-    copyLineBtn.disabled = !on;
-    linkLineBtn.disabled = !on;
-    const has = file !== null && count > 0;
-    firstBtn.disabled = !has;
-    lastBtn.disabled = !has;
-    copyBtn.disabled = !has;
-    detailBtn.disabled = !has;
     detailCopy.disabled = !on;
     detailLink.disabled = !on;
     paintMatchNav();
@@ -1359,7 +1347,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     if (cursorLine < 0) return;
     syncHash();
     void copyText(window.location.href).then((ok) => {
-      if (ok) flashButton(detailOpen && drawer.contains(document.activeElement) ? detailLink : linkLineBtn);
+      if (ok && detailOpen && drawer.contains(document.activeElement)) flashButton(detailLink);
       showNotice(ok ? T().exLineLinkCopied(fmtCount(cursorLine + 1)) : T().exCopyAddress, "info");
     });
   }
@@ -1371,7 +1359,6 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     detailOpen = true;
     drawer.hidden = false;
     work.classList.add("has-detail");
-    detailBtn.setAttribute("aria-expanded", "true");
     detailBody.replaceChildren(h("p", { class: "ex-muted" }, T().exDetailLoading));
     queueDetail(0);
     if (focus) detailHeading.focus();
@@ -1382,7 +1369,6 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     detailOpen = false;
     drawer.hidden = true;
     work.classList.remove("has-detail");
-    detailBtn.setAttribute("aria-expanded", "false");
     if (detailTimer !== null) window.clearTimeout(detailTimer);
     detailTimer = null;
     if (returnFocus) {
@@ -1932,26 +1918,37 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
   retryBtn.addEventListener("click", () => {
     if (file) startLoad(file);
   });
-  firstBtn.addEventListener("click", () => setCursor(0, true));
-  lastBtn.addEventListener("click", () => setCursor(count - 1, true));
   prevMatchBtn.addEventListener("click", () => stepMatch(-1));
   nextMatchBtn.addEventListener("click", () => stepMatch(1));
   fileSearch.addEventListener("input", renderFileList);
-  copyBtn.addEventListener("click", () => {
+  function copyView(): void {
     if (!file || !inWorker.has(file.path)) return;
     copyJob = client.job();
     copyKind = "view";
     client.send({ type: "copy", job: copyJob, path: file.path });
-  });
-  shareBtn.addEventListener("click", () => {
+  }
+  function copyViewLink(): void {
     syncHash();
     void copyText(window.location.href).then((ok) => {
-      if (ok) flashButton(shareBtn);
       showNotice(ok ? T().exLinkCopied : T().exCopyAddress, "info");
     });
-  });
-  copyLineBtn.addEventListener("click", copyLine);
-  linkLineBtn.addEventListener("click", copyLineLink);
+  }
+  /** The ⋯ menu, rebuilt on each open so its items follow the current file, cursor and drawer. */
+  const moreItems = (): MenuItem[] => {
+    const has = file !== null && count > 0;
+    const onLine = file !== null && cursor >= 0 && cursorLine >= 0;
+    return [
+      { label: T().exFirst, disabled: !has, run: () => setCursor(0, true) },
+      { label: T().exLast, disabled: !has, run: () => setCursor(count - 1, true) },
+      { label: detailOpen ? T().exDetailClose : T().exDetails, disabled: !has, run: () => (detailOpen ? closeDetail(true) : openDetail(true)) },
+      { label: T().exCopyLine, disabled: !onLine, run: copyLine },
+      { label: T().exLinkLine, disabled: !onLine, run: copyLineLink },
+      { label: T().exCopyLines, disabled: !has, run: copyView },
+      { label: T().exCopyLink, disabled: file === null, run: copyViewLink },
+    ];
+  };
+  menu(moreBtn, moreItems, { label: T().exMoreActions });
+  tooltip(moreBtn, T().exMoreActionsTip);
   wrapCb.addEventListener("change", () => {
     saveWrapPref(wrapCb.checked);
     setWrap(wrapCb.checked);
@@ -1971,10 +1968,6 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
   addCondBtn.addEventListener("click", () => {
     conds.push({ field: "", op: "eq", value: "" });
     renderConds(conds.length - 1);
-  });
-  detailBtn.addEventListener("click", () => {
-    if (detailOpen) closeDetail(true);
-    else openDetail(true);
   });
   detailClose.addEventListener("click", () => closeDetail(true));
   detailPrev.addEventListener("click", () => stepFromDrawer(-1));
@@ -2062,8 +2055,8 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
   const main = h("section", { class: "ex-main", "aria-label": T().exTitle },
     controls,
     notice,
-    h("div", { class: "ex-actions" }, firstBtn, lastBtn, matchNav, detailBtn, copyLineBtn, linkLineBtn, copyBtn, shareBtn,
-      h("label", { class: "ex-toggle", for: "ex-wrap" }, wrapCb, T().exWrap)),
+    h("div", { class: "ex-actions" }, matchNav,
+      h("label", { class: "ex-toggle", for: "ex-wrap" }, wrapCb, T().exWrap), moreBtn),
     keysHelp,
     work,
     aggSet,
