@@ -264,6 +264,9 @@
   --fill-inset: light-dark(oklch(0.955 0.006 80), oklch(0.25 0.009 70));
   /* tracks: progress and meter backgrounds */
   --fill-track: light-dark(oklch(0.915 0.008 80), oklch(0.3 0.01 70));
+  /* segmented controls: the track sits below its surface, the chosen pill above it (in dark too) */
+  --segment-track: light-dark(var(--fill-track), var(--level-1));
+  --segment-thumb: light-dark(var(--level-2), var(--level-4));
   /* wells below the page */
   --fill-sunken: light-dark(oklch(0.948 0.006 80), oklch(0.15 0.006 70));
   /* hover wash over any surface */
@@ -856,25 +859,36 @@ main.app-content {
 .filter-option input { margin: 0; inline-size: 16px; block-size: 16px; accent-color: var(--accent); }
 @media (pointer: coarse) { .filter-option { min-block-size: var(--target-min); } }
 
-/* ⚙ display settings: an .ov-popover panel (lib/overlay.ts popover()) anchored under the button */
-.settings-panel {
-  inline-size: min(22rem, calc(100vw - 2 * var(--gutter))); max-block-size: calc(100dvh - var(--space-8)); overflow: auto;
-  padding: var(--space-4); border-radius: var(--radius-lg);
+/* ⚙ display settings: an .ov-popover panel (lib/overlay.ts popover()) anchored under the button.
+   Soft UI card: 24px padding, each setting a full-width segmented control (muted track, the chosen
+   option a lifted pill). Native radios stay in place, visually hidden, so arrow keys and forms work.
+   `.ov-popover.settings-panel` outranks the generic `.ov-popover { padding: 0 }` that follows. */
+.ov-popover.settings-panel {
+  inline-size: min(20rem, calc(100vw - 2 * var(--gutter))); max-block-size: calc(100dvh - var(--space-8)); overflow: auto;
+  padding: var(--space-5); border-radius: var(--radius-surface);
 }
-.settings-title { font-size: var(--step-0); margin: 0 0 var(--space-3); }
-.settings-group { border: 0; margin: 0 0 var(--space-3); padding: 0; min-inline-size: 0; }
-.settings-legend { padding: 0; margin-block-end: var(--space-1); font-size: var(--step--2); font-weight: 600; text-transform: var(--label-case); letter-spacing: var(--type-label-track); color: var(--text-muted); }
-.settings-legend:lang(he) { text-transform: none; letter-spacing: normal; }
-.settings-options { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.settings-title { font-size: var(--type-body-size); font-weight: 600; line-height: var(--type-body-lh); margin: 0 0 var(--space-4); letter-spacing: 0; }
+.settings-group { border: 0; margin: 0 0 var(--space-4); padding: 0; min-inline-size: 0; }
+.settings-legend { padding: 0; margin-block-end: var(--space-2); font-size: var(--type-small-size); font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-1); }
+.settings-options {
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px;
+  padding: var(--space-1); border-radius: var(--radius-control); background: var(--segment-track);
+}
 .settings-option {
-  display: inline-flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-sm);
-  padding-inline: var(--space-2) var(--space-3); border: 1px solid var(--border-strong); border-radius: var(--radius-md);
-  font-size: var(--step--1); cursor: pointer;
+  position: relative; display: flex; align-items: center; justify-content: center; min-block-size: 32px; padding-inline: var(--space-2);
+  border-radius: var(--radius-control); font-size: var(--type-small-size); font-weight: 500; color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+  transition: background-color var(--motion-settle) var(--ease-standard), color var(--motion-settle) var(--ease-standard);
 }
-.settings-option:hover { background: var(--hover); }
-.settings-option:has(input:checked) { border-color: var(--edge-selected); background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; }
-.settings-option input { margin: 0; accent-color: var(--accent); }
-.settings-link { display: inline-flex; align-items: center; min-block-size: var(--target-min); font-size: var(--step--1); }
+.settings-option:hover { color: var(--text-1); }
+.settings-option:has(input:checked) { background: var(--segment-thumb); color: var(--text-1); font-weight: 600; box-shadow: var(--surface-lift); }
+.settings-option:has(input:focus-visible) { outline: var(--focus-width) solid var(--focus-ring); outline-offset: 1px; }
+.settings-option input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.settings-link {
+  display: flex; align-items: center; min-block-size: var(--target-min); margin: var(--space-1) calc(-1 * var(--space-5)) calc(-1 * var(--space-5));
+  padding: var(--space-2) var(--space-5); border-block-start: 1px solid var(--edge-subtle); font-size: var(--type-small-size); color: var(--text-2);
+}
+@media (pointer: coarse) { .settings-option { min-block-size: var(--target-min); } }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success-fg); display: inline-block; }
 
 /* page-panel content: shared parts the views build with (toolbox contents, home filters until #97 moves them) */
@@ -1495,8 +1509,9 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
   .chip-completed, .chip-in-progress, .chip-frozen, .lb-you { border-width: 2px; }
   .dot, .event-clock .dot { forced-color-adjust: none; background: CanvasText; }
   .nav-link[aria-current="page"] { box-shadow: none; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
-  .icon-btn, .settings-btn, .settings-option, .settings-panel, .net-status.is-down { border-color: CanvasText; }
-  .settings-option:has(input:checked) { border-width: 2px; }
+  .icon-btn, .settings-btn, .settings-panel, .net-status.is-down { border-color: CanvasText; }
+  .settings-option { border: 1px solid transparent; }
+  .settings-option:has(input:checked) { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; }
   .lb-table tr.is-me > * { forced-color-adjust: none; background: Highlight; color: HighlightText; }
   .cmd.is-revealed .code-block { border-inline-start: 3px solid CanvasText; }
   .tip { border-inline-start-color: CanvasText; }
@@ -2038,7 +2053,7 @@ input[type="radio"] { inline-size: 16px; block-size: 16px; accent-color: var(--a
         lifted, with 4px corners. Nothing slides. (.seg lives in admin.css.) ---- */
 .shell-tabs {
   display: inline-flex; align-items: center; gap: 2px; padding: var(--space-1);
-  border: 0; border-radius: var(--radius-control); background: var(--fill-track);
+  border: 0; border-radius: var(--radius-control); background: var(--segment-track);
 }
 .shell-tab {
   min-height: 28px; padding: 0 var(--space-3); border-radius: var(--radius-mark);
@@ -2046,7 +2061,7 @@ input[type="radio"] { inline-size: 16px; block-size: 16px; accent-color: var(--a
   transition: background-color var(--motion-settle) var(--ease-standard), color var(--motion-settle) var(--ease-standard);
 }
 .shell-tab:hover { color: var(--text-1); }
-.shell-tab[aria-selected="true"] { background: var(--level-2); color: var(--text-1); font-weight: 500; box-shadow: var(--surface-lift); }
+.shell-tab[aria-selected="true"] { background: var(--segment-thumb); color: var(--text-1); font-weight: 500; box-shadow: var(--surface-lift); }
 .shell-tab:focus-visible { outline-offset: 2px; }
 
 /* ---- pills (chips, badges, status): 12px semibold, no edge unless the tone needs one ---- */
