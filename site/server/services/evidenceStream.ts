@@ -11,8 +11,8 @@ import type { CaseRepository, EvidenceChunkRepository } from "../repositories/ca
 
 export const EVIDENCE_DB_PREFIX = "/evidence/db/";
 
-/** Public routes see only the version the meta points at, and only while it is published. */
-export const isPublicVersion = (meta: CaseMeta, version: number): boolean => meta.status === "published" && meta.version === version;
+/** Public routes see only `publishedVersion`, and only while the case is published (not a draft, not trashed). */
+export const isPublicVersion = (meta: CaseMeta, version: number): boolean => meta.status === "published" && meta.publishedVersion === version;
 
 export type EvidenceTarget =
   | { readonly kind: "file"; readonly caseId: string; readonly version: number; readonly path: string }

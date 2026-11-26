@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { CasesResponseSchema } from "../../shared/contract.ts";
-import { CaseContentResponseSchema, CaseContentSchema, EVIDENCE_CHUNK_BYTES } from "../../shared/case-records.ts";
+import { CaseContentResponseSchema, CaseContentSchema, EVIDENCE_CHUNK_BYTES, composeCaseMeta } from "../../shared/case-records.ts";
 import { InMemoryByteStore } from "../repositories/ByteStore.ts";
 import { CaseRepository, EvidenceChunkRepository, caseKeys, sha256Hex } from "../repositories/case-repository.ts";
 import { InMemoryKvStore } from "../repositories/KvStore.ts";
@@ -129,6 +129,31 @@ test("drafts, trashed cases and other versions are hidden from public routes", a
   assert.equal((await s.service.getSealed("live-case"))?.answers.q1, "q1-answer");
   await assert.rejects(s.service.evidenceIndex("draft-case", 1), { status: 404 });
   assert.equal((await s.service.evidenceIndex("live-case", 2)).length, 1);
+});
+
+test("a newer draft on top of a published version: public routes keep serving publishedVersion", async () => {
+  const s = setup();
+  await seedCase(s.repos, { id: "live-case", version: 1, files: [{ path: "a.log", bytes: patternBytes(10) }] });
+  const v1 = await s.cases.getMeta("live-case");
+  assert.ok(v1);
+  // v2 is stored as a draft: its records exist, the meta still points the public at v1.
+  await s.cases.putContent("live-case", 2, "en", { ...contentFixture("live-case"), title: "Draft title" });
+  const stored = await s.chunks.putFile(patternBytes(20, 3));
+  await s.cases.putEvidenceIndex("live-case", 2, [{ path: "b.log", format: "log", size: stored.size, sha256: stored.sha256, chunks: stored.chunks, explorer: true }]);
+  const draft = composeCaseMeta({
+    id: "live-case", createdBy: "admin", createdAt: v1.data.createdAt, updatedAt: v1.data.createdAt, publishedVersion: 1, status: "published",
+    versions: [...v1.data.versions, { ...v1.data.versions[0]!, version: 2, title: "Draft title", answerFingerprint: "fp-2" }],
+  });
+  assert.equal(await s.cases.saveMeta(draft, v1.etag), true);
+
+  const content = CaseContentResponseSchema.parse(await (await s.get("/cases/live-case/content")).json());
+  assert.equal(content.version, 1);
+  assert.equal(content.content.title, "Case live-case");
+  const catalog = CasesResponseSchema.parse(await (await s.get("/cases")).json());
+  assert.equal(catalog.cases[0]?.en.title, "Case live-case");
+  assert.equal((await s.fetchEvidence("live-case/v1/files/a.log")).status, 200);
+  assert.equal((await s.fetchEvidence("live-case/v2/files/b.log")).status, 404, "a draft is never public");
+  await assert.rejects(s.service.evidenceIndex("live-case", 2), { status: 404 });
 });
 
 test("content: Hebrew is served when present and falls back to English", async () => {

@@ -1,6 +1,6 @@
 // DB-stored cases: the published catalog, public content, server-only sealed material and evidence.
-// Only the published version of a case is visible here (isPublicVersion); drafts and trashed cases are
-// invisible to every public route. Nothing switches GameService over yet (#68).
+// Only `publishedVersion` of a case is visible here (isPublicVersion); drafts, older versions and trashed
+// cases are invisible to every public route. Nothing switches GameService over yet (#68).
 import { summarize } from "../../shared/catalog.ts";
 import type { CatalogEntry } from "../../shared/catalog.ts";
 import type { CaseContent, CaseLang, CaseMeta, CaseSealed, EvidenceEntry } from "../../shared/case-records.ts";
@@ -12,6 +12,8 @@ import type { ByteRange, EvidenceService } from "./evidenceStream.ts";
 
 export type PublishedContent = {
   readonly meta: CaseMeta;
+  /** the version served: meta.publishedVersion */
+  readonly version: number;
   /** the language actually served: `he` falls back to `en` when the case has no Hebrew content */
   readonly lang: CaseLang;
   readonly content: CaseContent;
@@ -22,6 +24,12 @@ export type EvidenceRead = {
   readonly range: ByteRange | null;
   readonly stream: ReadableStream<Uint8Array>;
 };
+
+type Live = { readonly meta: CaseMeta; readonly version: number };
+
+/** The live version of a case, or null while it is a draft or trashed. */
+const live = (meta: CaseMeta): Live | null =>
+  meta.publishedVersion !== null && isPublicVersion(meta, meta.publishedVersion) ? { meta, version: meta.publishedVersion } : null;
 
 const notFound = (): AppError => new AppError(404, "case not found", { code: "not-found" });
 
@@ -34,23 +42,23 @@ export class CaseService {
     this.evidence = deps.evidence;
   }
 
-  private async publishedMeta(id: string): Promise<CaseMeta | null> {
+  private async liveVersion(id: string): Promise<Live | null> {
     const meta = (await this.cases.getMeta(id))?.data;
-    return meta && isPublicVersion(meta, meta.version) ? meta : null;
+    return meta ? live(meta) : null;
   }
 
   /** Ids of every published case (the game overlays their sealed parts on the bundled answer keys). */
   async publishedIds(): Promise<string[]> {
-    return (await this.cases.listMetas()).filter((m) => isPublicVersion(m, m.version)).map((m) => m.id);
+    return (await this.cases.listMetas()).map(live).filter((l): l is Live => l !== null).map((l) => l.meta.id);
   }
 
   /** Catalog entries for every published case, by id. A case whose English content is missing or corrupt is left out. */
   async listPublished(): Promise<CatalogEntry[]> {
-    const published = (await this.cases.listMetas()).filter((m) => isPublicVersion(m, m.version));
-    const entries = await mapWithConcurrency(published, async (meta): Promise<CatalogEntry | null> => {
-      const en = await this.cases.getContent(meta.id, meta.version, "en");
+    const published = (await this.cases.listMetas()).map(live).filter((l): l is Live => l !== null);
+    const entries = await mapWithConcurrency(published, async ({ meta, version }): Promise<CatalogEntry | null> => {
+      const en = await this.cases.getContent(meta.id, version, "en");
       if (!en) return null;
-      const he = meta.langs.includes("he") ? await this.cases.getContent(meta.id, meta.version, "he") : null;
+      const he = meta.langs.includes("he") ? await this.cases.getContent(meta.id, version, "he") : null;
       return { file: meta.id, en: summarize(en), ...(he ? { he: summarize(he) } : {}) };
     });
     return entries.filter((e): e is CatalogEntry => e !== null);
@@ -58,21 +66,22 @@ export class CaseService {
 
   /** Public content of the published version. `he` falls back to `en`; 404 when not published. */
   async getContent(id: string, lang: CaseLang): Promise<PublishedContent> {
-    const meta = await this.publishedMeta(id);
-    if (!meta) throw notFound();
+    const found = await this.liveVersion(id);
+    if (!found) throw notFound();
+    const { meta, version } = found;
     if (lang !== "en" && meta.langs.includes(lang)) {
-      const localized = await this.cases.getContent(id, meta.version, lang);
-      if (localized) return { meta, lang, content: localized };
+      const localized = await this.cases.getContent(id, version, lang);
+      if (localized) return { meta, version, lang, content: localized };
     }
-    const en = await this.cases.getContent(id, meta.version, "en");
+    const en = await this.cases.getContent(id, version, "en");
     if (!en) throw notFound();
-    return { meta, lang: "en", content: en };
+    return { meta, version, lang: "en", content: en };
   }
 
   /** Server-only: answers, hint texts, commands and debriefs of the published version (null when not published). */
   async getSealed(id: string): Promise<CaseSealed | null> {
-    const meta = await this.publishedMeta(id);
-    return meta ? this.cases.getSealed(id, meta.version) : null;
+    const found = await this.liveVersion(id);
+    return found ? this.cases.getSealed(id, found.version) : null;
   }
 
   /** The evidence file list of a published version; 404 otherwise. */

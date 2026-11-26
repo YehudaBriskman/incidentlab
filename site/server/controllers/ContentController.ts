@@ -46,7 +46,7 @@ export class ContentController {
     const lang = CaseLangSchema.safeParse(new URL(req.url).searchParams.get("lang") ?? "en");
     if (!lang.success) throw new AppError(400, "lang must be en or he");
     const published = await this.cases.getContent(caseId, lang.data);
-    const etag = `"${published.meta.contentSha}-v${published.meta.version}-${published.lang}"`;
-    return cacheable(req, etag, { id: caseId, version: published.meta.version, lang: published.lang, content: published.content });
+    const etag = `"${published.meta.contentSha}-v${published.version}-${published.lang}"`;
+    return cacheable(req, etag, { id: caseId, version: published.version, lang: published.lang, content: published.content });
   }
 }

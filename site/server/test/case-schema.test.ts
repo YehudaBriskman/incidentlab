@@ -7,6 +7,7 @@ import { CaseSchema } from "../../shared/case.ts";
 import {
   CaseContentSchema,
   CaseMetaSchema,
+  composeCaseMeta,
   CasePackageManifestSchema,
   CaseSealedSchema,
   EVIDENCE_CHUNK_BYTES,
@@ -139,4 +140,40 @@ test("case meta applies additive defaults and checks its fields", () => {
   assert.equal(CaseMetaSchema.safeParse({ ...meta, status: "archived" }).success, false);
   assert.equal(CaseMetaSchema.safeParse({ ...meta, version: 0 }).success, false);
   assert.equal(CaseMetaSchema.safeParse({ ...meta, langs: ["fr"] }).success, false);
+});
+
+test("metas written by #64 (one `version`) still parse, mapped to publishedVersion", () => {
+  const legacy = {
+    schemaVersion: 1, id: "sample-case", version: 3, status: "published", langs: ["en", "he"], title: "Sample",
+    difficulty: "medium", tags: ["logs"], answerFingerprint: "fp-3", contentSha: SHA, createdBy: "admin", createdAt: "2026-11-26T00:00:00.000Z",
+  };
+  const published = CaseMetaSchema.parse(legacy);
+  assert.equal(published.publishedVersion, 3);
+  assert.equal(published.latestVersion, 3);
+  assert.equal(published.version, 3);
+  assert.equal(published.updatedAt, legacy.createdAt);
+  assert.deepEqual(published.versions.map((v) => [v.version, v.answerFingerprint, v.langs.join()]), [[3, "fp-3", "en,he"]]);
+  assert.equal(CaseMetaSchema.parse({ ...legacy, status: "draft" }).publishedVersion, null, "a legacy draft has nothing published");
+  assert.equal(CaseMetaSchema.parse({ ...legacy, status: "trashed" }).publishedVersion, 3, "a trashed case keeps its version for restore");
+  // A parsed meta parses again unchanged (what saveMeta writes is what getMeta reads).
+  assert.deepEqual(CaseMetaSchema.parse(JSON.parse(JSON.stringify(published))), published);
+});
+
+test("composeCaseMeta keeps the descriptive fields on the published version", () => {
+  const info = (version: number, fp: string) => ({
+    version, langs: ["en" as const], title: `Sample v${version}`, difficulty: "medium" as const, tags: [], answerFingerprint: fp,
+    contentSha: SHA, createdBy: "acct", createdAt: "2026-11-26T00:00:00.000Z", evidenceFiles: 1, evidenceBytes: 10,
+  });
+  const base = { id: "sample-case", createdBy: "acct", createdAt: "2026-11-26T00:00:00.000Z", updatedAt: "2026-11-27T00:00:00.000Z" };
+  const draftOnTop = composeCaseMeta({ ...base, versions: [info(2, "fp-2"), info(1, "fp-1")], publishedVersion: 1, status: "published" });
+  assert.equal(draftOnTop.version, 1);
+  assert.equal(draftOnTop.latestVersion, 2);
+  assert.equal(draftOnTop.title, "Sample v1");
+  assert.equal(draftOnTop.answerFingerprint, "fp-1");
+  assert.deepEqual(draftOnTop.versions.map((v) => v.version), [1, 2]);
+  const unpublished = composeCaseMeta({ ...base, versions: [info(1, "fp-1")], publishedVersion: null, status: "draft" });
+  assert.equal(unpublished.version, 1);
+  assert.equal(unpublished.schemaVersion, 2);
+  assert.throws(() => composeCaseMeta({ ...base, versions: [info(1, "fp-1")], publishedVersion: 5, status: "published" }));
+  assert.equal(CaseMetaSchema.safeParse({ ...draftOnTop, version: 2 }).success, false, "version must follow publishedVersion");
 });

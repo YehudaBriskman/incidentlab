@@ -1,6 +1,6 @@
 // DB-stored cases (#64). JSON records go through KvStore, evidence bytes through ByteStore, both on the
 // `incidentlab-v2` store:
-//   case:<id>:meta                       CaseMeta (the current version and its status; written with setIfMatch)
+//   case:<id>:meta                       CaseMeta (publishedVersion, latestVersion, status, every version; setIfMatch)
 //   case:<id>:v<n>:content:<lang>        CaseContent  (public: no hint texts, no runnable commands)
 //   case:<id>:v<n>:sealed                CaseSealed   (server-only: answers, hint texts, commands, debriefs)
 //   case:<id>:v<n>:evidence-index        EvidenceEntry[]  (every file of the evidence pack)
