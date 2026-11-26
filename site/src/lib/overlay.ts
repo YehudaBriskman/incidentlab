@@ -551,6 +551,8 @@ export interface MenuItem {
   label: string;
   tone?: "danger";
   disabled?: boolean;
+  /** a checkable row (menuitemcheckbox): the menu reserves a start gutter for the check mark */
+  checked?: boolean;
   run: () => void;
 }
 
@@ -567,7 +569,7 @@ let typeBuffer = "";
 let typeTimer: number | null = null;
 
 function menuItemsOf(el: HTMLElement): HTMLElement[] {
-  return [...el.querySelectorAll<HTMLElement>("[role=menuitem]")];
+  return [...el.querySelectorAll<HTMLElement>("[role=menuitem], [role=menuitemcheckbox]")];
 }
 
 /** One shared menu element in the top layer, so table scrollers never clip it. */
@@ -646,11 +648,13 @@ export function menu(anchor: HTMLButtonElement, items: MenuItems, opts: { label?
           "button",
           {
             type: "button",
-            role: "menuitem",
+            role: item.checked === undefined ? "menuitem" : "menuitemcheckbox",
             tabindex: -1,
             class: `ov-menu-item${item.tone === "danger" ? " is-danger" : ""}`,
             "aria-disabled": item.disabled === true ? "true" : null,
+            "aria-checked": item.checked === undefined ? null : String(item.checked),
           },
+          item.checked === undefined ? null : h("span", { class: "ov-menu-check", "aria-hidden": "true" }, "✓"),
           item.label,
         );
         btn.addEventListener("click", () => {
