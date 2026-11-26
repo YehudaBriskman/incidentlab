@@ -2,7 +2,7 @@
 /* The log pane is the always-dark code island (DESIGN.md deviation D1): it uses the --code-* roles,
    which are verified on --code-bg in both themes. Everything outside the pane uses the page roles. */
 .explorer {
-  display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3) var(--gutter) var(--space-6); max-width: 1600px; margin: 0 auto;
+  display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3) var(--gutter) var(--space-6);
 }
 .ex-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .ex-topbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
