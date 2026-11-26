@@ -35,6 +35,35 @@ test("instructor previews a case and presents it without leaking answers", async
   await expect(page.getByRole("link", { name: "Present to class" }).first()).toBeVisible();
 });
 
+test("presentation keys: arrows move slides, the long body scrolls inside, controls stay on screen, Esc exits", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  const login = await page.request.post("/api/auth/login", { data: { username: ADMIN_USERNAME, password: ADMIN_KEY } });
+  expect(login.ok()).toBe(true);
+  await page.goto(`/#/case/${CASE}/present`);
+  const pos = page.locator(".slide-pos");
+  await expect(pos).toHaveText(/^1 of \d+$/);
+  // the evidence slide is long: it scrolls inside the slide, never the page
+  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight");
+  await expect(pos).toHaveText(/^4 of \d+$/);
+  const body = page.locator(".slide-body");
+  await expect.poll(() => body.evaluate((e) => e.scrollHeight - e.clientHeight)).toBeGreaterThan(0);
+  await page.keyboard.press("PageDown");
+  await expect.poll(() => body.evaluate((e) => e.scrollTop)).toBeGreaterThan(0);
+  const pageScroll = await page.locator("main.app-content").evaluate((e) => e.scrollHeight - e.clientHeight);
+  expect(pageScroll).toBe(0);
+  await expect(page.getByRole("button", { name: "Next" })).toBeInViewport();
+  await expect(page.getByRole("link", { name: "Live leaderboard" })).toBeInViewport();
+  // ArrowDown scrolls, it does not change slides; ArrowLeft goes back one
+  await page.keyboard.press("ArrowDown");
+  await expect(pos).toHaveText(/^4 of \d+$/);
+  await page.keyboard.press("ArrowLeft");
+  await expect(pos).toHaveText(/^3 of \d+$/);
+  await page.keyboard.press("End");
+  await expect(page.getByRole("button", { name: "Next" })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(new RegExp(`#/case/${CASE}$`));
+});
+
 test("presentation mode is for the instructor only", async ({ page }) => {
   await page.goto(`/#/case/${CASE}/present`);
   await expect(page).toHaveURL(new RegExp(`#/case/${CASE}$`));

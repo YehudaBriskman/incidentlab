@@ -25,7 +25,7 @@ export const TR = defineStrings({
     prev: "Previous",
     next: "Next",
     slides: "Presentation",
-    keysHint: "Arrow keys move between slides",
+    keysHint: "← → slides · ↑ ↓ scroll · Esc exits",
   },
   he: {
     eyebrow: "תצוגת מדריך",
@@ -48,6 +48,6 @@ export const TR = defineStrings({
     prev: "הקודם",
     next: "הבא",
     slides: "מצגת",
-    keysHint: "מקשי החיצים עוברים בין השקפים",
+    keysHint: "← → שקפים · ↑ ↓ גלילה · Esc ליציאה",
   },
 });

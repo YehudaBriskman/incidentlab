@@ -162,12 +162,23 @@
 /* the deck fills the content area (fit layout): no page scroll; a slide that still overflows scrolls inside */
 .present-deck { flex: 1; min-block-size: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 .present-deck-bar { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-2); }
+/* the slide: its head (kicker, title) stays put, its body scrolls inside; centred while it fits ("safe" keeps the
+   top reachable once it overflows) */
 .slide {
-  flex: 1; min-block-size: 0; overflow: auto; overscroll-behavior: contain; display: flex;
+  flex: 1; min-block-size: 0; display: flex; flex-direction: column; justify-content: safe center; gap: var(--space-4);
   padding: clamp(var(--space-5), 4vw, var(--space-7)); border-radius: var(--radius-card); background: var(--level-1); box-shadow: var(--surface-lift);
 }
-/* one centred block per slide; margin: auto centres it both ways and still scrolls when taller than the slide */
-.slide-inner { margin: auto; inline-size: min(100%, 64rem); display: flex; flex-direction: column; gap: var(--space-4); }
+.slide-head, .slide-body { inline-size: min(100%, 64rem); margin-inline: auto; }
+.slide-head { flex: none; display: flex; flex-direction: column; gap: var(--space-3); }
+.slide-body {
+  flex: 0 1 auto; min-block-size: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
+  border-radius: var(--radius-control); transition: box-shadow var(--motion-settle) var(--ease-standard);
+}
+.slide-body:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--space-1); }
+/* inset edge shadows say "more above / below" */
+.slide-body.has-more { box-shadow: inset 0 -24px 20px -20px color-mix(in oklab, var(--text-1) 22%, transparent); }
+.slide-body.is-scrolled { box-shadow: inset 0 24px 20px -20px color-mix(in oklab, var(--text-1) 22%, transparent); }
+.slide-body.has-more.is-scrolled { box-shadow: inset 0 24px 20px -20px color-mix(in oklab, var(--text-1) 22%, transparent), inset 0 -24px 20px -20px color-mix(in oklab, var(--text-1) 22%, transparent); }
 .slide-kicker { margin: 0; font-size: clamp(1rem, 0.8rem + 0.8vw, 1.5rem); font-weight: 600; color: var(--accent-text); }
 .slide-title { margin: 0; font-size: clamp(2rem, 1.2rem + 3vw, 4rem); line-height: 1.1; letter-spacing: var(--type-display-track); }
 .slide-lead { margin: 0; max-inline-size: 48ch; font-size: clamp(1.25rem, 0.9rem + 1.4vw, 2.25rem); line-height: 1.35; color: var(--text-1); }
@@ -181,3 +192,12 @@
 .slide-pos { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
 .slide-pos-wrap .small { margin: 0; }
 @media (pointer: coarse) { .slide-pos-wrap .small { display: none; } }
+/* phones: the frame turns "fit" off below 641px (dashboards scroll there), but a slide deck must keep its controls
+   on screen, so the deck's page fits the viewport at every width */
+@media (max-width: 640px) {
+  .app-content[data-layout="fit"]:has(.present-deck) { overflow: hidden; padding-block-end: var(--space-3); }
+  .app-content[data-layout="fit"]:has(.present-deck) :is(.page-body, #app) { flex: 1; min-block-size: 0; display: flex; flex-direction: column; align-items: stretch; }
+  .slide { padding: var(--space-4); gap: var(--space-3); }
+  .slide-title { font-size: var(--type-page-title-size); }
+  .present-deck-foot .btn { padding-inline: var(--space-3); }
+}

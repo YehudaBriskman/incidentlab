@@ -54,31 +54,6 @@ function evidenceList(files: Case["evidence"], cls: string): HTMLElement {
   );
 }
 
-/** Splits markdown into slide-sized pages: whole paragraphs, about `budget` characters each. */
-function pages(source: string, budget: number): string[] {
-  const paras = source.split(/\n\s*\n/).map((p) => p.trim()).filter((p) => p.length > 0);
-  const out: string[] = [];
-  let cur: string[] = [];
-  let size = 0;
-  for (const p of paras) {
-    if (cur.length > 0 && size + p.length > budget) {
-      out.push(cur.join("\n\n"));
-      cur = [];
-      size = 0;
-    }
-    cur.push(p);
-    size += p.length;
-  }
-  if (cur.length > 0) out.push(cur.join("\n\n"));
-  return out;
-}
-
-function chunks<T>(items: readonly T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
-}
-
 function section(title: string, ...children: (HTMLElement | null)[]): HTMLElement {
   return h("section", { class: "present-card" }, h("h2", {}, title), ...children);
 }
@@ -125,17 +100,12 @@ export function renderInstructorPreview(root: HTMLElement, c: Case): void {
 
 type Slide = { title: string; body: HTMLElement | null; kicker?: string };
 
-/** "2 / 3" after a kicker when a topic spans several slides. */
-const part = (i: number, n: number): string | undefined => (n > 1 ? TR().slideOf(i + 1, n) : undefined);
-
 function slidesFor(c: Case): Slide[] {
-  const story = pages(c.briefing, 520);
-  const files = chunks(c.evidence, 5);
   return [
     { title: c.title, kicker: TR().eyebrow, body: h("div", {}, h("p", { class: "slide-lead" }, c.subtitle), metaLine(c)) },
-    ...story.map((page, i): Slide => ({ title: TR().story, kicker: part(i, story.length), body: html("div", { class: "prose slide-prose" }, md(page)) })),
+    { title: TR().story, body: html("div", { class: "prose slide-prose" }, md(c.briefing)) },
     { title: TR().inspired, body: h("div", {}, h("p", { class: "slide-lead" }, `${c.inspiredBy.title} (${c.inspiredBy.year})`), html("p", { class: "slide-prose" }, mdInline(c.inspiredBy.summary))) },
-    ...files.map((group, i): Slide => ({ title: `${TR().evidence} · ${TR().evidenceCount(c.evidence.length)}`, kicker: part(i, files.length), body: evidenceList(group, "present-files slide-files") })),
+    { title: TR().evidence, kicker: TR().evidenceCount(c.evidence.length), body: evidenceList(c.evidence, "present-files slide-files") },
     ...c.questions.map((q, i): Slide => ({
       kicker: TR().stageN(i + 1),
       title: q.stage?.name ?? q.title,
@@ -145,7 +115,15 @@ function slidesFor(c: Case): Slide[] {
   ];
 }
 
-/** Presentation mode: one slide at a time, sized for a projector. Instructor only; others go to the case. */
+/** Keys that move a scroll region one step: a few lines, or most of a page. */
+const SCROLL_STEP = { line: 64, pageShare: 0.85 } as const;
+
+/**
+ * Presentation mode: one slide at a time, sized for a projector. The slide title and the deck's controls stay
+ * on screen; a long slide body scrolls inside itself. Instructor only; others go to the case.
+ * Keys: ←/→ slides (mirrored in Hebrew), Home/End first/last, ↑/↓ and PageUp/PageDown scroll the body, Esc
+ * back to the preview. Modified keys (Alt+← = browser Back) and keys typed into fields are left alone.
+ */
 export function presentView(c: Case): ViewResult {
   const main = h("div", { class: "view" });
   const nav = createCaseNav(c, "present");
@@ -159,23 +137,40 @@ export function presentView(c: Case): ViewResult {
       }
       const slides = slidesFor(c);
       let at = 0;
-      const stage = h("section", { class: "slide", "aria-live": "polite" });
+      const head = h("div", { class: "slide-head" });
+      // focusable, so keyboard and screen-reader users can scroll it too; named by the slide title
+      const body = h("div", { class: "slide-body", tabindex: "0", role: "region", "aria-labelledby": "slide-title" });
+      const stage = h("section", { class: "slide", "aria-live": "polite" }, head, body);
       const pos = h("p", { class: "slide-pos" });
       const prev = h("button", { type: "button", class: "btn" }, TR().prev);
       const next = h("button", { type: "button", class: "btn btn-primary" }, TR().next);
+      const syncMore = (): void => {
+        const more = body.scrollHeight - body.clientHeight - body.scrollTop > 1;
+        const scrolls = body.scrollHeight - body.clientHeight > 1;
+        body.classList.toggle("has-more", more);
+        body.classList.toggle("is-scrolled", body.scrollTop > 1);
+        body.tabIndex = scrolls ? 0 : -1;
+      };
+      body.addEventListener("scroll", syncMore, { passive: true });
+      new ResizeObserver(syncMore).observe(body);
       const draw = (): void => {
         const s = slides[at];
         if (s === undefined) return;
-        setChildren(stage, h("div", { class: "slide-inner" }, s.kicker ? h("p", { class: "slide-kicker" }, s.kicker) : null, h("h1", { class: "slide-title" }, s.title), s.body));
-        stage.scrollTop = 0;
+        setChildren(head, s.kicker ? h("p", { class: "slide-kicker" }, s.kicker) : null, h("h1", { class: "slide-title", id: "slide-title" }, s.title));
+        setChildren(body, s.body);
+        body.scrollTop = 0;
+        syncMore();
         pos.textContent = TR().slideOf(at + 1, slides.length);
         prev.disabled = at === 0;
         next.disabled = at === slides.length - 1;
       };
       const go = (to: number): void => {
-        at = Math.max(0, Math.min(slides.length - 1, to));
+        const target = Math.max(0, Math.min(slides.length - 1, to));
+        if (target === at) return;
+        at = target;
         draw();
       };
+      const scrollBody = (delta: number): void => body.scrollBy({ top: delta, behavior: "auto" });
       prev.addEventListener("click", () => go(at - 1));
       next.addEventListener("click", () => go(at + 1));
       onKey = (ev: KeyboardEvent): void => {
@@ -183,15 +178,21 @@ export function presentView(c: Case): ViewResult {
           if (onKey) document.removeEventListener("keydown", onKey);
           return;
         }
+        if (ev.altKey || ev.ctrlKey || ev.metaKey || ev.defaultPrevented) return;
         const t = ev.target;
         if (t instanceof HTMLElement && t.closest("input, textarea, select, [contenteditable]")) return;
         const rtl = document.documentElement.dir === "rtl";
         const fwd = rtl ? "ArrowLeft" : "ArrowRight";
         const back = rtl ? "ArrowRight" : "ArrowLeft";
-        if (ev.key === fwd || ev.key === "PageDown" || ev.key === " ") go(at + 1);
-        else if (ev.key === back || ev.key === "PageUp") go(at - 1);
+        if (ev.key === fwd) go(at + 1);
+        else if (ev.key === back) go(at - 1);
         else if (ev.key === "Home") go(0);
         else if (ev.key === "End") go(slides.length - 1);
+        else if (ev.key === "ArrowDown") scrollBody(SCROLL_STEP.line);
+        else if (ev.key === "ArrowUp") scrollBody(-SCROLL_STEP.line);
+        else if (ev.key === "PageDown") scrollBody(body.clientHeight * SCROLL_STEP.pageShare);
+        else if (ev.key === "PageUp") scrollBody(-body.clientHeight * SCROLL_STEP.pageShare);
+        else if (ev.key === "Escape") window.location.hash = caseHref(c);
         else return;
         ev.preventDefault();
       };
