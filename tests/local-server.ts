@@ -1,16 +1,36 @@
 // Local stand-in for Netlify: serves site/dist plus the real /api handler on the in-memory store.
-// Usage: node --experimental-strip-types tests/local-server.ts [port=8888]
+// Usage: node --experimental-strip-types tests/local-server.ts [port=8888] [--seed-db-case]
 //   ADMIN_KEY defaults to "local-admin-key-0123456789" (16+ chars required).
+//   /evidence/db/* goes through the same EvidenceService as the Edge Function, on the same memory store.
+//   --seed-db-case (dev only) stores a published DB case `db-demo` v1 with a 9 MiB file, for Range checks.
 import { createServer } from "node:http";
+import { Readable } from "node:stream";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 
 process.env.INCIDENTLAB_STORE = "memory";
 process.env.ADMIN_KEY ??= "local-admin-key-0123456789";
-const { default: handler } = await import("../site/netlify/functions/api.mts");
+const { default: handler, appStores } = await import("../site/netlify/functions/api.mts");
+const { CaseRepository, EvidenceChunkRepository } = await import("../site/server/repositories/case-repository.ts");
+const { EvidenceService, EVIDENCE_DB_PREFIX } = await import("../site/server/services/evidenceStream.ts");
 
 const DIST = new URL("../site/dist/", import.meta.url).pathname;
-const PORT = Number(process.argv[2] ?? 8888);
+const args = process.argv.slice(2);
+const PORT = Number(args.find((a) => /^\d+$/.test(a)) ?? 8888);
+const caseRepo = new CaseRepository(appStores().kv);
+const chunkRepo = new EvidenceChunkRepository(appStores().bytes);
+const evidence = new EvidenceService({ cases: caseRepo, chunks: chunkRepo });
+
+if (args.includes("--seed-db-case")) {
+  const { seedCase, patternBytes } = await import("../site/server/test/case-fixtures.ts");
+  await seedCase({ cases: caseRepo, chunks: chunkRepo }, {
+    id: "db-demo",
+    langs: ["en", "he"],
+    files: [{ path: "logs/big.log", bytes: patternBytes(9 * 1024 * 1024 + 123) }, { path: "logs/app.log", bytes: new TextEncoder().encode("hello\n") }],
+    zip: patternBytes(1000, 7),
+  });
+  console.log("seeded DB case db-demo v1: /evidence/db/db-demo/v1/files/logs/big.log (9 MiB + 123 B)");
+}
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml",
   ".json": "application/json", ".zip": "application/zip", ".txt": "text/plain; charset=utf-8", ".log": "text/plain; charset=utf-8",
@@ -35,6 +55,17 @@ createServer(async (req, res) => {
     if (cookies.length > 0) outHeaders["set-cookie"] = cookies;
     res.writeHead(response.status, outHeaders);
     res.end(Buffer.from(await response.arrayBuffer()));
+    return;
+  }
+  if (url.pathname.startsWith(EVIDENCE_DB_PREFIX)) {
+    const headers = new Headers();
+    for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") headers.set(k, v);
+    const response = await evidence.respond(new Request(url, { method: req.method, headers }));
+    const outHeaders: Record<string, string> = {};
+    response.headers.forEach((value, key) => (outHeaders[key] = value));
+    res.writeHead(response.status, outHeaders);
+    if (response.body) Readable.fromWeb(response.body).pipe(res);
+    else res.end();
     return;
   }
   const safe = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, "");

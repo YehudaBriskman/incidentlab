@@ -26,3 +26,11 @@ test("admin disabled with a short key", async () => {
   assert.equal(res.status, 503);
   process.env.ADMIN_KEY = saved;
 });
+
+test("entry point: GET /api/cases is empty until cases are imported (#68)", async () => {
+  resetAppForTests();
+  const res = await handler(new Request("http://localhost/api/cases"), { ip: "10.0.0.1" });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { cases: [] });
+  assert.equal(res.headers.get("cache-control"), "public, max-age=60, stale-while-revalidate=600");
+});
