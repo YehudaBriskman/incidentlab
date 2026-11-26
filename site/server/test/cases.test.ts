@@ -97,6 +97,8 @@ test("content-addressed chunks: identical files are stored once across cases", a
 
 test("JSON snapshots skip the binary evidence: prefix", () => {
   assert.equal(isSnapshotKey("evidence:abc:0"), false);
+  assert.equal(isSnapshotKey("upload:0123456789abcdef01234567"), false, "in-progress uploads are ephemeral");
+  assert.equal(isSnapshotKey("upload:0123456789abcdef01234567:part:content.en.json"), false);
   assert.equal(isSnapshotKey("case:alpha:meta"), true);
   assert.equal(isSnapshotKey("account:1"), true);
 });

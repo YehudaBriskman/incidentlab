@@ -22,6 +22,8 @@ export interface Fixture {
   content: Json & { questions: Json[] };
   evidence: Map<string, Uint8Array>;
   extra: ZipInput[];
+  /** sealed answers (default ANSWERS) */
+  answers?: Record<string, string>;
 }
 
 export function fixture(id: string = ID): Fixture {
@@ -79,7 +81,7 @@ export async function build(f: Fixture): Promise<Uint8Array> {
   return writeZip([
     { name: "manifest.json", data: json(f.manifest) },
     { name: "content.en.json", data: json(f.content) },
-    { name: "sealed/answers.json", data: json(ANSWERS) },
+    { name: "sealed/answers.json", data: json(f.answers ?? ANSWERS) },
     { name: "sealed/hints.json", data: json(hints) },
     { name: "sealed/commands.json", data: json({ count: { command: COMMAND, powershell: null } }) },
     { name: "sealed/scoring.json", data: json({ title: f.content["title"], estMinutes: 30, questions: sealedQuestions }) },
