@@ -143,6 +143,10 @@ function route(): void {
       lazyView(() => Promise.all([import("./views/stats"), loadAuthView()]).then(([m]) => m.renderStats));
       return;
     }
+    if (parts[0] === "author" && parts.length === 1) {
+      lazyView(() => import("./views/author").then((m) => m.renderAuthor));
+      return;
+    }
     if (parts[0] === "admin" && parts.length === 1) {
       // Admin shows titles and question names of every case: load them all (in parallel with its code).
       lazyView(() => Promise.all([import("./views/admin"), loadAllCases()]).then(([m]) => m.renderAdmin));

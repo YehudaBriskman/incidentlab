@@ -188,6 +188,11 @@ export async function changePassword(input: { currentPassword: string; newPasswo
   return (await request("POST", "/api/me/password", AccountResponseSchema, input)).account;
 }
 
+/** A plain request to the API with the session cookie (the upload client parses the responses itself). */
+export function rawApiFetch(path: string, init: { method: string; headers: Readonly<Record<string, string>>; body?: BodyInit }): Promise<Response> {
+  return fetch(`${API_BASE}${path}`, { method: init.method, headers: init.headers, body: init.body, credentials: API_BASE ? "include" : "same-origin" });
+}
+
 /** A public GET validated with `schema` (DB-stored case catalog and content, see content/db-cases.ts). */
 export async function fetchPublic<S extends z.ZodType>(path: string, schema: S): Promise<z.infer<S>> {
   return request("GET", path, schema);
