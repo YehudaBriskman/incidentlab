@@ -579,6 +579,9 @@ function renderQuestionStage(
   /* finished stage: read-only */
   if (s.status === "solved" || s.status === "revealed") {
     const solved = s.status === "solved";
+    // The hints were paid for, so they stay readable after the stage is over.
+    const usedHints = player.unlocked.hints[id] ?? [];
+    const answer = s.revealedAnswer;
     return h(
       "div",
       { class: "stage" },
@@ -592,10 +595,26 @@ function renderQuestionStage(
         // Focus target after a solve or a reveal; the result itself is announced through the shared region.
         h("p", { class: "result-title", tabindex: "-1" }, solved ? T().solvedPts(s.points) : T().revealedPts),
         solved && s.breakdown !== null ? breakdownTable(s.breakdown) : null,
-        !solved && s.revealedAnswer !== null ? h("p", {}, T().answerLabel, h("code", { class: "answer-code" }, s.revealedAnswer)) : null,
+        !solved && answer !== null
+          ? h("p", { class: "answer-line" }, T().answerLabel, h("code", { class: "answer-code" }, answer), copyButton(() => answer))
+          : null,
         prose("prose", q.successNote),
         currentStage(player) !== id ? continueBtn() : null,
       ),
+      usedHints.length > 0
+        ? h(
+            "div",
+            { class: "block hints hints-used" },
+            h("h3", {}, TP().hintsUsedHead),
+            h(
+              "ol",
+              { class: "hint-list" },
+              usedHints.map((text, i) =>
+                h("li", { class: "hint" }, h("span", { class: "hint-label mono" }, TP().hintLabel(i + 1, q.hints[i]?.cost ?? 0)), prose("prose", text)),
+              ),
+            ),
+          )
+        : null,
     );
   }
 
@@ -954,8 +973,9 @@ function breakdownTable(b: ScoreBreakdown): HTMLElement {
       row(TG().bdCommands, b.commands),
       row(TG().bdWrong, b.wrong),
       row(TG().bdTime, b.time, TG().bdTimeDetail(mmss(b.solveSeconds), mmss(b.targetSeconds))),
-      row(TG().bdClean, b.clean),
-      row(TG().bdFirstBlood, b.firstBlood),
+      // A bonus that scored 0 says why, so the table explains itself.
+      row(TG().bdClean, b.clean, b.clean === 0 && (b.hints < 0 || b.commands < 0 || b.wrong < 0) ? TP().cleanLost(b.hints < 0, b.commands < 0, b.wrong < 0) : undefined),
+      row(TG().bdFirstBlood, b.firstBlood, b.firstBlood === 0 ? TP().firstTaken : undefined),
     ),
     h("tfoot", {}, h("tr", { class: "is-total" }, h("th", { scope: "row" }, TG().bdTotal), h("td", { class: "num mono" }, formatNumber(b.total)))),
   );
