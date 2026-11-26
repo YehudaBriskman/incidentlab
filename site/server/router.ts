@@ -16,6 +16,7 @@ import { AccountAdminService } from "./services/AccountAdminService.ts";
 import { AdminAuthService } from "./services/AdminAuthService.ts";
 import { AuditService } from "./services/AuditService.ts";
 import { AuthService } from "./services/AuthService.ts";
+import { CaseSecretsProvider } from "./services/CaseSecretsProvider.ts";
 import { CaseService } from "./services/CaseService.ts";
 import { EvidenceService } from "./services/evidenceStream.ts";
 import { EventService } from "./services/EventService.ts";
@@ -42,24 +43,26 @@ type MethodTable = Partial<Record<string, Handler>>;
 
 export const createApp = (deps: AppDeps): App => {
   const now = deps.now ?? (() => new Date());
-  const secrets = deps.secrets ?? loadSecrets();
+  const bundledSecrets = deps.secrets ?? loadSecrets();
   const repos = createRepositories(deps.store);
+  const caseRepo = new CaseRepository(deps.store);
+  const evidence = new EvidenceService({ cases: caseRepo, chunks: new EvidenceChunkRepository(deps.bytes ?? new InMemoryByteStore()) });
+  const cases = new CaseService({ cases: caseRepo, evidence });
+  // Answer keys: bundled secrets.json overlaid with DB-published cases (refreshed before each request, see handle).
+  const secrets = new CaseSecretsProvider({ bundled: bundledSecrets, source: cases, now });
   const settingsRepo = new SettingsRepository(deps.store);
   const firstBlood = new FirstBloodRepository(deps.store);
 
   const limiter = new RateLimiter(repos.rateLimits, now);
   const auth = new AuthService({ repos, settings: settingsRepo, limiter, adminKey: deps.adminKey, now });
   const events = new EventService({ events: new EventRepository(deps.store), settings: settingsRepo, now });
-  const schedule = new ScheduleService({ repository: repos.schedule, releasedCaseIds: Object.keys(secrets.cases), now });
+  const schedule = new ScheduleService({ repository: repos.schedule, releasedCaseIds: () => Object.keys(secrets.cases), now });
   const game = new GameService({ repository: repos.progress, firstBlood, secrets, schedule, events, now });
   const stats = new StatsService({ repos, secrets, now });
   const trashRepo = new TrashRepository(deps.store);
   const trash = new TrashService({ trash: trashRepo, repos, now });
   const accounts = new AccountAdminService({ repos, firstBlood, game, stats, trash, trashRepo, now });
   const audit = new AuditService({ repository: new AuditRepository(deps.store), now });
-  const caseRepo = new CaseRepository(deps.store);
-  const evidence = new EvidenceService({ cases: caseRepo, chunks: new EvidenceChunkRepository(deps.bytes ?? new InMemoryByteStore()) });
-  const cases = new CaseService({ cases: caseRepo, evidence });
 
   const authController = new AuthController({ auth, schedule, stats, events });
   const gameController = new GameController({ auth, game });
@@ -136,6 +139,7 @@ export const createApp = (deps: AppDeps): App => {
   return {
     async handle(req: Request, ip: string): Promise<Response> {
       try {
+        await secrets.refresh();
         const table = route(req, ip);
         if (!table) return errorResponse(404, "not found");
         const handler = table[req.method.toUpperCase()];

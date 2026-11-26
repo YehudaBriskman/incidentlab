@@ -39,6 +39,11 @@ export class CaseService {
     return meta && isPublicVersion(meta, meta.version) ? meta : null;
   }
 
+  /** Ids of every published case (the game overlays their sealed parts on the bundled answer keys). */
+  async publishedIds(): Promise<string[]> {
+    return (await this.cases.listMetas()).filter((m) => isPublicVersion(m, m.version)).map((m) => m.id);
+  }
+
   /** Catalog entries for every published case, by id. A case whose English content is missing or corrupt is left out. */
   async listPublished(): Promise<CatalogEntry[]> {
     const published = (await this.cases.listMetas()).filter((m) => isPublicVersion(m, m.version));

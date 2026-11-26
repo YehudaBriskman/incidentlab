@@ -18,10 +18,11 @@ export const localDate = (date: Date, timezone: string): string =>
 
 export class ScheduleService {
   private readonly repository: ScheduleRepository;
-  private readonly releasedCaseIds: readonly string[];
+  /** read per call: DB-published cases (#68) join the bundled ones without a redeploy */
+  private readonly releasedCaseIds: () => readonly string[];
   private readonly now: () => Date;
 
-  constructor(deps: { repository: ScheduleRepository; releasedCaseIds: readonly string[]; now: () => Date }) {
+  constructor(deps: { repository: ScheduleRepository; releasedCaseIds: () => readonly string[]; now: () => Date }) {
     this.repository = deps.repository;
     this.releasedCaseIds = deps.releasedCaseIds;
     this.now = deps.now;
@@ -34,7 +35,7 @@ export class ScheduleService {
   async save(schedule: Schedule): Promise<Schedule> {
     if (!isValidTimeZone(schedule.timezone)) throw new AppError(400, `unknown time zone: ${schedule.timezone}`);
     const referenced = [schedule.defaultCaseId, ...Object.values(schedule.days)].filter((id): id is string => id !== null);
-    const unknown = referenced.find((id) => !this.releasedCaseIds.includes(id));
+    const unknown = referenced.find((id) => !this.releasedCaseIds().includes(id));
     if (unknown !== undefined) throw new AppError(400, `case is not released: ${unknown}`);
     // Drop entries older than a year so the record can't grow without bound.
     const cutoff = localDate(new Date(this.now().getTime() - 366 * 24 * 60 * 60 * 1000), schedule.timezone);
@@ -48,8 +49,8 @@ export class ScheduleService {
     const schedule = await this.repository.get();
     const date = localDate(this.now(), schedule.timezone);
     const scheduled = schedule.days[date] ?? schedule.defaultCaseId;
-    const caseId = scheduled !== null && this.releasedCaseIds.includes(scheduled) ? scheduled : null;
-    return { date, timezone: schedule.timezone, caseId, lockToToday: schedule.lockToToday, releasedCaseIds: [...this.releasedCaseIds] };
+    const caseId = scheduled !== null && this.releasedCaseIds().includes(scheduled) ? scheduled : null;
+    return { date, timezone: schedule.timezone, caseId, lockToToday: schedule.lockToToday, releasedCaseIds: [...this.releasedCaseIds()] };
   }
 
   async canStart(caseId: string): Promise<boolean> {
