@@ -63,6 +63,7 @@ export const createApp = (deps: AppDeps): App => {
       "/api/auth/login": { POST: () => authController.login(req, ip) },
       "/api/auth/logout": { POST: () => authController.logout(req) },
       "/api/me": { GET: () => authController.me(req) },
+      "/api/session": { GET: () => authController.session(req) },
       "/api/me/stats": { GET: () => authController.myStats(req) },
       "/api/me/password": { POST: () => authController.changePassword(req) },
       "/api/today": { GET: () => authController.today() },

@@ -33,6 +33,7 @@ export const TO = defineStrings({
     offline: "Can't reach the server. Check your connection and try again.",
     signInForStats: "Sign in to see your stats",
     skipToContent: "Skip to content",
+    footerTagline: "IncidentLab · fictional companies, real failure modes · built for engineers who like a good outage",
     countdownLong: (days: number, hours: number, minutes: number): string => `${formatNumber(days)}d ${formatNumber(hours)}h ${formatNumber(minutes)}m`,
 
     // pending / rejected
@@ -142,6 +143,7 @@ export const TO = defineStrings({
     offline: "אין חיבור לשרת. בדקו את החיבור ונסו שוב.",
     signInForStats: "היכנסו כדי לראות את הסטטיסטיקות",
     skipToContent: "דילוג לתוכן",
+    footerTagline: "IncidentLab · חברות בדיוניות, תקלות אמיתיות · נבנה למהנדסים שאוהבים תקלה טובה",
     countdownLong: (days: number, hours: number, minutes: number): string =>
       `${days === 1 ? "יום 1" : `${formatNumber(days)} ימים`} ${formatNumber(hours)} שע' ${formatNumber(minutes)} דק'`,
 

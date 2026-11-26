@@ -370,6 +370,7 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 .logo { color: var(--text); text-decoration: none; font-weight: 700; font-size: var(--step-0); }
 .logo-mark { color: var(--accent); margin-inline-end: var(--space-1); }
 .topbar-status { color: var(--text-muted); font-size: var(--step--1); display: inline-flex; align-items: center; gap: var(--space-2); margin-inline-start: auto; }
+.topbar-status.is-off { visibility: hidden; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success-fg); display: inline-block; }
 .footer { text-align: center; color: var(--text-muted); font-size: var(--step--2); padding: var(--space-6) var(--gutter); }
 .net-banner { position: sticky; top: 0; z-index: 40; background: var(--accent); color: var(--on-accent); text-align: center; padding: var(--space-2) var(--space-4); font-size: var(--step--1); font-weight: 600; }
@@ -1166,7 +1167,8 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
 @media (max-width: 640px) {
   .lb-select, .lb-tools .btn { min-height: var(--control-md); }
   .lb-tools { width: 100%; }
-  .lb-select { flex: 1; max-width: none; }
+  /* min-width 0: a flex item's auto minimum is its longest option, which pushed the Hebrew page 24px sideways */
+  .lb-select { flex: 1 1 0; min-width: 0; max-width: 100%; }
   .lb-event { white-space: normal; }
 }
 

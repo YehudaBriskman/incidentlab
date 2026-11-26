@@ -4,6 +4,7 @@
 import type { z } from "zod";
 import {
   AccountResponseSchema,
+  SessionResponseSchema,
   AnswerResponseSchema,
   DebriefResponseSchema,
   ErrorBodySchema,
@@ -173,14 +174,9 @@ export async function logout(): Promise<void> {
   await requestNoContent("/api/auth/logout", {});
 }
 
-/** The signed-in account, or null when signed out. */
+/** The signed-in account, or null when signed out. `/api/session` answers 200 either way, so visitors see no 401. */
 export async function fetchMe(): Promise<AccountView | null> {
-  try {
-    return (await request("GET", "/api/me", AccountResponseSchema)).account;
-  } catch (err) {
-    if (err instanceof ApiError && err.isUnauthorized) return null;
-    throw err;
-  }
+  return (await request("GET", "/api/session", SessionResponseSchema)).account;
 }
 
 export async function fetchMyStats(): Promise<UserStats> {

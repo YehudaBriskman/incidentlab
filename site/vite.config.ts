@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
@@ -129,8 +130,29 @@ const caseCatalogPlugin = (): Plugin => {
   };
 };
 
+/** The commit this build came from (BUILD_SHA wins, then git; "-dirty" marks uncommitted changes). */
+const buildSha = (): string => {
+  const fromEnv = process.env.BUILD_SHA?.trim();
+  if (fromEnv) return fromEnv;
+  try {
+    const git = (...args: string[]): string => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return git("rev-parse", "--short=12", "HEAD") + (git("status", "--porcelain") === "" ? "" : "-dirty");
+  } catch {
+    return "unknown";
+  }
+};
+
+/** Stamps `<meta name="build">` so anyone can tell which commit is live (view source, or the smoke test). */
+const buildStampPlugin = (): Plugin => {
+  const sha = buildSha();
+  return {
+    name: "incidentlab-build-stamp",
+    transformIndexHtml: () => [{ tag: "meta", attrs: { name: "build", content: sha }, injectTo: "head" }],
+  };
+};
+
 export default defineConfig({
   base: "/",
-  plugins: [stripPaidContentPlugin(), caseCatalogPlugin()],
+  plugins: [stripPaidContentPlugin(), caseCatalogPlugin(), buildStampPlugin()],
   build: { outDir: "dist", sourcemap: false },
 });

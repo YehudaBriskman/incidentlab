@@ -43,6 +43,12 @@ import type { EvidenceFile, PatternPreset } from "../explorer/files";
 import type { WorkerErrorCode, WorkerResponse } from "../explorer/protocol";
 import { T } from "../i18n/strings-tools";
 
+/** A file path with line-break opportunities after "/", "_", "-" and ".", so names wrap at word joins, not mid-word. */
+function breakablePath(path: string): Node[] {
+  const parts = path.split(/(?<=[/_.-])/);
+  return parts.flatMap((part, i) => (i < parts.length - 1 ? [document.createTextNode(part), document.createElement("wbr")] : [document.createTextNode(part)]));
+}
+
 const ROW_H = 20;
 const DEBOUNCE_MS = 250;
 const ANNOUNCE_MS = 900;
@@ -535,7 +541,7 @@ export function renderExplorer(root: HTMLElement, c: Case): void {
         const btn = h(
           "button",
           { class: `ex-file${active ? " is-active" : ""}`, type: "button", "aria-current": active ? "true" : null },
-          h("span", { class: "ex-file-name mono", dir: "ltr" }, f.path),
+          h("span", { class: "ex-file-name mono", dir: "ltr" }, breakablePath(f.path)),
           h("span", { class: "ex-file-meta" },
             f.format !== "" ? h("span", {}, f.format) : null,
             size !== "" ? [f.format !== "" ? " · " : "", num(size)] : null,

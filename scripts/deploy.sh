@@ -99,8 +99,10 @@ else
 fi
 unset existing
 
-echo "[deploy] deploying site/dist + site/netlify/functions"
+BUILD_STAMP="$(sed -nE 's/.*<meta name="build" content="([^"]+)".*/\1/p' "$ROOT/site/dist/index.html" | head -n1)"
+echo "[deploy] deploying site/dist + site/netlify/functions (build ${BUILD_STAMP:-unknown})"
 "${NETLIFY[@]}" deploy --prod --dir=site/dist --functions=site/netlify/functions
+echo "[deploy] live build: ${BUILD_STAMP:-unknown} (check: curl -s <site>/ | grep 'name=\"build\"')"
 cp "$NEW_FP" "$DEPLOYED_FP"
 
 # --- 3. data migrations ---

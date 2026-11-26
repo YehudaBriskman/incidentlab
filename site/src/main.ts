@@ -12,10 +12,12 @@ import { TO } from "./i18n/strings-onboard";
 import { renderHome } from "./views/home";
 import { eventDisplayPhase, eventLine, eventWhen, renderLeaderboard, stopLeaderboard } from "./views/leaderboard";
 
-/** The skip link is static HTML: relabel it in the current language. */
+/** The skip link and footer tagline are static HTML: relabel them in the current language. */
 function labelSkipLink(): void {
   const link = document.querySelector(".skip-link");
   if (link !== null) link.textContent = TO().skipToContent;
+  const tagline = document.querySelector(".footer-tagline");
+  if (tagline !== null) tagline.textContent = TO().footerTagline;
 }
 
 applyLang();
@@ -90,8 +92,11 @@ function mountAccountMenu(): void {
   const bar = document.querySelector(".topbar");
   if (!(bar instanceof HTMLElement)) return;
   const wrap = h("nav", { class: "account-menu", "aria-label": TA().accountMenu });
+  const status = bar.querySelector(".topbar-status");
   const draw = (): void => {
     const account = cachedAccount();
+    // "on-call: you" only makes sense for someone signed in; the class keeps its layout slot either way
+    status?.classList.toggle("is-off", account === null);
     const board = h("a", { class: "btn btn-sm btn-ghost", href: "#/leaderboard" }, TG().leaderboard);
     if (account === null) {
       setChildren(wrap, board, h("a", { class: "btn btn-sm", href: "#/login" }, TA().signIn));

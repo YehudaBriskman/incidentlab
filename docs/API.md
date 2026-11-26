@@ -49,7 +49,8 @@ at base + 30 + 10, plus 50); first blood can push a score above par. Each solved
 | POST | `/api/auth/register` | none | `{username, password}` | 201 `{account}` + cookie |
 | POST | `/api/auth/login` | none | `{username, password}` | `{account}` + cookie |
 | POST | `/api/auth/logout` | cookie | `{}` | 204, clears the cookie |
-| GET | `/api/me` | cookie | | `{account}` |
+| GET | `/api/me` | cookie | | `{account}` (401 when signed out) |
+| GET | `/api/session` | optional cookie | | `{account}` or `{account: null}`, always 200. The browser uses this to probe sign-in without logging a 401. |
 | GET | `/api/me/stats` | cookie | | `{stats: UserStats}` |
 | GET | `/api/today` | none | | `{date, timezone, caseId, lockToToday, releasedCaseIds}` |
 | GET | `/api/cases/:caseId/progress` | approved | | `{progress}` (first call creates the record, so the admin sees the player at "setup") |

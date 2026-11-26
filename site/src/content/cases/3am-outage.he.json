@@ -30,17 +30,17 @@
   "evidence": [
     {
       "path": "README_FIRST.txt",
-      "format": "text",
+      "format": "טקסט",
       "description": "הערות התדריך מצוות ה-on-call, רשימת הקבצים והערות חשובות על פורמטי זמן. מתחילים כאן."
     },
     {
       "path": "nginx/access.log",
-      "format": "nginx log (UTC)",
+      "format": "לוג nginx (UTC)",
       "description": "כל בקשת HTTP שעברה דרך ה-edge proxy במהלך הלילה, עם status, תזמונים, request id (`rid`) ו-customer id (`cid`)."
     },
     {
       "path": "nginx/nginx.conf.snippet",
-      "format": "nginx config",
+      "format": "קונפיגורציית nginx",
       "description": "הגדרת ה-`log_format` וה-timeouts של ה-proxy, כדי שתדעו מה כל שדה (וכל timestamp) מייצג."
     },
     {
@@ -50,22 +50,22 @@
     },
     {
       "path": "metrics/checkout_metrics.csv",
-      "format": "CSV (unix epoch)",
+      "format": "CSV (epoch של unix)",
       "description": "מטריקות של שירות ה-checkout ברזולוציה של 15 שניות: pods ready, CPU, event-loop lag, p99 latency, RPS, error rate, restarts."
     },
     {
       "path": "db/postgresql-slow.log",
-      "format": "Postgres log (UTC)",
+      "format": "לוג Postgres (UTC)",
       "description": "slow-query log ואירועים בולטים מה-database הראשי."
     },
     {
       "path": "deploys/deploys.log",
-      "format": "text (UTC ISO-8601)",
+      "format": "טקסט (UTC, ISO-8601)",
       "description": "דיפלויים ו-rollbacks בכל השירותים בימים האחרונים."
     },
     {
       "path": "slack/inc-checkout.json",
-      "format": "Slack export (JSON)",
+      "format": "ייצוא Slack (JSON)",
       "description": "ערוץ האירוע, כפי שיוצא. `ts` הוא epoch seconds שמור כמחרוזת. התייחסו לדעות שבו כהשערות, לא כעובדות."
     },
     {
@@ -75,7 +75,7 @@
     },
     {
       "path": "repo/git-log.txt",
-      "format": "text (git log -p)",
+      "format": "טקסט (git log -p)",
       "description": "אותה היסטוריית repo כטקסט רגיל: כל commit, tag ו-diff (`git log -p --decorate --all`). השתמשו בזה אם אין לכם git."
     }
   ],
@@ -830,7 +830,7 @@
       ]
     },
     {
-      "category": "Code history forensics (git-log.txt)",
+      "category": "פורנזיקה של היסטוריית הקוד (git-log.txt)",
       "items": [
         {
           "id": "git-clone",
@@ -948,7 +948,7 @@
       ]
     },
     {
-      "category": "Postgres slow log",
+      "category": "ה-slow log של Postgres",
       "items": [
         {
           "id": "pg-slow-all",
