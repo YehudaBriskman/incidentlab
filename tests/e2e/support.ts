@@ -41,10 +41,19 @@ export async function scheduleToday(request: APIRequestContext, caseId: string):
 
 /** Approves the pending account named `username` through the admin API. */
 export async function approveAccount(request: APIRequestContext, username: string): Promise<void> {
-  const listRes = await request.get("/api/admin/accounts", { headers: adminHeaders });
-  expect(listRes.status()).toBe(200);
-  const { accounts } = (await listRes.json()) as { accounts: { accountId: string; username: string }[] };
-  const account = accounts.find((a) => a.username === username.toLowerCase());
+  type Row = { accountId: string; username: string };
+  // The admin account list is cached for a moment, so a sign-up made right after another spec read it may not be
+  // listed yet: wait for it instead of failing on whichever spec happens to run next.
+  let account: Row | undefined;
+  await expect
+    .poll(async () => {
+      const listRes = await request.get("/api/admin/accounts", { headers: adminHeaders });
+      expect(listRes.status()).toBe(200);
+      const { accounts } = (await listRes.json()) as { accounts: Row[] };
+      account = accounts.find((a) => a.username === username.toLowerCase());
+      return account !== undefined;
+    })
+    .toBe(true);
   expect(account, `account ${username} should exist`).toBeTruthy();
   const res = await request.post(`/api/admin/accounts/${account?.accountId}/approve`, { headers: adminHeaders, data: {} });
   expect(res.status(), await res.text()).toBe(200);

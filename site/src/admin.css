@@ -73,6 +73,10 @@
 .admin-tile-label { font-size: var(--step--2); text-transform: uppercase; letter-spacing: var(--track-label); color: var(--text-muted); }
 .admin-tile-value { font-family: var(--font-mono); font-size: clamp(1.6rem, 3.4vw, 2.4rem); font-weight: 600; line-height: 1.2; margin-top: var(--space-1); }
 .admin-tile-sub { font-size: var(--step--1); color: var(--text-2); }
+/* KPI tiles from components/statGrid.ts: the admin keeps its mono numbers and fluid size. */
+.admin-tiles .stat-tile { padding: var(--space-3) var(--space-4); gap: 0; }
+.admin-tiles .stat-value-row .stat-value { font-family: var(--font-mono); font-size: clamp(1.6rem, 3.4vw, 2.4rem); font-weight: 600; letter-spacing: 0; line-height: 1.2; }
+.admin-tiles .stat-sub { margin: 0; color: var(--text-2); }
 
 
 /* ---- funnel: bars grow from the inline start, so they mirror with the labels in Hebrew ---- */
@@ -151,12 +155,15 @@
 .admin-search { width: 220px; }
 .admin-table-wrap { overflow-x: auto; }
 .admin-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
-.admin-table th { padding: var(--space-2) var(--space-3); position: sticky; top: 0; }
-.admin-table td { padding: var(--space-3); border-bottom: 1px solid var(--border); vertical-align: middle; }
-.admin-table tr:hover td { background: var(--surface-2); }
+.admin-table thead th { padding: var(--space-2) var(--space-3); position: sticky; top: 0; }
+.admin-table tbody > tr > :is(td, th) { padding: var(--space-3); border-bottom: 1px solid var(--border); vertical-align: middle; text-align: start; font-weight: inherit; }
+.admin-table tbody > tr > .num { text-align: end; }
+.admin-table tbody > tr:hover > :is(td, th) { background: var(--surface-2); }
 /* Row markers sit on the row's inline-start edge in both directions (--dir flips the inset shadow). */
-.admin-table tr.is-warn td:first-child { box-shadow: inset calc(3px * var(--dir)) 0 0 var(--warning-fg); }
-.admin-table tr.is-alert td:first-child { box-shadow: inset calc(3px * var(--dir)) 0 0 var(--danger-fg); }
+.admin-table tr.is-warn > :first-child { box-shadow: inset calc(3px * var(--dir)) 0 0 var(--warning-fg); }
+.admin-table tr.is-alert > :first-child { box-shadow: inset calc(3px * var(--dir)) 0 0 var(--danger-fg); }
+/* Admin tables sit inside panels: no second frame around the scroller (components/dataTable.ts). */
+.admin .dt-wrap { border: 0; border-radius: 0; }
 .admin-table .num { text-align: end; font-family: var(--font-mono); }
 .col-name { max-width: 220px; }
 .player-name { font-weight: 600; overflow-wrap: anywhere; }
@@ -171,19 +178,20 @@
 /* Shrinks with the viewport so the 7 columns fit the wrapper down to the card breakpoint. */
 .stage-text { display: block; max-width: clamp(8rem, 100vw - 72rem, 20rem); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .col-onstage { white-space: nowrap; }
-.live-table td, .live-table th { padding-inline: var(--space-2); }
-.live-table-wrap.is-compact .admin-table td { padding-block: var(--space-1); }
+.live-table thead th, .live-table tbody > tr > :is(td, th) { padding-inline: var(--space-2); }
+.admin-table tbody > tr > .col-actions { text-align: end; }
+.live-table-wrap.is-compact .admin-table tbody > tr > :is(td, th) { padding-block: var(--space-1); }
 .live-table-wrap.is-compact .admin-table { font-size: var(--step--1); }
 .live-table-wrap.is-compact .col-score { font-size: var(--step--1); }
 .live-table-wrap.is-compact .cell { height: 12px; }
 .live-table-wrap.is-compact .acct-toggle { min-height: var(--control-xs); }
 .live-table-wrap.is-compact .row-menu-btn { min-height: var(--control-xs); }
 @keyframes admin-flash { from { background: var(--accent-soft); } }
-.is-flash td, .is-flash.player-card { animation: admin-flash var(--motion-dur-data) var(--motion-ease-standard); }
-.is-flash td:first-child { box-shadow: inset calc(3px * var(--dir)) 0 0 var(--accent); }
+.is-flash > :is(td, th), .is-flash.player-card { animation: admin-flash var(--motion-dur-data) var(--motion-ease-standard); }
+.is-flash > :first-child { box-shadow: inset calc(3px * var(--dir)) 0 0 var(--accent); }
 .is-flash.player-card { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) {
-  .is-flash td, .is-flash.player-card { animation: none; background: var(--accent-soft); }
+  .is-flash > :is(td, th), .is-flash.player-card { animation: none; background: var(--accent-soft); }
 }
 
 /* Segmented control (density) and checkbox labels: one tab stop each, 44px on touch. */
@@ -308,6 +316,12 @@ html.admin-sticky-tabs { scroll-padding-top: calc(var(--adm-tabs-h, 45px) + var(
   border-inline-start: 3px solid var(--warning-fg);
 }
 .pending-item.is-selected { background: var(--accent-soft); }
+.pending-item > .dt-card-select { grid-column: 1; grid-row: 1 / span 2; }
+.pending-table .pending-actions { display: inline-flex; gap: var(--space-2); justify-content: flex-end; }
+.pending-table tbody > tr > :is(td, th) { background: var(--surface-2); }
+.pending-table tbody > tr > :first-child { box-shadow: inset calc(3px * var(--dir)) 0 0 var(--warning-fg); }
+.pending-table tbody > tr.is-selected > :is(td, th) { background: var(--accent-soft); }
+.dt-cards-all { margin-block-end: var(--space-2); }
 .pending-check { grid-column: 1; grid-row: 1 / span 2; display: inline-flex; align-items: center; justify-content: center; min-width: var(--target-min); min-height: var(--target-min); cursor: pointer; }
 .pending-check input { width: 24px; height: 24px; margin: 0; accent-color: var(--accent); }
 .pending-name { grid-column: 2; font-weight: 600; overflow-wrap: anywhere; justify-self: start; }
@@ -340,12 +354,12 @@ html.admin-sticky-tabs { scroll-padding-top: calc(var(--adm-tabs-h, 45px) + var(
 .acct-toggle[aria-expanded="true"] .acct-caret { transform: rotate(90deg); }
 [dir=rtl] .acct-caret { transform: scaleX(-1); }
 [dir=rtl] .acct-toggle[aria-expanded="true"] .acct-caret { transform: rotate(90deg); }
-.acct-row.is-expanded td { background: var(--surface-2); }
-.admin-table tr.acct-detail:hover td,
-.acct-detail td { background: var(--surface-2); padding-top: 0; }
+.acct-row.is-expanded > :is(td, th) { background: var(--surface-2); }
+.admin-table tr.acct-detail:hover > td,
+.acct-detail > td { background: var(--surface-2); padding-top: 0; }
 .acct-detail-inner { padding-block: var(--space-1) var(--space-2); padding-inline: var(--space-5) 0; overflow-x: auto; }
 .admin-subtable { font-size: var(--step--1); }
-.admin-subtable th { position: static; background: transparent; }
+.admin-subtable thead th { position: static; background: transparent; }
 .case-status.is-completed { color: var(--success-fg); font-weight: 600; }
 .case-status.is-in-progress { color: var(--info-fg); }
 .case-status.is-not-started { color: var(--text-muted); }
@@ -407,6 +421,8 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 .cal-day.is-today { border: 2px solid var(--info-fg); background: var(--info-bg); opacity: 1; }
 .cal-day-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1); }
 .cal-num { font-family: var(--font-mono); font-weight: 600; }
+.cal-wd { display: none; color: var(--text-muted); font-size: var(--step--1); }
+.cal-day-head { flex-wrap: wrap; }
 .cal-day .today-tag { margin: 0; font-size: 0.7rem; padding: 0 var(--space-1); }
 .cal-select { width: 100%; font-size: var(--step--2); padding: var(--space-1); min-height: var(--target-min); }
 .cal-day:not(.is-set) .cal-select { color: var(--text-muted); }
@@ -442,8 +458,8 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 .stats-table-view[open] summary { margin-bottom: var(--space-2); }
 .q-id { font-family: var(--font-mono); color: var(--text-muted); }
 /* Hardest question: a neutral flag, not an error state. */
-.stats-q-table tr.is-hardest td { background: var(--surface-2); }
-.stats-q-table tr.is-hardest td:first-child { box-shadow: inset calc(3px * var(--dir)) 0 0 var(--text-2); }
+.stats-q-table tr.is-hardest > :is(td, th) { background: var(--surface-2); }
+.stats-q-table tr.is-hardest > :first-child { box-shadow: inset calc(3px * var(--dir)) 0 0 var(--text-2); }
 .stats-hardest { margin: 0; }
 .hardest-badge {
   margin-inline-start: var(--space-2);
@@ -452,7 +468,7 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
   letter-spacing: 0.06em;
   --pill-bg: transparent;
 }
-.admin-table tr.is-first td { background: var(--accent-soft); }
+.admin-table tr.is-first > :is(td, th) { background: var(--accent-soft); }
 
 /* ---- admin session, invite code, temp password, event, audit ---- */
 .admin-login-alt { margin: var(--space-4) 0 0; }
@@ -467,9 +483,8 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 .invite-current { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
 .invite-current p { margin: 0; }
 .invite-code { font-size: var(--step-1); letter-spacing: var(--track-label); }
-.invite-form { display: grid; gap: var(--space-2); }
-.invite-row { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
-.invite-input { width: 240px; font-family: var(--font-mono); }
+.invite-form { display: grid; gap: var(--space-3); max-width: 36rem; }
+.invite-input { font-family: var(--font-mono); }
 .invite-msg { margin: var(--space-2) 0 0; color: var(--success-fg); }
 .invite-msg.sched-invalid { color: var(--danger-fg); }
 .invite-msg[hidden] { display: none; }
@@ -487,9 +502,14 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 .adm-ev-dot.is-over { background: var(--danger-fg); }
 .adm-ev-quick { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .adm-ev-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.ev-time-row { display: flex; gap: var(--space-2); align-items: center; min-width: 0; }
-.ev-time-row .admin-input { flex: 1 1 0; min-width: 0; width: 100%; }
 .adm-ev-form .sched-field { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+/* Shared form fields (components/formLayout.ts) in the admin forms: full-width controls, quiet hints. */
+.admin .field { min-width: 0; }
+.admin .field > .admin-input { width: 100%; }
+.admin .field-help { font-size: var(--step--1); color: var(--text-muted); }
+.ev-time-extra { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-2); }
+.ev-time-extra .ev-time-preview { margin: 0; }
+.ev-time-extra .ev-time-note { flex: 1 1 100%; margin: 0; }
 .ev-tz { grid-column: 1 / -1; margin: 0; }
 .ev-time-preview { font-variant-numeric: tabular-nums; }
 .adm-ev-ann { display: grid; gap: var(--space-2); }
@@ -519,9 +539,12 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
   .board-time { display: none; }
   .admin-tab { padding: var(--space-2) var(--space-3); }
   .admin-toolbar .admin-input { min-width: 0; flex: 1 1 100%; }
-  .cal-grid { gap: 3px; }
-  .cal-day { padding: 3px; gap: 3px; }
-  .cal-select { font-size: 0.7rem; padding: 3px 1px; }
+  /* Phones: the month becomes a list (weekday, date, full-width picker): seven 40px columns can't show a case title. */
+  .cal-grid { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+  .cal-dow, .cal-day.is-blank { display: none; }
+  .cal-day { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); align-items: center; min-height: 0; padding: var(--space-1) var(--space-2); gap: var(--space-2); }
+  .cal-wd { display: inline; }
+  .cal-select { font-size: var(--step--1); }
   .adm-ev-form { grid-template-columns: minmax(0, 1fr); }
   .invite-input { width: 100%; flex: 1 1 100%; }
   .admin-pw .admin-share-url { font-size: var(--step-0); }
@@ -537,27 +560,6 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
   background: var(--surface);
 }
 .acct-searchbar .admin-search { width: min(100%, 24rem); }
-.col-chooser { position: relative; }
-.col-chooser > summary { list-style: none; cursor: pointer; }
-.col-chooser > summary::-webkit-details-marker { display: none; }
-.col-chooser-pop {
-  position: absolute;
-  inset-inline-end: 0;
-  top: calc(100% + var(--space-1));
-  z-index: 8;
-  display: grid;
-  gap: 0 var(--space-3);
-  min-width: 14rem;
-  margin: 0;
-  padding: var(--space-3);
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-}
-.col-chooser-pop legend { float: left; margin-bottom: var(--space-1); padding: 0; }
-.col-chooser-pop .btn { justify-self: start; margin-top: var(--space-2); }
-
 /* ---- KPI tiles that fold on phones/tablets ---- */
 .tiles-fold { display: grid; gap: var(--space-2); }
 .tiles-toggle {
@@ -629,8 +631,8 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
   .tiles-toggle { display: flex; }
   .tiles-fold.is-folded .admin-tiles { display: none; }
   .admin-tiles { gap: var(--space-2); }
-  .admin-tile { padding: var(--space-2) var(--space-3); }
-  .admin-tile-value { font-size: var(--step-2); }
+  .admin-tiles .stat-tile { padding: var(--space-2) var(--space-3); }
+  .admin-tiles .stat-value-row .stat-value { font-size: var(--step-2); }
   /* Two lines per player: name and reasons, then the stage; Jump on the end. */
   .help-item { grid-template-columns: minmax(0, 1fr) auto auto; padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3); }
   .help-name { grid-column: 1; grid-row: 1; }
@@ -638,7 +640,7 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
   .help-stage { grid-column: 1 / span 2; grid-row: 2; }
   .help-jump { grid-column: 3; grid-row: 1 / span 2; }
   /* Cards ignore row density and table columns: those controls only exist for the grids. */
-  .seg, .col-chooser { display: none; }
+  .seg, .dt-picker-wrap { display: none; }
   .stats-headline { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .stats-kpi.is-hardest { grid-column: 1 / -1; }
   .q-bar-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
@@ -647,7 +649,7 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 /* Phones/tablets: checkboxes get a 44px hit box (a 24px visible box inside a transparent 10px border), so the
    input itself meets the touch target, not just its label. Chromium/WebKit draw the tick with ::after. */
 @media (max-width: 900px) {
-  .admin-check input, .sched-check input, .pending-check input {
+  .admin-check input, .sched-check input, .pending-check input, .admin .dt-select-box, .admin .dt-check input {
     appearance: none;
     box-sizing: border-box;
     position: relative;
@@ -660,12 +662,12 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
     box-shadow: inset 0 0 0 2px var(--border-strong);
     cursor: pointer;
   }
-  .admin-check input:checked, .sched-check input:checked, .pending-check input:checked,
-  .admin-check input:indeterminate, .pending-check input:indeterminate {
+  .admin-check input:checked, .sched-check input:checked, .pending-check input:checked, .admin .dt-select-box:checked, .admin .dt-check input:checked,
+  .admin-check input:indeterminate, .pending-check input:indeterminate, .admin .dt-select-box:indeterminate {
     background: var(--accent) content-box;
     box-shadow: inset 0 0 0 2px var(--accent);
   }
-  .admin-check input:checked::after, .sched-check input:checked::after, .pending-check input:checked::after {
+  .admin-check input:checked::after, .sched-check input:checked::after, .pending-check input:checked::after, .admin .dt-select-box:checked::after, .admin .dt-check input:checked::after {
     content: "";
     position: absolute;
     inset-inline-start: 8px;
@@ -676,7 +678,7 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
     border-width: 0 3px 3px 0;
     transform: rotate(45deg);
   }
-  .admin-check input:indeterminate::after, .pending-check input:indeterminate::after {
+  .admin-check input:indeterminate::after, .pending-check input:indeterminate::after, .admin .dt-select-box:indeterminate::after {
     content: "";
     position: absolute;
     inset-inline: 5px;
@@ -684,12 +686,12 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
     height: 3px;
     background: var(--on-accent);
   }
-  .admin-check input:disabled, .pending-check input:disabled { opacity: 0.5; cursor: not-allowed; }
+  .admin-check input:disabled, .pending-check input:disabled, .admin .dt-select-box:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 @media (max-width: 900px) and (forced-colors: active) {
-  .admin-check input, .sched-check input, .pending-check input { forced-color-adjust: none; background: Canvas content-box; box-shadow: inset 0 0 0 2px CanvasText; }
-  .admin-check input:checked, .sched-check input:checked, .pending-check input:checked { background: Highlight content-box; }
-  .admin-check input:checked::after, .sched-check input:checked::after, .pending-check input:checked::after { border-color: HighlightText; }
+  .admin-check input, .sched-check input, .pending-check input, .admin .dt-select-box, .admin .dt-check input { forced-color-adjust: none; background: Canvas content-box; box-shadow: inset 0 0 0 2px CanvasText; }
+  .admin-check input:checked, .sched-check input:checked, .pending-check input:checked, .admin .dt-select-box:checked { background: Highlight content-box; }
+  .admin-check input:checked::after, .sched-check input:checked::after, .pending-check input:checked::after, .admin .dt-select-box:checked::after, .admin .dt-check input:checked::after { border-color: HighlightText; }
 }
 @media (max-width: 560px) {
   .admin-head-actions > .btn:not(.row-menu-btn) { padding-inline: var(--space-2); }
@@ -702,7 +704,7 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 /* ---- RTL (Hebrew) ----------------------------------------------------------
    Layout mirrors through logical properties (funnel, markers, padding, alignment).
    Numbers, codes, URLs and timestamps stay LTR, isolated from surrounding text. */
-[dir=rtl] .admin-tile-value,
+[dir=rtl] .admin-tiles .stat-value,
 [dir=rtl] .funnel-count,
 [dir=rtl] .admin-table .num,
 [dir=rtl] .board-rank,
@@ -718,36 +720,36 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 [dir=rtl] .admin-table .num,
 [dir=rtl] .board-score { text-align: end; }
 /* Values that carry a localized unit ("33 דק׳ 38 שנ׳", "לפני 6 דק׳") read in their own script's direction. */
-[dir=rtl] .admin-tile-value,
+[dir=rtl] .admin-tiles .stat-value,
 [dir=rtl] .stats-kpi-value,
 [dir=rtl] .admin-table .num.col-onstage,
 [dir=rtl] .admin-table .num.col-seen { direction: rtl; unicode-bidi: plaintext; }
 
 /* ---- accounts table: the username and the row actions stay on screen while the middle scrolls ----
    Delete is never pressable on a row you can't identify. The edge shadow points into the scroller (--dir). */
-.acct-table th:first-child,
-.acct-table td.col-name {
+.acct-table thead th:first-child,
+.acct-table tbody .col-name {
   position: sticky;
   inset-inline-start: 0;
   z-index: 1;
   background: var(--surface);
   box-shadow: calc(6px * var(--dir)) 0 6px -6px color-mix(in oklab, var(--shadow-color) 35%, transparent);
 }
-.acct-table th:first-child { z-index: 3; background: var(--surface-2); }
-.acct-table tr:hover td.col-name,
-.acct-table tr.is-expanded td.col-name { background: var(--surface-2); }
+.acct-table thead th:first-child { z-index: 3; background: var(--surface-2); }
+.acct-table tr:hover > .col-name,
+.acct-table tr.is-expanded > .col-name { background: var(--surface-2); }
 @media (min-width: 901px) {
-  .acct-table th:last-child,
-  .acct-table td.col-actions {
+  :is(.acct-table, .live-table) thead th:last-child,
+  :is(.acct-table, .live-table) tbody td.col-actions {
     position: sticky;
     inset-inline-end: 0;
     z-index: 1;
     background: var(--surface);
     box-shadow: calc(-6px * var(--dir)) 0 6px -6px color-mix(in oklab, var(--shadow-color) 35%, transparent);
   }
-  .acct-table th:last-child { z-index: 3; background: var(--surface-2); }
-  .acct-table tr:hover td.col-actions,
-  .acct-table tr.is-expanded td.col-actions { background: var(--surface-2); }
+  :is(.acct-table, .live-table) thead th:last-child { z-index: 3; background: var(--surface-2); }
+  :is(.acct-table, .live-table) tr:hover > td.col-actions,
+  :is(.acct-table, .live-table) tr.is-expanded > td.col-actions { background: var(--surface-2); }
 }
 .btn-delete { color: var(--danger-fg); }
 
@@ -791,8 +793,8 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
   .admin-tab { border-bottom-color: Canvas; }
   .admin-tab.is-active { border-bottom-color: Highlight; text-decoration: underline; text-underline-offset: 6px; }
   .admin-tabs { border-bottom-color: CanvasText; }
-  .admin-table tr.is-warn td:first-child, .admin-table tr.is-alert td:first-child,
-  .stats-q-table tr.is-hardest td:first-child { border-inline-start: 3px solid CanvasText; }
+  .admin-table tr.is-warn > :first-child, .admin-table tr.is-alert > :first-child,
+  .stats-q-table tr.is-hardest > :first-child { border-inline-start: 3px solid CanvasText; }
   .help-item, .pending-item { border-inline-start-color: CanvasText; }
   .adm-ev-dot { forced-color-adjust: none; background: CanvasText; }
   .adm-ev-dot.is-live { background: Highlight; }

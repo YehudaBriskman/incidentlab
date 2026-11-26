@@ -26,6 +26,10 @@ import {
   type UserStats,
 } from "../../shared/contract";
 import { cachedCase } from "../content/load";
+import { dataTable, type Column } from "../components/dataTable";
+import { statGrid, statTile } from "../components/statGrid";
+import { formActions, formField } from "../components/formLayout";
+import type { SortState } from "../components/table-core";
 import { copyButton, h, setChildren, type Child } from "../lib/dom";
 import { banner, closeMenu, confirm, menu, openDialog, showDialog, toast, type ConfirmOptions, type DialogHandle, type MenuItem } from "../lib/overlay";
 import {
@@ -95,11 +99,6 @@ type LiveSortKey = "score" | "progress" | "name" | "stuck";
 type AcctSortKey = "rank" | "newest" | "seen" | "name";
 type AcctFilter = "all" | AccountStatus;
 type AuthMode = "key" | "session";
-type AcctColId = "score" | "rank" | "completed" | "accuracy" | "seen" | "created" | "hints" | "wrong" | "commands" | "badges" | "streak";
-/** Optional account columns in display order; the default set answers "who is this and how are they doing". */
-const ACCT_COL_IDS: readonly AcctColId[] = ["score", "rank", "completed", "accuracy", "seen", "created", "hints", "wrong", "commands", "badges", "streak"];
-const ACCT_DEFAULT_COLS: readonly AcctColId[] = ["score", "rank", "completed", "accuracy", "seen"];
-const isAcctColId = (v: unknown): v is AcctColId => typeof v === "string" && ACCT_COL_IDS.some((id) => id === v);
 /** "Hardest question" needs at least this many players who reached it. */
 const HARDEST_MIN_PLAYERS = 3;
 /** How long a "saved" note stays in the save bar before the bar hides again. */
@@ -202,6 +201,12 @@ function formatDateTime(iso: string | null): string {
   const t = ms(iso);
   if (t === null) return "—";
   return new Intl.DateTimeFormat(locale(), { dateStyle: "medium", timeStyle: "short" }).format(t);
+}
+
+/** Date and time to the second ("25 Nov 2026, 14:04:11"), for the audit log. */
+function formatDateTimeSec(iso: string | null): string {
+  const t = ms(iso);
+  return t === null ? "—" : new Intl.DateTimeFormat(locale(), { dateStyle: "medium", timeStyle: "medium" }).format(t);
 }
 
 /** Same, with the time zone named ("25 Nov 2026, 18:30 GMT+2"): for values typed in a browser-formatted picker. */
@@ -563,36 +568,6 @@ function commandsUsed(p: AdminProgress): number {
   return QUESTION_ORDER.reduce((sum, q) => sum + (p.stages[q]?.commandsRevealed ?? 0), 0);
 }
 
-// ---- keyed table rows (keep focus/scroll across 5s refreshes) -------------------------
-
-type RowEntry<E extends Element = HTMLTableRowElement> = { rows: E[]; sig: string };
-type RowItem<E extends Element = HTMLTableRowElement> = { key: string; sig: string; build: () => E[] };
-
-/** Keyed list sync for table bodies and card lists: only changed entries are rebuilt, so focus survives the poll. */
-function syncRows<E extends Element>(tbody: Element, cache: Map<string, RowEntry<E>>, items: readonly RowItem<E>[]): void {
-  const keep = new Set<string>();
-  let i = 0;
-  for (const item of items) {
-    keep.add(item.key);
-    let entry = cache.get(item.key);
-    if (!entry || entry.sig !== item.sig) {
-      if (entry) for (const r of entry.rows) r.remove();
-      entry = { rows: item.build(), sig: item.sig };
-      cache.set(item.key, entry);
-    }
-    for (const row of entry.rows) {
-      const at = tbody.children[i];
-      if (at !== row) tbody.insertBefore(row, at ?? null);
-      i += 1;
-    }
-  }
-  for (const [key, entry] of cache) {
-    if (keep.has(key)) continue;
-    for (const r of entry.rows) r.remove();
-    cache.delete(key);
-  }
-}
-
 function readPref(key: string): string | null {
   try {
     return localStorage.getItem(key);
@@ -607,22 +582,6 @@ function writePref(key: string, value: string): void {
   } catch {
     // storage blocked: the preference lasts for this page only
   }
-}
-
-function readAcctCols(): AcctColId[] {
-  const raw = readPref(ACCT_COLS_STORAGE);
-  if (raw !== null) {
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        const chosen = new Set(parsed.filter(isAcctColId));
-        return ACCT_COL_IDS.filter((id) => chosen.has(id));
-      }
-    } catch {
-      // corrupt preference: fall back to the defaults
-    }
-  }
-  return [...ACCT_DEFAULT_COLS];
 }
 
 function readStoredTab(): TabId {
@@ -729,7 +688,6 @@ export function renderAdmin(root: HTMLElement): void {
     tilesOpen: readPref(TILES_STORAGE) === "1",
     /** pending sign-ups ticked for a bulk approve/reject */
     pendingSelected: new Set<string>(),
-    acctCols: readAcctCols(),
     // accounts tab
     acctSort: "rank" as AcctSortKey,
     acctFilter: "all" as AcctFilter,
@@ -853,7 +811,6 @@ export function renderAdmin(root: HTMLElement): void {
 
   /** Link clicks are caught before the hash changes, so staying doesn't even leave the page. */
   function onDocClick(e: MouseEvent): void {
-    if (colChooser.open && e.target instanceof Node && !colChooser.contains(e.target)) colChooser.open = false;
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const link = e.target instanceof Element ? e.target.closest("a[href]") : null;
     const href = link?.getAttribute("href") ?? "";
@@ -1219,14 +1176,9 @@ export function renderAdmin(root: HTMLElement): void {
     statusBanner.show();
   }
 
+  /** A KPI tile (components/statGrid.ts): label, value, one context line. */
   function tile(label: string, value: string, sub?: string): HTMLElement {
-    return h(
-      "div",
-      { class: "admin-tile" },
-      h("div", { class: "admin-tile-label" }, label),
-      h("div", { class: "admin-tile-value" }, value),
-      sub ? h("div", { class: "admin-tile-sub" }, sub) : null,
-    );
+    return statTile({ label, value, subs: [sub ?? null], className: "admin-tile" });
   }
 
   function th(label: string, cls?: string): HTMLTableCellElement {
@@ -1309,7 +1261,8 @@ export function renderAdmin(root: HTMLElement): void {
   // Accounts tab
   // =====================================================================================
 
-  const acctTilesEl = h("div", { class: "admin-tiles", id: "admin-acct-tiles" });
+  const acctTilesEl = statGrid([], "admin-tiles");
+  acctTilesEl.id = "admin-acct-tiles";
   const acctTiles = foldableTiles(acctTilesEl);
   const pendingBulkEl = h("div", { class: "pending-bulk" });
   const pendingEl = h("div", { class: "pending-wrap" });
@@ -1354,129 +1307,160 @@ export function renderAdmin(root: HTMLElement): void {
     h("option", { value: "newest" }, T().admSortNewest),
     h("option", { value: "seen" }, T().admSortSeen),
     h("option", { value: "name" }, T().admSortName),
+    h("option", { value: "custom", hidden: true, disabled: true }, T().admSortCustom),
   );
   acctSortSelect.addEventListener("change", () => {
     const v = acctSortSelect.value;
     if (v === "rank" || v === "newest" || v === "seen" || v === "name") {
       state.acctSort = v;
-      renderAccountsTable();
+      acctTable.setSort(ACCT_SORTS[v]);
     }
   });
 
-  // Columns: User and Status always lead and the actions menu always ends the row; the rest come from the chooser.
-  type AcctCol = { label: () => string; num: boolean; cell: (a: UserStats, now: number) => HTMLTableCellElement };
-  const ACCT_COL_DEFS: Record<AcctColId, AcctCol> = {
-    score: { label: () => T().admColScore, num: true, cell: (a) => h("td", { class: "num col-score" }, fmtInt(a.totalScore)) },
-    rank: { label: () => T().admColRank, num: true, cell: (a) => h("td", { class: "num" }, a.rank === null ? "—" : fmtInt(a.rank)) },
-    completed: {
-      label: () => T().admColCompleted,
-      num: true,
-      cell: (a) => h("td", { class: "num", title: T().admStartedCount(a.casesStarted) }, T().admOfN(fmtInt(a.casesCompleted), fmtInt(a.casesStarted))),
+  // The accounts table (components/dataTable.ts): User and Status lead, the actions menu ends the row, and the
+  // rest come from the column picker (remembered). Headers sort; the Sort select drives the same sort, and on
+  // phones and tablets (cards, no headers) it is the only way to sort. Rows are keyed, so focus survives polling.
+  let acctNow = Date.now();
+  const acctColumns: Column<UserStats>[] = [
+    {
+      id: "name",
+      header: T().admColUser,
+      rowHeader: true,
+      className: "col-name",
+      cell: (a) => acctToggle(a, `acct-detail-${a.accountId}`),
+      sortValue: (a) => a.username,
+      csv: (a) => a.username,
     },
-    accuracy: { label: () => T().admColAccuracy, num: true, cell: (a) => h("td", { class: "num" }, formatPct(a.accuracy)) },
-    seen: {
-      label: () => T().admColSeen,
-      num: false,
-      cell: (a, now) => h("td", { class: "col-seen muted", title: formatDateTime(a.lastSeenAt) }, relativeAgo(a.lastSeenAt, now)),
+    { id: "status", header: T().admColStatus, cell: (a) => [statusPill(a.status), rolePill(a)], sortValue: (a) => a.status, csv: (a) => a.status },
+    {
+      id: "score",
+      header: T().admColScore,
+      numeric: true,
+      hideable: true,
+      className: "col-score",
+      cell: (a) => fmtInt(a.totalScore),
+      sortValue: (a) => a.totalScore,
+      sortFirst: "desc",
+      csv: (a) => a.totalScore,
     },
-    created: { label: () => T().admColCreated, num: false, cell: (a) => h("td", { class: "col-seen muted" }, formatDateTime(a.createdAt)) },
-    hints: { label: () => T().admColHints, num: true, cell: (a) => h("td", { class: "num" }, fmtInt(a.hintsUsed)) },
-    wrong: { label: () => T().admColWrong, num: true, cell: (a) => h("td", { class: "num" }, fmtInt(a.wrongAttempts)) },
-    commands: { label: () => T().admColCommands, num: true, cell: (a) => h("td", { class: "num" }, fmtInt(a.commandsRevealed)) },
-    badges: {
-      label: () => T().admColBadges,
-      num: true,
-      cell: (a) =>
-        h("td", { class: "num", title: T().admBadgesTip(a.achievements.map((x) => T().admAchievement(x.id)).join(", ")) }, fmtInt(a.achievements.length)),
+    { id: "rank", header: T().admColRank, numeric: true, hideable: true, cell: (a) => (a.rank === null ? "—" : fmtInt(a.rank)), sortValue: (a) => a.rank, csv: (a) => a.rank },
+    {
+      id: "completed",
+      header: T().admColCompleted,
+      numeric: true,
+      hideable: true,
+      cell: (a) => h("span", { title: T().admStartedCount(a.casesStarted) }, T().admOfN(fmtInt(a.casesCompleted), fmtInt(a.casesStarted))),
+      sortValue: (a) => a.casesCompleted,
+      sortFirst: "desc",
+      csv: (a) => a.casesCompleted,
     },
-    streak: {
-      label: () => T().admColStreak,
-      num: true,
-      cell: (a) => h("td", { class: "num", title: T().admStreakTip(a.streak.current, a.streak.best) }, T().admOfN(fmtInt(a.streak.current), fmtInt(a.streak.best))),
+    { id: "accuracy", header: T().admColAccuracy, numeric: true, hideable: true, cell: (a) => formatPct(a.accuracy), sortValue: (a) => a.accuracy, sortFirst: "desc", csv: (a) => a.accuracy },
+    {
+      id: "seen",
+      header: T().admColSeen,
+      hideable: true,
+      className: "col-seen muted",
+      cell: (a) => h("span", { title: formatDateTime(a.lastSeenAt) }, relativeAgo(a.lastSeenAt, acctNow)),
+      sortValue: (a) => ms(a.lastSeenAt),
+      sortFirst: "desc",
+      csv: (a) => a.lastSeenAt,
     },
+    {
+      id: "created",
+      header: T().admColCreated,
+      hideable: true,
+      defaultHidden: true,
+      className: "col-seen muted",
+      cell: (a) => formatDateTime(a.createdAt),
+      sortValue: (a) => ms(a.createdAt),
+      sortFirst: "desc",
+      csv: (a) => a.createdAt,
+    },
+    { id: "hints", header: T().admColHints, numeric: true, hideable: true, defaultHidden: true, cell: (a) => fmtInt(a.hintsUsed), sortValue: (a) => a.hintsUsed, sortFirst: "desc", csv: (a) => a.hintsUsed },
+    { id: "wrong", header: T().admColWrong, numeric: true, hideable: true, defaultHidden: true, cell: (a) => fmtInt(a.wrongAttempts), sortValue: (a) => a.wrongAttempts, sortFirst: "desc", csv: (a) => a.wrongAttempts },
+    {
+      id: "commands",
+      header: T().admColCommands,
+      numeric: true,
+      hideable: true,
+      defaultHidden: true,
+      cell: (a) => fmtInt(a.commandsRevealed),
+      sortValue: (a) => a.commandsRevealed,
+      sortFirst: "desc",
+      csv: (a) => a.commandsRevealed,
+    },
+    {
+      id: "badges",
+      header: T().admColBadges,
+      numeric: true,
+      hideable: true,
+      defaultHidden: true,
+      cell: (a) => h("span", { title: T().admBadgesTip(a.achievements.map((x) => T().admAchievement(x.id)).join(", ")) }, fmtInt(a.achievements.length)),
+      sortValue: (a) => a.achievements.length,
+      sortFirst: "desc",
+      csv: (a) => a.achievements.length,
+    },
+    {
+      id: "streak",
+      header: T().admColStreak,
+      numeric: true,
+      hideable: true,
+      defaultHidden: true,
+      cell: (a) => h("span", { title: T().admStreakTip(a.streak.current, a.streak.best) }, T().admOfN(fmtInt(a.streak.current), fmtInt(a.streak.best))),
+      sortValue: (a) => a.streak.current,
+      sortFirst: "desc",
+      csv: (a) => a.streak.current,
+    },
+    { id: "actions", header: T().admColActions, headerHidden: true, className: "col-actions", cell: (a) => acctMenu(a) },
+  ];
+
+  /** The Sort select's choices as table sorts (the select stays: cards have no headers to click). */
+  const ACCT_SORTS: Record<AcctSortKey, SortState> = {
+    rank: { id: "rank", dir: "asc" },
+    newest: { id: "created", dir: "desc" },
+    seen: { id: "seen", dir: "desc" },
+    name: { id: "name", dir: "asc" },
   };
-  const acctColCount = (): number => state.acctCols.length + 3;
-  const acctThead = h("thead", {});
-  function renderAcctHead(): void {
-    setChildren(
-      acctThead,
-      h(
-        "tr",
-        {},
-        th(T().admColUser),
-        th(T().admColStatus),
-        state.acctCols.map((id) => th(ACCT_COL_DEFS[id].label(), ACCT_COL_DEFS[id].num ? "num" : undefined)),
-        h("th", { scope: "col" }, h("span", { class: "visually-hidden" }, T().admColActions)),
-      ),
-    );
-  }
-  renderAcctHead();
-  const acctTbody = h("tbody", {});
-  const acctTable = h("table", { class: "admin-table acct-table" }, acctThead, acctTbody);
-  const acctRowCache = new Map<string, RowEntry>();
-  const acctCards = h("ul", { class: "acct-cards", "aria-labelledby": "admin-accounts-title" });
-  const acctCardCache = new Map<string, RowEntry<HTMLLIElement>>();
-
-  // Column chooser: a disclosure with one checkbox per optional column, remembered in localStorage.
-  const colChooserCount = h("span", { class: "muted" });
-  const colChooser = h(
-    "details",
-    { class: "col-chooser" },
-    h("summary", { class: "btn btn-ghost btn-sm" }, T().admColumns, " ", colChooserCount),
-    h(
-      "fieldset",
-      { class: "col-chooser-pop" },
-      h("legend", { class: "admin-label" }, T().admColumnsLegend),
-      ACCT_COL_IDS.map((id) => {
-        const box = h("input", { type: "checkbox", id: `acct-col-${id}`, checked: state.acctCols.includes(id) });
-        box.addEventListener("change", () => {
-          const on = new Set(state.acctCols);
-          if (box.checked) on.add(id);
-          else on.delete(id);
-          state.acctCols = ACCT_COL_IDS.filter((x) => on.has(x));
-          writePref(ACCT_COLS_STORAGE, JSON.stringify(state.acctCols));
-          syncColChooser();
-          renderAcctHead();
-          acctRowCache.clear();
-          acctTbody.replaceChildren();
-          renderAccountsTable();
-        });
-        return h("label", { class: "admin-check", for: `acct-col-${id}` }, box, h("span", {}, ACCT_COL_DEFS[id].label()));
-      }),
-      h(
-        "button",
-        {
-          type: "button",
-          class: "btn btn-ghost btn-sm",
-          onclick: () => {
-            state.acctCols = [...ACCT_DEFAULT_COLS];
-            writePref(ACCT_COLS_STORAGE, JSON.stringify(state.acctCols));
-            for (const id of ACCT_COL_IDS) {
-              const box = colChooser.querySelector<HTMLInputElement>(`#acct-col-${id}`);
-              if (box) box.checked = state.acctCols.includes(id);
-            }
-            syncColChooser();
-            renderAcctHead();
-            acctRowCache.clear();
-            acctTbody.replaceChildren();
-            renderAccountsTable();
-          },
-        },
-        T().admColumnsReset,
-      ),
-    ),
-  );
-  colChooser.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape" || !colChooser.open) return;
-    e.stopPropagation();
-    colChooser.open = false;
-    colChooser.querySelector("summary")?.focus();
+  const acctTable = dataTable<UserStats>({
+    columns: acctColumns,
+    rows: [],
+    rowKey: (a) => a.accountId,
+    rowSig: (a) => acctSignature(a, acctNow),
+    rowAttrs: (a) => ({ class: `acct-row is-${a.status}${state.expanded.has(a.accountId) ? " is-expanded" : ""}`, "data-id": a.accountId }),
+    detail: (a) =>
+      state.expanded.has(a.accountId)
+        ? {
+            attrs: { class: "acct-detail", id: `acct-detail-${a.accountId}` },
+            content: h(
+              "div",
+              { class: "acct-detail-inner" },
+              h("p", { class: "admin-label" }, T().admPerCaseTitle(a.username)),
+              caseStatsTable(a.cases),
+              h("p", { class: "muted small acct-detail-meta" }, acctExtras(a)),
+            ),
+          }
+        : null,
+    labelledBy: "admin-accounts-title",
+    className: "admin-table acct-table",
+    wrapClass: "admin-dt",
+    initialSort: ACCT_SORTS[state.acctSort],
+    columnPicker: {
+      label: T().admColumns,
+      legend: T().admColumnsLegend,
+      resetLabel: T().admColumnsReset,
+      storageKey: ACCT_COLS_STORAGE,
+      countLabel: T().admColumnsCount,
+    },
+    virtualize: { rowHeight: 56 },
+    cards: { query: NARROW_QUERY, build: (a) => buildAcctCard(a, acctNow), className: "acct-cards", labelledBy: "admin-accounts-title" },
+    onSortChange: (s) => syncSortSelect(acctSortSelect, ACCT_SORTS, s),
   });
-  function syncColChooser(): void {
-    colChooserCount.textContent = `(${T().admOfN(fmtInt(state.acctCols.length), fmtInt(ACCT_COL_IDS.length))})`;
-  }
-  syncColChooser();
 
+  /** Shows the select option that matches a header sort, or "by column" for any other column. */
+  function syncSortSelect<K extends string>(select: HTMLSelectElement, sorts: Record<K, SortState>, s: SortState | null): void {
+    const match = (Object.keys(sorts) as K[]).find((k) => s !== null && sorts[k].id === s.id && sorts[k].dir === s.dir);
+    select.value = match ?? "custom";
+  }
   // ---- CSV export ----
   const exportBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm", title: T().admExportHint }, T().admExportCsv);
   exportBtn.addEventListener("click", () => void exportCsv());
@@ -1507,21 +1491,52 @@ export function renderAdmin(root: HTMLElement): void {
   }
 
   // ---- one-time temporary password (a dialog from lib/overlay.ts) ----
-  function showTempPassword(username: string, password: string): void {
+  async function showTempPassword(username: string, password: string): Promise<void> {
     state.tempPassword = { username, password };
-    void openDialog({
-      size: "sm",
-      title: T().admTempPwTitle(username),
-      className: "admin-pw-dialog",
-      body: [
-        h("p", { class: "muted" }, T().admTempPwHelp),
-        h("div", { class: "admin-share admin-pw" }, h("code", { class: "admin-share-url admin-pw-value" }, password), copyButton(() => password, T().admCopyPassword)),
-      ],
-      actions: [{ value: "done", label: T().admDone, tone: "primary", autofocus: true }],
-    }).then(() => {
-      // The password is shown once: the dialog left the DOM on close; drop it from memory too.
-      state.tempPassword = null;
-    });
+    let copied = false;
+    // The password exists only in this dialog: Done or Escape without copying asks first, and "Back" reopens it.
+    for (;;) {
+      const copy = copyButton(() => password, T().admCopyPassword);
+      copy.addEventListener("click", () => (copied = true));
+      await openDialog({
+        size: "sm",
+        title: T().admTempPwTitle(username),
+        className: "admin-pw-dialog",
+        body: [h("p", { class: "muted" }, T().admTempPwHelp), h("div", { class: "admin-share admin-pw" }, h("code", { class: "admin-share-url admin-pw-value" }, password), copy)],
+        actions: [{ value: "done", label: T().admDone, tone: "primary", autofocus: true }],
+      });
+      if (copied) break;
+      const close = await askConfirm({
+        title: T().admPwUncopiedTitle,
+        body: T().admPwUncopiedBody,
+        confirmLabel: T().admPwCloseAnyway,
+        cancelLabel: T().admPwBack,
+        tone: "danger",
+      });
+      if (close || disposed) break;
+    }
+    // Shown once: the dialog left the DOM on close; drop it from memory too.
+    state.tempPassword = null;
+  }
+
+  /**
+   * The trash entry a soft delete just created (newest first from the server), for the Undo in its toast.
+   * Matched by the server's label; null when it can't be found (the toast then has no Undo).
+   */
+  async function newestTrash(match: (e: TrashEntry) => boolean): Promise<TrashEntry | null> {
+    try {
+      const entries = await fetchTrash();
+      state.trash.entries = entries;
+      trashSig = "";
+      return entries.find(match) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** "Deleted …" with Undo, which restores the trash entry right away. */
+  function undoToast(text: string, entry: TrashEntry | null): void {
+    toast({ tone: "success", text, ...(entry ? { action: { label: T().admUndo, run: () => void restoreEntry(entry) } } : {}) });
   }
 
   // ---- class invite code ----
@@ -1535,8 +1550,8 @@ export function renderAdmin(root: HTMLElement): void {
     spellcheck: "false",
     maxlength: 40,
     dir: "ltr",
-    "aria-describedby": "admin-invite-help",
   });
+  const inviteField = formField({ input: inviteInput, label: T().admInviteInputLabel });
   inviteInput.addEventListener("input", () => {
     state.settings.input = inviteInput.value;
     state.settings.msg = null;
@@ -1547,12 +1562,7 @@ export function renderAdmin(root: HTMLElement): void {
   const inviteGenBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admInviteGenerate);
   const inviteClearBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admInviteClear);
   const inviteMsgEl = h("p", { class: "small invite-msg", role: "status" });
-  const inviteForm = h(
-    "form",
-    { class: "invite-form" },
-    h("label", { class: "admin-label", for: "admin-invite" }, T().admInviteInputLabel),
-    h("div", { class: "invite-row" }, inviteInput, inviteSetBtn, inviteGenBtn, inviteClearBtn),
-  );
+  const inviteForm = h("form", { class: "invite-form", novalidate: true }, inviteField.nodes, formActions(inviteSetBtn, inviteGenBtn, inviteClearBtn));
   inviteForm.addEventListener("submit", (e) => {
     e.preventDefault();
     const code = state.settings.input.trim();
@@ -1573,7 +1583,23 @@ export function renderAdmin(root: HTMLElement): void {
     inviteInput.focus();
     inviteInput.select();
   });
-  inviteClearBtn.addEventListener("click", () => void storeInvite(null));
+  // Turning the code off changes how every new sign-up is handled: ask, then offer Undo (puts the old code back).
+  inviteClearBtn.addEventListener("click", () => {
+    const previous = state.settings.server?.inviteCode ?? null;
+    if (previous === null) return;
+    void askConfirm({
+      title: T().admInviteOffTitle,
+      body: T().admInviteOffBody,
+      confirmLabel: T().admInviteOffConfirm,
+      tone: "primary",
+      returnFocus: () => inviteInput,
+    }).then(async (ok) => {
+      if (!ok) return;
+      await storeInvite(null);
+      if (state.settings.error !== null) return;
+      toast({ tone: "success", text: T().admInviteOffToast, action: { label: T().admUndo, run: () => void storeInvite(previous) } });
+    });
+  });
 
   async function storeInvite(code: string | null): Promise<void> {
     const st = state.settings;
@@ -1616,20 +1642,53 @@ export function renderAdmin(root: HTMLElement): void {
       }
     }
     if (inviteInput.value !== st.input) inviteInput.value = st.input;
-    const trimmed = st.input.trim();
-    inviteSetBtn.disabled = st.saving || trimmed === "";
+    // Never a disabled submit: an empty or short code gets an inline error on submit instead.
+    inviteSetBtn.disabled = st.saving;
     inviteGenBtn.disabled = st.saving;
     inviteClearBtn.disabled = st.saving || code === null;
-    inviteInput.setAttribute("aria-invalid", st.error !== null && st.error === T().admInviteInvalid ? "true" : "false");
-    inviteMsgEl.textContent = st.error ?? st.msg ?? "";
-    inviteMsgEl.className = `small invite-msg${st.error ? " sched-invalid" : ""}`;
-    inviteMsgEl.hidden = !st.error && !st.msg;
+    const fieldError = st.error !== null && st.error === T().admInviteInvalid;
+    inviteField.setError(fieldError ? st.error : null);
+    const msg = fieldError ? st.msg : (st.error ?? st.msg);
+    inviteMsgEl.textContent = msg ?? "";
+    inviteMsgEl.className = `small invite-msg${st.error && !fieldError ? " sched-invalid" : ""}`;
+    inviteMsgEl.hidden = msg === null;
   }
 
   // ---- recently deleted (trash): deleted accounts and reset case progress, restorable for a few days ----
   const trashBodyEl = h("div", { class: "admin-table-wrap" });
   const trashMsgEl = h("p", { class: "small trash-msg", role: "status", hidden: true });
   let trashSig = "";
+  let trashNow = Date.now();
+  // Stacks into labelled cards on phones (dt-stack): the Hebrew labels never wrap one letter per line.
+  const trashTable = dataTable<TrashEntry>({
+    columns: [
+      { id: "item", header: T().admColItem, rowHeader: true, className: "trash-label", cell: (e) => h("span", { dir: "auto" }, e.label), sortValue: (e) => e.label },
+      { id: "deleted", header: T().admColDeletedAt, className: "col-seen", cell: (e) => h("span", { title: e.deletedAt }, formatDateTime(e.deletedAt)), sortValue: (e) => ms(e.deletedAt), sortFirst: "desc" },
+      { id: "expires", header: T().admColExpires, className: "col-seen", cell: (e) => h("span", { title: formatDateTime(e.expiresAt) }, relativeIn(e.expiresAt, trashNow)), sortValue: (e) => ms(e.expiresAt) },
+      { id: "records", header: T().admColRecords, numeric: true, cell: (e) => fmtInt(e.records), sortValue: (e) => e.records, sortFirst: "desc" },
+      {
+        id: "actions",
+        header: T().admColActions,
+        headerHidden: true,
+        className: "col-actions",
+        cell: (e) => {
+          const busy = state.trash.busy.has(e.id);
+          return h(
+            "button",
+            { type: "button", class: "btn btn-ghost btn-sm", disabled: busy, "aria-label": T().admRestoreLabel(e.label), onclick: () => void restoreEntry(e) },
+            busy ? T().admRestoring : T().admRestore,
+          );
+        },
+      },
+    ],
+    rows: [],
+    rowKey: (e) => e.id,
+    rowSig: (e) => JSON.stringify([getLang(), e, state.trash.busy.has(e.id), relativeIn(e.expiresAt, trashNow)]),
+    className: "admin-table trash-table",
+    wrapClass: "admin-dt",
+    labelledBy: "admin-trash-title",
+    stackOnPhone: true,
+  });
 
   async function restoreEntry(entry: TrashEntry): Promise<void> {
     const t = state.trash;
@@ -1685,56 +1744,9 @@ export function renderAdmin(root: HTMLElement): void {
       setChildren(trashBodyEl, h("p", { class: "muted admin-empty-small" }, T().admTrashEmpty(TRASH_RETENTION_DAYS)));
       return;
     }
-    setChildren(
-      trashBodyEl,
-      h(
-        "table",
-        { class: "admin-table trash-table" },
-        h(
-          "thead",
-          {},
-          h(
-            "tr",
-            {},
-            th(T().admColItem),
-            th(T().admColDeletedAt),
-            th(T().admColExpires),
-            th(T().admColRecords, "num"),
-            h("th", { scope: "col" }, h("span", { class: "visually-hidden" }, T().admColActions)),
-          ),
-        ),
-        h(
-          "tbody",
-          {},
-          t.entries.map((e) => {
-            const busy = t.busy.has(e.id);
-            return h(
-              "tr",
-              {},
-              h("td", { class: "trash-label" }, h("span", { dir: "auto" }, e.label)),
-              h("td", { class: "col-seen", title: e.deletedAt }, formatDateTime(e.deletedAt)),
-              h("td", { class: "col-seen", title: formatDateTime(e.expiresAt) }, relativeIn(e.expiresAt, now)),
-              h("td", { class: "num" }, fmtInt(e.records)),
-              h(
-                "td",
-                { class: "col-actions" },
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "btn btn-ghost btn-sm",
-                    disabled: busy,
-                    "aria-label": T().admRestoreLabel(e.label),
-                    onclick: () => void restoreEntry(e),
-                  },
-                  busy ? T().admRestoring : T().admRestore,
-                ),
-              ),
-            );
-          }),
-        ),
-      ),
-    );
+    trashNow = now;
+    trashTable.update(t.entries);
+    if (trashTable.element.parentNode !== trashBodyEl) setChildren(trashBodyEl, trashTable.element);
   }
 
   function buildAccountsPanel(): void {
@@ -1756,7 +1768,7 @@ export function renderAdmin(root: HTMLElement): void {
           "div",
           { class: "admin-table-head" },
           h("h2", { class: "admin-h2", id: "admin-accounts-title" }, T().admAccountsTitle, " ", acctCountEl),
-          h("div", { class: "admin-controls" }, acctFilterSelect, acctSortSelect, colChooser, exportBtn),
+          h("div", { class: "admin-controls" }, acctFilterSelect, acctSortSelect, acctTable.pickerButton, exportBtn),
         ),
         // Search stays in view while the list scrolls (sticky under the tab bar).
         h("div", { class: "acct-searchbar" }, acctSearchInput),
@@ -1775,7 +1787,7 @@ export function renderAdmin(root: HTMLElement): void {
         "section",
         { class: "panel admin-panel invite-panel" },
         h("h2", { class: "admin-h2" }, T().admInviteTitle),
-        h("p", { class: "muted small admin-hint", id: "admin-invite-help" }, T().admInviteHelp),
+        h("p", { class: "muted small admin-hint" }, T().admInviteHelp),
         inviteCurrentEl,
         inviteForm,
         inviteMsgEl,
@@ -1838,10 +1850,9 @@ export function renderAdmin(root: HTMLElement): void {
     for (const id of ids) state.busy.delete(`status:${id}`);
     const authFailure = res.errors.find((err) => err instanceof AdminApiError && (err.status === 401 || err.status === 503));
     if (authFailure && handleAuthError(authFailure)) return;
-    state.pendingSelected.clear();
+    pendingTable.clearSelection();
     state.approvedMsg =
       action === "approve" ? T().admBulkApproved(res.ok.length, res.errors.length) : T().admBulkRejected(res.ok.length, res.errors.length);
-    pendingSig = "";
     if (state.accounts) {
       const done = new Map(res.ok.map((v) => [v.id, v.status] as const));
       state.accounts = {
@@ -1876,7 +1887,7 @@ export function renderAdmin(root: HTMLElement): void {
           tone: "primary",
           run: async () => {
             const password = await resetAccountPassword(a.accountId);
-            showTempPassword(a.username, password);
+            void showTempPassword(a.username, password);
           },
           returnFocus: () => menuTriggerEl(key),
         }),
@@ -1903,8 +1914,10 @@ export function renderAdmin(root: HTMLElement): void {
             void load();
           },
           returnFocus: () => menuTriggerEl(key) ?? acctSearchInput,
-        }).then((ok) => {
-          if (ok) toast({ tone: "success", text: T().admDeletedToast(a.username, TRASH_RETENTION_DAYS) });
+        }).then(async (ok) => {
+          if (!ok) return;
+          const entry = await newestTrash((e) => e.kind === "account" && e.label === `account ${a.username}`);
+          undoToast(T().admDeletedToast(a.username, TRASH_RETENTION_DAYS), entry);
         }),
     });
     return items;
@@ -1923,10 +1936,112 @@ export function renderAdmin(root: HTMLElement): void {
     return a.role === "author" ? [" ", h("span", { class: "status-pill is-author" }, T().admAuthorPill)] : null;
   }
 
+  // Waiting for approval: a data table with a checkbox per sign-up and a select-all box (components/dataTable.ts),
+  // so the instructor can tick several and approve or reject them together. Cards on phones and tablets.
+  let pendingNow = Date.now();
+  const pendingBusy = (a: UserStats): boolean => state.busy.has(`status:${a.accountId}`);
+  function pendingButtons(a: UserStats): HTMLElement[] {
+    const busy = pendingBusy(a);
+    return [
+      h(
+        "button",
+        { type: "button", class: "btn btn-primary btn-sm", disabled: busy, "aria-label": T().admApproveLabel(a.username), onclick: () => void changeStatus(a, "approve") },
+        T().admApprove,
+      ),
+      h(
+        "button",
+        { type: "button", class: "btn btn-ghost btn-sm", disabled: busy, "aria-label": T().admRejectLabel(a.username), onclick: () => void changeStatus(a, "reject") },
+        T().admReject,
+      ),
+    ];
+  }
+  const signedUp = (a: UserStats): HTMLElement => h("span", { title: formatDateTime(a.createdAt) }, T().admSignedUp(relativeAgo(a.createdAt, pendingNow)));
+  const pendingTable = dataTable<UserStats>({
+    columns: [
+      { id: "name", header: T().admColUser, rowHeader: true, className: "col-name", cell: (a) => h("span", { class: "player-name", dir: "auto" }, a.username), sortValue: (a) => a.username },
+      { id: "signed", header: T().admColSignedUp, className: "col-seen muted", cell: signedUp, sortValue: (a) => ms(a.createdAt) },
+      { id: "actions", header: T().admColActions, headerHidden: true, className: "col-actions", cell: (a) => h("span", { class: "pending-actions" }, pendingButtons(a)) },
+    ],
+    rows: [],
+    rowKey: (a) => a.accountId,
+    rowSig: (a) => JSON.stringify([getLang(), a.username, pendingBusy(a), relativeAgo(a.createdAt, pendingNow)]),
+    rowAttrs: () => ({ class: "pending-row" }),
+    initialSort: { id: "signed", dir: "asc" },
+    labelledBy: "admin-pending-title",
+    className: "admin-table pending-table",
+    wrapClass: "admin-dt",
+    selection: {
+      rowLabel: (a) => T().admSelectLabel(a.username),
+      allLabel: T().admSelectAll,
+      disabled: pendingBusy,
+      onChange: (keys) => {
+        state.pendingSelected.clear();
+        for (const k of keys) state.pendingSelected.add(k);
+        state.approvedMsg = null;
+        pendingStatusEl.hidden = true;
+        renderPendingBulk();
+      },
+    },
+    cards: {
+      query: NARROW_QUERY,
+      className: "pending-list",
+      labelledBy: "admin-pending-title",
+      build: (a) =>
+        h(
+          "li",
+          { class: "pending-item" },
+          h("span", { class: "pending-name", dir: "auto" }, a.username),
+          h("span", { class: "pending-meta muted small" }, signedUp(a)),
+          h("span", { class: "pending-actions" }, pendingButtons(a)),
+        ),
+    },
+  });
+
+  let pendingBulkSig = "";
+  /** "n selected" with Approve / Reject selected, only while something is ticked. */
+  function renderPendingBulk(): void {
+    const sel = state.pendingSelected.size;
+    const pending = (state.accounts?.accounts ?? []).filter((a) => a.status === "pending");
+    const anyBusy = pending.some(pendingBusy);
+    const sig = JSON.stringify([getLang(), sel, anyBusy]);
+    if (sig === pendingBulkSig) return;
+    pendingBulkSig = sig;
+    if (sel === 0) {
+      pendingBulkEl.replaceChildren();
+      return;
+    }
+    setChildren(
+      pendingBulkEl,
+      h("span", { class: "muted small", role: "status" }, T().admSelectedN(sel)),
+      h(
+        "button",
+        { type: "button", class: "btn btn-primary btn-sm", id: "pending-bulk-approve", disabled: anyBusy, onclick: () => void bulkStatus("approve") },
+        T().admApproveSelected(sel),
+      ),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "btn btn-ghost btn-sm",
+          id: "pending-bulk-reject",
+          disabled: anyBusy,
+          onclick: () =>
+            void askConfirm({
+              title: T().admRejectSelectedTitle(sel),
+              body: T().admRejectSelectedBody,
+              confirmLabel: T().admRejectSelected(sel),
+              tone: "danger",
+              run: () => bulkStatus("reject"),
+              returnFocus: () => pendingStatusEl,
+            }),
+        },
+        T().admRejectSelected(sel),
+      ),
+    );
+  }
+
   function renderPending(list: readonly UserStats[]): void {
-    const pending = list.filter((a) => a.status === "pending").sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    const pendingIds = new Set(pending.map((a) => a.accountId));
-    for (const id of state.pendingSelected) if (!pendingIds.has(id)) state.pendingSelected.delete(id);
+    const pending = list.filter((a) => a.status === "pending");
     pendingCountEl.textContent = fmtInt(pending.length);
     pendingCountEl.classList.toggle("is-zero", pending.length === 0);
     pendingTabBadge.textContent = fmtInt(pending.length);
@@ -1935,159 +2050,50 @@ export function renderAdmin(root: HTMLElement): void {
     pendingStatusEl.textContent = state.approvedMsg ?? "";
     pendingStatusEl.hidden = state.approvedMsg === null;
     pendingStatusEl.tabIndex = -1;
-    // Rebuild only when something visible changed, so focus on Approve/Reject survives polling.
-    const now = Date.now();
-    const sig = [
-      getLang(),
-      ...pending.map(
-        (a) =>
-          `${a.accountId}:${a.username}:${state.busy.has(`status:${a.accountId}`) ? 1 : 0}:${state.pendingSelected.has(a.accountId) ? 1 : 0}:${relativeAgo(a.createdAt, now)}`,
-      ),
-    ].join("|");
-    if (sig === pendingSig) return;
-    pendingSig = sig;
-    if (pending.length === 0) {
-      approveAllEl.replaceChildren();
-      pendingBulkEl.replaceChildren();
-      setChildren(pendingEl, h("p", { class: "muted admin-empty-small" }, T().admNoPending));
-      return;
-    }
     const n = pending.length;
-    const focusedId = document.activeElement instanceof HTMLElement ? document.activeElement.id : "";
-    // Approving is the intended, safe action: a primary confirm, never a red one.
-    setChildren(
-      approveAllEl,
-      h(
-        "button",
-        {
-          type: "button",
-          class: "btn btn-primary btn-sm",
-          id: "admin-approve-all",
-          "aria-label": T().admApproveAllLabel(n),
-          onclick: () =>
-            void askConfirm({
-              title: T().admApproveAllTitle(n),
-              body: T().admApproveAllBody,
-              confirmLabel: T().admApproveAll(n),
-              busyLabel: T().admApproving,
-              tone: "primary",
-              run: async () => {
-                const approved = await approveAll();
-                state.approvedMsg = T().admApprovedN(approved);
-                state.pendingSelected.clear();
-                pendingSig = "";
-                void load();
-              },
-              returnFocus: () => document.getElementById("admin-approve-all") ?? pendingEl.querySelector("button"),
-            }),
-        },
-        T().admApproveAll(n),
-      ),
-    );
-    // Bulk: tick sign-ups, then approve or reject the selection.
-    const sel = state.pendingSelected.size;
-    const anyBusy = pending.some((a) => state.busy.has(`status:${a.accountId}`));
-    const allBox = h("input", { type: "checkbox", id: "pending-select-all", disabled: anyBusy });
-    allBox.checked = sel === n;
-    allBox.indeterminate = sel > 0 && sel < n;
-    allBox.addEventListener("change", () => {
-      if (allBox.checked) for (const a of pending) state.pendingSelected.add(a.accountId);
-      else state.pendingSelected.clear();
-      state.approvedMsg = null;
-      renderPending(state.accounts?.accounts ?? []);
-      document.getElementById("pending-select-all")?.focus();
-    });
-    setChildren(
-      pendingBulkEl,
-      h("label", { class: "admin-check", for: "pending-select-all" }, allBox, h("span", {}, T().admSelectAll)),
-      h("span", { class: "muted small", role: "status" }, sel > 0 ? T().admSelectedN(sel) : ""),
-      sel > 0
-        ? [
-            h(
-              "button",
-              { type: "button", class: "btn btn-primary btn-sm", id: "pending-bulk-approve", disabled: anyBusy, onclick: () => void bulkStatus("approve") },
-              T().admApproveSelected(sel),
-            ),
-            h(
+    const sig = JSON.stringify([getLang(), n]);
+    if (sig !== pendingSig) {
+      pendingSig = sig;
+      // Approving is the intended, safe action: a primary confirm, never a red one.
+      setChildren(
+        approveAllEl,
+        n === 0
+          ? null
+          : h(
               "button",
               {
                 type: "button",
-                class: "btn btn-ghost btn-sm",
-                id: "pending-bulk-reject",
-                disabled: anyBusy,
+                class: "btn btn-primary btn-sm",
+                id: "admin-approve-all",
+                "aria-label": T().admApproveAllLabel(n),
                 onclick: () =>
                   void askConfirm({
-                    title: T().admRejectSelectedTitle(sel),
-                    body: T().admRejectSelectedBody,
-                    confirmLabel: T().admRejectSelected(sel),
-                    tone: "danger",
-                    run: () => bulkStatus("reject"),
-                    returnFocus: () => document.getElementById("pending-select-all"),
+                    title: T().admApproveAllTitle(n),
+                    body: T().admApproveAllBody,
+                    confirmLabel: T().admApproveAll(n),
+                    busyLabel: T().admApproving,
+                    tone: "primary",
+                    run: async () => {
+                      const approved = await approveAll();
+                      pendingTable.clearSelection();
+                      state.approvedMsg = T().admApprovedN(approved);
+                      void load();
+                    },
+                    returnFocus: () => document.getElementById("admin-approve-all") ?? pendingStatusEl,
                   }),
               },
-              T().admRejectSelected(sel),
+              T().admApproveAll(n),
             ),
-          ]
-        : null,
-    );
-    setChildren(
-      pendingEl,
-      h(
-        "ul",
-        { class: "pending-list" },
-        pending.map((a) => {
-          const busy = state.busy.has(`status:${a.accountId}`);
-          const box = h("input", {
-            type: "checkbox",
-            id: `pending-sel-${a.accountId}`,
-            disabled: busy,
-            "aria-label": T().admSelectLabel(a.username),
-          });
-          box.checked = state.pendingSelected.has(a.accountId);
-          box.addEventListener("change", () => {
-            if (box.checked) state.pendingSelected.add(a.accountId);
-            else state.pendingSelected.delete(a.accountId);
-            state.approvedMsg = null;
-            renderPending(state.accounts?.accounts ?? []);
-            document.getElementById(`pending-sel-${a.accountId}`)?.focus();
-          });
-          return h(
-            "li",
-            { class: `pending-item${box.checked ? " is-selected" : ""}` },
-            h("label", { class: "pending-check", for: `pending-sel-${a.accountId}` }, box),
-            h("span", { class: "pending-name", dir: "auto" }, a.username),
-            h("span", { class: "pending-meta muted small", title: formatDateTime(a.createdAt) }, T().admSignedUp(relativeAgo(a.createdAt, now))),
-            h(
-              "span",
-              { class: "pending-actions" },
-              h(
-                "button",
-                {
-                  type: "button",
-                  class: "btn btn-primary btn-sm",
-                  disabled: busy,
-                  "aria-label": T().admApproveLabel(a.username),
-                  onclick: () => void changeStatus(a, "approve"),
-                },
-                T().admApprove,
-              ),
-              h(
-                "button",
-                {
-                  type: "button",
-                  class: "btn btn-ghost btn-sm",
-                  disabled: busy,
-                  "aria-label": T().admRejectLabel(a.username),
-                  onclick: () => void changeStatus(a, "reject"),
-                },
-                T().admReject,
-              ),
-            ),
-          );
-        }),
-      ),
-    );
-    if (focusedId && !document.activeElement?.isConnected) document.getElementById(focusedId)?.focus();
+      );
+    }
+    if (n === 0) {
+      setChildren(pendingEl, h("p", { class: "muted admin-empty-small" }, T().admNoPending));
+    } else {
+      pendingNow = Date.now();
+      pendingTable.update(pending);
+      if (pendingTable.element.parentNode !== pendingEl) setChildren(pendingEl, pendingTable.element);
+    }
+    renderPendingBulk();
   }
 
   function caseStatsTable(list: readonly CaseStats[]): HTMLElement {
@@ -2168,8 +2174,6 @@ export function renderAdmin(root: HTMLElement): void {
     const id = a.accountId;
     return JSON.stringify([
       getLang(),
-      state.narrow,
-      state.acctCols,
       a.username,
       a.status,
       a.totalScore,
@@ -2211,36 +2215,6 @@ export function renderAdmin(root: HTMLElement): void {
     );
   }
 
-  function buildAcctRows(a: UserStats, now: number): HTMLTableRowElement[] {
-    const expanded = state.expanded.has(a.accountId);
-    const detailId = `acct-detail-${a.accountId}`;
-    const row = h(
-      "tr",
-      { class: `acct-row is-${a.status}${expanded ? " is-expanded" : ""}`, "data-id": a.accountId },
-      h("td", { class: "col-name" }, acctToggle(a, detailId)),
-      h("td", {}, statusPill(a.status), rolePill(a)),
-      state.acctCols.map((id) => ACCT_COL_DEFS[id].cell(a, now)),
-      h("td", { class: "col-actions" }, acctMenu(a)),
-    );
-    if (!expanded) return [row];
-    const detail = h(
-      "tr",
-      { class: "acct-detail", id: detailId },
-      h(
-        "td",
-        { colspan: acctColCount() },
-        h(
-          "div",
-          { class: "acct-detail-inner" },
-          h("p", { class: "admin-label" }, T().admPerCaseTitle(a.username)),
-          caseStatsTable(a.cases),
-          h("p", { class: "muted small acct-detail-meta" }, acctExtras(a)),
-        ),
-      ),
-    );
-    return [row, detail];
-  }
-
   /** The columns that are off in the chooser still show in the expanded row, so nothing is out of reach. */
   function acctExtras(a: UserStats): string {
     return [
@@ -2252,7 +2226,7 @@ export function renderAdmin(root: HTMLElement): void {
   }
 
   /** Phone/tablet card: name, status, the key numbers in one line, last seen, and the actions menu. */
-  function buildAcctCard(a: UserStats, now: number): HTMLLIElement[] {
+  function buildAcctCard(a: UserStats, now: number): HTMLLIElement {
     const expanded = state.expanded.has(a.accountId);
     const detailId = `acct-card-${a.accountId}`;
     const facts = [
@@ -2261,26 +2235,20 @@ export function renderAdmin(root: HTMLElement): void {
       T().admCasesShort(fmtInt(a.casesCompleted), fmtInt(a.casesStarted)),
       a.accuracy === null ? null : T().admAccuracyShort(formatPct(a.accuracy)),
     ].filter((x): x is string => x !== null);
-    return [
-      h(
+    return h(
         "li",
         { class: `acct-card is-${a.status}${expanded ? " is-expanded" : ""}`, "data-id": a.accountId },
         h("div", { class: "pc-head" }, acctToggle(a, detailId), acctMenu(a)),
         h("p", { class: "ac-facts" }, statusPill(a.status), rolePill(a), " ", facts.join(" · ")),
         h("p", { class: "muted small ac-seen", title: formatDateTime(a.lastSeenAt) }, T().admSeenLine(relativeAgo(a.lastSeenAt, now))),
         expanded ? h("div", { class: "ac-detail", id: detailId }, caseStatsList(a.cases), h("p", { class: "muted small" }, acctExtras(a))) : null,
-      ),
-    ];
+      );
   }
 
   function renderAccountsTable(): void {
     const all = state.accounts?.accounts ?? [];
     acctCountEl.textContent = `(${fmtInt(all.length)})`;
     if (all.length === 0) {
-      acctRowCache.clear();
-      acctCardCache.clear();
-      acctTbody.replaceChildren();
-      acctCards.replaceChildren();
       const url = location.origin;
       setChildren(
         acctTableEl,
@@ -2303,15 +2271,10 @@ export function renderAdmin(root: HTMLElement): void {
       setChildren(acctTableEl, h("p", { class: "muted admin-empty-small" }, T().admNoMatch));
       return;
     }
-    const now = Date.now();
-    const sorted = sortAccounts(filtered, state.acctSort);
-    if (state.narrow) {
-      if (acctCards.parentNode !== acctTableEl) setChildren(acctTableEl, acctCards);
-      syncRows(acctCards, acctCardCache, sorted.map((a) => ({ key: a.accountId, sig: acctSignature(a, now), build: () => buildAcctCard(a, now) })));
-      return;
-    }
-    if (acctTable.parentNode !== acctTableEl) setChildren(acctTableEl, acctTable);
-    syncRows(acctTbody, acctRowCache, sorted.map((a) => ({ key: a.accountId, sig: acctSignature(a, now), build: () => buildAcctRows(a, now) })));
+    acctNow = Date.now();
+    // Name order first: the table's sort is stable, so ties (same rank, same score) read alphabetically.
+    acctTable.update(sortAccounts(filtered, "name"));
+    if (acctTable.element.parentNode !== acctTableEl) setChildren(acctTableEl, acctTable.element);
   }
 
   function renderAccounts(): void {
@@ -2353,10 +2316,6 @@ export function renderAdmin(root: HTMLElement): void {
     if (caseId === state.liveCaseId) return;
     state.liveCaseId = caseId;
     state.progress = null;
-    liveRowCache.clear();
-    liveCardCache.clear();
-    liveTbody.replaceChildren();
-    liveCards.replaceChildren();
     if (updateUrl && state.tab === "live") setUrl(adminHash("live", caseId), "replace");
     if (state.accounts) {
       renderLive();
@@ -2365,7 +2324,8 @@ export function renderAdmin(root: HTMLElement): void {
   }
   let liveCaseOptionsSig = "";
   const liveTodayTag = h("span", { class: "today-tag" }, T().admTodayTag);
-  const liveTilesEl = h("div", { class: "admin-tiles", id: "admin-live-tiles" });
+  const liveTilesEl = statGrid([], "admin-tiles");
+  liveTilesEl.id = "admin-live-tiles";
   const liveTiles = foldableTiles(liveTilesEl);
   const funnelEl = h("div", { class: "admin-funnel" });
   const helpEl = h("section", { class: "help-panel", "aria-labelledby": "admin-help-title" });
@@ -2392,12 +2352,13 @@ export function renderAdmin(root: HTMLElement): void {
     h("option", { value: "progress" }, T().admSortProgress),
     h("option", { value: "stuck" }, T().admSortStuck),
     h("option", { value: "name" }, T().admSortName),
+    h("option", { value: "custom", hidden: true, disabled: true }, T().admSortCustom),
   );
   liveSortSelect.addEventListener("change", () => {
     const v = liveSortSelect.value;
     if (v === "score" || v === "progress" || v === "name" || v === "stuck") {
       state.liveSort = v;
-      renderLiveTable();
+      liveTable.setSort(LIVE_SORTS[v]);
     }
   });
 
@@ -2441,39 +2402,117 @@ export function renderAdmin(root: HTMLElement): void {
       typedName: caseId,
       run: () => resetProgress(caseId),
       returnFocus: () => resetBtn,
-    }).then((ok) => {
+    }).then(async (ok) => {
       if (!ok) return;
-      toast({ tone: "success", text: T().admCaseReset(title) });
       void load();
+      const entry = await newestTrash((e) => e.kind === "progress" && e.label.startsWith(`progress of ${caseId} (`));
+      undoToast(T().admCaseReset(title), entry);
     });
   });
 
-  const LIVE_COLS = 7;
-  const liveTbody = h("tbody", {});
-  const liveTable = h(
-    "table",
-    { class: "admin-table live-table" },
-    h(
-      "thead",
-      {},
-      h(
-        "tr",
-        {},
-        th(T().admColName),
-        th(T().admColProgress),
-        th(T().admColScore, "num"),
-        th(T().admColStage),
-        th(T().admColOnStage, "num"),
-        th(T().admColSeen),
-        h("th", { scope: "col" }, h("span", { class: "visually-hidden" }, T().admColActions)),
-      ),
-    ),
-    liveTbody,
+  // The players grid (components/dataTable.ts): per-stage cells, score, stage, time on it, last seen and the row
+  // menu. Headers sort (the Sort select drives the same sort and is the only one on cards). Keyed rows keep focus
+  // across the 5 s poll; the breakdown opens as a detail row. Cards on phones and tablets.
+  let liveNow = Date.now();
+  let liveStages: StageKey[] = [];
+  const prog = (p: AdminProgress): number => progressCount(p, liveStages);
+  const stuckKey = (p: AdminProgress): number => (isDone(p) ? -1 : p.stuckMinutes);
+  const liveColumns: Column<AdminProgress>[] = [
+    {
+      id: "name",
+      header: T().admColName,
+      rowHeader: true,
+      className: "col-name",
+      cell: (p) => liveToggle(p, `live-detail-${p.accountId}`, T().admShowBreakdown),
+      sortValue: (p) => p.username,
+      csv: (p) => p.username,
+    },
+    {
+      id: "progress",
+      header: T().admColProgress,
+      cell: (p) => progressCells(p, liveStages, liveNow),
+      sortCompare: (a, b) => prog(a) - prog(b) || a.score - b.score,
+      sortFirst: "desc",
+      csv: (p) => prog(p),
+    },
+    {
+      id: "score",
+      header: T().admColScore,
+      numeric: true,
+      className: "col-score",
+      cell: (p) => h("span", { title: T().admScoreParTip(p.maxScore) }, fmtInt(p.score)),
+      sortCompare: (a, b) => a.score - b.score || prog(a) - prog(b),
+      sortFirst: "desc",
+      csv: (p) => p.score,
+    },
+    {
+      id: "stage",
+      header: T().admColStage,
+      className: "col-stage",
+      cell: (p) => {
+        const stage = stageLongLabel(p.caseId, p.currentStage);
+        return h("span", { class: `stage-text${isDone(p) ? " stage-done" : ""}`, title: stage }, stage);
+      },
+      csv: (p) => stageLongLabel(p.caseId, p.currentStage),
+    },
+    {
+      id: "onstage",
+      header: T().admColOnStage,
+      numeric: true,
+      className: "col-onstage",
+      cell: (p) => onStage(p, liveNow),
+      sortCompare: (a, b) => stuckKey(a) - stuckKey(b),
+      sortFirst: "desc",
+      csv: (p) => (isDone(p) ? null : Math.floor(p.stuckMinutes)),
+    },
+    {
+      id: "seen",
+      header: T().admColSeen,
+      className: "col-seen muted",
+      cell: (p) => h("span", { title: formatDateTime(p.lastSeenAt) }, relativeAgo(p.lastSeenAt, liveNow)),
+      sortValue: (p) => ms(p.lastSeenAt),
+      sortFirst: "desc",
+      csv: (p) => p.lastSeenAt,
+    },
+    { id: "actions", header: T().admColActions, headerHidden: true, className: "col-actions", cell: (p) => liveMenu(p) },
+  ];
+  const LIVE_SORTS: Record<LiveSortKey, SortState> = {
+    score: { id: "score", dir: "desc" },
+    progress: { id: "progress", dir: "desc" },
+    stuck: { id: "onstage", dir: "desc" },
+    name: { id: "name", dir: "asc" },
+  };
+  const liveTable = dataTable<AdminProgress>({
+    columns: liveColumns,
+    rows: [],
+    rowKey: (p) => p.accountId,
+    rowSig: (p) => liveSignature(p, liveStages, liveNow),
+    rowAttrs: (p) => ({ class: `acct-row is-${stuckLevel(p)}${state.liveExpanded.has(p.accountId) ? " is-expanded" : ""}`, "data-id": p.accountId }),
+    detail: (p) =>
+      state.liveExpanded.has(p.accountId)
+        ? {
+            attrs: { class: "acct-detail", id: `live-detail-${p.accountId}` },
+            content: h("div", { class: "acct-detail-inner" }, h("p", { class: "admin-label" }, T().admBreakdownTitle(p.username)), breakdownTable(p)),
+          }
+        : null,
+    labelledBy: "admin-players-title",
+    className: "admin-table live-table",
+    wrapClass: "admin-dt",
+    initialSort: LIVE_SORTS[state.liveSort],
+    virtualize: { rowHeight: 52 },
+    cards: { query: NARROW_QUERY, build: (p) => buildLiveCard(p, liveStages, liveNow), className: "player-cards", labelledBy: "admin-players-title" },
+    onSortChange: (s) => syncSortSelect(liveSortSelect, LIVE_SORTS, s),
+  });
+  const liveExportBtn = h(
+    "button",
+    {
+      type: "button",
+      class: "btn btn-ghost btn-sm",
+      title: T().admExportViewHint,
+      onclick: () => liveTable.downloadCsv(`incidentlab-live-${state.liveCaseId ?? "case"}-${new Date().toISOString().slice(0, 10)}.csv`),
+    },
+    T().admExportView,
   );
-  const liveRowCache = new Map<string, RowEntry>();
-  // Phones and tablets: one card per player instead of the 7-column grid.
-  const liveCards = h("ul", { class: "player-cards", "aria-labelledby": "admin-players-title" });
-  const liveCardCache = new Map<string, RowEntry<HTMLLIElement>>();
 
   function buildLivePanel(): void {
     setChildren(
@@ -2502,7 +2541,7 @@ export function renderAdmin(root: HTMLElement): void {
           "div",
           { class: "admin-table-head" },
           h("h2", { class: "admin-h2", id: "admin-players-title" }, T().admPlayers, " ", playersCountEl),
-          h("div", { class: "admin-controls" }, liveSearchInput, liveSortSelect, activeOnlyLabel, densityGroup),
+          h("div", { class: "admin-controls" }, liveSearchInput, liveSortSelect, activeOnlyLabel, densityGroup, liveExportBtn),
         ),
         h(
           "div",
@@ -2848,6 +2887,10 @@ export function renderAdmin(root: HTMLElement): void {
               void load();
             },
             returnFocus: () => menuTriggerEl(key),
+          }).then(async (ok) => {
+            if (!ok) return;
+            const entry = await newestTrash((e) => e.kind === "progress" && e.label === `progress of ${caseId} for one player`);
+            undoToast(T().admRestartedToast(p.username), entry);
           });
         },
       },
@@ -2862,36 +2905,8 @@ export function renderAdmin(root: HTMLElement): void {
     return h("span", { class: level === "none" ? "" : `stuck-badge is-${level}`, title: T().admStuckTip(Math.floor(p.stuckMinutes)) }, formatMinutes(p.stuckMinutes));
   }
 
-  function buildLiveRows(p: AdminProgress, stages: readonly StageKey[], now: number): HTMLTableRowElement[] {
-    const expanded = state.liveExpanded.has(p.accountId);
-    const detailId = `live-detail-${p.accountId}`;
-    const stage = stageLongLabel(p.caseId, p.currentStage);
-    const row = h(
-      "tr",
-      { class: `acct-row is-${stuckLevel(p)}${expanded ? " is-expanded" : ""}`, "data-id": p.accountId },
-      h("td", { class: "col-name" }, liveToggle(p, detailId, T().admShowBreakdown)),
-      h("td", {}, progressCells(p, stages, now)),
-      h("td", { class: "num col-score", title: T().admScoreParTip(p.maxScore) }, fmtInt(p.score)),
-      h("td", { class: "col-stage" }, h("span", { class: `stage-text${isDone(p) ? " stage-done" : ""}`, title: stage }, stage)),
-      h("td", { class: "num col-onstage" }, onStage(p, now)),
-      h("td", { class: "col-seen muted", title: formatDateTime(p.lastSeenAt) }, relativeAgo(p.lastSeenAt, now)),
-      h("td", { class: "col-actions" }, liveMenu(p)),
-    );
-    if (!expanded) return [row];
-    const detail = h(
-      "tr",
-      { class: "acct-detail", id: detailId },
-      h(
-        "td",
-        { colspan: LIVE_COLS },
-        h("div", { class: "acct-detail-inner" }, h("p", { class: "admin-label" }, T().admBreakdownTitle(p.username)), breakdownTable(p)),
-      ),
-    );
-    return [row, detail];
-  }
-
   /** Phone/tablet card: name, score, current stage, minutes on it, and an expandable labelled stage strip. */
-  function buildLiveCard(p: AdminProgress, stages: readonly StageKey[], now: number): HTMLLIElement[] {
+  function buildLiveCard(p: AdminProgress, stages: readonly StageKey[], now: number): HTMLLIElement {
     const expanded = state.liveExpanded.has(p.accountId);
     const detailId = `live-card-${p.accountId}`;
     const stage = stageLongLabel(p.caseId, p.currentStage);
@@ -2914,7 +2929,7 @@ export function renderAdmin(root: HTMLElement): void {
           }),
         )
       : null;
-    const card = h(
+    return h(
       "li",
       { class: `player-card is-${stuckLevel(p)}${expanded ? " is-expanded" : ""}`, "data-id": p.accountId },
       h(
@@ -2934,7 +2949,6 @@ export function renderAdmin(root: HTMLElement): void {
       strip,
       expanded ? h("p", { class: "muted small pc-seen" }, T().admSeenLine(relativeAgo(p.lastSeenAt, now))) : null,
     );
-    return [card];
   }
 
   function renderLiveTable(): void {
@@ -2942,10 +2956,6 @@ export function renderAdmin(root: HTMLElement): void {
     const players = state.progress?.players ?? [];
     if (!caseId) return;
     if (players.length === 0) {
-      liveRowCache.clear();
-      liveCardCache.clear();
-      liveTbody.replaceChildren();
-      liveCards.replaceChildren();
       playersCountEl.textContent = "";
       const url = location.origin;
       setChildren(
@@ -2970,23 +2980,11 @@ export function renderAdmin(root: HTMLElement): void {
       setChildren(liveTableEl, h("p", { class: "muted admin-empty-small" }, state.liveActiveOnly && !q ? T().admNoActive : T().admNoMatch));
       return;
     }
-    const stages = caseStages(caseId);
-    const sorted = sortPlayers(filtered, state.liveSort, stages);
-    if (state.narrow) {
-      if (liveCards.parentNode !== liveTableEl) setChildren(liveTableEl, liveCards);
-      syncRows(
-        liveCards,
-        liveCardCache,
-        sorted.map((p) => ({ key: p.accountId, sig: liveSignature(p, stages, now), build: () => buildLiveCard(p, stages, now) })),
-      );
-      return;
-    }
-    if (liveTable.parentNode !== liveTableEl) setChildren(liveTableEl, liveTable);
-    syncRows(
-      liveTbody,
-      liveRowCache,
-      sorted.map((p) => ({ key: p.accountId, sig: liveSignature(p, stages, now), build: () => buildLiveRows(p, stages, now) })),
-    );
+    liveNow = now;
+    liveStages = caseStages(caseId);
+    // Name order first: the table's sort is stable, so ties read alphabetically.
+    liveTable.update(sortPlayers(filtered, "name", liveStages));
+    if (liveTable.element.parentNode !== liveTableEl) setChildren(liveTableEl, liveTable.element);
   }
 
   function renderLive(): void {
@@ -3200,7 +3198,13 @@ export function renderAdmin(root: HTMLElement): void {
         h(
           "div",
           { class: `cal-day${isToday ? " is-today" : ""}${assigned ? " is-set" : ""}${isPast ? " is-past" : ""}` },
-          h("div", { class: "cal-day-head" }, h("span", { class: "cal-num" }, String(d)), isToday ? h("span", { class: "today-tag" }, T().admTodayTag) : null),
+          h(
+            "div",
+            { class: "cal-day-head" },
+            // The weekday shows only in the phone list (the grid has a weekday header); the select's label names the day.
+            h("span", { class: "cal-wd", "aria-hidden": "true" }, weekdayFmt.format(Date.UTC(y, m, d))),
+            h("span", { class: "cal-num" }, String(d)),
+            isToday ? h("span", { class: "today-tag" }, T().admTodayTag) : null),
           select,
         ),
       );
@@ -3279,18 +3283,13 @@ export function renderAdmin(root: HTMLElement): void {
       autocomplete: "off",
       spellcheck: "false",
       dir: "ltr",
-      "aria-invalid": tzValid ? undefined : "true",
-      "aria-describedby": "sched-tz-help",
     });
     // Validate while typing (in place: re-rendering would move the caret); the draft updates on change.
-    const tzHelp = h("p", { class: tzValid ? "muted small" : "small sched-invalid", id: "sched-tz-help" }, tzValid ? T().admTimezoneHelp : T().admTimezoneInvalid);
+    const tzField = formField({ input: tzInput, label: T().admTimezone, help: T().admTimezoneHelp });
+    tzField.setError(tzValid ? null : T().admTimezoneInvalid);
     tzInput.addEventListener("input", () => {
       const v = tzInput.value.trim();
-      const ok = v === "" || isValidTimeZone(v);
-      if (ok) tzInput.removeAttribute("aria-invalid");
-      else tzInput.setAttribute("aria-invalid", "true");
-      tzHelp.className = ok ? "muted small" : "small sched-invalid";
-      tzHelp.textContent = ok ? T().admTimezoneHelp : T().admTimezoneInvalid;
+      tzField.setError(v === "" || isValidTimeZone(v) ? null : T().admTimezoneInvalid);
     });
     tzInput.addEventListener("change", () => {
       const v = tzInput.value.trim();
@@ -3335,21 +3334,9 @@ export function renderAdmin(root: HTMLElement): void {
         h(
           "div",
           { class: "sched-form" },
-          h(
-            "div",
-            { class: "sched-field" },
-            h("label", { class: "admin-label", for: "sched-default" }, T().admDefaultCase),
-            defaultSelect,
-            h("p", { class: "muted small" }, T().admDefaultCaseHelp),
-          ),
-          h(
-            "div",
-            { class: "sched-field" },
-            h("label", { class: "admin-label", for: "sched-tz" }, T().admTimezone),
-            tzInput,
-            tzList,
-            tzHelp,
-          ),
+          formField({ input: defaultSelect, label: T().admDefaultCase, help: T().admDefaultCaseHelp }).nodes,
+          tzField.nodes,
+          tzList,
           h(
             "div",
             { class: "sched-field sched-lock" },
@@ -3443,10 +3430,7 @@ export function renderAdmin(root: HTMLElement): void {
   const evStateEl = h("span", { class: "small", role: "status" });
   const evErrorEl = h("p", { class: "admin-error", role: "alert" });
   const evBar = h("div", { class: "sched-actions panel admin-panel" }, evSave, evDiscard, evStateEl, evErrorEl);
-  const fieldError = (id: string): HTMLParagraphElement => h("p", { class: "small sched-invalid field-error", id, hidden: true });
-  const evEndErr = fieldError("ev-end-err");
-  const evFreezeErr = fieldError("ev-freeze-err");
-  const evEnforceErr = fieldError("ev-enforce-err");
+  const evEnforceErr = h("p", { class: "small sched-invalid field-error", id: "ev-enforce-err", hidden: true });
   /** Puts (or clears) an inline error under a field and wires it to the input for screen readers. */
   function setFieldError(input: HTMLInputElement, errEl: HTMLElement, baseDescribedBy: string, message: string | null): void {
     errEl.textContent = message ?? "";
@@ -3471,6 +3455,29 @@ export function renderAdmin(root: HTMLElement): void {
       T().admClearTime,
     );
   }
+
+  // The form's fields (components/formLayout.ts): label, inline error, control; the time fields add the locale
+  // preview and a Clear button, and stay described by the preview and the time-zone note.
+  const evNameField = formField({ input: evName, label: T().admEventName });
+  // A note (the freeze explanation) goes under the control, so the three time inputs line up across columns.
+  const timeField = (input: HTMLInputElement, label: string, preview: HTMLElement, apply: (d: LiveEvent) => void, note?: string) => {
+    const noteId = `${input.id}-note`;
+    return formField({
+      input,
+      label,
+      describedBy: [preview.id, ...(note ? [noteId] : []), "ev-tz"],
+      extra: h(
+        "div",
+        { class: "ev-time-extra" },
+        preview,
+        clearTimeBtn(input, label, apply),
+        note ? h("p", { class: "muted small ev-time-note", id: noteId }, note) : null,
+      ),
+    });
+  };
+  const evStartField = timeField(evStart, T().admStartsAt, evStartPreview, (d) => (d.startsAt = null));
+  const evEndField = timeField(evEnd, T().admEndsAt, evEndPreview, (d) => (d.endsAt = null));
+  const evFreezeField = timeField(evFreeze, T().admFreezeAt, evFreezePreview, (d) => (d.freezeAt = null), T().admFreezeHelp);
 
   /** Mutates the draft from a control and refreshes the derived bits (no form rebuild). */
   function editEvent(mutate: (d: LiveEvent) => void): void {
@@ -3515,9 +3522,9 @@ export function renderAdmin(root: HTMLElement): void {
    * Quick actions change only the timing of the SAVED event (server clock) and save just that; half-edited
    * fields in the form are neither saved nor lost: they are re-applied on top of the result.
    */
-  async function quickEvent(mutate: (d: LiveEvent, now: number) => void): Promise<void> {
+  async function quickEvent(mutate: (d: LiveEvent, now: number) => void): Promise<boolean> {
     const ev = state.event;
-    if (!ev.server || ev.saving) return;
+    if (!ev.server || ev.saving) return false;
     const base = cloneEvent(ev.server);
     const draftBefore = ev.draft ? cloneEvent(ev.draft) : null;
     const next = cloneEvent(base);
@@ -3529,7 +3536,7 @@ export function renderAdmin(root: HTMLElement): void {
     renderEventControls();
     try {
       const res = await saveEvent(normalizeEvent(next));
-      if (disposed) return;
+      if (disposed) return false;
       applyEventResult(res, false);
       const merged = cloneEvent(res.event);
       if (draftBefore) {
@@ -3547,12 +3554,13 @@ export function renderAdmin(root: HTMLElement): void {
       clearSavedNoteLater();
       syncEventForm();
     } catch (err: unknown) {
-      if (disposed || handleAuthError(err)) return;
+      if (disposed || handleAuthError(err)) return false;
       ev.error = errMessage(err);
     } finally {
       ev.saving = false;
     }
     if (state.tab === "event") renderEventControls();
+    return ev.error === null;
   }
 
   /** The "(other edits stay unsaved)" note, only when there are other edits. */
@@ -3598,15 +3606,22 @@ export function renderAdmin(root: HTMLElement): void {
       confirmLabel: unfreeze ? T().admUnfreeze : T().admFreezeNow,
       tone: unfreeze ? "primary" : "danger",
       returnFocus: () => evFreezeBtn,
-    }).then((ok) => {
+    }).then(async (ok) => {
       if (!ok) return;
-      void quickEvent((d, now) => {
+      const previous = state.event.server?.freezeAt ?? null;
+      const saved = await quickEvent((d, now) => {
         if (unfreeze) {
           d.freezeAt = null;
           return;
         }
         const end = ms(d.endsAt);
         d.freezeAt = end !== null && end < now ? isoAt(end) : isoAt(now);
+      });
+      if (!saved) return;
+      toast({
+        tone: "success",
+        text: unfreeze ? T().admUnfrozenToast : T().admFrozenToast,
+        action: { label: T().admUndo, run: () => void quickEvent((d) => void (d.freezeAt = previous)) },
       });
     });
   });
@@ -3708,8 +3723,8 @@ export function renderAdmin(root: HTMLElement): void {
     evErrorEl.textContent = ev.error ? T().admSaveFailed(ev.error) : "";
     evErrorEl.hidden = ev.error === null;
     const errs = ev.draft ? eventFieldErrors(ev.draft) : { end: null, freeze: null, enforce: null };
-    setFieldError(evEnd, evEndErr, "ev-end-preview ev-tz", errs.end);
-    setFieldError(evFreeze, evFreezeErr, "ev-freeze-preview ev-tz", errs.freeze);
+    evEndField.setError(errs.end);
+    evFreezeField.setError(errs.freeze);
     if (ev.draft) {
       const preview = (el: HTMLElement, iso: string | null): void => {
         el.textContent = iso === null ? T().admTimeNotSet : formatDateTimeZone(iso);
@@ -3765,8 +3780,6 @@ export function renderAdmin(root: HTMLElement): void {
 
   function buildEventPanel(): void {
     const tz = browserTimeZone();
-    const field = (id: string, label: string, ...rest: Child[]): HTMLElement =>
-      h("div", { class: "sched-field" }, h("label", { class: "admin-label", for: id }, label), rest);
     setChildren(
       evBodyEl,
       h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, T().admEventTitle), evStatusEl, evClockEl),
@@ -3784,23 +3797,10 @@ export function renderAdmin(root: HTMLElement): void {
         h(
           "div",
           { class: "sched-form adm-ev-form" },
-          field("ev-name", T().admEventName, evName),
-          field("ev-start", T().admStartsAt, h("div", { class: "ev-time-row" }, evStart, clearTimeBtn(evStart, T().admStartsAt, (d) => (d.startsAt = null))), evStartPreview),
-          field(
-            "ev-end",
-            T().admEndsAt,
-            h("div", { class: "ev-time-row" }, evEnd, clearTimeBtn(evEnd, T().admEndsAt, (d) => (d.endsAt = null))),
-            evEndPreview,
-            evEndErr,
-          ),
-          field(
-            "ev-freeze",
-            T().admFreezeAt,
-            h("div", { class: "ev-time-row" }, evFreeze, clearTimeBtn(evFreeze, T().admFreezeAt, (d) => (d.freezeAt = null))),
-            evFreezePreview,
-            evFreezeErr,
-            h("p", { class: "muted small" }, T().admFreezeHelp),
-          ),
+          evNameField.nodes,
+          evStartField.nodes,
+          evEndField.nodes,
+          evFreezeField.nodes,
           h(
             "div",
             { class: "sched-field sched-lock" },
@@ -3870,15 +3870,88 @@ export function renderAdmin(root: HTMLElement): void {
   // =====================================================================================
 
   const auditBodyEl = h("div", { class: "admin-table-wrap" });
+  const auditCountEl = h("span", { class: "muted small" });
   let auditSig = "";
+  let auditNames: ReadonlyMap<string, string> = new Map();
+  const AUDIT_KINDS = ["all", "account", "progress", "event", "schedule", "settings", "trash"] as const;
+  const auditKindOf = (action: string): string => action.split(".")[0] ?? action;
+  let auditQuery = "";
+  let auditKind = "all";
+  const auditSearch = h("input", {
+    type: "search",
+    class: "admin-input audit-search",
+    dir: "auto",
+    enterkeyhint: "search",
+    placeholder: T().admAuditSearch,
+    "aria-label": T().admAuditSearch,
+  });
+  auditSearch.addEventListener("input", () => {
+    auditQuery = auditSearch.value;
+    auditSig = "";
+    renderAudit();
+  });
+  const auditKindSelect = h(
+    "select",
+    { class: "admin-input", "aria-label": T().admAuditKindLabel },
+    AUDIT_KINDS.map((k) => h("option", { value: k }, T().admAuditKind(k))),
+  );
+  auditKindSelect.addEventListener("change", () => {
+    auditKind = auditKindSelect.value;
+    auditSig = "";
+    renderAudit();
+  });
+  const auditDetailText = (e: AuditEntry): string => {
+    const name = e.target === null ? "" : (auditNames.get(e.target) ?? T().admUnknownAccount);
+    let detail = e.detail ?? "";
+    if (e.detail !== null && (e.action === "progress.restart" || e.action === "progress.reset")) detail = e.detail === "all cases" ? T().admAllCases : caseTitle(e.detail);
+    return [name, detail].filter((x) => x !== "").join(" · ");
+  };
+  const auditTable = dataTable<AuditEntry>({
+    columns: [
+      {
+        id: "time",
+        header: T().admColTime,
+        className: "col-seen",
+        // Seconds matter here: a class's approvals land within the same minute.
+        cell: (e) => h("time", { datetime: e.at, title: formatDateTime(e.at) }, formatDateTimeSec(e.at)),
+        sortValue: (e) => ms(e.at),
+        sortFirst: "desc",
+        csv: (e) => e.at,
+      },
+      { id: "action", header: T().admColAction, cell: (e) => h("span", { title: e.action }, T().admAuditAction(e.action)), sortValue: (e) => T().admAuditAction(e.action), csv: (e) => e.action },
+      { id: "target", header: T().admColTarget, className: "audit-target", cell: (e) => auditTarget(e, auditNames), csv: auditDetailText },
+      { id: "via", header: T().admColVia, cell: (e) => h("span", { class: `via-pill is-${e.via}` }, T().admVia(e.via)), sortValue: (e) => e.via, csv: (e) => e.via },
+    ],
+    rows: [],
+    className: "admin-table audit-table",
+    wrapClass: "admin-dt",
+    labelledBy: "admin-audit-title",
+    initialSort: { id: "time", dir: "desc" },
+    stackOnPhone: true,
+  });
+  const auditExportBtn = h(
+    "button",
+    {
+      type: "button",
+      class: "btn btn-ghost btn-sm",
+      title: T().admExportViewHint,
+      onclick: () => auditTable.downloadCsv(`incidentlab-audit-${new Date().toISOString().slice(0, 10)}.csv`),
+    },
+    T().admExportView,
+  );
 
   function buildAuditPanel(): void {
     setChildren(
       tabPanels.get("audit") ?? container,
       h(
         "section",
-        { class: "panel admin-panel" },
-        h("h2", { class: "admin-h2" }, T().admAuditTitle),
+        { class: "panel admin-panel", "aria-labelledby": "admin-audit-title" },
+        h(
+          "div",
+          { class: "admin-table-head" },
+          h("h2", { class: "admin-h2", id: "admin-audit-title" }, T().admAuditTitle, " ", auditCountEl),
+          h("div", { class: "admin-controls" }, auditSearch, auditKindSelect, auditExportBtn),
+        ),
         h("p", { class: "muted small admin-hint" }, T().admAuditHint),
         auditBodyEl,
       ),
@@ -3914,6 +3987,8 @@ export function renderAdmin(root: HTMLElement): void {
     const sig = JSON.stringify([getLang(), entries, [...names]]);
     if (sig === auditSig) return;
     auditSig = sig;
+    auditNames = names;
+    auditCountEl.textContent = "";
     if (entries === null) {
       setChildren(auditBodyEl, h("p", { class: "muted admin-empty-small" }, T().admLoading));
       return;
@@ -3922,28 +3997,19 @@ export function renderAdmin(root: HTMLElement): void {
       setChildren(auditBodyEl, h("p", { class: "muted admin-empty-small" }, T().admAuditEmpty));
       return;
     }
-    setChildren(
-      auditBodyEl,
-      h(
-        "table",
-        { class: "admin-table audit-table" },
-        h("thead", {}, h("tr", {}, th(T().admColTime), th(T().admColAction), th(T().admColTarget), th(T().admColVia))),
-        h(
-          "tbody",
-          {},
-          entries.map((e) =>
-            h(
-              "tr",
-              {},
-              h("td", { class: "col-seen", title: e.at }, formatDateTime(e.at)),
-              h("td", { title: e.action }, T().admAuditAction(e.action)),
-              h("td", { class: "audit-target" }, auditTarget(e, names)),
-              h("td", {}, h("span", { class: `via-pill is-${e.via}` }, T().admVia(e.via))),
-            ),
-          ),
-        ),
-      ),
+    const q = auditQuery.trim().toLowerCase();
+    const shown = entries.filter(
+      (e) =>
+        (auditKind === "all" || auditKindOf(e.action) === auditKind) &&
+        (q === "" || `${T().admAuditAction(e.action)} ${e.action} ${auditDetailText(e)}`.toLowerCase().includes(q)),
     );
+    auditCountEl.textContent = `(${shown.length === entries.length ? fmtInt(entries.length) : T().admAuditShown(fmtInt(shown.length), fmtInt(entries.length))})`;
+    if (shown.length === 0) {
+      setChildren(auditBodyEl, h("p", { class: "muted admin-empty-small" }, T().admAuditNoMatch));
+      return;
+    }
+    auditTable.update(shown);
+    if (auditTable.element.parentNode !== auditBodyEl) setChildren(auditBodyEl, auditTable.element);
   }
 
   // =====================================================================================
@@ -3958,9 +4024,27 @@ export function renderAdmin(root: HTMLElement): void {
       tabPanels.get("stats") ?? container,
       // How each case went comes first; the overall top 10 follows.
       statsCasesEl,
-      h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, T().admTop10), statsBoardEl),
+      h("section", { class: "panel admin-panel", "aria-labelledby": "admin-top10-title" }, h("h2", { class: "admin-h2", id: "admin-top10-title" }, T().admTop10), statsBoardEl),
     );
   }
+
+  const statsBoardTable = dataTable<UserStats>({
+    columns: [
+      { id: "rank", header: T().admColRank, numeric: true, cell: (a) => (a.rank === null ? "—" : fmtInt(a.rank)) },
+      { id: "user", header: T().admColUser, rowHeader: true, className: "col-name", cell: (a) => h("span", { class: "player-name", dir: "auto" }, a.username) },
+      { id: "score", header: T().admColScore, numeric: true, className: "col-score", cell: (a) => fmtInt(a.totalScore) },
+      { id: "completed", header: T().admColCompleted, numeric: true, cell: (a) => fmtInt(a.casesCompleted) },
+      { id: "accuracy", header: T().admColAccuracy, numeric: true, cell: (a) => formatPct(a.accuracy) },
+      { id: "hints", header: T().admColHints, numeric: true, optional: true, cell: (a) => fmtInt(a.hintsUsed) },
+    ],
+    rows: [],
+    rowKey: (a) => a.accountId,
+    rowSig: (a) => JSON.stringify([getLang(), a.rank, a.username, a.totalScore, a.casesCompleted, a.accuracy, a.hintsUsed]),
+    rowAttrs: (a) => ({ class: a.rank === 1 ? "is-first" : "" }),
+    className: "admin-table",
+    wrapClass: "admin-dt",
+    labelledBy: "admin-top10-title",
+  });
 
   function renderStatsBoard(): void {
     const top = topPlayers(state.accounts?.accounts ?? [], 10);
@@ -3968,44 +4052,12 @@ export function renderAdmin(root: HTMLElement): void {
       setChildren(statsBoardEl, h("p", { class: "muted admin-empty-small" }, T().admNoPlayersBoard));
       return;
     }
-    setChildren(
-      statsBoardEl,
-      h(
-        "table",
-        { class: "admin-table" },
-        h(
-          "thead",
-          {},
-          h(
-            "tr",
-            {},
-            th(T().admColRank, "num"),
-            th(T().admColUser),
-            th(T().admColScore, "num"),
-            th(T().admColCompleted, "num"),
-            th(T().admColAccuracy, "num"),
-            th(T().admColHints, "num"),
-          ),
-        ),
-        h(
-          "tbody",
-          {},
-          top.map((a) =>
-            h(
-              "tr",
-              { class: a.rank === 1 ? "is-first" : "" },
-              h("td", { class: "num" }, a.rank === null ? "—" : fmtInt(a.rank)),
-              h("td", { class: "col-name" }, h("span", { class: "player-name", dir: "auto" }, a.username)),
-              h("td", { class: "num col-score" }, fmtInt(a.totalScore)),
-              h("td", { class: "num" }, fmtInt(a.casesCompleted)),
-              h("td", { class: "num" }, formatPct(a.accuracy)),
-              h("td", { class: "num" }, fmtInt(a.hintsUsed)),
-            ),
-          ),
-        ),
-      ),
-    );
+    statsBoardTable.update(top);
+    if (statsBoardTable.element.parentNode !== statsBoardEl) setChildren(statsBoardEl, statsBoardTable.element);
   }
+
+  /** Cases whose "Show as a table" is open: the panels re-render on every poll and must not snap shut. */
+  const statsTableOpen = new Set<string>();
 
   /**
    * One case: a headline row that answers "how did it go?" (completion, median time, hardest stage with its numbers),
@@ -4111,53 +4163,39 @@ export function renderAdmin(root: HTMLElement): void {
         );
       }),
     );
+    const qTable = dataTable<QuestionFunnel>({
+      columns: [
+        { id: "q", header: T().admColQuestion, rowHeader: true, cell: (row) => [h("span", { class: "q-id" }, row.q.toUpperCase()), " ", questionTitle(s.caseId, row.q)] },
+        { id: "reached", header: T().admColReached, numeric: true, cell: (row) => fmtInt(row.reached), sortValue: (row) => row.reached, sortFirst: "desc" },
+        { id: "solved", header: T().admColSolved, numeric: true, cell: (row) => { const qs = s.questions[row.q]; return qs ? fmtInt(qs.solved) : "—"; }, sortValue: (row) => s.questions[row.q]?.solved ?? null, sortFirst: "desc" },
+        { id: "revealed", header: T().admColRevealed, numeric: true, cell: (row) => { const qs = s.questions[row.q]; return qs ? fmtInt(qs.revealed) : "—"; }, sortValue: (row) => s.questions[row.q]?.revealed ?? null, sortFirst: "desc" },
+        {
+          id: "notSolved",
+          header: T().admColNotSolved,
+          numeric: true,
+          cell: (row) => (row.reached > 0 ? `${fmtInt(row.reached - row.solved)} · ${formatPct((row.reached - row.solved) / row.reached)}` : "—"),
+          sortValue: (row) => (row.reached > 0 ? (row.reached - row.solved) / row.reached : null),
+          sortFirst: "desc",
+        },
+        { id: "avgWrong", header: T().admColAvgWrong, numeric: true, cell: (row) => { const qs = s.questions[row.q]; return qs ? fmtDec1(qs.avgWrong) : "—"; }, sortValue: (row) => s.questions[row.q]?.avgWrong ?? null, sortFirst: "desc" },
+        { id: "avgHints", header: T().admColAvgHints, numeric: true, cell: (row) => { const qs = s.questions[row.q]; return qs ? fmtDec1(qs.avgHints) : "—"; }, sortValue: (row) => s.questions[row.q]?.avgHints ?? null, sortFirst: "desc" },
+      ],
+      rows: funnel,
+      rowAttrs: (row) => ({ class: hardest?.row.q === row.q ? "is-hardest" : "" }),
+      className: "admin-table stats-q-table",
+      wrapClass: "admin-dt",
+      caption: `${title} · ${T().admQBarsTitle}`,
+    });
     const table = h(
       "details",
-      { class: "stats-table-view" },
+      { class: "stats-table-view", open: statsTableOpen.has(s.caseId) },
       h("summary", { class: "link-btn" }, T().admTableView),
-      h(
-        "div",
-        { class: "admin-table-wrap" },
-        h(
-          "table",
-          { class: "admin-table stats-q-table" },
-          h(
-            "thead",
-            {},
-            h(
-              "tr",
-              {},
-              th(T().admColQuestion),
-              th(T().admColReached, "num"),
-              th(T().admColSolved, "num"),
-              th(T().admColRevealed, "num"),
-              th(T().admColNotSolved, "num"),
-              th(T().admColAvgWrong, "num"),
-              th(T().admColAvgHints, "num"),
-            ),
-          ),
-          h(
-            "tbody",
-            {},
-            funnel.map((row) => {
-              const qs = s.questions[row.q];
-              const notSolved = row.reached - row.solved;
-              return h(
-                "tr",
-                { class: hardest?.row.q === row.q ? "is-hardest" : "" },
-                h("td", {}, h("span", { class: "q-id" }, row.q.toUpperCase()), " ", questionTitle(s.caseId, row.q)),
-                h("td", { class: "num" }, fmtInt(row.reached)),
-                h("td", { class: "num" }, qs ? fmtInt(qs.solved) : "—"),
-                h("td", { class: "num" }, qs ? fmtInt(qs.revealed) : "—"),
-                h("td", { class: "num" }, row.reached > 0 ? `${fmtInt(notSolved)} · ${formatPct(notSolved / row.reached)}` : "—"),
-                h("td", { class: "num" }, qs ? fmtDec1(qs.avgWrong) : "—"),
-                h("td", { class: "num" }, qs ? fmtDec1(qs.avgHints) : "—"),
-              );
-            }),
-          ),
-        ),
-      ),
+      qTable.element,
     );
+    table.addEventListener("toggle", () => {
+      if (table.open) statsTableOpen.add(s.caseId);
+      else statsTableOpen.delete(s.caseId);
+    });
     return h(
       "section",
       { class: "panel admin-panel stats-case" },
@@ -4189,9 +4227,14 @@ export function renderAdmin(root: HTMLElement): void {
       return;
     }
     const todayId = state.today?.caseId;
+    // Rebuild only when the numbers changed: a poll must not move focus out of a sorted per-question table.
+    const sig = JSON.stringify([getLang(), stats, [...state.statsProgress], todayId]);
+    if (sig === statsSig) return;
+    statsSig = sig;
     const ordered = [...stats.cases].sort((a, b) => Number(b.caseId === todayId) - Number(a.caseId === todayId) || b.players - a.players);
     setChildren(statsCasesEl, ordered.map(caseSummaryPanel));
   }
+  let statsSig = "";
 
   // =====================================================================================
   // Projector leaderboard: the PUBLIC board (GET /api/leaderboard), so a freeze hides the live standings
