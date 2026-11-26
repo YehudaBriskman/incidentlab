@@ -1491,21 +1491,52 @@ export function renderAdmin(root: HTMLElement): void {
   }
 
   // ---- one-time temporary password (a dialog from lib/overlay.ts) ----
-  function showTempPassword(username: string, password: string): void {
+  async function showTempPassword(username: string, password: string): Promise<void> {
     state.tempPassword = { username, password };
-    void openDialog({
-      size: "sm",
-      title: T().admTempPwTitle(username),
-      className: "admin-pw-dialog",
-      body: [
-        h("p", { class: "muted" }, T().admTempPwHelp),
-        h("div", { class: "admin-share admin-pw" }, h("code", { class: "admin-share-url admin-pw-value" }, password), copyButton(() => password, T().admCopyPassword)),
-      ],
-      actions: [{ value: "done", label: T().admDone, tone: "primary", autofocus: true }],
-    }).then(() => {
-      // The password is shown once: the dialog left the DOM on close; drop it from memory too.
-      state.tempPassword = null;
-    });
+    let copied = false;
+    // The password exists only in this dialog: Done or Escape without copying asks first, and "Back" reopens it.
+    for (;;) {
+      const copy = copyButton(() => password, T().admCopyPassword);
+      copy.addEventListener("click", () => (copied = true));
+      await openDialog({
+        size: "sm",
+        title: T().admTempPwTitle(username),
+        className: "admin-pw-dialog",
+        body: [h("p", { class: "muted" }, T().admTempPwHelp), h("div", { class: "admin-share admin-pw" }, h("code", { class: "admin-share-url admin-pw-value" }, password), copy)],
+        actions: [{ value: "done", label: T().admDone, tone: "primary", autofocus: true }],
+      });
+      if (copied) break;
+      const close = await askConfirm({
+        title: T().admPwUncopiedTitle,
+        body: T().admPwUncopiedBody,
+        confirmLabel: T().admPwCloseAnyway,
+        cancelLabel: T().admPwBack,
+        tone: "danger",
+      });
+      if (close || disposed) break;
+    }
+    // Shown once: the dialog left the DOM on close; drop it from memory too.
+    state.tempPassword = null;
+  }
+
+  /**
+   * The trash entry a soft delete just created (newest first from the server), for the Undo in its toast.
+   * Matched by the server's label; null when it can't be found (the toast then has no Undo).
+   */
+  async function newestTrash(match: (e: TrashEntry) => boolean): Promise<TrashEntry | null> {
+    try {
+      const entries = await fetchTrash();
+      state.trash.entries = entries;
+      trashSig = "";
+      return entries.find(match) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** "Deleted …" with Undo, which restores the trash entry right away. */
+  function undoToast(text: string, entry: TrashEntry | null): void {
+    toast({ tone: "success", text, ...(entry ? { action: { label: T().admUndo, run: () => void restoreEntry(entry) } } : {}) });
   }
 
   // ---- class invite code ----
@@ -1552,7 +1583,23 @@ export function renderAdmin(root: HTMLElement): void {
     inviteInput.focus();
     inviteInput.select();
   });
-  inviteClearBtn.addEventListener("click", () => void storeInvite(null));
+  // Turning the code off changes how every new sign-up is handled: ask, then offer Undo (puts the old code back).
+  inviteClearBtn.addEventListener("click", () => {
+    const previous = state.settings.server?.inviteCode ?? null;
+    if (previous === null) return;
+    void askConfirm({
+      title: T().admInviteOffTitle,
+      body: T().admInviteOffBody,
+      confirmLabel: T().admInviteOffConfirm,
+      tone: "primary",
+      returnFocus: () => inviteInput,
+    }).then(async (ok) => {
+      if (!ok) return;
+      await storeInvite(null);
+      if (state.settings.error !== null) return;
+      toast({ tone: "success", text: T().admInviteOffToast, action: { label: T().admUndo, run: () => void storeInvite(previous) } });
+    });
+  });
 
   async function storeInvite(code: string | null): Promise<void> {
     const st = state.settings;
@@ -1595,7 +1642,8 @@ export function renderAdmin(root: HTMLElement): void {
       }
     }
     if (inviteInput.value !== st.input) inviteInput.value = st.input;
-    inviteSetBtn.disabled = st.saving || st.input.trim() === "";
+    // Never a disabled submit: an empty or short code gets an inline error on submit instead.
+    inviteSetBtn.disabled = st.saving;
     inviteGenBtn.disabled = st.saving;
     inviteClearBtn.disabled = st.saving || code === null;
     const fieldError = st.error !== null && st.error === T().admInviteInvalid;
@@ -1839,7 +1887,7 @@ export function renderAdmin(root: HTMLElement): void {
           tone: "primary",
           run: async () => {
             const password = await resetAccountPassword(a.accountId);
-            showTempPassword(a.username, password);
+            void showTempPassword(a.username, password);
           },
           returnFocus: () => menuTriggerEl(key),
         }),
@@ -1866,8 +1914,10 @@ export function renderAdmin(root: HTMLElement): void {
             void load();
           },
           returnFocus: () => menuTriggerEl(key) ?? acctSearchInput,
-        }).then((ok) => {
-          if (ok) toast({ tone: "success", text: T().admDeletedToast(a.username, TRASH_RETENTION_DAYS) });
+        }).then(async (ok) => {
+          if (!ok) return;
+          const entry = await newestTrash((e) => e.kind === "account" && e.label === `account ${a.username}`);
+          undoToast(T().admDeletedToast(a.username, TRASH_RETENTION_DAYS), entry);
         }),
     });
     return items;
@@ -2352,10 +2402,11 @@ export function renderAdmin(root: HTMLElement): void {
       typedName: caseId,
       run: () => resetProgress(caseId),
       returnFocus: () => resetBtn,
-    }).then((ok) => {
+    }).then(async (ok) => {
       if (!ok) return;
-      toast({ tone: "success", text: T().admCaseReset(title) });
       void load();
+      const entry = await newestTrash((e) => e.kind === "progress" && e.label.startsWith(`progress of ${caseId} (`));
+      undoToast(T().admCaseReset(title), entry);
     });
   });
 
@@ -2836,6 +2887,10 @@ export function renderAdmin(root: HTMLElement): void {
               void load();
             },
             returnFocus: () => menuTriggerEl(key),
+          }).then(async (ok) => {
+            if (!ok) return;
+            const entry = await newestTrash((e) => e.kind === "progress" && e.label === `progress of ${caseId} for one player`);
+            undoToast(T().admRestartedToast(p.username), entry);
           });
         },
       },
@@ -3143,7 +3198,13 @@ export function renderAdmin(root: HTMLElement): void {
         h(
           "div",
           { class: `cal-day${isToday ? " is-today" : ""}${assigned ? " is-set" : ""}${isPast ? " is-past" : ""}` },
-          h("div", { class: "cal-day-head" }, h("span", { class: "cal-num" }, String(d)), isToday ? h("span", { class: "today-tag" }, T().admTodayTag) : null),
+          h(
+            "div",
+            { class: "cal-day-head" },
+            // The weekday shows only in the phone list (the grid has a weekday header); the select's label names the day.
+            h("span", { class: "cal-wd", "aria-hidden": "true" }, weekdayFmt.format(Date.UTC(y, m, d))),
+            h("span", { class: "cal-num" }, String(d)),
+            isToday ? h("span", { class: "today-tag" }, T().admTodayTag) : null),
           select,
         ),
       );
@@ -3461,9 +3522,9 @@ export function renderAdmin(root: HTMLElement): void {
    * Quick actions change only the timing of the SAVED event (server clock) and save just that; half-edited
    * fields in the form are neither saved nor lost: they are re-applied on top of the result.
    */
-  async function quickEvent(mutate: (d: LiveEvent, now: number) => void): Promise<void> {
+  async function quickEvent(mutate: (d: LiveEvent, now: number) => void): Promise<boolean> {
     const ev = state.event;
-    if (!ev.server || ev.saving) return;
+    if (!ev.server || ev.saving) return false;
     const base = cloneEvent(ev.server);
     const draftBefore = ev.draft ? cloneEvent(ev.draft) : null;
     const next = cloneEvent(base);
@@ -3475,7 +3536,7 @@ export function renderAdmin(root: HTMLElement): void {
     renderEventControls();
     try {
       const res = await saveEvent(normalizeEvent(next));
-      if (disposed) return;
+      if (disposed) return false;
       applyEventResult(res, false);
       const merged = cloneEvent(res.event);
       if (draftBefore) {
@@ -3493,12 +3554,13 @@ export function renderAdmin(root: HTMLElement): void {
       clearSavedNoteLater();
       syncEventForm();
     } catch (err: unknown) {
-      if (disposed || handleAuthError(err)) return;
+      if (disposed || handleAuthError(err)) return false;
       ev.error = errMessage(err);
     } finally {
       ev.saving = false;
     }
     if (state.tab === "event") renderEventControls();
+    return ev.error === null;
   }
 
   /** The "(other edits stay unsaved)" note, only when there are other edits. */
@@ -3544,15 +3606,22 @@ export function renderAdmin(root: HTMLElement): void {
       confirmLabel: unfreeze ? T().admUnfreeze : T().admFreezeNow,
       tone: unfreeze ? "primary" : "danger",
       returnFocus: () => evFreezeBtn,
-    }).then((ok) => {
+    }).then(async (ok) => {
       if (!ok) return;
-      void quickEvent((d, now) => {
+      const previous = state.event.server?.freezeAt ?? null;
+      const saved = await quickEvent((d, now) => {
         if (unfreeze) {
           d.freezeAt = null;
           return;
         }
         const end = ms(d.endsAt);
         d.freezeAt = end !== null && end < now ? isoAt(end) : isoAt(now);
+      });
+      if (!saved) return;
+      toast({
+        tone: "success",
+        text: unfreeze ? T().admUnfrozenToast : T().admFrozenToast,
+        action: { label: T().admUndo, run: () => void quickEvent((d) => void (d.freezeAt = previous)) },
       });
     });
   });
@@ -3987,6 +4056,9 @@ export function renderAdmin(root: HTMLElement): void {
     if (statsBoardTable.element.parentNode !== statsBoardEl) setChildren(statsBoardEl, statsBoardTable.element);
   }
 
+  /** Cases whose "Show as a table" is open: the panels re-render on every poll and must not snap shut. */
+  const statsTableOpen = new Set<string>();
+
   /**
    * One case: a headline row that answers "how did it go?" (completion, median time, hardest stage with its numbers),
    * then per-question solved / gave up / still on it as bars, with the full numbers one disclosure away.
@@ -4116,10 +4188,14 @@ export function renderAdmin(root: HTMLElement): void {
     });
     const table = h(
       "details",
-      { class: "stats-table-view" },
+      { class: "stats-table-view", open: statsTableOpen.has(s.caseId) },
       h("summary", { class: "link-btn" }, T().admTableView),
       qTable.element,
     );
+    table.addEventListener("toggle", () => {
+      if (table.open) statsTableOpen.add(s.caseId);
+      else statsTableOpen.delete(s.caseId);
+    });
     return h(
       "section",
       { class: "panel admin-panel stats-case" },
@@ -4151,9 +4227,14 @@ export function renderAdmin(root: HTMLElement): void {
       return;
     }
     const todayId = state.today?.caseId;
+    // Rebuild only when the numbers changed: a poll must not move focus out of a sorted per-question table.
+    const sig = JSON.stringify([getLang(), stats, [...state.statsProgress], todayId]);
+    if (sig === statsSig) return;
+    statsSig = sig;
     const ordered = [...stats.cases].sort((a, b) => Number(b.caseId === todayId) - Number(a.caseId === todayId) || b.players - a.players);
     setChildren(statsCasesEl, ordered.map(caseSummaryPanel));
   }
+  let statsSig = "";
 
   // =====================================================================================
   // Projector leaderboard: the PUBLIC board (GET /api/leaderboard), so a freeze hides the live standings
