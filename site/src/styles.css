@@ -653,13 +653,16 @@ body { min-height: 0; overflow: hidden; }
 .nav-sub .step.nav-sub-link { min-block-size: calc(var(--control-sm) - var(--space-1)); box-shadow: none; }
 .nav-sub .step.nav-sub-link.is-viewing { background: var(--fill-inset); color: var(--text-1); box-shadow: none; border-radius: var(--radius-md); }
 .nav-sub .step-icon.is-glyph {
-  inline-size: 20px; block-size: 20px; border-radius: var(--radius-full); border: 1.5px solid var(--edge-control);
-  font-size: var(--type-label-size); font-weight: 600; font-variant-numeric: tabular-nums;
+  inline-size: 20px; block-size: 20px; border-radius: var(--radius-pill); border: 0;
+  background: var(--fill-inset); color: var(--text-2);
+  font-family: inherit; font-size: var(--type-label-size); font-weight: 600; font-variant-numeric: tabular-nums;
 }
 .nav-sub .step-label { display: block; text-align: start; font-size: var(--type-small-size); -webkit-line-clamp: unset; }
-.nav-sub .step-active .step-icon { border-color: var(--edge-selected); color: var(--accent-text); }
-.nav-sub .step-solved .step-icon { background: var(--success-fg); border-color: var(--success-fg); color: var(--level-1); }
-.nav-sub .step-revealed .step-icon { border-style: dashed; }
+/* Soft UI pills: a tint per state, never a solid disc; the glyph (number, check, star) carries the meaning */
+.nav-sub .step-active .step-icon { background: var(--accent-soft); color: var(--accent-text); box-shadow: inset 0 0 0 1.5px var(--edge-selected); }
+.nav-sub .step-solved .step-icon { background: var(--success-bg); color: var(--success-fg); }
+.nav-sub .step-revealed .step-icon { background: none; box-shadow: inset 0 0 0 0 transparent; outline: 1.5px dashed var(--edge-control); outline-offset: -1.5px; }
+@media (forced-colors: active) { .nav-sub .step-icon.is-glyph { border: 1px solid CanvasText; } .nav-sub .step-revealed .step-icon { border-style: dashed; outline: 0; } }
 .nav-sub .step-locked { color: var(--text-3); cursor: default; }
 .nav-sub .step-locked:hover { background: none; color: var(--text-3); }
 .nav-sub-icon.is-dot::before { content: ""; inline-size: 6px; block-size: 6px; border-radius: var(--radius-full); background: currentColor; }
