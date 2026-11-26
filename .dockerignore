@@ -1,0 +1,11 @@
+# Lab images are built from clean temporary contexts (scripts/build-lab-image.sh), never from the repo root.
+# If anything ever does build from here, keep answers, solvers and build output out of the context.
+build/
+solutions/
+content-sealed/
+site/server/generated/
+docs/
+.git/
+node_modules/
+**/node_modules/
+.netlify/
