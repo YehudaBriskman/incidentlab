@@ -30,10 +30,12 @@ import { dataTable, type Column } from "../components/dataTable";
 import { statGrid, statTile } from "../components/statGrid";
 import { formActions, formField } from "../components/formLayout";
 import type { SortState } from "../components/table-core";
-import { copyButton, h, html, setChildren, type Child } from "../lib/dom";
+import { copyButton, h, setChildren, type Child } from "../lib/dom";
 import { TS } from "../i18n/strings-shell";
-import { setSidebarTrigger, showSidebar } from "../shell/sidebar";
-import type { SidebarSpec, ViewResult } from "../shell/types";
+import { clickClosedDrawer, navSubLink, refreshNav, showSubNav } from "../shell/nav";
+import { setPageCrumb } from "../shell/topbar";
+import { scrollerOf } from "../shell/scroll";
+import type { NavSection, ViewResult } from "../shell/types";
 import { banner, closeMenu, confirm, menu, openDialog, showDialog, toast, type ConfirmOptions, type DialogHandle, type MenuItem } from "../lib/overlay";
 import {
   AdminApiError,
@@ -105,7 +107,6 @@ const SECTION_ICONS: Readonly<Record<TabId, string>> = {
   schedule: svgIcon('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/>'),
   audit: svgIcon('<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 12h7"/><path d="M9 16h7"/>'),
 };
-const PROJECTOR_ICON = svgIcon('<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>');
 const AUDIT_LIMIT = 100;
 const EVENT_QUICK_MINUTES = 60;
 const INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O, 1/I/L: easy to read aloud and type
@@ -638,8 +639,8 @@ type AdminInstance = {
 };
 let activeInstance: AdminInstance | null = null;
 
-/** The sidebar parts of one dashboard instance: they live as long as it does (reused when the router re-attaches it). */
-type AdminSide = { content: HTMLElement; rail: HTMLElement };
+/** The nav section of one dashboard instance: it lives as long as it does (reused when the router re-attaches it). */
+type AdminSide = { content: HTMLElement };
 
 /** The live instance the router will re-attach on this URL, if any (same language, still inside #/admin). */
 function reusableInstance(): AdminInstance | null {
@@ -653,9 +654,9 @@ function reusableInstance(): AdminInstance | null {
  */
 export function adminView(): ViewResult {
   const main = h("div", { class: "view" });
-  const side: AdminSide = reusableInstance()?.side ?? { content: h("div", { class: "side-stack admin-side" }), rail: h("div", { class: "admin-rail" }) };
-  const sidebar: SidebarSpec = { label: TS().adminSide, trigger: TS().adminSideTrigger, content: side.content, rail: side.rail };
-  return { main, sidebar, start: () => renderAdmin(main, side) };
+  const side: AdminSide = reusableInstance()?.side ?? { content: h("ul", { class: "nav-sub-list admin-nav" }) };
+  const nav: NavSection = { under: "admin", label: TS().adminSections, content: side.content };
+  return { main, nav, layout: "fit", start: () => renderAdmin(main, side) };
 }
 
 function renderAdmin(root: HTMLElement, side: AdminSide): void {
@@ -880,7 +881,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     reattach: () => {
       syncShellSidebar();
       if (state.accounts) applyUrlState();
-      setSidebarTrigger(side.content, triggerText());
+      setPageCrumb(tabLabel(state.tab));
       if (lastFocused && lastFocused.isConnected) lastFocused.focus({ preventScroll: true });
     },
     dirtyDrafts: () => ({ schedule: scheduleDirty() ? state.schedule.draft : null, event: eventDirty() ? state.event.draft : null }),
@@ -906,7 +907,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       const bar = container.querySelector<HTMLElement>(".admin-tabpanel:not([hidden]) .sched-actions:not([hidden])");
       if (!bar || bar.contains(target) || document.activeElement !== target) return;
       const overlap = target.getBoundingClientRect().bottom - bar.getBoundingClientRect().top + 12;
-      if (overlap > 0) window.scrollBy({ top: overlap });
+      if (overlap > 0) scrollerOf(target).scrollBy({ top: overlap });
     });
   }
   /** Crossing the phone/tablet breakpoint swaps grids for cards (and back) without losing state. */
@@ -1078,35 +1079,26 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   // Links, not a tablist: each section has its own URL (#/admin?tab=…), so the browser's Back, "open in a new
   // tab" and copy-link work, and aria-current marks the one on screen. A plain click is handled here (pushState,
   // so the router doesn't rebuild the page) and goes through selectTab's unsaved-edits guard.
-  const pendingTabBadge = h("span", { class: "tab-badge" });
+  const pendingTabBadge = h("span", { class: "tab-badge nav-sub-badge" });
   pendingTabBadge.hidden = true;
-  const pendingRailBadge = h("span", { class: "admin-rail-badge", "aria-hidden": "true" });
-  pendingRailBadge.hidden = true;
   const sectionLinks = new Map<TabId, HTMLAnchorElement[]>();
   const tabPanels = new Map<TabId, HTMLElement>();
-  const sidebarSpec: SidebarSpec = { label: TS().adminSide, trigger: TS().adminSideTrigger, content: side.content, rail: side.rail };
-  /** The sign-in gate is on screen: the sidebar column is released until the dashboard is back. */
+  const navSpec: NavSection = { under: "admin", label: TS().adminSections, content: side.content };
+  /** The sign-in gate is on screen: the nav section is removed until the dashboard is back. */
   let gateShown = false;
 
-  function onSectionClick(tab: TabId, e: MouseEvent, fromRail: boolean): void {
+  function onSectionClick(tab: TabId, e: MouseEvent): void {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
     // From the drawer (it has already closed): focus follows to the section. The column and the rail keep it.
-    const focusPanel = !fromRail && window.matchMedia("(max-width: 1024px)").matches;
+    const focusPanel = clickClosedDrawer();
     if (selectTab(tab) && focusPanel) tabPanels.get(tab)?.focus({ preventScroll: true });
   }
 
-  function sectionLink(tab: TabId, fromRail: boolean): HTMLAnchorElement {
+  function sectionLink(tab: TabId): HTMLAnchorElement {
     const label = tabLabel(tab);
-    const link = fromRail
-      ? h(
-          "a",
-          { href: adminHash(tab, null), class: "admin-rail-link", "aria-label": label, title: label },
-          html("span", { class: "sidebar-icon", "aria-hidden": "true" }, SECTION_ICONS[tab]),
-          tab === "accounts" ? pendingRailBadge : null,
-        )
-      : h("a", { href: adminHash(tab, null), class: "side-link admin-side-link" }, h("span", { class: "admin-side-label" }, label), tab === "accounts" ? pendingTabBadge : null);
-    link.addEventListener("click", (e) => onSectionClick(tab, e, fromRail));
+    const link = navSubLink(adminHash(tab, null), { label, icon: { svg: SECTION_ICONS[tab] }, badge: tab === "accounts" ? pendingTabBadge : null, className: "admin-side-link" });
+    link.addEventListener("click", (e) => onSectionClick(tab, e));
     const list = sectionLinks.get(tab) ?? [];
     list.push(link);
     sectionLinks.set(tab, list);
@@ -1124,56 +1116,22 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     { id: "audit", label: TS().adminGroupAudit, tabs: ["audit"] },
   ];
 
-  /** Fills the sidebar once per instance: quick actions on top, then the grouped sections; icons in the rail. */
+  /** Fills the nav section once per instance: the sections in their groups' order. */
   function buildSidebar(): void {
     sectionLinks.clear();
-    const quickId = "admin-side-quick";
-    setChildren(
-      side.content,
-      h(
-        "section",
-        { class: "side-group admin-quick", "aria-labelledby": quickId },
-        h("h2", { class: "side-h", id: quickId }, TS().adminQuick),
-        updatedEl,
-        h("div", { class: "admin-quick-row" }, pauseBtn, refreshBtn),
-        boardBtn,
-        h("a", { href: "#/author", class: "side-link admin-side-author" }, TS().navAuthor),
-      ),
-      h(
-        "nav",
-        { class: "admin-side-nav", "aria-label": T().admTabsLabel },
-        sectionGroups.map((g) =>
-          h(
-            "div",
-            { class: "side-group" },
-            h("h2", { class: "side-h", id: `admin-side-${g.id}` }, g.label),
-            h("ul", { class: "side-links", "aria-labelledby": `admin-side-${g.id}` }, g.tabs.map((tab) => h("li", {}, sectionLink(tab, false)))),
-          ),
-        ),
-      ),
-    );
-    const railBoard = h("button", { type: "button", class: "admin-rail-link", "aria-label": TS().adminProjector, title: TS().adminProjector });
-    railBoard.addEventListener("click", () => boardBtn.click());
-    railBoard.append(html("span", { class: "sidebar-icon", "aria-hidden": "true" }, PROJECTOR_ICON));
-    setChildren(
-      side.rail,
-      h("nav", { class: "admin-rail-nav", "aria-label": T().admTabsLabel }, h("ul", { class: "admin-rail-list" }, sectionGroups.flatMap((g) => g.tabs).map((tab) => h("li", {}, sectionLink(tab, true))))),
-      railBoard,
-    );
+    side.content.setAttribute("aria-label", T().admTabsLabel);
+    setChildren(side.content, sectionGroups.flatMap((g) => g.tabs).map((tab) => h("li", {}, sectionLink(tab))));
   }
 
-  /** Shows (or, at the sign-in gate, releases) this dashboard's sidebar in the shell, when it is the page on screen. */
+  /** Shows (or, at the sign-in gate, removes) this dashboard's nav section, when it is the page on screen. */
   function syncShellSidebar(): void {
     if (disposed || !container.isConnected) return;
-    sidebarSpec.trigger = triggerText();
-    showSidebar(gateShown ? null : sidebarSpec);
+    showSubNav(gateShown ? null : navSpec);
+    setPageCrumb(gateShown ? null : tabLabel(state.tab));
   }
 
-  /** The phone's drawer button names the section on screen ("Sections: Live"): there is no tab bar to show it. */
-  const triggerText = (): string => TS().adminSideTriggerOn(tabLabel(state.tab));
-
   function syncTabs(): void {
-    setSidebarTrigger(side.content, triggerText());
+    setPageCrumb(tabLabel(state.tab));
     for (const tab of TABS) {
       const selected = tab === state.tab;
       for (const link of sectionLinks.get(tab) ?? []) {
@@ -1234,9 +1192,14 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
           h("p", { class: "eyebrow" }, T().admInstructorLive),
           h("h1", { class: "admin-title" }, T().admClassDashboard),
         ),
+        // The page's quick actions: freshness, pause/refresh, the projector board, then the session.
         h(
           "div",
           { class: "admin-head-actions" },
+          updatedEl,
+          pauseBtn,
+          refreshBtn,
+          boardBtn,
           state.auth === "session" ? h("span", { class: "admin-session-tag" }, T().admSignedInAsAdmin) : null,
           logoutBtn,
         ),
@@ -2146,10 +2109,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     pendingTabBadge.textContent = fmtInt(pending.length);
     pendingTabBadge.hidden = pending.length === 0;
     pendingTabBadge.setAttribute("aria-label", T().admPendingBadge(pending.length));
-    pendingRailBadge.textContent = fmtInt(pending.length);
-    pendingRailBadge.hidden = pending.length === 0;
     const railLabel = pending.length === 0 ? tabLabel("accounts") : `${tabLabel("accounts")}, ${T().admPendingBadge(pending.length)}`;
-    for (const link of sectionLinks.get("accounts") ?? []) if (link.classList.contains("admin-rail-link")) link.setAttribute("aria-label", railLabel);
+    for (const link of sectionLinks.get("accounts") ?? []) link.dataset.navTip = railLabel;
+    refreshNav();
     pendingStatusEl.textContent = state.approvedMsg ?? "";
     pendingStatusEl.hidden = state.approvedMsg === null;
     pendingStatusEl.tabIndex = -1;

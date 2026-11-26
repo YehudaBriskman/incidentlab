@@ -3,6 +3,7 @@ import { h } from "../lib/dom";
 import { recordVisit } from "../lib/recent";
 import { openSheet, tooltip } from "../lib/overlay";
 import type { ViewResult } from "../shell/types";
+import { createCaseNav } from "./caseNav";
 import { getLang } from "../i18n/i18n";
 import { WorkerClient } from "../explorer/client";
 import type { RestartReason } from "../explorer/client";
@@ -157,11 +158,15 @@ type Progress =
   | { kind: "cancelled" }
   | { kind: "failed"; message: string };
 
-/** The Explorer as a shell view: the log pane in main; the evidence files and the time converter in the sidebar. */
+/**
+ * The Explorer as a frame view: the log pane in main; the evidence files and the time converter in the page
+ * panel (a file list with a search box and a converter form is page content, like an IDE's file tree, and forms
+ * never go in the global nav); the case's Investigation, Toolbox and Explorer links under Cases in the nav.
+ */
 export function explorerView(c: Case): ViewResult {
   const main = h("div", { class: "view" });
   const sidebar = h("div", { class: "ex-side", id: "ex-sidebar" });
-  return { main, sidebar: { label: T().exFilesTime, content: sidebar }, start: () => renderExplorer(main, c, sidebar) };
+  return { main, nav: createCaseNav(c, "explorer").section, aside: { label: T().exFilesTime, content: sidebar }, start: () => renderExplorer(main, c, sidebar) };
 }
 
 export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement): void {
@@ -643,7 +648,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     const loaded = inWorker.has(f.path);
     const btn = h(
       "button",
-      // data-sidebar-close: picking a file closes the sidebar drawer on narrow screens (shell/sidebar.ts)
+      // data-sidebar-close: picking a file closes the page-panel drawer on narrow screens (shell/frame.ts)
       // aria-label carries the full path: hidden text beside the visible name would be read with a space ("app/ x.log")
       {
         class: `ex-file${active ? " is-active" : ""}`, type: "button", "aria-current": active ? "true" : null, "data-sidebar-close": "",
