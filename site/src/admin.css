@@ -1,9 +1,6 @@
 /* Instructor dashboard (#/admin). Uses only the shared roles and scales from styles.css (see DESIGN.md):
    accent = brand/selection, warning = needs attention, info = live/today/session, success, danger. */
 /* Fills the main area at every width (no centred cap); the gutter padding stays. */
-/* The fit-layout page body is a column flexbox with align-items: start (styles.css), which shrinks #app, and the
-   dashboard with it, to its content width. Stretch it on the admin page so the dashboard spans the main area. */
-.page-body:has(> #app > .view > .admin) { align-items: stretch; }
 .admin {
   padding: var(--space-5) var(--gutter) var(--space-8);
   color: var(--text);
