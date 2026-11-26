@@ -66,7 +66,9 @@ target time, fading linearly to 0 at 3× the target) + 10 for a clean solve (no 
 answers) + 15 first blood (first solver of that stage; reset with the case). Per case: +50 when all six
 stages are solved without revealing an answer. A revealed stage scores 0. `maxScore` is par (every stage
 at base + 30 + 10, plus 50); first blood can push a score above par. Each solved stage stores its
-`breakdown`. Constants: `SCORING` in `site/shared/contract.ts`.
+`breakdown`, and the answer the player typed (trimmed) as `solvedAnswer` (#133; null for stages solved before
+it). Only the player gets `solvedAnswer`, in their own `no-store` progress responses: the admin live view blanks
+it, and no public or CDN-cached response carries stage records. Constants: `SCORING` in `site/shared/contract.ts`.
 
 ## Endpoints
 

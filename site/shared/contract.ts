@@ -97,6 +97,12 @@ export const StageProgressSchema = z.object({
   revealedAnswer: z.string().nullable(), // only set when status === "revealed"
   commandsRevealed: z.number().int().min(0).default(0), // full commands paid for while this stage was active
   breakdown: ScoreBreakdownSchema.nullable().default(null), // set when solved (null for stages scored before v2)
+  /**
+   * Additive (#133): the player's own correct answer as they typed it (trimmed), set when solved. Null before that,
+   * on revealed stages and on stages solved before #133. Sent only to that player: admin views blank it, and no
+   * public or CDN-cached response carries stage records.
+   */
+  solvedAnswer: z.string().nullable().default(null),
 });
 export type StageProgress = z.infer<typeof StageProgressSchema>;
 

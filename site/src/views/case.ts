@@ -641,6 +641,10 @@ function renderQuestionStage(
         { class: `result-panel ${solved ? "is-solved" : "is-revealed"}${justSolved ? " pop" : ""}` },
         // Focus target after a solve or a reveal; the result itself is announced through the shared region.
         h("p", { class: "result-title with-icon", tabindex: "-1" }, solved ? null : inlineIcon("eye"), solved ? T().solvedPts(s.points) : T().revealedPts),
+        // The player's own answer (#133): only in their own progress; stages solved before it have none.
+        solved && s.solvedAnswer !== null
+          ? h("p", { class: "answer-line own-answer" }, T().yourAnswerLabel, h("code", { class: "answer-code", dir: "ltr" }, s.solvedAnswer))
+          : null,
         solved && s.breakdown !== null ? breakdownTable(s.breakdown) : null,
         !solved && answer !== null
           ? h("p", { class: "answer-line" }, T().answerLabel, h("code", { class: "answer-code" }, answer), copyButton(() => answer))
