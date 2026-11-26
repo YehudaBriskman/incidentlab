@@ -1,9 +1,18 @@
 name: CI
 
+# Two lanes in parallel, so the wall time is the slower lane, not the sum:
+#   build: the full build-all.sh (generators, packages, solvers, every toolbox command with stock tools and
+#          PowerShell, site, contrast, bundle leak check, server and client tests);
+#   e2e:   the Playwright suite split into 4 shards. Each shard builds only what its local server needs
+#          (build-all.sh --e2e-prep) and runs on its own fresh, unseeded server, so tests that change shared
+#          state (schedule, accounts) never meet across shards. Blob reports merge into one HTML report.
+# Docs-only changes skip CI (nothing on main requires these checks).
 on:
   pull_request:
+    paths-ignore: ["**/*.md", "docs/**"]
   push:
     branches: [main]
+    paths-ignore: ["**/*.md", "docs/**"]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -13,14 +22,10 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test:
-    name: Build, solver + server tests, e2e
+  build:
+    name: Build, solvers, command checks, unit tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    env:
-      CI: "true"
-      E2E_PORT: "8888"
-      E2E_BASE_URL: http://localhost:8888
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -33,9 +38,7 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: |
-            site/package-lock.json
-            tests/e2e/package-lock.json
+          cache-dependency-path: site/package-lock.json
 
       - name: Install system tools (zip, GNU awk for the POSIX-awk check)
         run: |
@@ -48,19 +51,78 @@ jobs:
           git config --global user.email "ci@incidentlab.invalid"
           git config --global init.defaultBranch main
 
-      - name: Full build (generators, answer keys, packaging, solvers, site, server tests)
+      - name: Full build (generators, answer keys, packaging, solvers, commands, site, server tests)
         run: ./scripts/build-all.sh
+
+  e2e:
+    name: E2E (shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      CI: "true"
+      E2E_PORT: "8888"
+      E2E_BASE_URL: http://localhost:8888
+      # Throwaway key for the in-memory local server only (never a real secret).
+      ADMIN_KEY: ci-admin-key-0123456789abcdef
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            site/package-lock.json
+            tests/e2e/package-lock.json
+
+      # zip ships with the runner image; apt only runs if it ever goes missing (gawk is for the build lane's checks).
+      - name: System tools and git identity
+        run: |
+          command -v zip > /dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends zip; }
+          git config --global user.name "IncidentLab CI"
+          git config --global user.email "ci@incidentlab.invalid"
+          git config --global init.defaultBranch main
+
+      - name: Build what the local server needs (evidence, case packages, site)
+        run: ./scripts/build-all.sh --e2e-prep
 
       - name: Install e2e dependencies
         working-directory: tests/e2e
+        run: npm ci
+
+      # The browser download is cached per Playwright version (the lockfile); system libraries are still
+      # installed every run, which guards against runner image changes and costs little.
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('tests/e2e/package-lock.json') }}
+          # the browser binaries only; restore-keys would bring back a mismatched version, so none
+
+      - name: Install Chromium (cache miss)
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        working-directory: tests/e2e
+        run: npx playwright install --with-deps chromium
+
+      # On a hit, skip apt (install-deps runs apt-get update, the slow part) unless Chromium can't actually launch:
+      # the runner image normally has every library, and a missing one installs here instead of failing later.
+      - name: Check Chromium launches (cache hit)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        working-directory: tests/e2e
         run: |
-          npm ci
-          npx playwright install --with-deps chromium
+          node -e "require('@playwright/test').chromium.launch().then((b) => b.close())" \
+            || npx playwright install-deps chromium
 
       - name: Start local server
-        env:
-          # Throwaway key for the in-memory local server only (never a real secret).
-          ADMIN_KEY: ci-admin-key-0123456789abcdef
         run: |
           # The server uploads and publishes every build/packages/*.case.zip at startup (the site has no bundled
           # cases since #68). --seed-db-case adds db-demo for tests/e2e/db-cases.spec.ts.
@@ -76,20 +138,63 @@ jobs:
           cat local-server.log >&2
           exit 1
 
-      - name: End-to-end tests (Playwright)
+      - name: End-to-end tests (Playwright, shard ${{ matrix.shard }}/4)
         working-directory: tests/e2e
-        env:
-          ADMIN_KEY: ci-admin-key-0123456789abcdef
-        run: npx playwright test
+        run: npx playwright test --shard=${{ matrix.shard }}/4
 
-      - name: Upload Playwright report and screenshots
+      - name: Upload blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: blob-report-${{ matrix.shard }}
+          path: tests/e2e/blob-report
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload screenshots, traces and server log
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: e2e-results-${{ matrix.shard }}
           path: |
-            tests/e2e/playwright-report/
             tests/e2e/test-results/
             local-server.log
           retention-days: 14
           if-no-files-found: ignore
+
+  e2e-report:
+    name: E2E report
+    if: ${{ !cancelled() }}
+    needs: e2e
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tests/e2e/package-lock.json
+
+      - name: Install e2e dependencies
+        working-directory: tests/e2e
+        run: npm ci
+
+      - name: Download blob reports
+        uses: actions/download-artifact@v8
+        with:
+          path: all-blob-reports
+          pattern: blob-report-*
+          merge-multiple: true
+
+      - name: Merge into one HTML report
+        working-directory: tests/e2e
+        run: npx playwright merge-reports --reporter html ../../all-blob-reports
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: tests/e2e/playwright-report
+          retention-days: 14

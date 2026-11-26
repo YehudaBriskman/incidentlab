@@ -1149,7 +1149,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   }
 
   for (const tab of TABS) {
-    tabPanels.set(tab, h("section", { id: `admin-panel-${tab}`, class: "admin-tabpanel", "aria-label": tabLabel(tab), tabindex: "-1" }));
+    // tabindex 0: the visible panel scrolls inside the fit layout, so keyboard users must be able to reach and
+    // scroll it (WCAG 2.1.1, axe scrollable-region-focusable); hidden panels are out of the tab order anyway.
+    tabPanels.set(tab, h("section", { id: `admin-panel-${tab}`, class: "admin-tabpanel", "aria-label": tabLabel(tab), tabindex: "0" }));
   }
 
   const sectionGroups: ReadonlyArray<{ id: string; label: string; tabs: readonly TabId[] }> = [

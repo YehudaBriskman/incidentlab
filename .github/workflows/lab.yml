@@ -57,8 +57,10 @@ jobs:
           git config --global user.email "ci@incidentlab.invalid"
           git config --global init.defaultBranch main
 
-      - name: Build the evidence (no site)
-        run: ./scripts/build-all.sh --no-site
+      # Only the generators, answer keys and evidence zips: the full build (solvers, every command, unit tests)
+      # already runs in the CI workflow, so the lab jobs don't repeat it five times.
+      - name: Build the evidence
+        run: ./scripts/build-all.sh --evidence-only
 
       - name: Leak gate self-test
         run: python3 scripts/lab_gate.py --self-test

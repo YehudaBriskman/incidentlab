@@ -29,6 +29,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -201,14 +202,78 @@ def case_ids(argv: list[str]) -> list[str]:
     return sorted(p.stem for p in CASES_DIR.glob("*.json") if not p.name.startswith("_") and not p.name.endswith(".he.json"))
 
 
-def check_case(case_id: str, sandbox: Path, verbose: bool, lab_only: bool = False) -> int:
+# Every command runs in its own process, read-only on the evidence, so they run in parallel (#ci): one worker per
+# CPU by default, CHECK_JOBS to override. Results are still reported in content order, so the output is identical.
+POOL = ThreadPoolExecutor(max_workers=int(os.environ.get("CHECK_JOBS", "0")) or (os.cpu_count() or 4))
+
+# One planned result: (kind, label, Future of (status, detail)) or (kind, label, (status, detail)) when already known.
+Entry = tuple[str, str, "Future[tuple[str, str]] | tuple[str, str]"]
+
+
+def run_solver(case_id: str, solver: Path, evidence: Path, sandbox: Path) -> tuple[str, str]:
+    env = {"PATH": str(sandbox), "LC_ALL": "C", "HOME": tempfile.gettempdir(), "TZ": "UTC"}
+    proc = subprocess.run(["bash", str(solver), str(evidence)], cwd=ROOT, env=env, capture_output=True, text=True, timeout=300, errors="replace")
+    fails = [l for l in proc.stdout.splitlines() if " FAIL" in l]
+    if proc.returncode != 0 or fails:
+        tail = (proc.stderr.strip().splitlines() or fails or [f"exit {proc.returncode}"])[-1]
+        return "FAIL", tail[:160]
+    return "OK", f"{sum(' PASS' in l for l in proc.stdout.splitlines())} PASS"
+
+
+def plan_case(case_id: str, sandbox: Path, lab_only: bool) -> tuple[dict, list[Entry], int] | None:
+    """Starts every command of one case on the pool; returns the case data, its planned results and the template count."""
     data = json.loads((CASES_DIR / f"{case_id}.json").read_text(encoding="utf-8"))
     evidence = EVIDENCE / case_id
     if not evidence.is_dir():
+        return None
+    entries: list[Entry] = []
+    templates = 0
+    if lab_only:
+        return data, entries, templates
+    for section in data["toolbox"]:
+        for item in section["items"]:
+            tid = item.get("id", item["title"])
+            cmd = item.get("command", "")
+            ps = item.get("powershell")
+            forbidden = sorted(tool_tokens(cmd) & set(FORBIDDEN_TOOLS))
+            if forbidden:
+                entries.append(("bash", tid, ("FORBIDDEN", ", ".join(forbidden))))
+            for pattern, why in BASH_LINT:
+                if pattern.search(cmd) and not why.startswith("less"):
+                    entries.append(("bash", tid, ("LINT", why)))
+            if ps:
+                for pattern, why in PS_LINT:
+                    if pattern.search(ps):
+                        entries.append(("powershell", tid, ("LINT", why)))
+            if re.search(r"\b(unzip|Expand-Archive)\b|^cd\b", cmd) or PLACEHOLDER.search(cmd):
+                templates += 1
+            elif not forbidden:
+                entries.append(("bash", tid, POOL.submit(run_bash, cmd, evidence, sandbox)))
+                if ps and not PLACEHOLDER.search(ps):
+                    entries.append(("powershell", tid, POOL.submit(run_pwsh, ps, evidence)))
+    for q in data["questions"]:
+        for i, hint in enumerate(q["hints"], 1):
+            for block in FENCE.findall(hint.get("text", "")):
+                label = f"{q['id']} hint {i}"
+                forbidden = sorted(tool_tokens(block) & set(FORBIDDEN_TOOLS))
+                if forbidden:
+                    entries.append(("hint", label, ("FORBIDDEN", ", ".join(forbidden))))
+                elif not PLACEHOLDER.search(block) and not re.search(r"\b(Expand-Archive|Get-Content|Select-String|ForEach-Object)\b", block):
+                    entries.append(("hint", label, POOL.submit(run_bash, block, evidence, sandbox)))
+    solver = ROOT / "solutions" / ("solve.sh" if case_id == "3am-outage" else f"{case_id}/solve.sh")
+    if solver.is_file():
+        entries.append(("solver", solver.relative_to(ROOT).as_posix(), POOL.submit(run_solver, case_id, solver, evidence, sandbox)))
+    return data, entries, templates
+
+
+def report_case(case_id: str, planned: tuple[dict, list[Entry], int] | None, verbose: bool) -> int:
+    """Waits for one case's results and prints them in content order. Returns the number of problems."""
+    if planned is None:
         print(f"[{case_id}] evidence missing: run scripts/build-all.sh first")
         return 1
+    data, entries, templates = planned
     problems = 0
-    counts: dict[str, int] = {}
+    counts: dict[str, int] = {"TEMPLATE": templates} if templates else {}
 
     def report(kind: str, label: str, status: str, detail: str) -> None:
         nonlocal problems
@@ -220,52 +285,11 @@ def check_case(case_id: str, sandbox: Path, verbose: bool, lab_only: bool = Fals
 
     print(f"[{case_id}]")
     check_lab(case_id, data, report)
-    if lab_only:
-        print("  summary: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
-        return problems
-    for section in data["toolbox"]:
-        for item in section["items"]:
-            tid = item.get("id", item["title"])
-            cmd = item.get("command", "")
-            ps = item.get("powershell")
-            forbidden = sorted(tool_tokens(cmd) & set(FORBIDDEN_TOOLS))
-            if forbidden:
-                report("bash", tid, "FORBIDDEN", ", ".join(forbidden))
-            for pattern, why in BASH_LINT:
-                if pattern.search(cmd) and not why.startswith("less"):
-                    report("bash", tid, "LINT", why)
-            if ps:
-                for pattern, why in PS_LINT:
-                    if pattern.search(ps):
-                        report("powershell", tid, "LINT", why)
-            if re.search(r"\b(unzip|Expand-Archive)\b|^cd\b", cmd) or PLACEHOLDER.search(cmd):
-                counts["TEMPLATE"] = counts.get("TEMPLATE", 0) + 1
-            elif not forbidden:
-                report("bash", tid, *run_bash(cmd, evidence, sandbox))
-                if ps and not PLACEHOLDER.search(ps):
-                    status, detail = run_pwsh(ps, evidence)
-                    if status != "SKIP":
-                        report("powershell", tid, status, detail)
-    for q in data["questions"]:
-        for i, hint in enumerate(q["hints"], 1):
-            for block in FENCE.findall(hint.get("text", "")):
-                label = f"{q['id']} hint {i}"
-                forbidden = sorted(tool_tokens(block) & set(FORBIDDEN_TOOLS))
-                if forbidden:
-                    report("hint", label, "FORBIDDEN", ", ".join(forbidden))
-                elif not PLACEHOLDER.search(block) and not re.search(r"\b(Expand-Archive|Get-Content|Select-String|ForEach-Object)\b", block):
-                    report("hint", label, *run_bash(block, evidence, sandbox))
-
-    solver = ROOT / "solutions" / ("solve.sh" if case_id == "3am-outage" else f"{case_id}/solve.sh")
-    if solver.is_file():
-        env = {"PATH": str(sandbox), "LC_ALL": "C", "HOME": tempfile.gettempdir(), "TZ": "UTC"}
-        proc = subprocess.run(["bash", str(solver), str(evidence)], cwd=ROOT, env=env, capture_output=True, text=True, timeout=300, errors="replace")
-        fails = [l for l in proc.stdout.splitlines() if " FAIL" in l]
-        if proc.returncode != 0 or fails:
-            tail = (proc.stderr.strip().splitlines() or fails or [f"exit {proc.returncode}"])[-1]
-            report("solver", solver.relative_to(ROOT).as_posix(), "FAIL", tail[:160])
-        else:
-            report("solver", solver.relative_to(ROOT).as_posix(), "OK", f"{sum(' PASS' in l for l in proc.stdout.splitlines())} PASS")
+    for kind, label, result in entries:
+        status, detail = result.result() if isinstance(result, Future) else result
+        if kind == "powershell" and status == "SKIP":
+            continue  # pwsh not installed: counted nowhere, as before
+        report(kind, label, status, detail)
     print("  summary: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
     return problems
 
@@ -275,8 +299,11 @@ def main() -> int:
     lab_only = "--lab-only" in sys.argv
     sandbox = build_sandbox()
     try:
-        total = sum(check_case(cid, sandbox, verbose, lab_only) for cid in case_ids(sys.argv[1:]))
+        ids = case_ids(sys.argv[1:])
+        plans = [plan_case(cid, sandbox, lab_only) for cid in ids]  # every case's commands start now, in parallel
+        total = sum(report_case(cid, plan, verbose) for cid, plan in zip(ids, plans))
     finally:
+        POOL.shutdown(wait=True)
         shutil.rmtree(sandbox, ignore_errors=True)
     print(f"[check_commands] {'FAIL: ' + str(total) + ' problems' if total else 'OK'}")
     return 1 if total else 0
