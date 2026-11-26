@@ -1,7 +1,7 @@
 import "./styles.css";
 import { applyLang, isRelabel, noteRoute } from "./i18n/i18n";
 import { T } from "./i18n/strings-player";
-import { caseSummary, loadAllCases, loadCase } from "./content/load";
+import { caseSummary, catalogReady, loadAllCases, loadCase, onCatalogChange } from "./content/load";
 import { h, setChildren } from "./lib/dom";
 import { TA } from "./i18n/strings-account";
 import { TO } from "./i18n/strings-onboard";
@@ -190,7 +190,13 @@ function route(): void {
         return;
       }
       if (caseSummary(id) === undefined) {
-        notFound(T().caseMissing(id));
+        // It may be a DB-published case the catalog fetch hasn't merged yet: wait for it once, then decide.
+        const token = routeToken;
+        void catalogReady.then(() => {
+          if (token !== routeToken) return;
+          if (caseSummary(id) === undefined) notFound(T().caseMissing(id));
+          else route();
+        });
         return;
       }
       // The case's content is its own chunk (per language), fetched only now.
@@ -223,4 +229,6 @@ document.querySelector(".skip-link")?.addEventListener("click", (ev) => {
 });
 
 window.addEventListener("hashchange", route);
+// DB-published cases that add to (or retitle) the bundled catalog: redraw the current page once with them.
+onCatalogChange(route);
 route();
