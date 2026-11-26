@@ -90,7 +90,7 @@ a.home-row:hover { background: var(--hover); }
 /* difficulty: three bars filled up to the level, plus the word */
 .home-diff { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
 .home-diff-bars { display: inline-flex; align-items: flex-end; gap: 2px; block-size: 10px; }
-.home-diff-bars > span { inline-size: 3px; border-radius: var(--radius-xs); background: var(--fill-track); }
+.home-diff-bars > span { inline-size: 3px; border-radius: var(--radius-xs); background: var(--edge-control); } /* empty bars at the 3:1 control edge, so they still read in dark */
 .home-diff-bars > span:nth-child(1) { block-size: 4px; }
 .home-diff-bars > span:nth-child(2) { block-size: 7px; }
 .home-diff-bars > span:nth-child(3) { block-size: 10px; }
@@ -146,6 +146,11 @@ a.home-row:hover { background: var(--hover); }
   .home-cases-head { padding-inline: 0; }
   .home-cases-table.dt-stack tr { background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift); margin-block-end: var(--space-2); }
   .home-cases-table th:first-child, .home-cases-table td:first-child { padding-inline-start: 0; }
+  /* compact card: title on top, then the facts three to a row with no rules; topics stay on the case page */
+  .home-cases-table.dt-stack tr { border: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--space-4); }
+  .home-cases-table.dt-stack :is(th, td) { border: 0; padding: 0; background: none; }
+  .home-cases-table.dt-stack td::before { font-weight: 500; color: var(--text-2); font-size: var(--type-label-size); }
+  .home-cases-table.dt-stack td.home-col-tags { display: none; }
 }
 @media (forced-colors: active) {
   .home-card, .home-cases, .home-intro { border: 1px solid CanvasText; }
