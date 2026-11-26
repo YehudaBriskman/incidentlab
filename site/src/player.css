@@ -76,6 +76,36 @@
 .tool-list { gap: var(--gap-stack); }
 .btn-reveal { border-style: solid; }
 
+/* ---- phones (#132): a sticky answer bar while the real field is off screen, command cards folded to title and
+   syntax. Both are phone-only: above 640px the bar and the Details toggle don't render and cards show everything. */
+.answer-bar, .cmd-more-toggle { display: none; }
+@media (max-width: 640px) {
+  .answer-bar {
+    display: grid; gap: var(--gap-tight); position: sticky; inset-block-end: var(--space-2); z-index: 2;
+    margin-block-start: var(--gap-stack); padding: var(--space-2);
+    background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--elevation-2);
+    transition: opacity var(--motion-settle) var(--ease-standard), visibility 0s linear 0s;
+  }
+  /* hidden but in place: showing it never moves the page (the stage reserves its row) */
+  .answer-bar[data-shown="false"] {
+    visibility: hidden; opacity: 0;
+    transition: opacity var(--motion-settle) var(--ease-exit), visibility 0s linear var(--motion-settle);
+  }
+  .answer-bar-row { display: flex; gap: var(--gap-related); }
+  .answer-bar-input { flex: 1 1 auto; min-inline-size: 0; }
+  .answer-bar-input[aria-invalid="true"] { border-width: 2px; border-color: var(--danger-fg); }
+  .answer-bar-submit { flex: none; }
+  .answer-bar-note { margin: 0; padding-inline: var(--space-1); font-size: var(--type-label-size); line-height: var(--type-label-lh); color: var(--text-2); }
+  .answer-bar-note:empty { display: none; }
+  .answer-bar-note.is-wrong { color: var(--danger-fg); }
+
+  .cmd-more-toggle { display: inline-flex; margin-block-start: var(--space-2); }
+  .cmd.is-collapsible:not(.is-open) .cmd-more { display: none; }
+}
+@media (max-width: 640px) and (forced-colors: active) {
+  .answer-bar { border: 1px solid CanvasText; }
+}
+
 /* setup: the briefing and the two paths are soft cards */
 .briefing { background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift); padding: var(--space-1) var(--pad-card); }
 .briefing[open] { padding-bottom: var(--pad-card); }

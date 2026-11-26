@@ -1592,17 +1592,13 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
   .step.is-viewing { box-shadow: none; border-block-end: var(--space-1) solid Highlight; }
 }
 
-/* Stage: compact "Look for" and a phone-only jump to the answer field. */
+/* Stage: compact "Look for" (the phone answer bar, #132, lives in player.css). */
 .look-for > summary {
   display: list-item; cursor: pointer; min-block-size: var(--target-min); padding-block: var(--space-1);
   font-size: var(--step--1); font-weight: 600; text-transform: var(--label-case); letter-spacing: var(--type-label-track); color: var(--text-muted);
 }
 [dir=rtl] .look-for > summary { text-transform: none; letter-spacing: 0; }
 .look-for[open] > summary { margin-block-end: var(--space-2); }
-.answer-jump { display: none; }
-@media (max-width: 640px) {
-  .answer-jump { display: inline-flex; align-self: flex-start; margin-block: calc(-1 * var(--space-4)) 0; }
-}
 .stage-goal:focus, .result-title:focus, .hint:focus { outline-offset: var(--focus-offset); }
 .stage-link { display: inline-flex; align-items: center; min-block-size: var(--target-min); }
 .briefing > summary, .quiet-details > summary { min-block-size: var(--target-min); }
