@@ -671,6 +671,18 @@ export const T = defineStrings({
     admQBarNobody: "nobody reached it yet",
     admStillOn: "Still on it",
     admTableView: "Show as a table",
+    // shared data tables (#62), undo toasts and the #38 follow-ups
+    admSortCustom: "Sort: by column",
+    admColumnsCount: (shown: number, total: number) => `(${shown}/${total})`,
+    admColSignedUp: "Signed up",
+    admExportView: "Export CSV",
+    admExportViewHint: "The rows on screen, in this order.",
+    admAuditSearch: "Search the log",
+    admAuditKindLabel: "Show",
+    admAuditKind: (k: string) =>
+      ({ all: "All actions", account: "Accounts", progress: "Progress", event: "Event", schedule: "Schedule", settings: "Invite code", trash: "Restores" } as Record<string, string>)[k] ?? k,
+    admAuditShown: (shown: string, total: string) => `${shown} of ${total}`,
+    admAuditNoMatch: "No log entries match.",
   },
   he: {
     exDocTitle: "סייר הראיות · IncidentLab",
@@ -1341,5 +1353,17 @@ export const T = defineStrings({
     admQBarNobody: "אף אחד עוד לא הגיע",
     admStillOn: "עדיין בשאלה",
     admTableView: "הצגה כטבלה",
+    // shared data tables (#62), undo toasts and the #38 follow-ups
+    admSortCustom: "מיון: לפי עמודה",
+    admColumnsCount: (shown: number, total: number) => `(${shown}/${total})`,
+    admColSignedUp: "נרשם",
+    admExportView: "ייצוא CSV",
+    admExportViewHint: "השורות שעל המסך, בסדר הזה.",
+    admAuditSearch: "חיפוש ביומן",
+    admAuditKindLabel: "הצגה",
+    admAuditKind: (k: string) =>
+      ({ all: "כל הפעולות", account: "חשבונות", progress: "התקדמות", event: "אירוע", schedule: "לוח", settings: "קוד הזמנה", trash: "שחזורים" } as Record<string, string>)[k] ?? k,
+    admAuditShown: (shown: string, total: string) => `${shown} מתוך ${total}`,
+    admAuditNoMatch: "אין רשומות ביומן שמתאימות.",
   },
 });
