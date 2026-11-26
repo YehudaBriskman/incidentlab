@@ -2,10 +2,12 @@
 // column picker, bulk approval through row selection, CSV of the current view, the row menu, undo after a
 // delete, the one-time password guard, and the Recently deleted table at 390px in Hebrew.
 import { readFile } from "node:fs/promises";
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { ADMIN_KEY, ADMIN_USERNAME, adminHeaders, approveAccount, randomUsername } from "./support";
+import { expect, test, type APIRequestContext, type Page, type PlaywrightWorkerArgs } from "@playwright/test";
+import { ADMIN_KEY, ADMIN_USERNAME, adminHeaders, answerFor, approveAccount, randomUsername } from "./support";
 
 const PASSWORD = "e2e-password-123";
+/** Every test makes its own data (CI starts an empty server): players on this case, scored by solving stages. */
+const CASE_ID = "3am-outage";
 
 // ---- selectors: keep every UI hook here so UI changes need edits in one place ----------------
 const ui = {
@@ -41,6 +43,33 @@ async function register(request: APIRequestContext, prefix: string): Promise<str
   return username;
 }
 
+/**
+ * An approved player who opened CASE_ID and solved `solve` stages (each solve scores), in its own cookie session.
+ * Returns the username.
+ */
+async function playingPlayer(
+  pw: PlaywrightWorkerArgs["playwright"],
+  baseURL: string | undefined,
+  request: APIRequestContext,
+  prefix: string,
+  solve: number,
+): Promise<string> {
+  const session = await pw.request.newContext({ baseURL });
+  const username = randomUsername(prefix);
+  const reg = await session.post("/api/auth/register", { data: { username, password: PASSWORD } });
+  expect(reg.status(), await reg.text()).toBe(201);
+  await approveAccount(request, username);
+  const c = (path: string): string => `/api/cases/${CASE_ID}${path}`;
+  expect((await session.get(c("/progress"))).status()).toBe(200);
+  expect((await session.post(c("/setup-done"), { data: {} })).status()).toBe(200);
+  for (const q of ["q1", "q2", "q3", "q4", "q5", "q6"].slice(0, solve)) {
+    const res = await session.post(c("/answer"), { data: { questionId: q, answer: answerFor(CASE_ID, q) } });
+    expect(res.status(), await res.text()).toBe(200);
+  }
+  await session.dispose();
+  return username;
+}
+
 async function accountStatus(request: APIRequestContext, username: string): Promise<string | null> {
   const res = await request.get("/api/admin/accounts", { headers: adminHeaders });
   const { accounts } = (await res.json()) as { accounts: Array<{ username: string; status: string }> };
@@ -61,7 +90,9 @@ async function signInAdmin(page: Page, lang: "en" | "he" = "en"): Promise<void> 
   await page.waitForURL((url) => !url.hash.startsWith("#/login"));
 }
 
-test("accounts: a header sorts the table and the Sort select follows", async ({ page }) => {
+test("accounts: a header sorts the table and the Sort select follows", async ({ page, playwright, baseURL, request }) => {
+  await playingPlayer(playwright, baseURL, request, "e2esort", 0);
+  await playingPlayer(playwright, baseURL, request, "e2esort", 1);
   await signInAdmin(page);
   await page.goto("/#/admin?tab=accounts");
   const score = ui.acctHeader(page, /score/i);
@@ -79,7 +110,8 @@ test("accounts: a header sorts the table and the Sort select follows", async ({ 
   await expect(score).toHaveAttribute("aria-sort", "none");
 });
 
-test("accounts: the column picker adds a column and remembers it", async ({ page }) => {
+test("accounts: the column picker adds a column and remembers it", async ({ page, request }) => {
+  await approveAccount(request, await register(request, "e2ecols"));
   await signInAdmin(page);
   await page.goto("/#/admin?tab=accounts");
   await expect(ui.acctTable(page)).toBeVisible();
@@ -111,9 +143,11 @@ test("pending: tick two sign-ups and approve them together", async ({ page, requ
   await expect.poll(() => accountStatus(request, b)).toBe("approved");
 });
 
-test("live and audit: Export CSV downloads the rows on screen", async ({ page }) => {
+test("live and audit: Export CSV downloads the rows on screen", async ({ page, playwright, baseURL, request }) => {
+  // A player on the case for Live; the approval is an audit entry.
+  await playingPlayer(playwright, baseURL, request, "e2ecsv", 1);
   await signInAdmin(page);
-  await page.goto("/#/admin?tab=live");
+  await page.goto(`/#/admin?tab=live&case=${CASE_ID}`);
   await expect(page.locator("table.live-table tbody tr.acct-row").first()).toBeVisible();
   const rows = await page.locator("table.live-table tbody tr.acct-row").count();
   const [live] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: /^export csv$/i }).click()]);
