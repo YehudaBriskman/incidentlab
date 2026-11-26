@@ -14,6 +14,11 @@ click may lose it. This document is the contract for anyone changing stored reco
 
 `session:` and `ratelimit:` keys are ephemeral and never backed up or restored.
 
+**Planned in #64** (not written yet): DB-stored cases add the prefixes `case:` (case records, `CaseMetaSchema`,
+plus public and sealed content), `evidence:` (evidence files in 4 MiB chunks, `EvidenceEntrySchema`) and
+`upload:` (in-progress chunked uploads) to `incidentlab-v2`. The schemas live in `site/shared/case-records.ts`
+and follow the rules below.
+
 ## Rules for changing stored records
 
 1. **Additive only.** New fields get a zod `.default(...)`, so every record already stored still parses.
@@ -77,6 +82,8 @@ node --experimental-strip-types scripts/data.ts migrate --apply
 - migrations: idempotency, dry runs, the legacy import;
 - the backup → wipe → restore round trip (with and without prune);
 - daily rotation;
-- soft delete and restore, including conflict and expiry.
+- soft delete and restore, including conflict and expiry;
+- the shared case schemas against the real case files and `secrets.json`, and answer normalization against
+  the shared vectors.
 
 CI runs them on every PR.

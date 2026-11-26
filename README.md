@@ -47,7 +47,6 @@ docs/
   cases/<id>.md          SPOILERS: the bible of every other case
   API.md                 the /api contract (accounts, sessions, gameplay, schedule, stats, admin)
   DATA.md                production data rules, backups, restores and migrations
-  SITE_SCHEMA.ts.txt     content schema shared by the generators and the site
   INSTRUCTOR.md          presenter run-sheet (SPOILERS)
   POSTMORTEM_TEMPLATE.md blameless postmortem template for players
 generator/               Python 3 (stdlib) generators that build the evidence packs deterministically
