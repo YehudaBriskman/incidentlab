@@ -875,3 +875,101 @@ export function banner(opts: BannerOptions): BannerHandle {
     hide: () => void (el.hidden = true),
   };
 }
+
+/* ---------- tooltip (secondary details on hover and focus) ---------- */
+
+/** How long the pointer must rest on a trigger before its tooltip opens (focus opens it at once). */
+const TOOLTIP_DELAY_MS = 400;
+/** Grace period for moving the pointer from the trigger onto the tooltip (WCAG 1.4.13: hoverable). */
+const TOOLTIP_HIDE_MS = 150;
+
+let tooltipEl: HTMLElement | null = null;
+let tooltipOwner: HTMLElement | null = null;
+let tooltipShowTimer: number | undefined;
+let tooltipHideTimer: number | undefined;
+
+function sharedTooltip(): HTMLElement {
+  if (tooltipEl !== null && tooltipEl.isConnected) return tooltipEl;
+  const el = h("div", { class: "ov-tooltip", role: "tooltip", id: nextId("ov-tip") });
+  if (supportsPopover()) el.setAttribute("popover", "manual"); // manual: never closes an open menu or popover
+  else el.hidden = true;
+  el.addEventListener("pointerenter", () => window.clearTimeout(tooltipHideTimer));
+  el.addEventListener("pointerleave", () => scheduleTooltipHide());
+  document.body.append(el);
+  tooltipEl = el;
+  return el;
+}
+
+/** Adds or removes one id in an element's aria-describedby, keeping ids that others put there (form hints). */
+function describedBy(el: HTMLElement, id: string, on: boolean): void {
+  const ids = (el.getAttribute("aria-describedby") ?? "").split(/\s+/).filter((v) => v !== "" && v !== id);
+  if (on) ids.push(id);
+  if (ids.length > 0) el.setAttribute("aria-describedby", ids.join(" "));
+  else el.removeAttribute("aria-describedby");
+}
+
+function hideTooltipNow(): void {
+  window.clearTimeout(tooltipShowTimer);
+  window.clearTimeout(tooltipHideTimer);
+  const el = tooltipEl;
+  if (el === null) return;
+  if (supportsPopover()) {
+    if (el.matches(":popover-open")) el.hidePopover();
+  } else el.hidden = true;
+  if (tooltipOwner !== null) describedBy(tooltipOwner, el.id, false);
+  tooltipOwner = null;
+}
+
+function scheduleTooltipHide(): void {
+  window.clearTimeout(tooltipHideTimer);
+  tooltipHideTimer = window.setTimeout(hideTooltipNow, TOOLTIP_HIDE_MS);
+}
+
+function showTooltip(anchor: HTMLElement, content: () => Child): void {
+  window.clearTimeout(tooltipHideTimer);
+  const el = sharedTooltip();
+  el.replaceChildren();
+  appendChildren(el, [content()]);
+  if (tooltipOwner !== null && tooltipOwner !== anchor) describedBy(tooltipOwner, el.id, false);
+  tooltipOwner = anchor;
+  describedBy(anchor, el.id, true);
+  if (supportsPopover()) {
+    if (!el.matches(":popover-open")) el.showPopover();
+  } else el.hidden = false;
+  const root = document.documentElement;
+  const pos = placeAnchored(anchor.getBoundingClientRect(), el.getBoundingClientRect(), { width: root.clientWidth, height: window.innerHeight }, { align: "start", rtl: isRtl() });
+  el.style.left = `${pos.left}px`;
+  el.style.top = `${pos.top}px`;
+}
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && tooltipOwner !== null) hideTooltipNow(); // dismissible without moving focus
+});
+
+/**
+ * Secondary details for `anchor`, shown on hover (after a short delay) and on keyboard focus, linked with
+ * aria-describedby while visible. Meets WCAG 1.4.13: Escape dismisses it, the pointer can move onto it, and it
+ * stays until the pointer or focus leaves. Keep the visible label enough to act on; put the rest here. Touch
+ * screens have no hover, so never hide anything a player needs only in a tooltip.
+ */
+export function tooltip(anchor: HTMLElement, content: Child | (() => Child)): void {
+  const get = typeof content === "function" ? content : (): Child => content;
+  anchor.addEventListener("pointerenter", (ev) => {
+    if (ev.pointerType === "touch") return;
+    window.clearTimeout(tooltipShowTimer);
+    tooltipShowTimer = window.setTimeout(() => showTooltip(anchor, get), TOOLTIP_DELAY_MS);
+  });
+  anchor.addEventListener("pointerleave", () => {
+    window.clearTimeout(tooltipShowTimer);
+    if (tooltipOwner === anchor) scheduleTooltipHide();
+  });
+  anchor.addEventListener("focus", () => {
+    if (anchor.matches(":focus-visible")) showTooltip(anchor, get);
+  });
+  anchor.addEventListener("blur", () => {
+    if (tooltipOwner === anchor) hideTooltipNow();
+  });
+  anchor.addEventListener("click", () => {
+    if (tooltipOwner === anchor) hideTooltipNow();
+  });
+}

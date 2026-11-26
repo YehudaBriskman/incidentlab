@@ -235,3 +235,23 @@ test("explorer on a phone: filters open in a bottom sheet, apply live, and focus
   // (inside the collapsed inline panel, so query by attribute rather than by role)
   await expect(page.locator('.ex-controls [aria-label="Step 1 filter text"]')).toHaveValue("DEPLOY");
 });
+
+test("explorer files: rows show just the name; path, format and description open in a tooltip on hover and focus", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(ROUTE);
+  const row = ui.file(page, "app/checkout-service.log");
+  await expect(row).toBeVisible();
+  await expect(row).not.toContainText("JSON"); // no format or description text in the row itself
+  const tip = page.getByRole("tooltip");
+  await row.hover();
+  await expect(tip).toBeVisible();
+  await expect(tip).toContainText("app/checkout-service.log");
+  await expect(row).toHaveAttribute("aria-describedby", /ov-tip/);
+  await page.keyboard.press("Escape");
+  await expect(tip).toBeHidden();
+  await page.mouse.move(0, 0);
+  await row.focus(); // programmatic focus after a key press counts as keyboard focus
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(tip).toBeVisible();
+});
