@@ -1,5 +1,5 @@
-// App shell (#59): navbar aria-current, language toggle, the ⚙ display settings (persistence and keyboard)
-// and reflow at phone width in Hebrew.
+// App shell (#59, frame #97): nav aria-current, language toggle, the ⚙ display settings (persistence and
+// keyboard) and reflow at phone width in Hebrew.
 import { expect, test, type Page } from "@playwright/test";
 
 const ui = {
@@ -89,15 +89,20 @@ test("settings menu works from the keyboard", async ({ page }) => {
 
 test("navigation marks the current page with aria-current", async ({ page }) => {
   const nav = ui.nav(page);
+  await expect(nav.getByRole("link", { name: "Home", exact: true })).toHaveAttribute("aria-current", "page");
+  await nav.getByRole("link", { name: "Cases" }).click();
+  await expect(page).toHaveURL(/#\/cases$/);
   await expect(nav.getByRole("link", { name: "Cases" })).toHaveAttribute("aria-current", "page");
   await nav.getByRole("link", { name: "Leaderboard" }).click();
   await expect(page).toHaveURL(/#\/leaderboard/);
   await expect(nav.getByRole("link", { name: "Leaderboard" })).toHaveAttribute("aria-current", "page");
   await expect(nav.getByRole("link", { name: "Cases" })).not.toHaveAttribute("aria-current", /.*/);
   await expect(nav.locator("[aria-current]")).toHaveCount(1);
+  // The breadcrumb follows the page.
+  await expect(page.getByRole("navigation", { name: "Breadcrumb" }).locator("[aria-current=page]")).toHaveText("Leaderboard");
 });
 
-test("no horizontal overflow at 390px in Hebrew; navigation folds behind a menu button", async ({ page }) => {
+test("no horizontal overflow at 390px in Hebrew; navigation opens from the top bar's menu button", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => localStorage.setItem("il.lang", "he"));
   await page.reload();
@@ -108,19 +113,19 @@ test("no horizontal overflow at 390px in Hebrew; navigation folds behind a menu 
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow, `horizontal overflow on ${path}`).toBeLessThanOrEqual(0);
   }
-  const toggle = page.locator(".nav-toggle");
+  const toggle = page.locator(".topbar-menu");
   await expect(ui.nav(page)).toBeHidden();
   await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await expect(ui.nav(page)).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(ui.nav(page)).toBeHidden();
-  // the header stays two short rows at most (navbar + live strip)
-  const headerHeight = await page.evaluate(() => document.querySelector("header.navbar")?.getBoundingClientRect().height ?? 0);
-  expect(headerHeight).toBeLessThan(140);
+  await expect(toggle).toBeFocused();
+  // the top bar stays one slim row
+  const headerHeight = await page.evaluate(() => document.querySelector("header.topbar")?.getBoundingClientRect().height ?? 0);
+  expect(headerHeight).toBeLessThan(64);
 });
 
-test("reflow: at 320px with 200% text the navbar wraps instead of scrolling sideways", async ({ page }) => {
+test("reflow: at 320px with 200% text the top bar wraps instead of scrolling sideways", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 700 });
   for (const lang of ["en", "he"]) {
     await page.addInitScript((l) => localStorage.setItem("il.lang", l), lang);

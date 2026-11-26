@@ -234,14 +234,13 @@ test.describe("HE 390", () => {
   });
 });
 
-// ---- sections in the shell sidebar (#60) --------------------------------------------------------
+// ---- sections as nested items under Admin in the global nav (app frame, #97) ----------------------
 const side = {
-  aside: (p: Page) => p.getByRole("complementary", { name: "Dashboard menu" }),
-  nav: (p: Page) => side.aside(p).getByRole("navigation", { name: "Dashboard sections" }),
+  main: (p: Page) => p.getByRole("navigation", { name: "Main" }),
+  nav: (p: Page) => side.main(p).getByRole("list", { name: "Dashboard sections" }),
   link: (p: Page, name: RegExp) => side.nav(p).getByRole("link", { name }),
   panel: (p: Page, tab: string) => p.locator(`#admin-panel-${tab}`),
-  rail: (p: Page) => p.locator("#sidebar .sidebar-rail").getByRole("navigation", { name: "Dashboard sections" }),
-  trigger: (p: Page, name: string) => p.locator(".page-header").getByRole("button", { name }),
+  head: (p: Page) => p.locator(".admin-head"),
 };
 
 test("sections: the sidebar links switch sections, mark the current one, and Back walks them", async ({ page }) => {
@@ -249,9 +248,10 @@ test("sections: the sidebar links switch sections, mark the current one, and Bac
   await page.goto("/#/admin?tab=accounts");
   await expect(side.panel(page, "accounts")).toBeVisible();
   await expect(side.link(page, /^Accounts/)).toHaveAttribute("aria-current", "page");
-  // Quick actions sit above the sections; Authoring is a plain link.
-  await expect(side.aside(page).getByRole("button", { name: "Projector board" })).toBeVisible();
-  await expect(side.aside(page).getByRole("link", { name: "Authoring" })).toHaveAttribute("href", "#/author");
+  // Admin is the ancestor of the section; the quick actions sit in the page header; Authoring is a nav item.
+  await expect(side.main(page).getByRole("link", { name: "Admin", exact: true })).toHaveAttribute("aria-current", "true");
+  await expect(side.head(page).getByRole("button", { name: "Projector board" })).toBeVisible();
+  await expect(side.main(page).getByRole("link", { name: "Authoring" })).toHaveAttribute("href", "#/author");
 
   await side.link(page, /^Stats$/).click();
   await expect(page).toHaveURL(/#\/admin\?tab=stats$/);
@@ -301,8 +301,8 @@ test("sections: leaving unsaved Schedule edits through the sidebar asks first", 
   await expect(side.link(page, /^Schedule$/)).toHaveAttribute("aria-current", "page");
   await expect(page.locator("#sched-save")).toBeEnabled();
 
-  // The Authoring quick link leaves #/admin: the same guard.
-  await side.aside(page).getByRole("link", { name: "Authoring" }).click();
+  // The Authoring nav item leaves #/admin: the same guard.
+  await side.main(page).getByRole("link", { name: "Authoring" }).click();
   await ui.confirm(page).getByRole("button", { name: /keep editing/i }).click();
   await expect(page).toHaveURL(/#\/admin\?tab=schedule/);
 
@@ -318,9 +318,10 @@ test.describe("tablet rail", () => {
   test("the rail shows every section as a named icon link", async ({ page }) => {
     await signInAdmin(page);
     await page.goto("/#/admin?tab=accounts");
-    const rail = side.rail(page);
+    const rail = side.nav(page);
     await expect(rail).toBeVisible();
     await expect(rail.getByRole("link")).toHaveCount(6);
+    await expect.poll(async () => (await side.main(page).boundingBox())?.width).toBe(64);
     const event = rail.getByRole("link", { name: "Event" });
     await expect(event).toHaveAttribute("title", "Event");
     await event.click();
