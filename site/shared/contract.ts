@@ -31,8 +31,12 @@ export const usernameKey = (username: string): string => username.trim().normali
 export const AccountStatusSchema = z.enum(["pending", "approved", "rejected"]);
 export type AccountStatus = z.infer<typeof AccountStatusSchema>;
 
-export const AccountRoleSchema = z.enum(["player", "admin"]);
+/** "admin" is the ADMIN_KEY session only; stored accounts are "player" or "author" (authors may upload cases). */
+export const AccountRoleSchema = z.enum(["player", "author", "admin"]);
 export type AccountRole = z.infer<typeof AccountRoleSchema>;
+/** The roles an admin can give a stored account. */
+export const AccountRecordRoleSchema = z.enum(["player", "author"]);
+export type AccountRecordRole = z.infer<typeof AccountRecordRoleSchema>;
 
 export const AccountViewSchema = z.object({
   id: z.string(),
@@ -153,6 +157,8 @@ export const UserStatsSchema = z.object({
   accountId: z.string(),
   username: z.string(),
   status: AccountStatusSchema,
+  /** added with the author role; older payloads parse as "player" */
+  role: AccountRecordRoleSchema.default("player"),
   createdAt: z.string(),
   lastSeenAt: z.string().nullable(),
   totalScore: z.number().int().min(0),
@@ -343,6 +349,8 @@ export const UserStatsResponseSchema = z.object({ stats: UserStatsSchema });
 
 // ---- admin ----------------------------------------------------------------
 // GET    /api/admin/accounts                    -> {accounts: UserStats[]}   (every account, with stats)
+// PUT    /api/admin/accounts/:id/role {role: "player"|"author"} -> {account}   (audited as account.role)
+export const SetAccountRoleRequestSchema = z.object({ role: AccountRecordRoleSchema });
 // POST   /api/admin/accounts/:id/approve  {}    -> {account}
 // POST   /api/admin/accounts/:id/reject   {}    -> {account}   (the player sees the "not approved" screen)
 // DELETE /api/admin/accounts/:id                -> 204         (moves account + progress to the trash; sessions end)

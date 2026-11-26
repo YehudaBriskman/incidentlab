@@ -1,6 +1,6 @@
 // Server-side domain types: stored records, secrets and case config.
 import { z } from "zod";
-import { AccountStatusSchema, QuestionIdSchema, StageProgressSchema } from "../../shared/contract.ts";
+import { AccountRecordRoleSchema, AccountStatusSchema, QuestionIdSchema, StageProgressSchema } from "../../shared/contract.ts";
 import type { QuestionId } from "../../shared/contract.ts";
 import { CaseSealedSchema } from "../../shared/case-records.ts";
 
@@ -25,6 +25,8 @@ export const AccountRecordSchema = z.object({
   lastSeenAt: z.string().nullable(),
   lastLoginAt: z.string().nullable(),
   mustChangePassword: z.boolean().default(false),
+  /** additive (author role): accounts saved before it are players */
+  role: AccountRecordRoleSchema.default("player"),
 });
 export type AccountRecord = z.infer<typeof AccountRecordSchema>;
 

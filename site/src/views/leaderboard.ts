@@ -82,7 +82,7 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): vo
   document.body.classList.toggle("projector", projector);
 
   // Only an approved player can have a row; the admin session and pending players have none.
-  const keyOf = (a: AccountView | null): string | null => (a !== null && a.role === "player" && a.status === "approved" ? usernameKey(a.username) : null);
+  const keyOf = (a: AccountView | null): string | null => (a !== null && a.role !== "admin" && a.status === "approved" ? usernameKey(a.username) : null);
   let me = cachedAccount();
   let myKey = keyOf(me);
   // Cold load: the account may answer after the first board; redraw with the "you" row then.

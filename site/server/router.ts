@@ -106,6 +106,7 @@ export const createApp = (deps: AppDeps): App => {
       if (segments.length === 4) return { DELETE: () => adminController.deleteAccount(req, second) };
       if (segments.length === 5 && action === "approve") return { POST: () => adminController.approve(req, second) };
       if (segments.length === 5 && action === "reject") return { POST: () => adminController.reject(req, second) };
+      if (segments.length === 5 && action === "role") return { PUT: () => adminController.setRole(req, second) };
       if (segments.length === 5 && action === "reset-password") return { POST: () => adminController.resetPassword(req, second) };
     }
     if (area === "admin" && first === "trash" && second !== undefined && segments.length === 5 && segments[4] === "restore") {

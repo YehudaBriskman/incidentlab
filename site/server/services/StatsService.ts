@@ -149,6 +149,7 @@ export class StatsService {
       accountId: account.id,
       username: account.username,
       status: account.status,
+      role: account.role,
       createdAt: account.createdAt,
       lastSeenAt: account.lastSeenAt,
       totalScore: sum((c) => c.score),
