@@ -38,50 +38,50 @@ colors:
     info-fg: "oklch(0.86 0.06 250)"
 typography:
   display:
-    fontFamily: IBM Plex Sans
+    fontFamily: "system-ui, -apple-system, Segoe UI, Noto Sans Hebrew, Noto Sans, Arial, sans-serif"
     fontSize: clamp(2rem, 1.6rem + 1.6vw, 2.5rem)
     fontWeight: 600
     lineHeight: 1.1
     letterSpacing: -0.02em
   page-title:
-    fontFamily: IBM Plex Sans
+    fontFamily: "system-ui, -apple-system, Segoe UI, Noto Sans Hebrew, Noto Sans, Arial, sans-serif"
     fontSize: clamp(1.75rem, 1.5rem + 1vw, 2rem)
     fontWeight: 600
     lineHeight: 1.2
     letterSpacing: -0.015em
   headline:
-    fontFamily: IBM Plex Sans
+    fontFamily: "system-ui, -apple-system, Segoe UI, Noto Sans Hebrew, Noto Sans, Arial, sans-serif"
     fontSize: 1.375rem
     fontWeight: 600
     lineHeight: 1.3
     letterSpacing: -0.01em
   title:
-    fontFamily: IBM Plex Sans
+    fontFamily: "system-ui, -apple-system, Segoe UI, Noto Sans Hebrew, Noto Sans, Arial, sans-serif"
     fontSize: 1.125rem
     fontWeight: 600
     lineHeight: 1.35
   prose:
-    fontFamily: IBM Plex Sans
+    fontFamily: "system-ui, -apple-system, Segoe UI, Noto Sans Hebrew, Noto Sans, Arial, sans-serif"
     fontSize: 1.0625rem
     fontWeight: 400
     lineHeight: 1.65
   body:
-    fontFamily: IBM Plex Sans
+    fontFamily: "system-ui, -apple-system, Segoe UI, Noto Sans Hebrew, Noto Sans, Arial, sans-serif"
     fontSize: 1rem
     fontWeight: 400
     lineHeight: 1.5
   small:
-    fontFamily: IBM Plex Sans
+    fontFamily: "system-ui, -apple-system, Segoe UI, Noto Sans Hebrew, Noto Sans, Arial, sans-serif"
     fontSize: 0.875rem
     fontWeight: 400
     lineHeight: 1.45
   label:
-    fontFamily: IBM Plex Sans
+    fontFamily: "system-ui, -apple-system, Segoe UI, Noto Sans Hebrew, Noto Sans, Arial, sans-serif"
     fontSize: 0.75rem
     fontWeight: 500
     lineHeight: 1.35
   kpi:
-    fontFamily: IBM Plex Sans
+    fontFamily: "system-ui, -apple-system, Segoe UI, Noto Sans Hebrew, Noto Sans, Arial, sans-serif"
     fontSize: 2rem
     fontWeight: 600
     lineHeight: 1.1
@@ -128,7 +128,7 @@ components:
   Open work goes in GitHub issues, never in this file.
 -->
 
-# IncidentLab design system v2.0.0 (Night Shift)
+# IncidentLab design system v3.0.0 (Soft UI on Night Shift colours)
 
 ## Overview
 
@@ -140,7 +140,7 @@ IncidentLab is a learning game for engineers: each case is a fictional outage wi
   - Consumer/game: students on phones (390px is a real case), Hebrew users, achievements, streaks, time bonus and a leaderboard. So: a 17px prose role for reading, 44px touch targets, expressive motion only at key moments (solve pop, wrong-answer shake).
   - Real-time: event clock, live admin funnel, leaderboard refresh. Numbers use tabular figures and status is never colour-only.
   - Projector: `body.projector` and the admin board need large type and the high-contrast theme.
-- **Token set version:** 2.0.0
+- **Token set version:** 3.0.0. Soft UI geometry, depth, motion and type (#104); the colour roles are unchanged from 2.0.0 (Night Shift, #101).
 
 ### Design brief
 
@@ -424,16 +424,16 @@ Token names in this table are the pre-2.0 names the components still use; each r
 
 | Component | Classes | Tokens |
 |---|---|---|
-| Button | `.btn` + `-primary`, `-ghost`, `-danger`, `-sm`, `-lg`, `-copy`, `.link-btn` | heights `--control-xs/sm/md/lg` = 28/36/44/52 (xs and sm become 44 on `pointer: coarse`); edge `--border-strong`; `.link-btn` min 24px |
-| Input | `.input`, `.admin-input`, `.ex-input`, `.ex-select` | `--surface` fill, `--border-strong` edge, `--radius-md`; `.input` 44, admin/explorer 36 (beside `.btn-sm`) |
+| Button | `.btn` + `-primary`, `-ghost`, `-danger`, `-sm`, `-lg`, `-copy`, `.link-btn` | heights `--control-xs/sm/md/lg` = 28/36/44/52 (xs and sm become 44 on `pointer: coarse`); `--radius-control`; variants: filled amber primary (one per view), tinted secondary, outline (`--edge-control`), ghost, danger; `.link-btn` min 24px |
+| Input | `.input`, `.admin-input`, `.ex-input`, `.ex-select` | `--level-1` fill, 1px `--edge-control` edge (3:1), `--radius-control`; `.input` 40 (16px text on phones, 14px from 768px), admin/explorer 36 beside `.btn-sm` |
 | Pill | `.chip`, `.meter-item`, `.event-clock`, `.stuck-badge`, `.status-pill`, `.via-pill`, `.today-tag`, `.hardest-badge`, `.tab-badge`, `.count-badge`, `.admin-session-tag`, `.ex-chip`, `.board-*-chip` | one base rule; tones set `--pill-fg/-bg/-line`: neutral, accent, success, warning, danger, info (`.pill-*` helpers) |
-| Table header | `.stats-table thead th`, `.admin-table th`, `.prose thead th`, `.ex-table th` | `--step--2`, uppercase, `--text-muted` on `--surface-2`, `--border-strong` underline |
+| Table header | `.stats-table thead th`, `.admin-table th`, `.prose thead th`, `.ex-table th` | label role (12px), sentence case (`--label-case: none`), `--text-2` on the muted header band; a 60% `--edge-subtle` underline; sticky headers separate with a shadow edge |
 | Focus ring | global `:focus-visible` | `--focus-width` 2px solid `--focus-ring`, offset `--focus-offset` 2px; inset (-2px) only inside clipped scrollers (shell tabs, explorer rows); `Highlight` in forced colours; `--code-accent` inside the code island |
 | Tabs | `.shell-tab[aria-selected]` | accent tint + 2–3px accent underline; Highlight fill/underline in forced colours |
 | Frame nav | `mountNav()`, `showSubNav()`, `navSubLink()` / `navSubButton()` in `src/shell/nav.ts` → `.app-nav` > `.nav-head` (logo) + `.nav-scroll` > `.nav-list` > `.nav-item` > `.nav-link` (`.nav-icon` + `.nav-label`) + `.nav-sub` (`.nav-sub-title` + the view's `.nav-sub-list` of `.nav-sub-link`, `.nav-sub-badge`) + `.nav-foot` (a11y link, `.nav-collapse`) | rows `--radius-md`, hover `--hover-fill`, current `--fill-inset` + 600; nested rows indented `--space-3`; case stages as `.nav-steps` with the stepper's state glyphs in circles; forced colours: Highlight on the current row |
 | Display settings | `.settings-panel` (an `.ov-popover` from `popover()`), `.settings-option` | `--shadow-lg`, `--radius-lg`; checked option = accent tint + accent edge. Applies `data-theme`, `data-text-scale`, `data-motion`, `data-contrast`, `data-spacing` on `<html>` (token overrides only) |
 | Data table | `dataTable()` in `src/components/dataTable.ts` → `.dt-wrap.table-wrap` > `table.stats-table.data-table`; `.dt-sort` header buttons with `aria-sort`; `.dt-opt` columns; `.dt-stack` phone cards; `.dt-message`, `.dt-skeleton` | sticky `thead`; numbers `.num` end-aligned with tabular figures; missing values sort last both ways; `.dt-opt` hides below 640px; `.dt-stack` turns each row into a labelled card below 600px (`data-label` per cell); loading = skeleton rows + a `role=status` label; error = `role=alert` + retry. Dashboard options: keyed rows (`rowKey` + `rowSig`, focus survives polling), `detail` rows (`.dt-detail`), `columnPicker` (`.dt-picker` popover, hideable columns, remembered), `selection` (`.dt-select` checkboxes, select-all in the header or above the cards, `.is-selected` accent tint), `csv()`/`downloadCsv()` of the current view (UTF-8 BOM, formula-safe), `virtualize` above 200 rows (`.dt-virtual` scroller, spacer rows, `aria-rowcount`/`aria-rowindex`), `cards` (caller-built `.dt-cards` below a media query). Used by My stats, the leaderboard and every admin table (Accounts, Waiting for approval, Live, Recently deleted, Stats, Audit log) |
-| Stat tile | `statTile()`, `statGrid()`, `statTileSkeleton()` in `src/components/statGrid.ts` → `.kpi-grid` > `.stat-tile.kpi` | label `--step--2` uppercase muted; value 1.6rem 700 tabular; context lines `.stat-sub` (`.is-up` success, `.is-down` danger); skeleton keeps the tile's footprint; the admin KPI rows (`.admin-tiles`) use it with mono values |
+| Stat tile | `statTile()`, `statGrid()`, `statTileSkeleton()` in `src/components/statGrid.ts` → `.kpi-grid` > `.stat-tile.kpi` | label 12px/500 sentence case `--text-2`; value 20px/600 sans with tabular figures (not mono); context lines `.stat-sub` (`.is-up` success, `.is-down` danger); skeleton keeps the tile's footprint; the admin KPI rows (`.admin-tiles`) use it |
 | Reading layout | `readingLayout()` in `src/components/readingLayout.ts` → `.reading` > `details.toc` + content | `--read` measure; "On this page" contents (`.toc-list`, h3 as `.toc-sub`) only with ≥3 h2/h3 headings; links scroll and focus the heading without touching the hash route; used by the debrief |
 | Form field | `formField()`, `formSection()`, `formActions()` in `src/components/formLayout.ts` → `.field`, `.field-label`, `.field-help`, `.field-error`, `.form-section`, `.form-actions` | order: label, hint, error, control; hint + error in `aria-describedby`, error sets `aria-invalid`; `.form-section` = fieldset with legend, `--radius-lg` edge; `describedBy` keeps extra describers (a live preview, a shared note); used by sign-in/sign-up and the admin event, schedule and invite-code forms |
 | Top bar, page panel | `mountTopbar()`, `setPageCrumb()` (`src/shell/topbar.ts`); `showPage()`, `openAsideDrawer()` (`src/shell/frame.ts`); views return `{ main, nav?: { under, label, content }, aside?: { label, trigger?, content }, header?, layout?: "scroll" \| "fit", start? }` (`src/shell/types.ts`; `sidebar` is a deprecated alias of `aside`) | `.topbar`, `.crumbs`, `.status-chip` (pill, `--info-fg` dot), `.net-status.is-down` (warning pill), `.lang-toggle` (segmented), `.icon-btn`/`.settings-btn` (36px, `--radius-md`), `.account-btn` + `.avatar` (circles, `--radius-full`), `.account-panel` popover; `.page-aside` (`--level-1`, `--shadow-sm`, `--radius-lg`), `.aside-trigger`; `.pg-head`, `.pnl`, `.pnl.is-scroll` |
@@ -446,10 +446,10 @@ Every dialog, sheet, menu, popover, toast and banner comes from this module; vie
 
 | Primitive | API | Anatomy | Tokens | States |
 |---|---|---|---|---|
-| Dialog | `openDialog({size, title, body, actions})` → `Promise<value \| null>`; `showDialog()` returns a handle (`el`, `body`, `close`, `result`) for dialogs that re-render (projector board) | `dialog.ov-dialog.is-{sm,md,lg,full}` > `header.ov-head` (`h2.ov-title`, optional `.ov-close` ×) + `.ov-body` + `footer.ov-actions` (`.btn` per action, `data-action=value`) | widths `--dialog-sm/md/lg` (30rem / 40rem / `--read`), `full` fills the viewport on `--canvas`; `--surface`, `--border-strong`, `--radius-lg`, `--shadow-lg`, `::backdrop` `--scrim`; `--z-dialog` | open, closing (fade + 8px rise), busy (`aria-busy`, actions disabled, busy label, Escape ignored); below 480px the actions stack full width, primary on top |
+| Dialog | `openDialog({size, title, body, actions})` → `Promise<value \| null>`; `showDialog()` returns a handle (`el`, `body`, `close`, `result`) for dialogs that re-render (projector board) | `dialog.ov-dialog.is-{sm,md,lg,full}` > `header.ov-head` (`h2.ov-title`, optional `.ov-close` ×) + `.ov-body` + `footer.ov-actions` (`.btn` per action, `data-action=value`) | widths `--dialog-sm/md/lg` (30rem / 40rem / `--read`), `full` fills the viewport on `--canvas`; `--level-4`, 1px subtle edge, `--radius-surface` from 640px (square below), `--elevation-3`, `::backdrop` `--scrim`; `--z-dialog` | open, closing (fade + 8px rise), busy (`aria-busy`, actions disabled, busy label, Escape ignored); below 480px the actions stack full width, primary on top |
 | Confirm | `confirm({title, body, confirmLabel, cancelLabel?, tone: "default" \| "danger", typedName?, note?, run?, busyLabel?})` → `Promise<boolean>` | an `sm` dialog, `role=alertdialog` described by its body; Cancel (ghost, focused first) + confirm (primary, or `.btn-danger` for `danger`); with `typedName`: label "Type `name` to confirm", `.ov-typed-input`, hint | as Dialog; `.ov-typed-name` mono on `--surface-2` | confirm disabled until the typed text equals `typedName` exactly; `run` keeps the dialog open and busy until it settles; a rejection closes it and rejects the promise |
 | Sheet | `openSheet({side: "start" \| "end" \| "bottom", title, body})` → handle | `dialog.ov-sheet.is-{start,end,bottom}` with the Dialog parts; × always shown; a backdrop click closes it | `--sheet-size` 24rem (side), 85dvh max (bottom, `--radius-xl` top corners); `--z-sheet` | slides in from its edge (mirrored by `--dir`), fades with reduced motion off |
-| Popover | `popover(anchor, panel, {align, onOpen})` | any panel + `.ov-popover`; anchor gets `aria-controls`/`aria-expanded` | `--surface`, `--border-strong`, `--radius-md`, `--shadow-lg`; `--z-popover` (fallback when the Popover API is missing) | top layer, light dismiss (outside click, Escape), closes when focus leaves it; placed under the anchor, inline-end aligned, flipped above near the bottom, 8px inside the viewport |
+| Popover | `popover(anchor, panel, {align, onOpen})` | any panel + `.ov-popover`; anchor gets `aria-controls`/`aria-expanded` | `--level-3`, 1px subtle edge, `--radius-surface`, `--elevation-2`; `--z-popover` (fallback when the Popover API is missing) | top layer, light dismiss (outside click, Escape), closes when focus leaves it; placed under the anchor, inline-end aligned, flipped above near the bottom, 8px inside the viewport |
 | Menu | `menu(anchor, items, {label})`; `MenuItem = {label, tone?: "danger", disabled?, run}` | one shared `#ov-menu.ov-menu[role=menu]` of `.ov-menu-item[role=menuitem]` buttons; anchor `aria-haspopup=menu` | min 12rem; items `--control-sm` tall, `--step--1`; danger items `--danger-fg` after a `--border` divider | APG menu button: Enter/Space/ArrowDown open on the first item, ArrowUp on the last; arrows wrap, Home/End, typeahead (repeat a letter to cycle); Escape closes and refocuses the anchor; Tab closes; choosing refocuses the anchor before the item runs |
 | Toast | `toast({tone, text, action?, timeout?})` → `{dismiss}` | one polite `aria-live` `.toast-host` (bottom inline-end); `.toast[data-tone]` = icon + text (visually hidden tone word) + ×n count + optional action + × | `--toast-size` 22.5rem; `--surface`, 4px inline-start edge in the tone's `-fg`; `--shadow-lg`; `--z-toast` | success and info dismiss after 6s (paused on hover/focus); warning and error stay until dismissed; the same tone+text bumps "×n" instead of stacking; at most 3, the oldest goes first. A modal's top layer covers the host, so a toast raised during a modal is read and usable once it closes |
 | Banner | `banner({tone, text, dismissible, label?, onDismiss?})` → `{el, update, show, hide}` | `.banner[data-tone]` = icon + live text + optional ×; `role=region` when labelled (the announcement) | tone `-bg` fill and `-fg` edge, `--radius-md`, `--step--1` | placed inline by the caller (announcement under the navbar, admin status under the tabs); `update()` changes text in place so it is announced; dismiss moves focus to `#app` |
@@ -469,14 +469,14 @@ Tones (toast and banner) map to the status roles: `success`, `info`, `warning`, 
 
 ## Generator inputs
 
-2.0.0 is hand-derived from the Night Shift direction (#92) and the palette in #93, re-derived in warm graphite, rather than generated by `theme.mjs`: the generator cannot hold one accent fill across themes while moving the text shade separately. The shipped values are the single source; `scripts/check-contrast.mts` is the check the generator used to provide.
+The colour roles (2.0.0, kept in 3.0.0) are hand-derived from the Night Shift direction (#92) and the palette in #93, re-derived in warm graphite, rather than generated by `theme.mjs`: the generator cannot hold one accent fill across themes while moving the text shade separately. The shipped values are the single source; `scripts/check-contrast.mts` is the check the generator used to provide.
 
 | Input | Value |
 |---|---|
 | neutral hue / chroma | 65-80 / 0.005-0.014 (warm graphite) |
 | accent | `#f5a524` = `oklch(0.7819 0.1585 72.33)`, the fill in every theme |
 | contrast | text Lc 75, bold labels Lc 60, UI Lc 30; dark small text Lc 75+ |
-| radius | 4 (base) |
+| radius | by role (3.0.0): mark 4, control 8, card 12, surface 16, pill (see Shapes) |
 | density | comfortable; compact admin density is a page override (admin sweep) |
 
 Check: `node --experimental-strip-types scripts/check-contrast.mts [--markdown] [--all]` (exit 1 on any failure; part of `scripts/build-all.sh`).
@@ -507,11 +507,11 @@ Check: `node --experimental-strip-types scripts/check-contrast.mts [--markdown] 
 | `--tint` | removed | status and accent fills are explicit roles now |
 | `--ok`, `--ok-soft`, `--bad`, `--bad-soft` | `--success-fg/-bg`, `--danger-fg/-bg` | |
 | `--shadow-sm`, `--shadow-md`, `--shadow-lg`, `--shadow` | `--elev-1`, `--elev-2`, `--elev-3`, `--elev-2` | |
-| `--radius-xs/sm/md/lg/xl` | 2 / 3 / 4 / 6 / 8 (were 4 / 6 / 8 / 12 / 16) | same names, 4px base |
+| `--radius-xs/sm/md/lg/xl` | aliases of the 3.0.0 roles: mark 4 / 6 / control 8 / card 12 / surface 16 | use the role names in new code (Shapes) |
 | `--step--2 … --step-4` | `--type-label/small/prose/title/headline/page-title/display-size` | |
 | `--leading-body`, `--leading-tight`, `--track-display` | `--type-body-lh`, `--type-headline-lh`, `--type-display-track` | |
 | `--track-label` | 0.06em (0 in Hebrew) | only the invite code's spaced characters still use it |
-| `--page` 1080, `--page-wide` 1280 | 1120, 1440 | |
+| `--page` 1080, `--page-wide` 1280 | 1120, 1440 | no longer cap the frame: pages fill the content area (#116) |
 | `--code-accent` as text | `--code-accent-text`; marks `--code-mark` | |
 | `--sans`, `--mono` | `--font-sans`, `--font-mono` | |
 
@@ -522,7 +522,7 @@ Check: `node --experimental-strip-types scripts/check-contrast.mts [--markdown] 
 | Leaderboard projector (`body.projector`, `.lb-page.is-projector`, admin board) | Display type in clamp() sizes, no chrome | Read across a room; the brief's projector modifier |
 | Explorer (`.explorer`) | Code island surfaces, smaller controls (36px, 44 on touch) | Dense tool next to a dark log pane |
 | Home (`.home-dash`, `src/home.css`) | A dashboard: "Continue" (start) and "Today's case" (end) cards of fixed height, then the cases `dataTable()` in a panel. Cards and panel have no border, only `--surface`, `--radius-card` and `--surface-lift`. On desktop the script caps the dashboard at the viewport so only the table scrolls (sticky header); `.shell-main` loses its 100dvh minimum on this page only. Search, the Filter popover (a local `popover()` wrapper until the shell's `filterButton()`) and Sort sit in the table toolbar, with state in the URL query; no sidebar | The first question is "what is today's case, and where was I?"; a console home answers it in one screen instead of a long scroll of cards |
-| Admin (`.admin`) | `--page-wide` 1440, panels with `--elev-1` (`--shadow-sm`) | Instructor dashboard with wide tables |
+| Admin (`.admin`) | Fills the content area (no width cap); compact density (36px controls, about 40px rows); panels on `--surface-lift` without borders; one amber primary per view (#119) | Instructor dashboard with wide tables |
 | Admin below 900px | `--control-xs`, `--control-sm` and `--target-min` set to 44px; Live and Accounts render as cards; checkboxes keep a 24px visible box inside a 44px hit area | The instructor walks the room with a phone or tablet; same values the `pointer: coarse` rule uses |
 | Print (`@media print`) | Forced light roles, black on white; chrome, buttons, stepper and progress hidden; code blocks bordered and wrapped; collapsed `details` open; external links print their URL | The debrief and case pages are printed and shared |
 
