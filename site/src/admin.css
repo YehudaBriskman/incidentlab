@@ -26,11 +26,11 @@
 .admin-h2-row > .admin-h2 { margin: 0; }
 .admin-table-head .admin-h2-row { margin: 0; }
 .admin-info {
-  flex: none; display: inline-grid; place-items: center; inline-size: 20px; block-size: 20px; padding: 0;
+  /* --target-min: 24px (the WCAG 2.5.8 floor), 44px on coarse pointers and in the admin below 900px (#126). */
+  flex: none; display: inline-grid; place-items: center; inline-size: var(--target-min); block-size: var(--target-min); padding: 0;
   border: 0; border-radius: var(--radius-pill); background: var(--fill-inset); color: var(--text-2);
-  font: 600 12px/1 var(--font-sans); cursor: help; position: relative;
+  font: 600 var(--type-label-size)/1 var(--font-sans); cursor: help;
 }
-.admin-info::after { content: ""; position: absolute; inset: -4px; }
 .admin-info:hover { background: var(--fill-track); color: var(--text-1); }
 .admin-hint.is-touch-only { display: none; }
 @media (hover: none) {
@@ -107,7 +107,7 @@ input.admin-input[type="search"] {
    and a 20px semibold tabular value. */
 .admin-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2); margin: 0; }
 .admin-tiles .stat-tile {
-  min-height: 72px; padding: var(--space-2) var(--space-3); gap: 2px; justify-content: center;
+  min-height: 72px; padding: var(--space-2) var(--space-3); gap: 2px; justify-content: flex-start; /* labels and values line up whether or not a tile has a sub-line (#129) */
   background: var(--level-1); border: 0; border-radius: var(--radius-card); box-shadow: var(--surface-lift);
 }
 .admin-tiles .stat-label { font-size: var(--type-label-size); font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-2); }
@@ -155,7 +155,7 @@ input.admin-input[type="search"] {
 .admin-empty-small { margin: var(--space-1) 0; }
 
 /* ---- badges (pill tones; the base lives in styles.css) & cells ---- */
-.stuck-badge { font-family: var(--font-mono); }
+.stuck-badge { font-variant-numeric: tabular-nums; }
 .stuck-badge.is-warn { --pill-fg: var(--warning-fg); --pill-bg: var(--warning-bg); --pill-line: var(--warning-fg); }
 .stuck-badge.is-alert { --pill-fg: var(--danger-fg); --pill-bg: var(--danger-bg); --pill-line: var(--danger-fg); }
 /* Help reasons share the pill base (styles.css) through .stuck-badge's tones. */
@@ -263,30 +263,44 @@ input.admin-input[type="search"] {
 .admin-danger .admin-h2 { color: var(--danger-fg); }
 .admin-reset { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 
-/* ---- leaderboard (projector): a full-size .ov-dialog (lib/overlay.ts) ---- */
-.ov-dialog.admin-board .ov-body { padding: 4vh var(--gutter); }
-.admin-board-inner { max-width: 1100px; margin: 0 auto; }
-.admin-board-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: 3vh; }
-.admin-board-title { margin: 0; font-size: clamp(2rem, 5vw, 3.6rem); letter-spacing: var(--track-display); }
+/* ---- leaderboard (projector): a full-size .ov-dialog (lib/overlay.ts) ----
+   Sized from the viewport height, so the header and the whole top 10 fit one screen from 1440x900 up (#127);
+   short screens (phones) fall back to content-height rows and the body scrolls. */
+.ov-dialog.admin-board .ov-body { display: flex; flex-direction: column; padding: 3dvh var(--gutter); }
+.admin-board-content { flex: 1 1 auto; min-block-size: 0; display: flex; flex-direction: column; }
+.admin-board-inner { flex: 1 1 auto; min-block-size: 0; display: flex; flex-direction: column; gap: 2dvh; inline-size: 100%; max-inline-size: 1100px; margin: 0 auto; }
+.admin-board-inner p { margin: 0; }
+.admin-board-head { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); }
+.admin-board-meta { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-5); }
+.admin-board-meta:not(:has(> :not([hidden]))) { display: none; }
+.admin-board-title { margin: 0; font-size: clamp(1.75rem, min(5vw, 6dvh), 3.6rem); line-height: 1.1; letter-spacing: var(--track-display); }
+.admin-board-event { font-size: clamp(1rem, min(2.4vw, 3dvh), 1.6rem); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.admin-board-event strong { color: var(--text-1); }
+.admin-board-event[hidden], .admin-board-state[hidden] { display: none; }
 .admin-board-empty { font-size: var(--step-2); text-align: center; margin-top: 10vh; }
-.admin-board-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1.2vh; }
+.admin-board-list {
+  flex: 1 1 auto; min-block-size: 0; list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-rows: repeat(10, minmax(auto, 1fr)); gap: 1dvh;
+}
 .admin-board-row {
   display: grid;
   grid-template-columns: 2.2em minmax(0, 1fr) auto 3.6em;
   align-items: center;
   gap: 0.8em;
-  font-size: clamp(1.2rem, 3vw, 2.2rem);
-  padding: 0.45em 0.8em;
+  font-size: clamp(1rem, min(3vw, 3.4dvh), 2.2rem);
+  line-height: 1.2;
+  padding: 0.2em 0.8em;
   border-radius: var(--radius-card);
   background: var(--level-1);
   box-shadow: var(--surface-lift);
 }
 .admin-board-row.rank-1 { background: var(--accent-soft); box-shadow: var(--surface-lift), inset 0 0 0 2px var(--edge-selected); }
-.board-rank { font-family: var(--font-mono); font-weight: 700; color: var(--text-muted); }
+.board-rank { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-muted); }
 .rank-1 .board-rank { color: var(--accent-strong); }
 .board-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.board-time { font-family: var(--font-mono); font-size: 0.7em; }
-.board-score { font-family: var(--font-mono); font-weight: 700; text-align: end; }
+.board-time { font-size: 0.7em; font-variant-numeric: tabular-nums; }
+.board-score { font-weight: 700; font-variant-numeric: tabular-nums; text-align: end; }
+.admin-board-more { flex: none; text-align: center; font-size: clamp(1rem, min(2vw, 2.6dvh), 1.4rem); color: var(--text-2); font-variant-numeric: tabular-nums; }
 
 /* ---- sections (#60): one visible at a time; the links live in the shell sidebar ---- */
 .admin-tabpanel { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-5); min-width: 0; }
@@ -297,7 +311,7 @@ input.admin-input[type="search"] {
   --pill-line: var(--accent);
   min-width: 1.6em;
   padding: 1px var(--space-2);
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-weight: 700;
 }
 .tab-badge[hidden] { display: none; }
@@ -416,10 +430,10 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 .cal-day.is-past { opacity: 0.6; }
 .cal-day.is-today { background: var(--info-bg); box-shadow: inset 0 0 0 2px var(--info-fg); opacity: 1; }
 .cal-day-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1); }
-.cal-num { font-family: var(--font-mono); font-weight: 600; }
+.cal-num { font-weight: 600; font-variant-numeric: tabular-nums; }
 .cal-wd { display: none; color: var(--text-muted); font-size: var(--step--1); }
 .cal-day-head { flex-wrap: wrap; }
-.cal-day .today-tag { margin: 0; font-size: 0.7rem; padding: 0 var(--space-1); }
+.cal-day .today-tag { margin: 0; font-size: var(--type-label-size); padding: 0 var(--space-1); }
 .cal-select { width: 100%; font-size: var(--type-label-size); padding-block: var(--space-1); min-height: 32px; }
 .cal-day:not(.is-set) .cal-select { color: var(--text-muted); }
 
@@ -454,7 +468,7 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 .key-open { background: var(--info-bg); border: 1px solid var(--info-fg); }
 .stats-table-view summary { cursor: pointer; font-size: var(--step--1); color: var(--accent-strong); min-height: var(--target-min); display: inline-flex; align-items: center; }
 .stats-table-view[open] summary { margin-bottom: var(--space-2); }
-.q-id { font-family: var(--font-mono); color: var(--text-muted); }
+.q-id { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-muted); }
 /* Hardest question: a neutral flag, not an error state. */
 .stats-q-table tr.is-hardest > :is(td, th) { background: var(--fill-inset); font-weight: 600; }
 .stats-hardest { margin: 0; }
@@ -467,7 +481,6 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 /* ---- admin session, invite code, temp password, event, audit ---- */
 .admin-login-alt { margin: var(--space-4) 0 0; }
 .admin-login-alt a { color: var(--text-1); }
-.admin-session-tag { --pill-fg: var(--success-fg); --pill-bg: var(--success-bg); --pill-line: var(--success-fg); }
 .pending-panel .admin-table-head { margin-bottom: var(--space-3); }
 .pending-approve-all:empty { display: none; }
 .pending-status { margin: -6px 0 var(--space-3); color: var(--success-fg); }
@@ -591,10 +604,10 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 .pc-head { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-2); }
 .pc-head .acct-toggle { min-width: 0; }
 .pc-head .player-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-score { font-family: var(--font-mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+.pc-score { font-weight: 600; font-variant-numeric: tabular-nums; }
 .pc-meta { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: var(--step--1); }
 .pc-stage { flex: 1 1 auto; min-width: 0; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-meta > :last-child { flex: none; font-family: var(--font-mono); }
+.pc-meta > :last-child { flex: none; font-variant-numeric: tabular-nums; }
 .pc-seen { margin: 0; }
 .stage-strip { list-style: none; margin: var(--space-1) 0 0; padding: 0; display: grid; gap: var(--space-1); }
 .strip-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); font-size: var(--step--1); }
@@ -614,7 +627,7 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
   /* Same values the pointer: coarse layer uses: every control here is a 44px target. */
   .admin { --control-xs: var(--control-md); --control-sm: var(--control-md); --target-min: var(--control-md); gap: var(--space-4); padding-top: var(--space-3); }
   .admin-head { flex-wrap: nowrap; align-items: center; }
-  .admin-head-title .eyebrow, .admin-session-tag { display: none; }
+  .admin-head-title .eyebrow { display: none; }
   .admin-title { font-size: var(--step-1); margin: 0; }
   .admin-head-actions { flex-wrap: nowrap; gap: var(--space-1); }
   .tiles-toggle { display: flex; }
@@ -749,12 +762,11 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 /* ---- projector board: scope + frozen state ---- */
 .admin-board-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .admin-board-scope { min-width: 12rem; }
-.admin-board-head { flex-wrap: wrap; }
 @media (max-width: 560px) {
   .admin-board-tools { width: 100%; flex-wrap: nowrap; }
   .admin-board-scope { min-width: 0; flex: 1 1 0; }
 }
-.admin-board-state { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin: -1.5vh 0 2vh; font-size: clamp(1rem, 2vw, 1.4rem); }
+.admin-board-state { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); font-size: clamp(1rem, min(2vw, 2.6dvh), 1.4rem); font-variant-numeric: tabular-nums; }
 .board-frozen-chip,
 .board-live-chip {
   --pill-fg: var(--text);
