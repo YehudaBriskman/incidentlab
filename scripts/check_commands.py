@@ -11,7 +11,13 @@ It also lints every bash and PowerShell command for tools and flags that aren't 
 PowerShell commands run too when `pwsh` is installed (POSIX paths only; the content uses Windows paths
 with backslashes, which pwsh on Linux also accepts).
 
-Usage: scripts/check_commands.py [case-id ...]   (default: every case)   [--verbose]
+Lab commands (`lab`, #149) are the extra lab-image track and may use its tools (tcpdump, dig, jq, gawk, git).
+They run only inside the case's lab image, as `docker run --rm --network none <image> bash -c '<cmd>'` from
+/case, when LAB_IMAGE_CHECK=1 and the image (LAB_IMAGE, default incidentlab/lab-<case>:local) exists;
+otherwise they are skipped with a note. LAB_IMAGE_CHECK=required fails instead of skipping when the image
+or docker is missing (CI, after scripts/build-lab-image.sh). Every `lab` needs a free `syntaxLab`.
+
+Usage: scripts/check_commands.py [case-id ...]   (default: every case)   [--verbose] [--lab-only]
 Exit 1 on any failure. Python 3 stdlib only.
 """
 from __future__ import annotations
@@ -106,6 +112,10 @@ def run_bash(command: str, cwd: Path, sandbox: Path) -> tuple[str, str]:
                               capture_output=True, text=True, timeout=TIMEOUT_S, errors="replace")
     except subprocess.TimeoutExpired:
         return "FAIL", f"timed out after {TIMEOUT_S}s"
+    return judge(proc, command)
+
+
+def judge(proc: subprocess.CompletedProcess, command: str) -> tuple[str, str]:
     err = proc.stderr.strip().splitlines()
     if "command not found" in proc.stderr:
         return "MISSING", next((l for l in err if "command not found" in l), "")
@@ -118,6 +128,56 @@ def run_bash(command: str, cwd: Path, sandbox: Path) -> tuple[str, str]:
     if out == "":
         return "EMPTY", "no output"
     return "OK", out.splitlines()[0][:100]
+
+
+def lab_image(case_id: str) -> tuple[str | None, str]:
+    """The lab image to run `lab` commands in, or None and why not (LAB_IMAGE_CHECK unset, no docker, no image)."""
+    if os.environ.get("LAB_IMAGE_CHECK", "") not in ("1", "required"):
+        return None, "set LAB_IMAGE_CHECK=1 to run them in the lab image (scripts/build-lab-image.sh)"
+    image = os.environ.get("LAB_IMAGE") or f"incidentlab/lab-{case_id}:local"
+    docker = shutil.which("docker")
+    if not docker:
+        return None, "docker is not installed"
+    found = subprocess.run([docker, "image", "inspect", image], capture_output=True, text=True)
+    if found.returncode != 0:
+        return None, f"image {image} not found or docker unusable (run scripts/build-lab-image.sh {case_id})"
+    return image, ""
+
+
+def run_lab(command: str, image: str) -> tuple[str, str]:
+    """One lab command inside the case's lab image, from /case, without network (an offline lab)."""
+    try:
+        proc = subprocess.run(["docker", "run", "--rm", "--network", "none", image, "bash", "-c", command],
+                              stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=TIMEOUT_S * 2, errors="replace")
+    except subprocess.TimeoutExpired:
+        return "FAIL", f"timed out after {TIMEOUT_S * 2}s"
+    return judge(proc, command)
+
+
+def check_lab(case_id: str, data: dict, report) -> None:
+    """Lints every lab variant, then runs the runnable ones inside the case's lab image when asked to."""
+    labs: list[tuple[str, str]] = []
+    for section in data["toolbox"]:
+        for item in section["items"]:
+            tid = item.get("id", item["title"])
+            lab, syntax = item.get("lab"), item.get("syntaxLab")
+            if lab and not syntax:
+                report("lab", tid, "LINT", "a lab command needs a free syntaxLab")
+            if syntax and not lab:
+                report("lab", tid, "LINT", "syntaxLab without a lab command")
+            if lab and syntax == lab:
+                report("lab", tid, "LINT", "syntaxLab must not equal the paid lab command")
+            if lab and not PLACEHOLDER.search(lab):
+                labs.append((tid, lab))
+    if not labs:
+        return
+    image, why = lab_image(case_id)
+    if image is None:
+        status = "FAIL" if os.environ.get("LAB_IMAGE_CHECK") == "required" else "SKIP"
+        report("lab", f"{len(labs)} commands", status, why)
+        return
+    for tid, lab in labs:
+        report("lab", tid, *run_lab(lab, image))
 
 
 def run_pwsh(command: str, cwd: Path) -> tuple[str, str]:
@@ -141,7 +201,7 @@ def case_ids(argv: list[str]) -> list[str]:
     return sorted(p.stem for p in CASES_DIR.glob("*.json") if not p.name.startswith("_") and not p.name.endswith(".he.json"))
 
 
-def check_case(case_id: str, sandbox: Path, verbose: bool) -> int:
+def check_case(case_id: str, sandbox: Path, verbose: bool, lab_only: bool = False) -> int:
     data = json.loads((CASES_DIR / f"{case_id}.json").read_text(encoding="utf-8"))
     evidence = EVIDENCE / case_id
     if not evidence.is_dir():
@@ -155,10 +215,14 @@ def check_case(case_id: str, sandbox: Path, verbose: bool) -> int:
         counts[status] = counts.get(status, 0) + 1
         bad = status in ("FAIL", "MISSING", "FORBIDDEN", "LINT")
         problems += bad
-        if bad or verbose or status == "EMPTY":
+        if bad or verbose or status in ("EMPTY", "SKIP"):
             print(f"  {status:<9} {kind:<10} {label}: {detail}")
 
     print(f"[{case_id}]")
+    check_lab(case_id, data, report)
+    if lab_only:
+        print("  summary: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+        return problems
     for section in data["toolbox"]:
         for item in section["items"]:
             tid = item.get("id", item["title"])
@@ -208,9 +272,10 @@ def check_case(case_id: str, sandbox: Path, verbose: bool) -> int:
 
 def main() -> int:
     verbose = "--verbose" in sys.argv
+    lab_only = "--lab-only" in sys.argv
     sandbox = build_sandbox()
     try:
-        total = sum(check_case(cid, sandbox, verbose) for cid in case_ids(sys.argv[1:]))
+        total = sum(check_case(cid, sandbox, verbose, lab_only) for cid in case_ids(sys.argv[1:]))
     finally:
         shutil.rmtree(sandbox, ignore_errors=True)
     print(f"[check_commands] {'FAIL: ' + str(total) + ' problems' if total else 'OK'}")

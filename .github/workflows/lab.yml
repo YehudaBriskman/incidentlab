@@ -1,8 +1,9 @@
 name: Lab images
 
 # Builds every case's lab image from its public evidence zip and proves it with the leak gate and the
-# case solver run inside the image (#147, #148). Nothing is pushed: publishing to GHCR is a separate
-# workflow in the incidentslab organisation (#151), so this repo's CI keeps `contents: read`.
+# case solver run inside the image (#147, #148), then runs every toolbox `lab` command inside it (#149).
+# Nothing is pushed: publishing to GHCR is a separate workflow in the incidentslab organisation (#151),
+# so this repo's CI keeps `contents: read`.
 on:
   pull_request:
     paths:
@@ -11,6 +12,8 @@ on:
       - "scripts/lab_gate.py"
       - "generator/**"
       - "solutions/**"
+      - "site/src/content/cases/**"
+      - "scripts/check_commands.py"
       - ".github/workflows/lab.yml"
   workflow_dispatch:
 
@@ -62,6 +65,11 @@ jobs:
 
       - name: Build and prove the lab image
         run: scripts/build-lab-image.sh "${{ matrix.case }}"
+
+      - name: Run the toolbox lab commands inside the image
+        env:
+          LAB_IMAGE_CHECK: required
+        run: python3 scripts/check_commands.py "${{ matrix.case }}" --lab-only
 
       - name: Image size
         run: docker image ls --format '{{.Repository}}:{{.Tag}} {{.Size}}' | grep incidentlab/
