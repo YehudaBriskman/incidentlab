@@ -88,7 +88,8 @@ function syntaxNodes(text: string): Child[] {
 let cardSeq = 0;
 
 /** One command: syntax (free) with Bash | PowerShell | Lab tabs, or the full command once revealed. */
-export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
+/** `heading`: the title's level in the page outline (h4 under the case page's h3, h3 under a toolbox h2). */
+export function commandCard(item: ToolItem, ctx: CommandContext, heading: "h3" | "h4" = "h4"): HTMLElement {
   const uid = `cmd-${++cardSeq}`;
   const progress = ctx.progress;
   const toolId = item.id;
@@ -210,7 +211,7 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
   return h(
     "div",
     { class: `cmd${full ? " is-revealed" : ""}`, "data-tool": toolId ?? null },
-    h("div", { class: "cmd-head" }, h("h4", {}, item.title), tag, tabBar),
+    h("div", { class: "cmd-head" }, h(heading, {}, item.title), tag, tabBar),
     full ? null : h("p", { class: "syntax-label" }, TG().syntaxLabel),
     h("div", { class: "code-wrap" }, pre, full ? copyButton(current, T().copy) : null),
     labNote,
@@ -341,7 +342,7 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
   const sections = c.toolbox.map((sec, i) => {
     const heading = h("h2", { id: `tb-${i}-h`, tabindex: "-1" }, sec.category);
     const cards = sec.items.map((item) => {
-      const card = commandCard(item, ctx);
+      const card = commandCard(item, ctx, "h3");
       card.dataset.search = [item.title, item.syntax ?? "", item.syntaxPowershell ?? "", item.syntaxLab ?? "", item.explain, sec.category].join(" ").toLowerCase();
       return card;
     });

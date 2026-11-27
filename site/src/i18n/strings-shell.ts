@@ -114,7 +114,6 @@ export const TS = defineStrings({
     roleAdmin: "Instructor",
     roleAuthor: "Author",
     rolePlayer: "Player",
-    pageAsideOpen: (label: string): string => `Open ${label}`,
 
     // filterButton() (components/filterPopover.ts)
     filterButton: "Filter",
@@ -220,7 +219,6 @@ export const TS = defineStrings({
     roleAdmin: "מדריך",
     roleAuthor: "כותב תיקים",
     rolePlayer: "שחקן",
-    pageAsideOpen: (label: string): string => `פתיחת ${label}`,
 
     filterButton: "סינון",
     filterButtonCount: (n: number): string => `סינון, ${n} פעילים`,

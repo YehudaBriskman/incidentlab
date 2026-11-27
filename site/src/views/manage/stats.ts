@@ -55,7 +55,8 @@ export function createStatsPanel(opts: StatsOptions): StatsPanel {
       panel,
       // How each case went comes first; the overall top 10 follows.
       statsCasesEl,
-      h("section", { class: "panel admin-panel", "aria-labelledby": "admin-top10-title" }, h("h2", { class: "admin-h2", id: "admin-top10-title" }, T().admTop10), statsBoardEl),
+      // not a landmark itself: the table scroller below is the region named "Top 10" (#249, no duplicate names)
+      h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2", id: "admin-top10-title" }, T().admTop10), statsBoardEl),
     );
   }
 
@@ -75,6 +76,7 @@ export function createStatsPanel(opts: StatsOptions): StatsPanel {
     className: "admin-table",
     wrapClass: "admin-dt",
     labelledBy: "admin-top10-title",
+    regionLabel: T().admTop10, // a focusable scroller: keyboard users can scroll the wide table (#249)
   });
 
   function renderStatsBoard(): void {

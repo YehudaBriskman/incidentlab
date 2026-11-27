@@ -6,6 +6,7 @@
 }
 .ex-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .ex-topbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ex-h1 { margin: 0; font-size: inherit; line-height: inherit; font-weight: 700; letter-spacing: normal; }
 .ex-status { color: var(--text-muted); font-size: var(--step--1); margin: 0; flex: 1; }
 /* The evidence files and the time converter live in the shell sidebar (.ex-side, #60): the layout is one column. */
 .ex-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); align-items: start; }

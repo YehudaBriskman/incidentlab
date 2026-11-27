@@ -794,8 +794,11 @@ a.status-chip:hover { background: var(--hover-fill); color: var(--text-1); }
 .account-signin { white-space: nowrap; }
 
 /* ---- content area: the page scroller ---- */
+/* position: relative makes the scroller the containing block of absolutely placed descendants (#249): without
+   it a visually hidden span deep in a long page is placed against the viewport and stretches the document,
+   which then scrolls blank canvas below the frame. */
 main.app-content {
-  grid-area: content; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain;
+  grid-area: content; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; position: relative;
   display: flex; flex-direction: column;
   max-width: none; margin: 0; padding: var(--space-4) var(--gutter) var(--space-8);
 }
@@ -1242,7 +1245,8 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 
 .tool-list { display: flex; flex-direction: column; gap: var(--space-5); }
 .cmd-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--space-2); }
-.cmd h4 { margin: 0; font-size: 1rem; }
+/* a card title is an h3 on the Toolbox page and an h4 on the case page (#249): the same look either way */
+.cmd :is(h3, h4) { margin: 0; font-size: var(--type-body-size); line-height: var(--type-body-lh); font-weight: 600; letter-spacing: normal; }
 .shell-tabs { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-md); overflow: hidden; }
 .shell-tab { min-height: var(--control-xs); background: none; border: 0; padding: var(--space-1) var(--space-3); font: inherit; font-size: var(--step--1); color: var(--text-muted); cursor: pointer; }
 .shell-tab:focus-visible { outline-offset: calc(-1 * var(--focus-width)); }
@@ -1301,6 +1305,9 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 .prose pre code { background: none; padding: 0; color: inherit; }
 .prose blockquote { margin: 1em 0; padding-inline-start: var(--space-4); border-inline-start: 3px solid var(--border-strong); color: var(--text-muted); }
 .prose table { border-collapse: collapse; display: block; overflow-x: auto; font-size: var(--step--1); }
+/* the debrief's tables scroll in a focusable region (views/case.ts scrollableTables), not in the table itself */
+.prose .prose-table { overflow-x: auto; margin-block: var(--space-4); }
+.prose .prose-table > table { display: table; overflow: visible; margin: 0; }
 .prose th, .prose td { border: 1px solid var(--border); padding: var(--space-2) var(--space-3); text-align: start; }
 .prose ul, .prose ol { padding-inline-start: 1.3em; }
 .prose img { max-width: 100%; }
@@ -1369,7 +1376,7 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 /* The code block is an LTR island in both languages, so its revealed marker stays on the physical left. */
 .cmd.is-revealed .code-block { box-shadow: inset 3px 0 0 var(--success-fg); }
 .cmd-tag { margin-inline-end: auto; }
-.cmd-head h4 + .cmd-tag { margin-inline-start: var(--space-1); }
+.cmd-head :is(h3, h4) + .cmd-tag { margin-inline-start: var(--space-1); }
 .cmd-actions { margin-top: var(--space-3); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
 .cmd-note { margin: 0; }
 .btn-reveal { border-style: dashed; }
@@ -1555,7 +1562,7 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
   details::details-content { content-visibility: visible; display: block; } /* collapsed briefings print open */
   .prose a[href^="http"]::after, .stage a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 0.85em; overflow-wrap: anywhere; }
   a { color: var(--text); }
-  .table-wrap, .prose table { overflow: visible; display: table; }
+  .table-wrap, .prose table, .prose .prose-table { overflow: visible; display: table; }
 }
 
 /* ===== case play (wave 3) ===== */

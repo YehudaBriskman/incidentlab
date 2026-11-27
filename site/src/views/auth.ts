@@ -106,6 +106,8 @@ export type GateOptions = {
   titled?: boolean;
   /** Heading of the sign-in form when this gate guards a specific page (e.g. "Sign in to see your stats"). */
   signInTitle?: string;
+  /** Level of the sign-in and recovery form titles: "h2" when the page above already has its h1 (#249). */
+  titleTag?: "h1" | "h2";
   /** Offer "Play as guest" beside the form (#176): playable views only. */
   allowGuest?: boolean;
 };
@@ -161,6 +163,7 @@ export function withApprovedAccount(
           inviteCode: options.inviteCode,
           titled: options.titled,
           signInTitle: options.signInTitle,
+          titleTag: options.titleTag,
         });
       } else if (isAdmin(account)) (options.onAdmin ?? (() => renderAdminCard(root, again)))();
       else if (account.status === "pending") renderPending(root, account, again);
@@ -335,7 +338,7 @@ function setBusy(button: HTMLButtonElement, busy: boolean, label: string): void 
 
 export function renderAuthForm(
   root: HTMLElement,
-  opts: { context: string; mode: Mode; onSignedIn: () => void; inviteCode?: string; titled?: boolean; signInTitle?: string },
+  opts: { context: string; mode: Mode; onSignedIn: () => void; inviteCode?: string; titled?: boolean; signInTitle?: string; titleTag?: "h1" | "h2" },
 ): void {
   stopAuthTimers();
   if (opts.mode === "recover") {
@@ -437,7 +440,7 @@ export function renderAuthForm(
     { class: "center-card gate", novalidate: true, "data-mode": opts.mode },
     summary.el,
     h("p", { class: "eyebrow" }, opts.context),
-    h("h1", {}, isSignUp ? TA().authTitleSignUp : (opts.signInTitle ?? TA().authTitleSignIn)),
+    h(opts.titleTag ?? "h1", {}, isSignUp ? TA().authTitleSignUp : (opts.signInTitle ?? TA().authTitleSignIn)),
     h("p", { class: "muted" }, isSignUp ? TA().authHelpSignUp : TA().authHelpSignIn),
     recovered !== null ? h("p", { class: "form-ok", role: "status" }, TA().recoveredNotice) : null,
     // A class link (`?code=`) leads with the prefilled code: it says which class this sign-up joins.
@@ -622,7 +625,7 @@ function renderRecoverForm(root: HTMLElement, opts: AuthFormOptions): void {
     { class: "center-card gate", novalidate: true, "data-mode": "recover" },
     summary.el,
     h("p", { class: "eyebrow" }, opts.context),
-    h("h1", {}, TA().recoverTitle),
+    h(opts.titleTag ?? "h1", {}, TA().recoverTitle),
     h("p", { class: "muted" }, TA().recoverHelp),
     user.nodes,
     code.nodes,

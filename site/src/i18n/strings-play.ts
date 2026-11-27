@@ -14,6 +14,8 @@ export const TP = defineStrings({
     copy: "Copy",
     copied: "Copied",
     onThisPage: "On this page",
+    /** name of a scrollable table in the debrief when no heading comes before it */
+    proseTable: "Table",
     copyFailed: "Copy failed",
     copiedAnnounce: "Copied to the clipboard.",
 
@@ -139,6 +141,7 @@ export const TP = defineStrings({
     copy: "העתקה",
     copied: "הועתק",
     onThisPage: "בעמוד זה",
+    proseTable: "טבלה",
     copyFailed: "ההעתקה נכשלה",
     copiedAnnounce: "הועתק ללוח.",
 

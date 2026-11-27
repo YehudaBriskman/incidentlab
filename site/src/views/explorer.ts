@@ -2066,7 +2066,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     h("div", { class: "explorer" },
       h("div", { class: "ex-topbar" },
         h("a", { class: "btn btn-sm btn-ghost", href: `#/case/${c.id}` }, T().exBack),
-        h("strong", {}, T().exTitle),
+        h("h1", { class: "ex-h1" }, T().exTitle), // the page h1 (#249), styled as the bar label it was
         h("span", { class: "ex-muted ex-case" }, c.title),
         tagline),
       announcer,
