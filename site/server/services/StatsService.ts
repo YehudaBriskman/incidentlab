@@ -1,8 +1,11 @@
-// Per-account and per-case statistics, achievements, streaks and the leaderboard, all computed from
-// progress records (no extra writes on the hot path).
+// Per-account and per-case statistics, achievements and streaks, computed from progress records, and the
+// global leaderboard, computed from the opted-in players' score summaries only (#175): the board and a
+// player's rank never read another account's progress.
 import { QUESTION_ORDER } from "../../shared/contract.ts";
 import type { CaseStats, CaseSummary, LeaderboardResponse, QuestionId, Schedule, StageProgress, UserStats } from "../../shared/contract.ts";
 import type { AccountRecord, ProgressRecord, Secrets } from "../domain/types.ts";
+import { boardTotals } from "../domain/score.ts";
+import type { BoardTotals, ScoreRecord } from "../domain/score.ts";
 import type { Repositories } from "../repositories/repositories.ts";
 import { mapWithConcurrency } from "../repositories/KvStore.ts";
 import { localDate } from "./ScheduleService.ts";
@@ -24,6 +27,13 @@ const shiftDate = (isoDate: string, days: number): string => new Date(Date.parse
 
 /** Ranks by score descending; ties share a rank (1, 1, 3). */
 const rankOf = (score: number, sortedScores: readonly number[]): number => sortedScores.indexOf(score) + 1;
+
+/** Who may be listed on the public board: an approved, full (non-guest) account that opted in. */
+export const isBoardEligible = (account: AccountRecord): boolean => account.status === "approved" && account.kind === "user" && account.showOnGlobalBoard;
+
+type BoardPlayer = { readonly account: AccountRecord; readonly score: ScoreRecord };
+type BoardRow = BoardTotals & { readonly accountId: string; readonly username: string };
+type RankedRow = BoardRow & { readonly rank: number };
 
 export class StatsService {
   private readonly repos: Repositories;
@@ -139,7 +149,7 @@ export class StatsService {
     return out.sort((a, b) => a.earnedAt.localeCompare(b.earnedAt));
   }
 
-  private userStats(account: AccountRecord, records: readonly ProgressRecord[], schedule: Schedule): Omit<UserStats, "rank"> {
+  private userStats(account: AccountRecord, records: readonly ProgressRecord[], schedule: Schedule): Omit<UserStats, "rank" | "onGlobalBoard"> {
     const cases = this.caseIds.map((caseId) => this.caseStats(caseId, records.find((r) => r.caseId === caseId) ?? null));
     const sum = (pick: (c: CaseStats) => number): number => cases.reduce((s, c) => s + pick(c), 0);
     const solved = sum((c) => c.solved);
@@ -167,61 +177,80 @@ export class StatsService {
     };
   }
 
-  /** Every account with stats and a rank among approved accounts (ties share a rank). */
+  /** Every account with stats and a rank among approved accounts (ties share a rank). Admin only: a full scan. */
   async allUsers(): Promise<UserStats[]> {
     const [accounts, progress, schedule] = await Promise.all([this.repos.accounts.list(), this.repos.progress.list(), this.repos.schedule.get()]);
     const byAccount = new Map<string, ProgressRecord[]>();
     for (const record of progress) byAccount.set(record.accountId, [...(byAccount.get(record.accountId) ?? []), record]);
-    const rows = accounts.map((a) => this.userStats(a, byAccount.get(a.id) ?? [], schedule));
+    const rows = accounts.map((a) => ({ ...this.userStats(a, byAccount.get(a.id) ?? [], schedule), onGlobalBoard: isBoardEligible(a) }));
     const scores = rows.filter((r) => r.status === "approved").map((r) => r.totalScore).sort((a, b) => b - a);
     return rows
       .map((r): UserStats => ({ ...r, rank: r.status === "approved" ? rankOf(r.totalScore, scores) : null }))
       .sort((a, b) => b.totalScore - a.totalScore || a.createdAt.localeCompare(b.createdAt));
   }
 
-  /** One account's stats. Rank needs everyone's totals, so this reads all progress (fine at classroom scale). */
+  /**
+   * One account's stats. The rank is the account's place on the live overall public board, read from the
+   * opted-in players' summaries only (never every account or progress record); null when the account isn't
+   * on the board (not opted in, a guest, not approved, or nothing solved yet).
+   */
   async forAccount(account: AccountRecord): Promise<UserStats> {
     const [own, schedule] = await Promise.all([
       mapWithConcurrency(this.caseIds, (caseId) => this.repos.progress.get(caseId, account.id)),
       this.repos.schedule.get(),
     ]);
     const stats = this.userStats(account, own.filter((r) => r !== null).map((r) => r.data), schedule);
-    if (account.status !== "approved") return { ...stats, rank: null };
-    const all = await this.allUsers();
-    return { ...stats, rank: all.find((u) => u.accountId === account.id)?.rank ?? null };
+    const onGlobalBoard = isBoardEligible(account);
+    if (!onGlobalBoard) return { ...stats, rank: null, onGlobalBoard };
+    const board = this.rank(this.rows(await this.boardPlayers(), { caseId: null, cutoff: null }));
+    return { ...stats, rank: board.find((row) => row.accountId === account.id)?.rank ?? null, onGlobalBoard };
   }
 
-  /** Public standings of approved players, overall or for one case. With `frozenAt`, only what happened before it counts. */
+  /**
+   * Public standings of the opted-in players, overall or for one case. With `frozenAt`, only what happened
+   * before it counts: every solve in a summary keeps its time, so the frozen board needs no progress record.
+   */
   async leaderboard(input: { caseId: string | null; frozenAt: string | null }): Promise<LeaderboardResponse> {
-    const [accounts, progress] = await Promise.all([this.repos.accounts.list(), this.repos.progress.list(input.caseId ?? undefined)]);
     const cutoff = input.frozenAt;
-    const counts = (at: string | null): boolean => at !== null && (cutoff === null || at <= cutoff);
-    const rows = accounts
-      .filter((a) => a.status === "approved")
-      .map((account) => {
-        const records = progress.filter((r) => r.accountId === account.id);
-        const solvedStages = records.flatMap(stagesOf).filter((s) => s.status === "solved" && counts(s.finishedAt));
-        const completed = records.filter((r) => counts(r.completedAt));
-        return {
-          username: account.username,
-          score: solvedStages.reduce((s, st) => s + st.points, 0) + completed.reduce((s, r) => s + r.completionBonus, 0),
-          stagesSolved: solvedStages.length,
-          casesCompleted: completed.length,
-          firstBloods: solvedStages.filter((s) => (s.breakdown?.firstBlood ?? 0) > 0).length,
-          lastSolveAt: solvedStages.map((s) => s.finishedAt).filter((v): v is string => v !== null).sort().at(-1) ?? null,
-        };
-      })
-      .filter((row) => row.stagesSolved > 0)
-      // Same score: whoever got there first is listed first (the rank number is still shared).
-      .sort((a, b) => b.score - a.score || (a.lastSolveAt ?? "").localeCompare(b.lastSolveAt ?? ""));
-    const scores = rows.map((r) => r.score);
+    const ranked = this.rank(this.rows(await this.boardPlayers(), { caseId: input.caseId, cutoff }));
     return {
       caseId: input.caseId,
       frozen: cutoff !== null,
       frozenAt: cutoff,
       generatedAt: this.now().toISOString(),
-      entries: rows.map((row) => ({ rank: rankOf(row.score, scores), ...row })),
+      entries: ranked.map((row) => ({
+        rank: row.rank,
+        username: row.username,
+        score: row.score,
+        stagesSolved: row.stagesSolved,
+        casesCompleted: row.casesCompleted,
+        firstBloods: row.firstBloods,
+        lastSolveAt: row.lastSolveAt,
+      })),
     };
+  }
+
+  /** The opted-in accounts: one key listing, then each one's account and summary (a small set by design). */
+  private async boardPlayers(): Promise<BoardPlayer[]> {
+    const ids = await this.repos.globalBoard.listAccountIds();
+    const players = await mapWithConcurrency(ids, async (id): Promise<BoardPlayer | null> => {
+      const [account, score] = await Promise.all([this.repos.accounts.get(id), this.repos.scores.get(id)]);
+      return account && score && isBoardEligible(account.data) ? { account: account.data, score: score.data } : null;
+    });
+    return players.filter((p): p is BoardPlayer => p !== null);
+  }
+
+  private rows(players: readonly BoardPlayer[], filter: { caseId: string | null; cutoff: string | null }): BoardRow[] {
+    return players
+      .map((p): BoardRow => ({ accountId: p.account.id, username: p.account.username, ...boardTotals(p.score.cases, filter) }))
+      .filter((row) => row.stagesSolved > 0)
+      // Same score: whoever got there first is listed first (the rank number is still shared).
+      .sort((a, b) => b.score - a.score || (a.lastSolveAt ?? "").localeCompare(b.lastSolveAt ?? ""));
+  }
+
+  private rank(rows: readonly BoardRow[]): RankedRow[] {
+    const scores = rows.map((r) => r.score);
+    return rows.map((row) => ({ ...row, rank: rankOf(row.score, scores) }));
   }
 
   async caseSummaries(): Promise<CaseSummary[]> {

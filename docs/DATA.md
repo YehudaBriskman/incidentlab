@@ -7,7 +7,7 @@ click may lose it. This document is the contract for anyone changing stored reco
 
 | Store | What | Notes |
 |---|---|---|
-| `incidentlab-v2` | Live data: `account:`, `username:`, `session:`, `progress:<case>:<account>`, `config:*` (schedule, settings, event, migrations ledger), `firstblood:`, `audit:`, `trash:`, `legacy:`, `ratelimit:`, `case:`, `evidence:` (binary), `upload:` | Never rename. A new name means an empty store. That's how round-1 players were orphaned. |
+| `incidentlab-v2` | Live data: `account:`, `username:`, `session:`, `progress:<case>:<account>`, `score:<account>`, `globalboard:<account>`, `config:*` (schedule, settings, event, migrations ledger), `firstblood:`, `audit:`, `trash:`, `legacy:`, `ratelimit:`, `case:`, `evidence:` (binary), `upload:` | Never rename. A new name means an empty store. That's how round-1 players were orphaned. |
 | `incidentlab-backups` | `daily/<YYYY-MM-DD>.json` snapshots, 30 days | Written by the scheduled function `backup-daily` |
 | `incidentlab-players` | Round-1 anonymous players (pre-accounts) | Read-only. Migration 002 copies it to `legacy:<id>` |
 | `~/.incidentlab-backups/` (your machine) | Pre-deploy, pre-migrate, pre-restore and manual snapshots | Mode 600, never in the repo |
@@ -129,6 +129,17 @@ share them. `scripts/data.ts gc-evidence` (`EvidenceGcService`, #122) reclaims c
 Their input is the **case package** (`build/packages/<id>-v<n>.case.zip`, format in `docs/CASE_CONTRACT.md`).
 Packages are build artefacts: `scripts/build-all.sh` writes and validates them under the gitignored `build/`.
 They contain the answer keys, so they are never committed, deployed or put under `site/`.
+
+### Score summaries and the opt-in board (`score:`, `globalboard:`, since #175)
+
+| Key | Holds | Notes |
+|---|---|---|
+| `score:<accountId>` | `ScoreRecord` (`site/server/domain/score.ts`) | `{total, stagesSolved, casesCompleted, firstBloods, lastSolveAt}` plus `cases`: per case, every solved stage with its points and solve time, and the completion bonus with its time. Always derived from the account's progress records. `ScoreService` re-derives a case's part after each solve or reveal, admin reset, account delete and trash restore. It writes with `setIfMatch` and re-reads the progress record after the summary, so retries and races can't double-count. |
+| `globalboard:<accountId>` | `{accountId, since}` | Exists only while the account opts in (`PUT /api/me/board`). The public board lists this prefix and reads only those accounts and their summaries. |
+
+The account's `showOnGlobalBoard` flag is the player's choice. The board also checks that the account is
+approved and not a guest, so a rejected or guest account never shows even if a marker is left behind.
+Migration 003 backfills `score:` for every account. Accounts that have no summary yet get one when they opt in.
 
 ## Rules for changing stored records
 

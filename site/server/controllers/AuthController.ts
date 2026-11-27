@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { CaseIdSchema, ChangePasswordRequestSchema, LoginRequestSchema, RegisterRequestSchema } from "../../shared/contract.ts";
+import { BoardVisibilityRequestSchema, CaseIdSchema, ChangePasswordRequestSchema, LoginRequestSchema, RegisterRequestSchema } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
 import type { AuthService } from "../services/AuthService.ts";
 import type { EventService } from "../services/EventService.ts";
+import type { GlobalBoardService } from "../services/GlobalBoardService.ts";
 import type { ScheduleService } from "../services/ScheduleService.ts";
 import type { StatsService } from "../services/StatsService.ts";
 import { json, noContent, parseBody, publicJson, sessionCookie, sessionToken, withCookie } from "./http.ts";
@@ -26,12 +27,14 @@ export class AuthController {
   private readonly schedule: ScheduleService;
   private readonly stats: StatsService;
   private readonly events: EventService;
+  private readonly board: GlobalBoardService;
 
-  constructor(deps: { auth: AuthService; schedule: ScheduleService; stats: StatsService; events: EventService }) {
+  constructor(deps: { auth: AuthService; schedule: ScheduleService; stats: StatsService; events: EventService; board: GlobalBoardService }) {
     this.auth = deps.auth;
     this.schedule = deps.schedule;
     this.stats = deps.stats;
     this.events = deps.events;
+    this.board = deps.board;
   }
 
   async register(req: Request, ip: string): Promise<Response> {
@@ -78,6 +81,13 @@ export class AuthController {
     const { principal } = await this.auth.authenticate(sessionToken(req));
     if (principal.kind === "admin") throw new AppError(403, "the admin account has no player stats", { code: "admin" });
     return json(200, { stats: await this.stats.forAccount(principal.account) });
+  }
+
+  /** PUT /api/me/board {show}: opt in to or out of the public global leaderboard (personalised: no-store). */
+  async setBoard(req: Request): Promise<Response> {
+    const player = await this.auth.requirePlayer(sessionToken(req));
+    const body = await parseBody(req, BoardVisibilityRequestSchema);
+    return json(200, { account: await this.board.setShown(player, body.show) });
   }
 
   // The three public GETs below never read the session: the CDN may serve them to everyone (publicJson).

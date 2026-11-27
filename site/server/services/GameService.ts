@@ -9,6 +9,7 @@ import type { ProgressRepository } from "../repositories/repositories.ts";
 import type { Versioned } from "../repositories/KvStore.ts";
 import type { EventService } from "./EventService.ts";
 import type { ScheduleService } from "./ScheduleService.ts";
+import type { ScoreService } from "./ScoreService.ts";
 import { parScore, scoreStage } from "./scoring.ts";
 
 const WRONG_ANSWER_WINDOW_MS = 60_000;
@@ -49,6 +50,7 @@ export class GameService {
   private readonly secrets: Secrets;
   private readonly schedule: ScheduleService;
   private readonly events: EventService;
+  private readonly scores: ScoreService | null;
   private readonly now: () => Date;
 
   constructor(deps: {
@@ -57,6 +59,8 @@ export class GameService {
     secrets: Secrets;
     schedule: ScheduleService;
     events: EventService;
+    /** keeps the board's score summary in step (#175); left out only by tests that don't need it */
+    scores?: ScoreService;
     now: () => Date;
   }) {
     this.repository = deps.repository;
@@ -64,6 +68,7 @@ export class GameService {
     this.secrets = deps.secrets;
     this.schedule = deps.schedule;
     this.events = deps.events;
+    this.scores = deps.scores ?? null;
     this.now = deps.now;
   }
 
@@ -120,7 +125,7 @@ export class GameService {
       }
     }
 
-    return this.mutate(ctx, (record) => {
+    const outcome = await this.mutate(ctx, (record) => {
       // Idempotent: a double-submitted correct answer must not re-score or error.
       if (this.stage(record, questionId).status === "solved") {
         return { result: { correct: true, progress: this.toView(record, ctx) }, changed: false };
@@ -154,6 +159,9 @@ export class GameService {
       }
       return { result: { correct: isCorrect, progress: this.toView(record, ctx) }, changed: true };
     });
+    // Also on a repeated correct answer: the summary is re-derived, so this only repairs a lost earlier sync.
+    if (outcome.correct) await this.syncScore(ctx);
+    return outcome;
   }
 
   async hint(ctx: PlayContext, questionId: QuestionId): Promise<ProgressView> {
@@ -189,13 +197,16 @@ export class GameService {
   async reveal(ctx: PlayContext, questionId: QuestionId): Promise<ProgressView> {
     const secrets = this.caseSecrets(ctx.caseId);
     await this.events.assertOpen();
-    return this.mutate(ctx, (record) => {
+    const view = await this.mutate(ctx, (record) => {
       if (this.stage(record, questionId).status === "revealed") return { result: this.toView(record, ctx), changed: false };
       const stage = this.requireActive(record, questionId);
       const revealedAnswer = secrets.answers[questionId] ?? "";
       this.finishStage(record, questionId, { ...stage, status: "revealed", points: 0, revealedAnswer, breakdown: null });
       return { result: this.toView(record, ctx), changed: true };
     });
+    // A reveal scores nothing, but revealing the last stage completes the case.
+    await this.syncScore(ctx);
+    return view;
   }
 
   async debrief(ctx: PlayContext): Promise<{ markdown: string }> {
@@ -276,6 +287,19 @@ export class GameService {
   }
 
   // ---- helpers ------------------------------------------------------------
+
+  /**
+   * Updates the score summary after the progress write has landed. A failure here never fails the answer
+   * (the progress is saved): the next solve, a repeated answer or migration 003 re-derives it.
+   */
+  private async syncScore(ctx: PlayContext): Promise<void> {
+    if (!this.scores) return;
+    try {
+      await this.scores.syncCase(ctx.player.id, ctx.caseId);
+    } catch (error) {
+      console.error("[incidentlab-api] score summary update failed", ctx.player.id, ctx.caseId, error);
+    }
+  }
 
   private newRecord(accountId: string, caseId: string): ProgressRecord {
     const nowIso = this.now().toISOString();

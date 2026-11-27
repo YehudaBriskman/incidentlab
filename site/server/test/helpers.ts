@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import type { z } from "zod";
 import type { Secrets } from "../domain/types.ts";
 import { InMemoryKvStore } from "../repositories/KvStore.ts";
+import type { KvStore } from "../repositories/KvStore.ts";
 import { createApp } from "../router.ts";
+import type { CachePurger } from "../services/CachePurger.ts";
 
 export const ADMIN_KEY = "admin-key-for-tests-0123456789";
 export const TARGET_SECONDS = 600;
@@ -30,8 +32,8 @@ export type Client = {
   json<T extends z.ZodType>(res: Response, schema: T): Promise<z.infer<T>>;
 };
 
-export const createHarness = (options: { now?: () => Date; ip?: string; store?: InMemoryKvStore } = {}) => {
-  const app = createApp({ store: options.store ?? new InMemoryKvStore(), staticSecrets: SECRETS, adminKey: () => ADMIN_KEY, now: options.now });
+export const createHarness = (options: { now?: () => Date; ip?: string; store?: KvStore; cachePurger?: CachePurger } = {}) => {
+  const app = createApp({ store: options.store ?? new InMemoryKvStore(), staticSecrets: SECRETS, adminKey: () => ADMIN_KEY, now: options.now, cachePurger: options.cachePurger });
 
   /** A browser-like client that keeps its own cookie jar. */
   const client = (ip = options.ip ?? "10.0.0.1"): Client & { cookie(): string | null } => {

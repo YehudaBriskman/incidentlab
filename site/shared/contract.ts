@@ -184,7 +184,13 @@ export const UserStatsSchema = z.object({
   wrongAttempts: z.number().int().min(0),
   /** solved / (solved + wrong attempts), 0..1; null when nothing was attempted. */
   accuracy: z.number().min(0).max(1).nullable(),
-  rank: z.number().int().min(1).nullable(), // among approved accounts by totalScore (ties share a rank)
+  /**
+   * /api/me/stats: the place on the live overall public board (#175), null when not on it (not opted in, or
+   * nothing solved yet). /api/admin/accounts: among every approved account. Ties share a rank.
+   */
+  rank: z.number().int().min(1).nullable(),
+  /** additive (#175): the account opted in to the public global leaderboard (and may be listed there) */
+  onGlobalBoard: z.boolean().default(false),
   commandsRevealed: z.number().int().min(0),
   achievements: z.array(z.object({ id: z.string(), earnedAt: z.string() })),
   /** consecutive incident-of-the-day dates completed on that date */
@@ -263,7 +269,8 @@ export const LeaderboardEntrySchema = z.object({
   firstBloods: z.number().int().min(0),
   lastSolveAt: z.string().nullable(),
 });
-// GET /api/leaderboard?caseId=<id>   (public; omit caseId for overall)
+// GET /api/leaderboard?caseId=<id>   (public; omit caseId for overall). Only approved, non-guest accounts that
+// opted in (PUT /api/me/board) and solved at least one stage are listed.
 export const LeaderboardResponseSchema = z.object({
   caseId: z.string().nullable(),
   frozen: z.boolean(),
@@ -374,6 +381,9 @@ export const DebriefResponseSchema = z.object({ markdown: z.string() });
 
 // GET /api/me/stats -> UserStats
 export const UserStatsResponseSchema = z.object({ stats: UserStatsSchema });
+// PUT /api/me/board {show} -> {account}   (#175: opt in to / out of the public global leaderboard; approved
+//                                          full accounts only, 403 code "guest" for guests; off by default)
+export const BoardVisibilityRequestSchema = z.object({ show: z.boolean() }).strict();
 
 // ---- admin ----------------------------------------------------------------
 // GET    /api/admin/accounts                    -> {accounts: UserStats[]}   (every account, with stats)
