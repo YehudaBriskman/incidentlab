@@ -69,11 +69,18 @@ test.describe("phone with touch (390x844)", () => {
 
   test("admin pages: inputs, row menus and calendar selects are 44px on a coarse pointer", async ({ page }) => {
     expect((await page.request.post("/api/auth/login", { data: { username: ADMIN_USERNAME, password: ADMIN_KEY } })).ok()).toBe(true);
-    for (const path of ["/#/admin?tab=users", "/#/admin?tab=classes", "/#/admin?tab=schedule", "/#/author"]) {
+    for (const path of ["/#/admin?tab=accounts", "/#/admin?tab=classes", "/#/admin?tab=schedule", "/#/author"]) {
       await page.goto(path);
       await settle(page);
       expect(await smallTargets(page), path).toEqual([]);
     }
+    // an open row menu: its items are touch targets too
+    await page.goto("/#/admin?tab=accounts");
+    await settle(page);
+    await page.locator(".row-menu-btn:visible").first().click();
+    await expect(page.locator(".ov-menu-item").first()).toBeVisible();
+    await page.waitForTimeout(400); // the menu grows in (a scale transform) before it is measured
+    expect(await smallTargets(page), "row menu").toEqual([]);
   });
 
   test("home: Tab never lands on an invisible control (the stacked table's header)", async ({ page }) => {
