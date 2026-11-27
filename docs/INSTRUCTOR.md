@@ -74,8 +74,8 @@ Session shape: **10 min orientation, 40 min solve (pairs), then debrief and lect
 ## Incident of the day
 
 `#/admin` → **Schedule** is a calendar: pick a case per date, plus a default for unscheduled days. The home page
-shows that case as **Incident of the day** (dates are in the schedule's time zone, default Asia/Jerusalem), and
-streaks count it. It never stops anyone from playing another case: the old "Lock to today's case" switch is gone
+shows that case as **Incident of the day** (dates are in the schedule's time zone, default Asia/Jerusalem). Streaks count any
+day with a solved stage, so they don't depend on the schedule. It never stops anyone from playing another case: the old "Lock to today's case" switch is gone
 (#180).
 
 ## Live event

@@ -47,11 +47,11 @@ test("board entry matches usernames the way the server keys them", () => {
 });
 
 test("next achievement: the closest measurable one, else the first locked, else none", () => {
-  const base = { achievements: [], streak: { current: 0, best: 0 }, cases: [{}, {}, {}, {}] as never[], casesCompleted: 0 };
+  const base = { achievements: [], streak: { current: 0, best: 0, activeToday: false }, cases: [{}, {}, {}, {}] as never[], casesCompleted: 0 };
   assert.deepEqual(nextAchievement(base, IDS), { id: "streak-3", have: 0, need: 3 });
   assert.deepEqual(nextAchievement({ ...base, casesCompleted: 3 }, IDS), { id: "all-cases", have: 3, need: 4 });
   const streakDone = [{ id: "streak-3", earnedAt: "x" }];
-  assert.deepEqual(nextAchievement({ ...base, achievements: streakDone, streak: { current: 4, best: 4 } }, IDS), { id: "streak-7", have: 4, need: 7 });
+  assert.deepEqual(nextAchievement({ ...base, achievements: streakDone, streak: { current: 4, best: 4, activeToday: false } }, IDS), { id: "streak-7", have: 4, need: 7 });
   const allButFirst = IDS.filter((id) => !["first-blood"].includes(id)).map((id) => ({ id, earnedAt: "x" }));
   assert.deepEqual(nextAchievement({ ...base, achievements: allButFirst }, IDS), { id: "first-blood", have: null, need: null });
   assert.equal(nextAchievement({ ...base, achievements: IDS.map((id) => ({ id, earnedAt: "x" })) }, IDS), null);

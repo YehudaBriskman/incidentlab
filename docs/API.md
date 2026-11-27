@@ -370,7 +370,8 @@ for viewing and leaving.
 
 `Schedule = { timezone, defaultCaseId, days: {"YYYY-MM-DD": caseId}, lockToToday }`. "Today" is the
 date in `timezone` (default `Asia/Jerusalem`). Today's case is `days[today] ?? defaultCaseId`: the daily card on
-the home page and the streaks count it.
+the home page shows it. Streaks don't depend on it (#212): a streak is consecutive days (in `timezone`) with at
+least one solved stage of any case, and `streak.activeToday` in `UserStats` says whether today already counts.
 
 **Players can always play every published case** (#180). `lockToToday` (schedule) and `enforceWindow` (event)
 are deprecated: they stay in the stored records and the responses, but nothing enforces them, and the admin

@@ -204,10 +204,37 @@ test("achievements and daily streaks", async () => {
   await finish("beta"); // on 24th, scheduled beta
   now = new Date("2026-11-25T09:00:00Z");
   const stats = await player.json(await player.call("/me/stats"), UserStatsResponseSchema);
-  assert.deepEqual(stats.stats.streak, { current: 2, best: 2 });
+  assert.deepEqual(stats.stats.streak, { current: 2, best: 2, activeToday: false });
   const ids = stats.stats.achievements.map((a) => a.id);
   for (const id of ["first-blood", "clean-case", "speedrun", "no-hints-5", "all-cases"]) assert.ok(ids.includes(id), `${id} in ${ids.join(",")}`);
   assert.ok(!ids.includes("streak-3"));
+});
+
+test("a streak counts any solved stage per day, so seven days is reachable with two cases (#212)", async () => {
+  let now = new Date("2026-11-23T08:00:00Z");
+  const harness = createHarness({ now: () => now });
+  await harness.admin("/admin/schedule", { method: "PUT", body: { timezone: "UTC", defaultCaseId: null, days: {}, lockToToday: false } });
+  const { player } = await approvedPlayer(harness, "Daily");
+  await player.call("/cases/alpha/setup-done", { body: {} });
+  await player.call("/cases/beta/setup-done", { body: {} });
+  // Day 1: alpha q1 (plus beta q1); days 2-6: one beta stage each; day 7: alpha q2.
+  const plan: Array<[string, number, string]> = [["alpha", 1, "alpha-a1"], ...ALL_ANSWERS.slice(0, 5).map((a, i): [string, number, string] => ["beta", i + 2, a])];
+  await player.call("/cases/beta/answer", { body: { questionId: "q1", answer: "beta-a1" } });
+  for (const [i, [caseId, q, answer]] of plan.entries()) {
+    now = new Date(Date.parse("2026-11-23T08:00:00Z") + i * 86_400_000);
+    const res = await player.call(`/cases/${caseId}/answer`, { body: { questionId: `q${q}`, answer } });
+    assert.equal(res.status, 200);
+  }
+  now = new Date("2026-11-29T10:00:00Z"); // day 7
+  await player.call("/cases/alpha/answer", { body: { questionId: "q2", answer: ALL_ANSWERS[0] } });
+  const stats = await player.json(await player.call("/me/stats"), UserStatsResponseSchema);
+  assert.deepEqual(stats.stats.streak, { current: 7, best: 7, activeToday: true });
+  const ids = stats.stats.achievements.map((a) => a.id);
+  assert.ok(ids.includes("streak-3") && ids.includes("streak-7"), ids.join(","));
+  // A missed day resets the current streak but keeps the best.
+  now = new Date("2026-12-01T10:00:00Z");
+  const later = await player.json(await player.call("/me/stats"), UserStatsResponseSchema);
+  assert.deepEqual(later.stats.streak, { current: 0, best: 7, activeToday: false });
 });
 
 test("audit log records admin actions, newest first", async () => {

@@ -5,7 +5,7 @@
 import { ACHIEVEMENT_IDS, type ClassDetail, type ClassSummary, type TodayResponse, type UserStats } from "../../shared/contract";
 import { caseSummary } from "../content/load";
 import { classToday, fetchClass, fetchMyClasses } from "../lib/class-api";
-import { classEventPhase, dateInZone, homeClasses, isClassBoardFrozen, needsDetail, nextAchievement } from "../lib/challenges";
+import { classEventPhase, homeClasses, isClassBoardFrozen, needsDetail, nextAchievement } from "../lib/challenges";
 import { h, type Child } from "../lib/dom";
 import { formatCountdown, serverNow } from "../lib/event";
 import { getLang } from "../i18n/i18n";
@@ -213,12 +213,6 @@ export function guestCard(): HTMLElement {
 export type StreakState = { readonly kind: "loading" } | { readonly kind: "failed" } | { readonly kind: "ready"; readonly stats: UserStats; readonly today: TodayResponse | null };
 
 /** Whether today's case was finished today (in the schedule's time zone): that is what keeps the streak. */
-function todayDone(stats: UserStats, today: TodayResponse | null): boolean {
-  if (today?.caseId == null) return false;
-  const done = stats.cases.find((c) => c.caseId === today.caseId);
-  if (done?.status !== "completed" || done.completedAt === null) return false;
-  return dateInZone(today.timezone, Date.parse(done.completedAt)) === today.date;
-}
 
 function nextAchievementBlock(stats: UserStats): HTMLElement {
   const next = nextAchievement(stats, ACHIEVEMENT_IDS);
@@ -241,10 +235,9 @@ export function streakCard(state: StreakState): HTMLElement {
   const body = ((): Child => {
     if (state.kind === "loading") return [h("span", { class: "dt-skeleton home-skel-title" }), h("span", { class: "dt-skeleton" }), h("span", { class: "dt-skeleton" })];
     if (state.kind === "failed") return h("p", { class: "home-card-note", role: "alert" }, TC().streakFailed);
-    const { stats, today } = state;
+    const { stats } = state;
     const current = stats.streak.current;
-    const hasToday = today?.caseId != null && caseSummary(today.caseId) !== undefined;
-    const note = !hasToday ? null : todayDone(stats, today) ? TC().streakSafe : current > 0 ? TC().streakKeep : TC().streakStart;
+    const note = stats.streak.activeToday ? TC().streakSafe : current > 0 ? TC().streakKeep : TC().streakStart;
     return [
       h(
         "p",

@@ -152,10 +152,14 @@ function kpiGrid(stats: UserStats, board: LeaderboardResponse | null): HTMLEleme
   const released = stats.cases.length;
   const inProgress = stats.cases.filter((c) => c.status === "in-progress").length;
   const completed = stats.cases.filter((c) => c.status === "completed");
-  const parDiff = completed.length > 0 ? completed.reduce((sum, c) => sum + c.score - c.maxScore, 0) : null;
+  // Score as a share of par on finished cases (#211): a signed "vs par" sum read as a loss almost always.
+  // Par is a target that bonuses can beat, so this can pass 100%.
+  const parOnCompleted = completed.reduce((sum, c) => sum + c.maxScore, 0);
+  const ofPar = parOnCompleted > 0 ? Math.round((100 * completed.reduce((sum, c) => sum + c.score, 0)) / parOnCompleted) : null;
   // Comparisons come from the live public board (a frozen board would compare against stale scores).
   const live = board !== null && !board.frozen ? board : null;
-  const classMedian = live !== null && live.entries.length >= 2 ? median(live.entries.map((e) => e.score)) : null;
+  // The median of the opt-in global board (#211), shown only to players on it, who are compared against their peers there.
+  const boardMedian = stats.onGlobalBoard && live !== null && live.entries.length >= 2 ? median(live.entries.map((e) => e.score)) : null;
   const ranked = live?.entries.length ?? null;
   // The rank is on the global board, which players join by choice (#175); class ranks are in the Classes section.
   const rankTile = !stats.onGlobalBoard
@@ -165,8 +169,8 @@ function kpiGrid(stats: UserStats, board: LeaderboardResponse | null): HTMLEleme
       : kpi(TB().kpiRank, ranked !== null ? TO().rankOfN(stats.rank, Math.max(ranked, stats.rank)) : TO().rankAlone(stats.rank), null, [TC().rankNote]);
   return statGrid([
     kpi(TO().kpiScore, formatNumber(stats.totalScore), TO().ptsUnit, [
-      classMedian !== null ? TO().vsMedian(stats.totalScore - classMedian, classMedian) : null,
-      parDiff !== null ? TO().vsPar(parDiff) : null,
+      boardMedian !== null ? TO().vsMedian(stats.totalScore - boardMedian, boardMedian) : null,
+      ofPar !== null ? TO().ofPar(ofPar) : null,
     ]),
     rankTile,
     kpi(TO().kpiCases, TO().casesOf(stats.casesCompleted, released), null, [inProgress > 0 ? TO().inProgress(inProgress) : null]),
