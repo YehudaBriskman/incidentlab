@@ -1,7 +1,6 @@
 import { QUESTION_ORDER, SCORING, type ProgressView, type QuestionId, type ScoreBreakdown, type StageProgress } from "../../shared/contract";
-import { canonicalAnswer, formatKind, matchesFormat, type FormatKind } from "../lib/answer-format";
 import type { Case, Question } from "../../shared/case";
-import { ApiError, getDebrief, getProgress, revealAnswer, revealHint, setupDone, submitAnswer } from "../lib/api";
+import { ApiError, getDebrief, getProgress, revealAnswer, revealHint, setupDone } from "../lib/api";
 import { recordVisit } from "../lib/recent";
 import { playErrorText, recoverFromWrite } from "../lib/errors";
 import { handleAuthLoss, onAuthLoss } from "../lib/auth-loss";
@@ -14,17 +13,18 @@ import { withApprovedAccount } from "./auth";
 import { renderInstructorPreview } from "./present";
 import { announce, copyButton, ensureAnnouncer, h, html, setChildren, type Child } from "../lib/dom";
 import { ICONS, type IconName } from "../shell/icons";
-import { confirm, tooltip } from "../lib/overlay";
+import { confirm } from "../lib/overlay";
+import { HEBREW, bidiProse, contentText } from "../lib/bidi";
+import { answerForm, clearAnswerDrafts } from "./answerForm";
 import "../player.css";
 import { md, mdInline } from "../lib/markdown";
 import { readingLayout } from "../components/readingLayout";
 import { formatElapsed } from "../lib/time";
-import { formatNumber, isRelabel, locale } from "../i18n/i18n";
+import { formatNumber, isRelabel } from "../i18n/i18n";
 import { commandCard, commandShellSwitch, isCleanSoFar, type CommandContext } from "./toolbox";
 import { T } from "../i18n/strings-player";
 import { TP } from "../i18n/strings-play";
 import { TS } from "../i18n/strings-shell";
-import { getLang } from "../i18n/i18n";
 import type { ViewResult } from "../shell/types";
 import { scrollContentTo } from "../shell/scroll";
 import { createCaseNav, type CaseNav } from "./caseNav";
@@ -39,9 +39,6 @@ type StepState = "locked" | "active" | "solved" | "revealed";
 type FocusTarget = { kind: "heading" } | { kind: "result" } | { kind: "hint"; index: number } | { kind: "command"; toolId: string };
 
 const timers = new Set<number>();
-const drafts = new Map<QuestionId, string>();
-/** Answer cooldown end (epoch ms) per "caseId:questionId": survives redraws (hint, reveal, language). */
-const cooldowns = new Map<string, number>();
 /** The stage last shown, so a language switch (which re-renders the route) keeps the player where they were. */
 let lastView: { caseId: string; stage: StageKey } | null = null;
 
@@ -253,7 +250,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
       : confirm({ title: T().switchTitle, body: T().switchBody, confirmLabel: T().switchConfirm });
     void asked.then((ok) => {
       if (!ok) return;
-      drafts.clear();
+      clearAnswerDrafts();
       void signOut()
         .catch(() => undefined)
         .finally(() => {
@@ -537,62 +534,10 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
   );
 }
 
-/* ---------- answer formats: client-side format check (free) before a guess that costs points ---------- */
-
-/** The placeholder shows the format's shape, never a realistic value that reads as a prefilled answer. */
-function formatPlaceholder(kind: FormatKind): string | null {
-  const t = TP();
-  const map: Record<FormatKind, string | null> = {
-    time: t.phTime,
-    integer: t.phInteger,
-    ipv4: t.phIpv4,
-    sha: t.phSha,
-    version: t.phVersion,
-    change: t.phChange,
-    order: t.phOrder,
-    accessKey: t.phAccessKey,
-    other: null,
-  };
-  return map[kind];
-}
-
-function formatInputMode(kind: FormatKind): string {
-  if (kind === "integer") return "numeric";
-  if (kind === "ipv4" || kind === "version") return "decimal";
-  return "text";
-}
-
-/* ---------- Hebrew UI: English-only content keeps its own direction ---------- */
-
-const HEBREW = /[֐-׿]/;
-
-/**
- * Case content is partly translated. In the Hebrew UI every prose block gets dir="auto" (its first strong
- * character decides), and blocks with no Hebrew at all get lang="en", so English punctuation stays at the
- * end of the line and screen readers switch voice.
- */
-function bidiProse<E extends HTMLElement>(el: E): E {
-  if (getLang() !== "he") return el;
-  const blocks: HTMLElement[] = el.matches("p, li, h1, h2, h3, h4, td, th, blockquote, dd, dt") ? [el] : [];
-  blocks.push(...el.querySelectorAll<HTMLElement>("p, li, h1, h2, h3, h4, td, th, blockquote, dd, dt"));
-  for (const block of blocks) {
-    block.setAttribute("dir", "auto");
-    if (!HEBREW.test(block.textContent ?? "")) block.setAttribute("lang", "en");
-  }
-  if (!HEBREW.test(el.textContent ?? "")) {
-    el.setAttribute("lang", "en");
-    el.setAttribute("dir", "auto");
-  }
-  return el;
-}
-
 /** Trusted build-time markdown, with the Hebrew-UI direction fix applied. */
 const prose = (cls: string, markdown: string): HTMLElement => bidiProse(html("div", { class: cls }, md(markdown)));
 const inlineMd = <K extends keyof HTMLElementTagNameMap>(tag: K, markdown: string): HTMLElementTagNameMap[K] =>
   bidiProse(html(tag, {}, mdInline(markdown)));
-/** Plain content text (stage names, goals) that may be English inside the Hebrew UI. */
-const contentText = <K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string>, text: string): HTMLElementTagNameMap[K] =>
-  h(tag, { ...attrs, dir: getLang() === "he" ? "auto" : null, lang: getLang() === "he" && !HEBREW.test(text) ? "en" : null }, text);
 
 /* ================= Question stages ================= */
 
@@ -685,146 +630,22 @@ function renderQuestionStage(
   /* active stage */
   const cleanOpen = isCleanSoFar(s);
   const completionOpen = QUESTION_ORDER.every((qid) => player.stages[qid]?.status !== "revealed");
-  const kind = formatKind(q.answerFormat);
-  const inputId = `answer-${id}`;
-  const input = h("input", {
-    id: inputId,
-    class: "input input-lg mono",
-    type: "text",
-    dir: "ltr",
-    autocomplete: "off",
-    autocapitalize: "off",
-    autocorrect: "off",
-    spellcheck: "false",
-    enterkeyhint: "go",
-    inputmode: formatInputMode(kind),
-    maxlength: "200",
-    placeholder: formatPlaceholder(kind),
-    "aria-describedby": `fmt-${id} feedback-${id}`,
+  const meterRef: { current: ReturnType<typeof stageMeter> | null } = { current: null };
+  const af = answerForm({
+    caseId: c.id,
+    questionId: id,
+    question: q,
+    stage: s,
+    index,
+    cleanOpen,
+    withBar: true,
+    onSolved: (next) => onAnswer(next, true),
+    onWrong: (next) => meterRef.current?.refresh(next),
+    onServerProgress: (server) => update(server, id),
   });
-  input.value = drafts.get(id) ?? "";
-  const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg answer-submit" }, TP().checkAnswer);
-  const feedback = h("p", { id: `feedback-${id}`, class: "feedback", role: "status" });
-  if (s.wrongAttempts > 0) feedback.textContent = TG().wrongSoFarCost(s.wrongAttempts, wrongPenalty(s.wrongAttempts));
-  const setInvalid = (message: string): void => {
-    input.setAttribute("aria-invalid", "true");
-    feedback.className = "feedback is-wrong";
-    feedback.textContent = message;
-  };
-  input.addEventListener("input", () => {
-    drafts.set(id, input.value);
-    if (input.getAttribute("aria-invalid") === "true") input.removeAttribute("aria-invalid");
-  });
-
-  // Rate-limit cooldown. The end time lives in `cooldowns`, so a redraw (hint, reveal, language) keeps
-  // Submit disabled. The live region gets one message with an absolute time; the ticking countdown is on
-  // the (non-live) button only, so screen readers aren't told the time every second.
-  const cooldownKey = `${c.id}:${id}`;
-  let cooldown: number | null = null;
-  let busy = false;
-  const startCooldown = (until: number): void => {
-    cooldowns.set(cooldownKey, until);
-    submit.disabled = true;
-    const at = new Intl.DateTimeFormat(locale(), { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(until));
-    feedback.className = "feedback is-wrong";
-    if (feedback.textContent !== T().tooManyUntil(at)) feedback.textContent = T().tooManyUntil(at);
-    const show = (): boolean => {
-      const left = Math.ceil((until - Date.now()) / 1000);
-      if (left > 0) {
-        submit.textContent = T().waitBtn(formatElapsed(left * 1000));
-        return true;
-      }
-      if (cooldown !== null) window.clearInterval(cooldown);
-      cooldowns.delete(cooldownKey);
-      submit.disabled = false;
-      submit.textContent = TP().checkAnswer;
-      feedback.className = "feedback";
-      feedback.textContent = T().canTryAgain;
-      return false;
-    };
-    if (cooldown !== null) window.clearInterval(cooldown);
-    if (show()) cooldown = every(1000, show);
-  };
-  const pendingCooldown = cooldowns.get(cooldownKey);
-  if (pendingCooldown !== undefined) {
-    if (pendingCooldown > Date.now()) startCooldown(pendingCooldown);
-    else cooldowns.delete(cooldownKey);
-  }
-
-  // Scoring fine print: read by screen readers in place, shown to sighted players on the ⓘ beside the format.
-  const costText = TP().costNote(SCORING.WRONG_COST, SCORING.WRONG_CAP, SCORING.CLEAN_BONUS, cleanOpen);
-  const costNote = h("p", { class: "visually-hidden cost-note" }, costText);
-  const costInfo = h("button", { type: "button", class: "info-dot", "aria-label": costText }, "i");
-  tooltip(costInfo, costText);
-  const form = h(
-    "form",
-    { class: "answer-form", id: `form-${id}`, novalidate: true },
-    h("label", { class: "answer-label", for: inputId }, T().yourAnswer),
-    h("p", { id: `fmt-${id}`, class: "muted small answer-format-line" }, T().format, contentText("bdi", { class: "answer-format" }, q.answerFormat), costInfo),
-    h("div", { class: "answer-row" }, input, submit),
-    feedback,
-    costNote,
-  );
-  const bar = answerBar(index, form, input, submit, feedback);
-  form.addEventListener("submit", (ev) => {
-    ev.preventDefault();
-    if (busy || submit.disabled) return;
-    // Sent from the phone's sticky bar: errors keep focus there instead of scrolling to the field.
-    const field = bar.el.contains(document.activeElement) ? bar.input : input;
-    const answer = canonicalAnswer(q.answerFormat, input.value);
-    if (answer.length === 0) {
-      setInvalid(T().typeFirst);
-      field.focus();
-      return;
-    }
-    if (!matchesFormat(q.answerFormat, answer)) {
-      setInvalid(TP().formatMismatch(q.answerFormat));
-      field.focus();
-      return;
-    }
-    busy = true;
-    submit.setAttribute("aria-disabled", "true");
-    submit.textContent = TP().checking;
-    const done = (): void => {
-      busy = false;
-      submit.removeAttribute("aria-disabled");
-      if (!cooldowns.has(cooldownKey)) submit.textContent = TP().checkAnswer;
-    };
-    submitAnswer(c.id, id, answer)
-      .then(({ correct, progress: next }) => {
-        if (correct) {
-          drafts.delete(id);
-          announce(TP().solvedAnnounce(next.stages[id]?.points ?? 0));
-          onAnswer(next, true);
-          return;
-        }
-        done();
-        const attempts = next.stages[id]?.wrongAttempts ?? 0;
-        setInvalid(
-          SCORING.WRONG_COST * attempts <= SCORING.WRONG_CAP
-            ? TP().wrongValue(attempts, SCORING.WRONG_COST)
-            : TP().wrongValueCapped(attempts, SCORING.WRONG_CAP),
-        );
-        meter.refresh(next.stages[id] ?? s);
-        form.classList.remove("shake");
-        void form.offsetWidth;
-        form.classList.add("shake");
-        field.select();
-      })
-      .catch((err: unknown) => {
-        done();
-        if (handleAuthLoss(err)) return; // the draft is kept: the stage re-renders with it after the gate
-        // Stale or unconfirmed (#202, #203): show what the server has; the draft stays for the player to resend.
-        const server = recoverFromWrite(err);
-        if (server !== null) return update(server, id);
-        if (err instanceof ApiError && err.isRateLimited) {
-          startCooldown(Date.now() + (err.retryAfterSeconds ?? 60) * 1000);
-          return;
-        }
-        feedback.className = "feedback is-wrong";
-        feedback.textContent = errorMessage(err);
-      });
-  });
+  cleanups.add(af.dispose);
+  const form = af.form;
+  const bar = af.bar;
 
   /* useful commands */
   const toolIds = stage?.tools ?? [];
@@ -911,6 +732,7 @@ function renderQuestionStage(
   });
 
   const meter = stageMeter(c, q, s);
+  meterRef.current = meter;
   every(1000, () => meter.tick());
 
   return h(
@@ -950,96 +772,8 @@ function renderQuestionStage(
       hintError,
     ),
     h("div", { class: "reveal" }, reveal, revealError),
-    bar.el,
+    bar?.el ?? null,
   );
-}
-
-/* ---------- phones (#132): the sticky answer bar ---------- */
-
-type AnswerBar = { readonly el: HTMLFormElement; readonly input: HTMLInputElement };
-
-/**
- * A sticky `[input][Check]` bar at the bottom of the stage, shown on phones while the real answer field is off
- * screen (an IntersectionObserver on the form). It is a second way into the same form: typing fills the same
- * draft, Check submits the real form, and the form's feedback and button state are copied in. The copy is
- * aria-hidden, because the form's own status region already announces them. Hidden with `visibility`, so it
- * keeps its place and showing it never shifts the page; CSS removes it above 640px.
- */
-function answerBar(index: number, form: HTMLFormElement, input: HTMLInputElement, submit: HTMLButtonElement, feedback: HTMLElement): AnswerBar {
-  const barInput = h("input", {
-    class: "input mono answer-bar-input",
-    type: "text",
-    dir: "ltr",
-    autocomplete: "off",
-    autocapitalize: "off",
-    autocorrect: "off",
-    spellcheck: "false",
-    enterkeyhint: "go",
-    inputmode: input.inputMode || "text",
-    maxlength: "200",
-    placeholder: input.placeholder || null,
-    "aria-label": TP().answerBarInput(index),
-  });
-  barInput.value = input.value;
-  const barSubmit = h("button", { type: "submit", class: "btn btn-primary answer-bar-submit" }, TP().answerBarCheck);
-  const note = h("p", { class: "answer-bar-note", "aria-hidden": "true" });
-  const el = h(
-    "form",
-    { class: "answer-bar", "aria-label": TP().answerBarLabel, novalidate: true, "data-shown": "false" },
-    h("div", { class: "answer-bar-row" }, barInput, barSubmit),
-    note,
-  );
-
-  barInput.addEventListener("input", () => {
-    input.value = barInput.value;
-    input.dispatchEvent(new Event("input")); // the real field's listener keeps the draft and clears the error mark
-  });
-  input.addEventListener("input", () => {
-    if (barInput.value !== input.value) barInput.value = input.value;
-  });
-  el.addEventListener("submit", (ev) => {
-    ev.preventDefault();
-    input.value = barInput.value;
-    form.requestSubmit();
-  });
-
-  // Mirror the form's state: feedback text and tone, the error mark, the button's label and disabled state.
-  const mirror = (): void => {
-    note.textContent = feedback.textContent ?? "";
-    note.classList.toggle("is-wrong", feedback.classList.contains("is-wrong"));
-    if (input.getAttribute("aria-invalid") === "true") barInput.setAttribute("aria-invalid", "true");
-    else barInput.removeAttribute("aria-invalid");
-    barSubmit.disabled = submit.disabled;
-    if (submit.getAttribute("aria-disabled") === "true") barSubmit.setAttribute("aria-disabled", "true");
-    else barSubmit.removeAttribute("aria-disabled");
-    const label = submit.textContent ?? "";
-    barSubmit.textContent = label === TP().checkAnswer ? TP().answerBarCheck : label;
-  };
-  const watcher = new MutationObserver(mirror);
-  for (const target of [feedback, submit, input]) watcher.observe(target, { childList: true, characterData: true, subtree: true, attributes: true });
-  mirror();
-  cleanups.add(() => watcher.disconnect());
-
-  // Shown while the real field is off screen; never hidden under the player's fingers (focus inside the bar).
-  let formOnScreen = true;
-  const sync = (): void => {
-    const show = !formOnScreen || el.contains(document.activeElement);
-    el.dataset.shown = String(show);
-    el.inert = !show;
-  };
-  el.addEventListener("focusout", () => window.requestAnimationFrame(sync));
-  if (typeof IntersectionObserver === "function") {
-    const io = new IntersectionObserver((entries) => {
-      const entry = entries[entries.length - 1];
-      if (entry === undefined) return;
-      formOnScreen = entry.isIntersecting;
-      sync();
-    });
-    io.observe(form);
-    cleanups.add(() => io.disconnect());
-  }
-  sync();
-  return { el, input: barInput };
 }
 
 /* ================= Debrief ================= */
