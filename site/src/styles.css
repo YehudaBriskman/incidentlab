@@ -1829,7 +1829,17 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
 @media (max-width: 600px) {
   .dt-wrap:has(.dt-stack) { border: 0; overflow: visible; }
   .dt-stack, .dt-stack tbody { display: block; }
-  .dt-stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  /* The header row becomes a visible bar of sort buttons (#246): clipped to 1px it left invisible tab stops.
+     Header cells with no control stay for screen readers only; the cards label each value themselves. */
+  .dt-wrap .dt-stack.data-table > thead { display: block; margin-block-end: var(--space-3); }
+  .dt-wrap .dt-stack.data-table > thead tr { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: 0; margin: 0; border: 0; border-radius: 0; background: none; }
+  .dt-wrap .dt-stack.data-table > thead th { position: static; display: block; block-size: auto; padding: 0; border: 0; background: none; box-shadow: none; font-size: var(--type-small-size); font-weight: 500; }
+  .dt-wrap .dt-stack.data-table > thead th:not(:has(button, input)) { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .dt-wrap .dt-stack.data-table > thead .dt-sort { min-block-size: var(--target-min); padding-inline: var(--space-3); border-radius: var(--radius-full); background: var(--level-2); box-shadow: var(--elev-1); color: var(--text-2); }
+  .dt-wrap .dt-stack.data-table > thead th[aria-sort="ascending"] .dt-sort, .dt-wrap .dt-stack.data-table > thead th[aria-sort="descending"] .dt-sort { background: var(--accent-soft); color: var(--accent-strong); }
+  .dt-wrap .dt-stack.data-table > thead .dt-select { display: inline-flex; align-items: center; min-block-size: var(--target-min); }
+  /* home has its own Sort select above the cards: no second sort bar */
+  .home-table .dt-stack thead { display: none; }
   .dt-stack tr { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-1) var(--space-3); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
   .dt-stack th, .dt-stack td { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0; border: 0; text-align: start; white-space: normal; }
   .dt-stack th[scope=row] { grid-column: 1 / -1; font-size: var(--step-0); font-weight: 700; }

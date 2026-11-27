@@ -16,6 +16,7 @@ import { mountNav } from "./shell/nav";
 import { mountTopbar } from "./shell/topbar";
 import { initFrame, reserveAside, resetContentScroll, showPage } from "./shell/frame";
 import { applySettings, loadSettings } from "./shell/settings";
+import { focusRoute } from "./shell/routeFocus";
 
 applySettings(loadSettings()); // settings-boot.js already did this before first paint; resync in case it failed
 applyLang();
@@ -59,9 +60,12 @@ function mount(view: ViewResult): void {
     const old = only instanceof HTMLElement && only.classList.contains("view") ? only : appRoot;
     view.main.append(...old.childNodes);
   }
+  const relabel = isRelabel();
   setChildren(appRoot, view.main);
   showPage(view);
   view.start?.();
+  // A new page takes focus on its h1 (#246); a language switch or same-page redraw keeps focus where it is.
+  focusRoute(appRoot.closest("main") ?? appRoot, relabel);
 }
 
 /** Adapter for the views still written as `render(root)`: they draw into a layout-neutral wrapper, full width. */
