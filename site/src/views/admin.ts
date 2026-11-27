@@ -34,7 +34,7 @@ import { clickClosedDrawer, navSubLink, refreshNav, showSubNav } from "../shell/
 import { setPageCrumb } from "../shell/topbar";
 import { scrollerOf } from "../shell/scroll";
 import type { NavSection, ViewResult } from "../shell/types";
-import { banner, closeMenu, confirm, menu, openDialog, showDialog, toast, tooltip, type ConfirmOptions, type DialogHandle, type MenuItem } from "../lib/overlay";
+import { banner, closeMenu, openDialog, showDialog, toast, tooltip, type DialogHandle, type MenuItem } from "../lib/overlay";
 import {
   AdminApiError,
   approveAll,
@@ -118,6 +118,7 @@ import {
   type LiveSortKey,
 } from "./manage/progressMetrics";
 import { headWithHint, th, tile, tipped } from "./manage/ui";
+import { NARROW_QUERY, createManageHost, setTilesSummary, syncSortSelect } from "./manage/host";
 
 const POLL_MS = 5000;
 /** The dashboard poll refetches /api/today at most this often (see load()). */
@@ -127,9 +128,6 @@ const BOARD_ROWS = 10;
 const MAX_BACKOFF_MS = 60000;
 const DENSITY_STORAGE = "il.adminDensity";
 const ACCT_COLS_STORAGE = "il.adminAcctCols";
-const TILES_STORAGE = "il.adminTilesOpen";
-/** Below this width Live and Accounts render as cards and the header chrome compacts (phones and tablets). */
-const NARROW_QUERY = "(max-width: 900px)";
 const TAB_STORAGE = "il.adminTab";
 const DEFAULT_TIMEZONE = "Asia/Jerusalem";
 
@@ -436,8 +434,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     liveDensity: (readPref(DENSITY_STORAGE) === "compact" ? "compact" : "comfortable") as "compact" | "comfortable",
     /** phone/tablet layout (cards instead of grids, compact chrome) */
     narrow: window.matchMedia(NARROW_QUERY).matches,
-    /** the KPI tiles on phones/tablets: collapsed to a one-line summary unless opened (remembered) */
-    tilesOpen: readPref(TILES_STORAGE) === "1",
     /** pending sign-ups ticked for a bulk approve/reject */
     pendingSelected: new Set<string>(),
     // accounts tab
@@ -486,6 +482,21 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     },
     audit: null as AuditEntry[] | null,
   };
+
+  // The services every manage panel gets (views/manage/host.ts): the root, the poll, errors, confirms and menus.
+  const host = createManageHost({
+    container,
+    disposed: () => disposed,
+    narrow: () => state.narrow,
+    refresh: () => void load(),
+    handleAuthError: (err) => handleAuthError(err),
+    setBanner: (text) => {
+      state.banner = text;
+      renderBanner();
+    },
+    syncSaveBar: () => syncSaveBarClass(),
+  });
+  const { askConfirm, menuButton, menuTriggerEl, foldableTiles, showActionError, withFocusKept } = host;
 
   const stopTimers = (): void => {
     if (pollId !== null) window.clearTimeout(pollId);
@@ -714,12 +725,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       return true;
     }
     return false;
-  }
-
-  function showActionError(err: unknown): void {
-    if (handleAuthError(err)) return;
-    state.banner = T().admActionFailed(errMessage(err));
-    renderBanner();
   }
 
   // ---- shell: header, tabs, banner (built once; tab regions re-rendered) ------------------
@@ -958,20 +963,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     statusBanner.show();
   }
 
-  // ---- confirms and row menus (lib/overlay.ts) ---------------------------------------------
-  // The title names the target and the action, the button repeats it ("Delete dana_k"), focus starts on the
-  // safe choice, and only destructive actions are red. An action that fails closes the dialog and shows the
-  // banner.
-
-  function askConfirm(opts: Omit<ConfirmOptions, "tone"> & { tone: "danger" | "primary" }): Promise<boolean> {
-    return confirm({ ...opts, tone: opts.tone === "danger" ? "danger" : "default", cancelLabel: opts.cancelLabel ?? T().admCancel }).catch(
-      (err: unknown) => {
-        showActionError(err);
-        return false;
-      },
-    );
-  }
-
   /** Unsaved schedule or event edits: ask before they are dropped. Resolves true to discard and go on. */
   function confirmLeave(what: string): Promise<boolean> {
     return askConfirm({
@@ -981,53 +972,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       cancelLabel: T().admLeaveStay,
       tone: "danger",
     });
-  }
-
-  const menuTriggerEl = (key: string): HTMLElement | null => container.querySelector<HTMLElement>(`[data-menu="${CSS.escape(key)}"]`);
-
-  /** The "⋯" button that opens a row's actions menu; `key` finds it again after a re-render (focus return). */
-  function menuButton(label: string, key: string, items: () => readonly MenuItem[], text?: string): HTMLButtonElement {
-    const btn = h(
-      "button",
-      {
-        type: "button",
-        class: `btn btn-ghost btn-sm row-menu-btn${text ? "" : " is-icon"}`,
-        "aria-label": label,
-        title: label,
-        "data-menu": key,
-      },
-      text ? h("span", {}, text) : null,
-      h("span", { class: "row-menu-dots", "aria-hidden": "true" }, "⋯"),
-    );
-    menu(btn, items, { label });
-    return btn;
-  }
-
-  // ---- KPI tiles that fold into a one-line summary on phones/tablets (the header chrome before content shrinks) ----
-
-  type FoldTiles = HTMLElement & { _summary?: HTMLElement };
-  function foldableTiles(tilesEl: HTMLElement): FoldTiles {
-    const summary = h("span", { class: "tiles-summary" });
-    const toggle = h(
-      "button",
-      { type: "button", class: "tiles-toggle", "aria-expanded": String(state.tilesOpen), "aria-controls": tilesEl.id },
-      h("span", { class: "acct-caret", "aria-hidden": "true" }, "▸"),
-      summary,
-    );
-    const wrap: FoldTiles = h("div", { class: `tiles-fold${state.tilesOpen ? "" : " is-folded"}` }, toggle, tilesEl);
-    wrap._summary = summary;
-    toggle.addEventListener("click", () => {
-      state.tilesOpen = !state.tilesOpen;
-      writePref(TILES_STORAGE, state.tilesOpen ? "1" : "0");
-      for (const w of container.querySelectorAll<HTMLElement>(".tiles-fold")) {
-        w.classList.toggle("is-folded", !state.tilesOpen);
-        w.querySelector(".tiles-toggle")?.setAttribute("aria-expanded", String(state.tilesOpen));
-      }
-    });
-    return wrap;
-  }
-  function setTilesSummary(wrap: FoldTiles, text: string): void {
-    if (wrap._summary) wrap._summary.textContent = text;
   }
 
   // =====================================================================================
@@ -1229,11 +1173,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     onSortChange: (s) => syncSortSelect(acctSortSelect, ACCT_SORTS, s),
   });
 
-  /** Shows the select option that matches a header sort, or "by column" for any other column. */
-  function syncSortSelect<K extends string>(select: HTMLSelectElement, sorts: Record<K, SortState>, s: SortState | null): void {
-    const match = (Object.keys(sorts) as K[]).find((k) => s !== null && sorts[k].id === s.id && sorts[k].dir === s.dir);
-    select.value = match ?? "custom";
-  }
   // ---- CSV export ----
   const exportBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm", title: T().admExportHint }, T().admExportCsv);
   exportBtn.addEventListener("click", () => void exportCsv());
@@ -2889,14 +2828,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       " ",
       today.caseId ? caseTitle(today.caseId) : h("span", { class: "muted" }, T().admNoCaseToday),
     );
-  }
-
-  /** Re-render while keeping keyboard focus on the same control (selects are rebuilt). */
-  function withFocusKept(render: () => void): void {
-    const active = document.activeElement;
-    const id = active instanceof HTMLElement && container.contains(active) ? active.id : "";
-    render();
-    if (id) document.getElementById(id)?.focus();
   }
 
   function updateDraft(mutate: (d: Schedule) => void): void {
