@@ -21,7 +21,7 @@ plan allows 125,000 function calls a month.
 
 | Route | `Netlify-CDN-Cache-Control` | Tag | Purged by |
 |---|---|---|---|
-| `/api/event` | `public, durable, max-age=10, stale-while-revalidate=20` | `event` | `PUT /api/admin/event` |
+| `/api/event` | `public, durable, max-age=10, stale-while-revalidate=20` while the event runs or starts or ends within 15 minutes; otherwise `max-age=300, stale-while-revalidate=600` (#242, `eventCacheWindow`) | `event` | `PUT /api/admin/event` |
 | `/api/leaderboard` | `public, durable, max-age=10, stale-while-revalidate=20` | `leaderboard` | `PUT /api/admin/event` (freeze), `PUT /api/me/board` (a player opts in or out) |
 | `/api/today` | `max-age` and `stale-while-revalidate` up to 60 s each, capped at the seconds left until midnight in the schedule's time zone | `today` | `PUT /api/admin/schedule` |
 | `/api/cases`, `/api/cases/:caseId/content` (#243) | `public, durable, max-age=3600, stale-while-revalidate=86400` | `catalog`, `case:<caseId>` | publish, rollback, approve, delete, restore (below) |
@@ -34,7 +34,7 @@ plan allows 125,000 function calls a month.
 - Changes nobody purges (answers moving the leaderboard or a class board, a case being published) show within
   10 s for the boards and 60 s for today. Solves never purge: a purge per correct answer would add an API call per
   solve on a class night, while the 10 s window already bounds how stale a board can be.
-- **Clock:** a cached `serverTime` can be up to about 30 s old. The client (`src/lib/clock.ts`) takes the server
+- **Clock:** a cached `serverTime` can be up to about 15 minutes old (30 s near an event). The client (`src/lib/clock.ts`) takes the server
   clock from responses the origin answered: their `Date` header, or `/api/event`'s `serverTime` when its
   `Cache-Status` is not a hit. A cached `/api/event` counts only when its `Age` header is present.
 - **Event poll:** the client (`src/lib/event.ts`) polls `/api/event` every 30 s while an event is running or

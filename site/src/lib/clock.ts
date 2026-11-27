@@ -1,7 +1,7 @@
 // Pure helpers for the server clock and the event poll (no DOM, no imports: unit-tested in node).
 //
 // Countdowns run on the server's clock. Since the public GETs are CDN-cached (server publicJson), a response
-// may be up to ~30 s old, so its body time can't be trusted blindly:
+// may be up to ~15 minutes old (/api/event with no event near, #242), so its body time can't be trusted blindly:
 // - a response that came from the origin (not a cache hit) is exact;
 // - a cache hit with an `Age` header is exact to about a second (its time + Age);
 // - a cache hit without `Age` says nothing about "now", so it is ignored.
