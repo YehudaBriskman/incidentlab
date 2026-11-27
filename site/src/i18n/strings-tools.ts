@@ -3,7 +3,7 @@ import { defineStrings } from "./i18n";
 
 export const T = defineStrings({
   en: {
-    exDocTitle: "Evidence explorer · IncidentLab",
+    exDocTitle: (title: string): string => `Evidence · ${title} · IncidentLab`,
     exTitle: "Evidence explorer",
     exBack: "← Back to case",
     exTagline: "grep, uniq and friends — in your browser",
@@ -746,7 +746,7 @@ export const T = defineStrings({
     admAuditNoMatch: "No log entries match.",
   },
   he: {
-    exDocTitle: "סייר הראיות · IncidentLab",
+    exDocTitle: (title: string): string => `ראיות · ${title} · IncidentLab`,
     exTitle: "סייר הראיות",
     exBack: "→ חזרה לתיק",
     exTagline: "grep, uniq וחברים — ישר בדפדפן",

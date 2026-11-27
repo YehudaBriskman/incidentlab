@@ -87,7 +87,7 @@ function notFound(message: string): void {
       h(
         "div",
         { class: "row-center" },
-        h("a", { class: "btn btn-primary", href: "#/" }, T().backToCases),
+        h("a", { class: "btn btn-primary", href: "#/cases" }, T().backToCases),
         h("a", { class: "btn btn-ghost", href: "#/leaderboard" }, TO().toLeaderboard),
       ),
     ),
@@ -151,7 +151,7 @@ function loadFailed(err: unknown): void {
         "div",
         { class: "row-center" },
         h("button", { type: "button", class: "btn btn-primary", onclick: retry }, needsReload ? TE().reloadPage : T().tryAgain),
-        h("a", { class: "btn btn-ghost", href: "#/" }, T().backToCases),
+        h("a", { class: "btn btn-ghost", href: "#/cases" }, T().backToCases),
       ),
     ),
   );

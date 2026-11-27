@@ -19,7 +19,6 @@ import { formatNumber, getLang } from "../i18n/i18n";
 import { TB } from "../i18n/strings-board";
 import { TG } from "../i18n/strings-game";
 import { TO } from "../i18n/strings-onboard";
-import { T } from "../i18n/strings-player";
 
 type LeaderboardEntry = LeaderboardResponse["entries"][number];
 
@@ -359,7 +358,9 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams, opt
   };
 
   if (board !== null) syncClassOptions();
-  const backLink = board !== null ? h("a", { class: "back-link", href: "#/classes" }, TC().navClasses) : h("a", { class: "back-link", href: "#/" }, T().navCases);
+  // A class board sits under Classes, so it links back there; the global board is a top-level page (#222: no
+  // "← Cases" that went home).
+  const backLink = board !== null ? h("a", { class: "back-link", href: "#/classes" }, TC().navClasses) : null;
   setChildren(
     root,
     h(

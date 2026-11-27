@@ -65,7 +65,8 @@ function crumbsFor(parts: readonly string[]): Crumb[] {
       return pageCrumb === null ? [homeCrumb, classesCrumb, name, manage] : [homeCrumb, classesCrumb, name, manage, { label: pageCrumb }];
     }
   }
-  if (section === "login" || section === "signup") return [homeCrumb, { label: TS().crumbSignIn }];
+  if (section === "login") return [homeCrumb, { label: TS().crumbSignIn }];
+  if (section === "signup") return [homeCrumb, { label: TS().crumbSignUp }];
   // #221: the review queue sits inside the platform console
   if (section === "admin" && id === "reviews") return [homeCrumb, { label: TS().navConsole, href: "#/admin" }, { label: TS().crumbReviews }];
   const labels: Partial<Record<string, string>> = {
@@ -91,8 +92,14 @@ function createCrumbs(): HTMLElement {
       list,
       crumbs.map((c, i) => {
         const last = i === crumbs.length - 1;
-        const text = c.bdi === true ? h("bdi", {}, c.label) : c.label;
-        const inner = last || c.href === undefined ? h("span", { class: "crumb-current", "aria-current": last ? "page" : null }, text) : h("a", { class: "crumb-link", href: c.href }, text);
+        // A name someone else wrote (a case title, a class name) gets its own direction on the crumb element itself,
+        // not a <bdi> inside it: the crumb is what clips, so its ellipsis then falls at the end of that text (an
+        // English title in the Hebrew UI loses its tail, not its start).
+        const dir = c.bdi === true ? "auto" : null;
+        const inner =
+          last || c.href === undefined
+            ? h("span", { class: "crumb-current", dir, "aria-current": last ? "page" : null }, c.label)
+            : h("a", { class: "crumb-link", dir, href: c.href }, c.label);
         return h("li", { class: `crumb${last ? " is-last" : ""}` }, inner);
       }),
     );

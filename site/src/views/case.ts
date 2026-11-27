@@ -351,7 +351,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
       h(
         "div",
         { class: "case-head-top" },
-        h("a", { class: "back-link", href: "#/" }, T().navCases),
+        h("a", { class: "back-link", href: "#/cases" }, T().navCases),
         h(
           "span",
           { class: "player-tag" },
@@ -1144,7 +1144,7 @@ function renderDebrief(c: Case, player: ProgressView): HTMLElement {
       "div",
       { class: "row-actions debrief-next" },
       h("a", { class: "btn btn-primary", href: "#/leaderboard" }, TG().homeLeaderboard),
-      h("a", { class: "btn", href: "#/" }, T().backToCases),
+      h("a", { class: "btn", href: "#/cases" }, T().backToCases),
     ),
     reading.element,
   );

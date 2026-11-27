@@ -302,9 +302,12 @@ function renderJoin(root: HTMLElement, code: string): void {
   watchAccount();
   document.title = `${TC().joinPageTitle} · IncidentLab`;
   const body = h("div", { class: "classes-body is-narrow" }, h("p", { class: "muted" }, TC().joining));
-  setChildren(root, pageHeader({ title: TC().joinPageTitle, meta: h("span", { class: "mono", dir: "ltr" }, code), id: "join-title" }), body);
+  const header = pageHeader({ title: TC().joinPageTitle, meta: h("span", { class: "mono", dir: "ltr" }, code), id: "join-title" });
+  setChildren(root, header, body);
   void loadAccount().then(
     (account) => {
+      // Signed out, the gate's form brings its own h1 ("Sign in to join…", with the code prefilled): one h1 (#222).
+      if (account === null) header.remove();
       if (account !== null && isGuest(account)) return setChildren(body, guestCard());
       // Signed out: the gate's sign-in form, then the join runs as soon as the account is ready.
       withApprovedAccount(
@@ -312,6 +315,7 @@ function renderJoin(root: HTMLElement, code: string): void {
         TC().joinPageTitle,
         () => {
           // A join that already went through is a no-op on the server (a language switch re-runs it).
+          if (!header.isConnected) root.prepend(header); // signed in from the gate: the page's h1 is back
           setChildren(body, h("p", { class: "muted" }, TC().joining));
           void attemptJoin(code).then((card) => {
             setChildren(body, card);

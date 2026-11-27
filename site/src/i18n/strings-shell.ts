@@ -127,6 +127,9 @@ export const TS = defineStrings({
     navConsole: "Platform console",
     crumbReviews: "Reviews",
 
+    // breadcrumb leaves (#222)
+    crumbSignUp: "Create account",
+
     // filterButton() (components/filterPopover.ts)
     filterButton: "Filter",
     filterButtonCount: (n: number): string => `Filter, ${n} active`,
@@ -241,6 +244,8 @@ export const TS = defineStrings({
 
     navConsole: "קונסולת הפלטפורמה",
     crumbReviews: "סקירות",
+
+    crumbSignUp: "פתיחת חשבון",
 
     filterButton: "סינון",
     filterButtonCount: (n: number): string => `סינון, ${n} פעילים`,

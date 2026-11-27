@@ -202,7 +202,6 @@ function draw(root: HTMLElement, account: AccountView, stats: UserStats, board: 
     h(
       "section",
       { class: "stats-page" },
-      h("a", { class: "back-link", href: "#/" }, T().navCases),
       h("h1", {}, TA().statsTitle),
       withTip(h("p", { class: "page-meta" }, h("strong", {}, h("bdi", {}, stats.username)), " · ", TA().memberSince(since)), TO().statsSub),
       account.kind === "guest" ? upgradeCard() : null,
