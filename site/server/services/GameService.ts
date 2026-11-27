@@ -116,12 +116,18 @@ export class GameService {
       }
     }
 
+    const normalized = normalizeAnswer(input.answer);
     const outcome = await this.mutate(ctx, (record) => {
       // Idempotent: a double-submitted correct answer must not re-score or error.
       if (this.stage(record, questionId).status === "solved") {
         return { result: { correct: true, progress: this.toView(record, ctx) }, changed: false };
       }
-      const stage = this.requireActive(record, questionId);
+      const stage = this.requireActive(record, ctx, questionId);
+      // Idempotent too (#202): the same wrong answer again (a retried request, a double submit) is not counted
+      // twice, and doesn't use up the rate limit. It answers exactly as the first one did.
+      if (!isCorrect && record.lastWrongAnswers[questionId] === normalized) {
+        return { result: { correct: false, progress: this.toView(record, ctx) }, changed: false };
+      }
       const nowMs = this.now().getTime();
       const recent = (record.wrongAnswerTimestamps[questionId] ?? []).filter((t) => nowMs - t < WRONG_ANSWER_WINDOW_MS);
       const oldest = recent[0];
@@ -147,6 +153,7 @@ export class GameService {
       } else {
         record.stages[questionId] = { ...stage, wrongAttempts: stage.wrongAttempts + 1 };
         record.wrongAnswerTimestamps[questionId] = [...recent, nowMs];
+        record.lastWrongAnswers[questionId] = normalized;
       }
       return { result: { correct: isCorrect, progress: this.toView(record, ctx) }, changed: true };
     });
@@ -155,19 +162,34 @@ export class GameService {
     return outcome;
   }
 
-  async hint(ctx: PlayContext, questionId: QuestionId): Promise<ProgressView> {
+  /**
+   * Buys the stage's next hint. With `expectedHint` (#202, #203) it buys only that one: when the server has
+   * already sold it (another tab, a retried request) or the stage is no longer active, nothing is charged and the
+   * answer is 409 "stale" with the current progress.
+   */
+  async hint(ctx: PlayContext, input: { questionId: QuestionId; expectedHint?: number | undefined }): Promise<ProgressView> {
     const secrets = this.caseSecrets(ctx.caseId);
+    const { questionId, expectedHint } = input;
     return this.mutate(ctx, (record) => {
-      const stage = this.requireActive(record, questionId);
+      if (expectedHint !== undefined) {
+        const current = this.stage(record, questionId);
+        if (current.status !== "active" || current.hintsRevealed !== expectedHint) throw this.stale(record, ctx, "that hint was already bought");
+      }
+      const stage = this.requireActive(record, ctx, questionId);
       if (stage.hintsRevealed >= secrets.questions[questionId].hintCosts.length) throw new AppError(409, "no more hints");
       record.stages[questionId] = { ...stage, hintsRevealed: stage.hintsRevealed + 1 };
       return { result: this.toView(record, ctx), changed: true };
     });
   }
 
-  /** Pay 5 points (on the active stage) to see a full command. Free if already paid for or the case is done. */
-  async revealCommand(ctx: PlayContext, toolId: string): Promise<ProgressView> {
+  /**
+   * Pay 5 points (on the active stage) to see a full command. Free if already paid for or the case is done. With
+   * `expectedStage` (#203) a charge lands only on that stage: when another stage is active, nothing is charged and
+   * the answer is 409 "stale" with the current progress.
+   */
+  async revealCommand(ctx: PlayContext, input: { toolId: string; expectedStage?: QuestionId | undefined }): Promise<ProgressView> {
     const secrets = this.caseSecrets(ctx.caseId);
+    const { toolId, expectedStage } = input;
     if (!secrets.tools[toolId]) throw new AppError(404, "unknown command", { code: "unknown-command" });
     return this.mutate(ctx, (record) => {
       if (record.completedAt !== null || record.commandsRevealed[toolId] !== undefined) {
@@ -177,6 +199,7 @@ export class GameService {
       if (record.setupDoneAt === null || active === undefined) {
         throw new AppError(403, "start the case before revealing commands", { code: "locked" });
       }
+      if (expectedStage !== undefined && expectedStage !== active) throw this.stale(record, ctx, "another stage is active now");
       const stage = this.stage(record, active);
       record.stages[active] = { ...stage, commandsRevealed: stage.commandsRevealed + 1 };
       record.commandsRevealed[toolId] = active;
@@ -188,7 +211,7 @@ export class GameService {
     const secrets = this.caseSecrets(ctx.caseId);
     const view = await this.mutate(ctx, (record) => {
       if (this.stage(record, questionId).status === "revealed") return { result: this.toView(record, ctx), changed: false };
-      const stage = this.requireActive(record, questionId);
+      const stage = this.requireActive(record, ctx, questionId);
       const revealedAnswer = secrets.answers[questionId] ?? "";
       this.finishStage(record, questionId, { ...stage, status: "revealed", points: 0, revealedAnswer, breakdown: null });
       return { result: this.toView(record, ctx), changed: true };
@@ -304,6 +327,7 @@ export class GameService {
       wrongAnswerTimestamps: {},
       commandsRevealed: {},
       completionBonus: 0,
+      lastWrongAnswers: {},
     };
   }
 
@@ -339,11 +363,17 @@ export class GameService {
     return record.stages[questionId] ?? emptyStage();
   }
 
-  private requireActive(record: ProgressRecord, questionId: QuestionId): StageProgress {
+  /** A finished stage answers 409 "stale" with the progress, so a tab showing it as active redraws (#203). */
+  private requireActive(record: ProgressRecord, ctx: PlayContext, questionId: QuestionId): StageProgress {
     const stage = this.stage(record, questionId);
     if (stage.status === "locked") throw new AppError(403, "stage is locked", { code: "locked" });
-    if (stage.status !== "active") throw new AppError(409, "stage already finished");
+    if (stage.status !== "active") throw this.stale(record, ctx, "stage already finished");
     return stage;
+  }
+
+  /** 409 "stale": the client acted on old state. Nothing was charged; the body carries the current progress. */
+  private stale(record: ProgressRecord, ctx: PlayContext, message: string): AppError {
+    return new AppError(409, message, { code: "stale", progress: this.toView(record, ctx) });
   }
 
   private finishStage(record: ProgressRecord, questionId: QuestionId, finished: StageProgress): void {

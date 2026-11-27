@@ -44,7 +44,7 @@ plan allows 125,000 function calls a month.
   the event they follow is live, every 60 s otherwise (and at the moment an upcoming event starts), never in a
   hidden tab, and not after 15 minutes without pointer or key input until the viewer presses Resume. A projector
   during a live event keeps polling. An answer that shows the same standings is not redrawn.
-- Errors are non-2xx with body `{ "error": string, "code"?: string, "retryAfterSeconds"?: number, "details"?: string[] }` (`details` lists every failed check of a rejected upload). Status codes: 400 validation, 401 signed out, 403 forbidden (see codes), 404, 405, 409 conflict (username taken, already finished, no more hints, concurrent update: retry), 413, 415, 429 rate limit (also sends `Retry-After`), 500 `{"error":"internal"}`, 503 admin disabled.
+- Errors are non-2xx with body `{ "error": string, "code"?: string, "retryAfterSeconds"?: number, "details"?: string[] }` (`details` lists every failed check of a rejected upload). Status codes: 400 validation, 401 signed out, 403 forbidden (see codes), 404, 405, 409 conflict (username taken, no more hints, concurrent update: retry; code `stale` from a play route also carries `progress`, see below), 413, 415, 429 rate limit (also sends `Retry-After`), 500 `{"error":"internal"}`, 503 admin disabled.
 - Error codes the UI acts on (also, for private cases and review, #184: `not-admin`, `not-published`, `already-public`, `not-submitted`): `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-class-code` (`bad-invite-code` before #204), `pending`, `rejected`, `admin`, `password-change-required`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`, and for classes (#179) `guest`, `not-class-admin`, `not-class-owner`, `class-limit`, `class-full`, `class-archived`, `owner-locked`, `pending-member`.
 
 ## Accounts and sessions
@@ -122,10 +122,10 @@ it, and no public or CDN-cached response carries stage records. Constants: `SCOR
 | GET | `/api/today` | none | | `{date, timezone, caseId, lockToToday, releasedCaseIds}` (`lockToToday` is deprecated: returned, never enforced) |
 | GET | `/api/cases/:caseId/progress` | approved | | `{progress}` (first call creates the record, so the admin sees the player at "setup") |
 | POST | `/api/cases/:caseId/setup-done` | approved | `{}` | `{progress}` (q1 becomes active; idempotent) |
-| POST | `/api/cases/:caseId/answer` | approved | `{questionId, answer}` | `{correct, progress}` |
-| POST | `/api/cases/:caseId/hint` | approved | `{questionId}` | `{progress}` (`hintsRevealed` +1) |
+| POST | `/api/cases/:caseId/answer` | approved | `{questionId, answer}` | `{correct, progress}` (the same wrong answer twice in a row is counted once, #202) |
+| POST | `/api/cases/:caseId/hint` | approved | `{questionId, expectedHint?}` | `{progress}` (`hintsRevealed` +1). `expectedHint` (0-based, additive): buy only that hint, else 409 `stale` |
 | POST | `/api/cases/:caseId/reveal` | approved | `{questionId}` | `{progress}` (0 points, `revealedAnswer` set, next stage active) |
-| POST | `/api/cases/:caseId/reveal-command` | approved | `{toolId}` | `{progress}` (−5 on the active stage; free if already paid or the case is done) |
+| POST | `/api/cases/:caseId/reveal-command` | approved | `{toolId, expectedStage?}` | `{progress}` (−5 on the active stage; free if already paid or the case is done). `expectedStage` (additive): charge only if that stage is active, else 409 `stale` |
 | GET | `/api/cases/:caseId/debrief?lang=en\|he` | approved | | `{markdown}`, 403 until every stage is finished |
 | POST | `/api/me/password` | cookie | `{currentPassword, newPassword}` | `{account}` + fresh cookie (other sessions end) |
 | POST | `/api/me/recovery-code` | cookie | `{currentPassword}` | `{recoveryCode}` (replaces the old code; 400 `bad-credentials`; wrong passwords count against the username's sign-in limit) |
@@ -397,7 +397,8 @@ leaderboard. Classes count their own windows on their own boards (see Classes).
 
 ## Rules
 
-- Stages are sequential: setup, then q1 to q6, then the debrief. Acting on a locked stage returns 403. Acting on a finished stage returns 409, except that re-answering a solved stage returns `correct:true` without re-scoring and re-revealing a revealed stage returns the current progress.
+- Stages are sequential: setup, then q1 to q6, then the debrief. Acting on a locked stage returns 403. Acting on a finished stage returns 409 `stale` with the current `progress` in the error body, except that re-answering a solved stage returns `correct:true` without re-scoring and re-revealing a revealed stage returns the current progress.
+- **Safe writes (#202, #203).** The browser never re-sends a POST: only GETs are retried. When a write gets no response, the client re-reads `progress` and shows the server's state. Every paid action is safe to repeat: a hint carries `expectedHint` and a command reveal `expectedStage`, and a mismatch (another tab bought it, the first request did land) charges nothing and answers 409 `{error, code: "stale", progress}`. An identical repeated wrong answer is not counted again. Clients that omit the new fields behave as before. After each write the page shares the new progress with the player's other tabs (BroadcastChannel), and a tab that becomes visible again re-reads it (at most every 15 s).
 - Score for a solved stage = `max(0, points - sum(cost of the first hintsRevealed hints))`. Points and hint costs come from the case JSON (copied into the secrets by `scripts/make_flags.py`).
 - Rate limits: 5 wrong answers per account per question per 60 s; 8 failed logins per username and 60 per IP per 15 min; 100 sign-ups (and guest upgrades) per IP per hour and 30 new guests per IP per hour (classrooms share a NAT IP).
 - Writes use optimistic concurrency (Blobs etags, up to 3 retries), so parallel requests for one player stay consistent.
