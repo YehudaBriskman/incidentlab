@@ -20,8 +20,6 @@ import teasersRaw from "./teasers.json";
  *    (fetched again when someone else signs in). Their content comes from the same content route, no-store.
  */
 
-export const FEATURED_CASE_ID = "3am-outage";
-
 function parseTeasers(): Teaser[] {
   const result = TeasersSchema.safeParse(teasersRaw);
   if (!result.success) {
@@ -122,14 +120,13 @@ export function caseSummary(id: string): CaseSummary | undefined {
   return entry === undefined ? undefined : summaryIn(entry, getLang());
 }
 
-/** Catalog order: the original case first, then easiest to hardest, then by (English) title. */
+/** Catalog order: easiest to hardest, then by (English) title. */
 const DIFFICULTY_ORDER: Record<CaseSummary["difficulty"], number> = { easy: 0, medium: 1, hard: 2 };
 export function caseSummaries(): CaseSummary[] {
   const lang = getLang();
   return [...catalog.values()]
     .sort(
       (a, b) =>
-        Number(b.en.id === FEATURED_CASE_ID) - Number(a.en.id === FEATURED_CASE_ID) ||
         DIFFICULTY_ORDER[a.en.difficulty] - DIFFICULTY_ORDER[b.en.difficulty] ||
         a.en.title.localeCompare(b.en.title),
     )
