@@ -42,14 +42,19 @@ export function applyPendingRestore(): void {
   if (pending.fields.size === 0 && pending.scrollY === 0 && pending.focus === null) pendingRestore = null;
 }
 
-function switchLang(lang: "en" | "he", button: HTMLElement): void {
+/**
+ * Switches the language and re-renders the route, keeping typed text and the scroll position. `button` keeps
+ * focus when it had it (it must survive the re-render: the top-bar toggle does; a control inside #app does not,
+ * so the settings page passes null and refocuses its own control).
+ */
+export function switchLang(lang: "en" | "he", button: HTMLElement | null): void {
   if (lang === getLang()) return;
   const app = document.getElementById("app");
   pendingRestore = {
     hash: window.location.hash,
     fields: app === null ? new Map() : snapshotFields(app),
     scrollY: contentScroller().scrollTop,
-    focus: document.activeElement === button ? button : null,
+    focus: button !== null && document.activeElement === button ? button : null,
     until: Date.now() + RESTORE_WINDOW_MS,
   };
   setLang(lang);

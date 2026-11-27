@@ -1,11 +1,11 @@
-// "My stats": the signed-in player's totals, rank and per-case breakdown, the global-board switch and (#183) the
+// "My stats": the signed-in player's totals, rank and per-case breakdown and (#183) the
 // player's classes with their rank on each class board. Guests see their stats with the upgrade card.
 import { ACHIEVEMENT_IDS, type AccountView, type CaseStats, type ClassSummary, type LeaderboardResponse, type UserStats } from "../../shared/contract";
 import { caseSummary } from "../content/load";
-import { ApiError, fetchLeaderboard, fetchMyStats, setBoardVisibility } from "../lib/api";
+import { ApiError, fetchLeaderboard, fetchMyStats } from "../lib/api";
 import { h, html, setChildren, type Child } from "../lib/dom";
 import { iconSvg } from "../shell/icons";
-import { toast, tooltip } from "../lib/overlay";
+import { tooltip } from "../lib/overlay";
 import "../player.css";
 import "../stats.css";
 import { fetchClass, fetchClassBoard, fetchMyClasses } from "../lib/class-api";
@@ -17,13 +17,14 @@ import { dataTable, type Column } from "../components/dataTable";
 import { statGrid, statTile } from "../components/statGrid";
 import { formatElapsed } from "../lib/time";
 import { formatNumber, getLang } from "../i18n/i18n";
-import { setAccount } from "../lib/session";
 import { TA } from "../i18n/strings-account";
 import { TB } from "../i18n/strings-board";
 import { TG, achievementInfo } from "../i18n/strings-game";
 import { TO } from "../i18n/strings-onboard";
 import { T } from "../i18n/strings-player";
-import { passwordChangeForm, recoveryCodeSection, withApprovedAccount } from "./auth";
+import { withApprovedAccount } from "./auth";
+import { TSe } from "../i18n/strings-settings";
+import { settingsHref } from "../lib/settings-route";
 
 const locale = (): string => (getLang() === "he" ? "he-IL" : "en-GB");
 
@@ -179,47 +180,12 @@ function kpiGrid(stats: UserStats, board: LeaderboardResponse | null): HTMLEleme
 }
 
 /**
- * The opt-in switch for the public global leaderboard (#175), off by default, with what turning it on makes
- * public. A native checkbox with role="switch", so it keeps the keyboard, label and form behaviour.
+ * Where the account settings went (#219): password and recovery code (accounts only) and the global-board switch
+ * live on #/settings now. A guest's link opens Account, which leads with the Create account card.
  */
-function boardSection(account: AccountView, stats: UserStats, onSaved: (account: AccountView) => void): HTMLElement {
-  const title = h("h2", { id: "board-h", class: "section-title" }, TB().sectionTitle);
-  if (account.kind === "guest") {
-    return h("section", { class: "board-pref stats-card", id: "board", "aria-labelledby": "board-h" }, title, h("p", { class: "muted small" }, TB().guestNote));
-  }
-  const input = h("input", { id: "me-board", type: "checkbox", role: "switch", class: "switch", "aria-describedby": "me-board-note" });
-  input.checked = stats.onGlobalBoard;
-  let busy = false;
-  input.addEventListener("change", () => {
-    const show = input.checked;
-    if (busy) {
-      input.checked = !show; // one change at a time
-      return;
-    }
-    busy = true;
-    input.setAttribute("aria-busy", "true");
-    setBoardVisibility(show)
-      .then((updated) => {
-        toast({ tone: "success", text: show ? TB().shownToast : TB().hiddenToast });
-        onSaved(updated);
-      })
-      .catch((err: unknown) => {
-        input.checked = !show;
-        toast({ tone: "error", text: err instanceof ApiError ? err.message : TB().saveFailed });
-      })
-      .finally(() => {
-        busy = false;
-        input.removeAttribute("aria-busy");
-      });
-  });
-  return h(
-    "section",
-    { class: "board-pref stats-card", id: "board", "aria-labelledby": "board-h" },
-    title,
-    h("label", { class: "check board-switch", for: "me-board" }, input, h("span", {}, TB().switchLabel)),
-    h("p", { id: "me-board-note", class: "muted small board-note" }, TB().privacyNote),
-    h("a", { class: "small stats-card-foot", href: "#/leaderboard" }, TC().openLeaderboard),
-  );
+function settingsLink(account: AccountView): HTMLElement {
+  const href = settingsHref(account.kind === "user" ? "privacy" : "account");
+  return h("p", { class: "stats-settings-link small" }, h("a", { href }, account.kind === "user" ? TSe().statsSettingsLink : TSe().menuSettings));
 }
 
 function draw(root: HTMLElement, account: AccountView, stats: UserStats, board: LeaderboardResponse | null): void {
@@ -227,18 +193,6 @@ function draw(root: HTMLElement, account: AccountView, stats: UserStats, board: 
   const tries = stats.stagesSolved + stats.wrongAttempts;
   const pct = stats.accuracy === null ? null : new Intl.NumberFormat(locale(), { style: "percent", maximumFractionDigits: 0 }).format(stats.accuracy);
   const firstBloods = stats.cases.reduce((sum, c) => sum + c.firstBloods, 0);
-  let grid = kpiGrid(stats, board);
-  // After a toggle the rank changes: refresh the tiles only, so focus stays on the switch.
-  const onBoardSaved = (updated: AccountView): void => {
-    setAccount(updated);
-    Promise.all([fetchMyStats(), fetchLeaderboard(null).catch(() => null)])
-      .then(([fresh, freshBoard]) => {
-        const next = kpiGrid(fresh, freshBoard);
-        grid.replaceWith(next);
-        grid = next;
-      })
-      .catch(() => undefined); // the tiles keep the old rank until the next visit
-  };
   // Each pair in its own <div> (valid inside <dl>): the grid places whole pairs, so a label can never wrap away
   // from its value onto another row.
   const detail = (label: string, value: Child): HTMLElement => h("div", { class: "detail-pair" }, h("dt", {}, label), h("dd", {}, value));
@@ -252,8 +206,8 @@ function draw(root: HTMLElement, account: AccountView, stats: UserStats, board: 
       h("h1", {}, TA().statsTitle),
       withTip(h("p", { class: "page-meta" }, h("strong", {}, h("bdi", {}, stats.username)), " · ", TA().memberSince(since)), TO().statsSub),
       account.kind === "guest" ? upgradeCard() : null,
-      grid,
-      h("div", { class: "stats-pair" }, boardSection(account, stats, onBoardSaved), classesSection(account, stats.username)),
+      kpiGrid(stats, board),
+      classesSection(account, stats.username),
       h(
         "section",
         { class: "stat-details", "aria-labelledby": "detail-h" },
@@ -282,17 +236,7 @@ function draw(root: HTMLElement, account: AccountView, stats: UserStats, board: 
         regionLabel: TO().perCaseRegion,
         stackOnPhone: true,
       }).element,
-      // Password and recovery code are for accounts only (#207): a guest has neither, and gets the upgrade card above.
-      account.kind === "user"
-        ? h(
-            "details",
-            { class: "pw-section" },
-            h("summary", { class: "section-title" }, TG().pwTitle),
-            passwordChangeForm({ forced: false, idPrefix: "me-pw", onChanged: (changed) => setAccount(changed) }),
-          )
-        : null,
-      // Recovery code (#174): replace it, with the current password. Kept in its own section (auth.ts owns it).
-      account.kind === "user" ? recoveryCodeSection(stats.username) : null,
+      settingsLink(account),
     ),
   );
 }

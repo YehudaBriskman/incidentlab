@@ -167,7 +167,7 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams, opt
     setChildren(
       optInEl,
       TB().lbOptInNote,
-      hidden ? [" ", TB().lbYouHidden, " ", h("a", { href: "#/me" }, TB().lbOptInLink)] : null,
+      hidden ? [" ", TB().lbYouHidden, " ", h("a", { href: "#/settings/privacy" }, TB().lbOptInLink)] : null,
     );
   };
   const subEl = h("p", { class: "muted small lb-sub" });

@@ -98,9 +98,14 @@ test("a guest's #/me offers the upgrade, not password or recovery-code forms (#2
   const upgrade = page.locator(".stats-upgrade");
   await expect(upgrade.getByRole("heading", { name: "Keep your progress" })).toBeVisible();
   await expect(upgrade.getByRole("button", { name: /create account/i })).toBeVisible();
-  await expect(page.locator(".pw-section")).toHaveCount(0);
-  await expect(page.locator("#me-pw-current, #me-recovery-current")).toHaveCount(0);
+  await expect(page.locator(".pw-form, .recovery-section")).toHaveCount(0);
   await expect(page.getByText("Change password")).toHaveCount(0);
+  // and #/settings/security (#219) shows the same card instead of the forms
+  await page.goto("/#/settings/security");
+  await expect(page.getByRole("heading", { level: 2, name: "Security" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Keep your progress" }).getByRole("button", { name: /create account/i })).toBeVisible();
+  await expect(page.locator(".pw-form, .recovery-section")).toHaveCount(0);
+  await expect(page.locator("#settings-pw-current, #settings-recovery-current")).toHaveCount(0);
 });
 
 test("a guest's \"not you? switch\" on a case warns and offers the account first (#206)", async ({ page, request }) => {
