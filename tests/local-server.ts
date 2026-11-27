@@ -69,7 +69,12 @@ createServer(async (req, res) => {
     const body = req.method === "GET" || req.method === "HEAD" ? undefined : await readBody(req);
     const headers = new Headers();
     for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") headers.set(k, v);
-    const response = await handler(new Request(url, { method: req.method, headers, body }), { ip: req.socket.remoteAddress ?? "127.0.0.1" });
+    // Every local client is 127.0.0.1, so the per-IP limits (20 sign-ups an hour since #173) would trip over the
+    // e2e suite's own sign-ups. Loopback clients are keyed per connection instead; the limits themselves are
+    // covered by the server tests.
+    const remote = req.socket.remoteAddress ?? "127.0.0.1";
+    const ip = /^(127\.|::1$|::ffff:127\.)/.test(remote) ? `${remote}:${req.socket.remotePort ?? 0}` : remote;
+    const response = await handler(new Request(url, { method: req.method, headers, body }), { ip });
     const outHeaders: Record<string, string | string[]> = {};
     response.headers.forEach((value, key) => (outHeaders[key] = value));
     const cookies = response.headers.getSetCookie();

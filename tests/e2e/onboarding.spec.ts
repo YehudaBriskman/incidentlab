@@ -1,5 +1,5 @@
 // Onboarding locks (#34, #52): field-level errors and focus on sign-in / sign-up, the language toggle keeping
-// typed input, a refresh after sign-up landing on the pending screen, and pending -> rejected.
+// typed input, the recovery code shown first after sign-up (#174), and a rejection after it.
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { adminHeaders, randomUsername } from "./support";
 
@@ -15,7 +15,7 @@ const ui = {
   fieldError: (p: Page, id: string) => p.locator(`#${id}-error`),
   toSignUp: (p: Page) => p.getByRole("button", { name: /create an account/i }),
   langButton: (p: Page, label: "EN" | "עב") => p.getByRole("group", { name: /^(language|שפה)$/i }).getByRole("button", { name: label }),
-  pendingHeading: (p: Page) => p.getByRole("heading", { level: 1, name: /waiting for approval/i }),
+  codeHeading: (p: Page) => p.getByRole("heading", { level: 1, name: /save your recovery code/i }),
   rejectedHeading: (p: Page) => p.getByRole("heading", { level: 1, name: /account not approved/i }),
 };
 
@@ -95,22 +95,29 @@ test("language toggle re-labels the form and keeps what was typed, including the
   await expect(ui.username(page)).toHaveValue("second_user");
 });
 
-test("refresh after sign-up shows the pending screen; a rejection while waiting shows the rejected screen", async ({ page, request }) => {
+test("sign-up is approved at once: the recovery code comes first, a language switch keeps it, a later rejection shows", async ({ page, request }) => {
   const username = randomUsername("e2ewait");
   await page.goto("/#/signup");
   await ui.username(page).fill(username);
   await ui.password(page).fill(PASSWORD);
   await ui.submit(page).click();
-  await expect(ui.pendingHeading(page)).toBeVisible();
+  await expect(ui.codeHeading(page)).toBeVisible();
+  await expect(ui.codeHeading(page)).toBeFocused();
+  await expect(page).toHaveTitle(/save your recovery code/i);
+  const code = (await page.getByTestId("recovery-code").textContent()) ?? "";
+  expect(code).toMatch(/^[A-Z2-9]{5}(-[A-Z2-9]{5}){3}$/);
+  const me = await page.request.get("/api/me");
+  expect(JSON.stringify(await me.json())).toContain('"status":"approved"');
 
-  await page.reload();
-  await expect(ui.pendingHeading(page)).toBeVisible();
-  await expect(page).toHaveTitle(/waiting for approval/i);
-  // The polite status region stays silent while polling (it speaks only on a state change).
-  await expect(page.locator(".pending-status")).toHaveText("");
+  // The code lives only in memory: re-labelling the page must not lose it.
+  await ui.langButton(page, "עב").click();
+  await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+  await expect(page.getByTestId("recovery-code")).toHaveText(code);
+  await ui.langButton(page, "EN").click();
 
+  // A rejection after sign-up: the next load of the gate shows it (the code, kept in memory only, is gone then).
   await rejectAccount(request, username);
-  await page.getByRole("button", { name: /check now/i }).click();
+  await page.reload();
   await expect(ui.rejectedHeading(page)).toBeVisible();
   await expect(ui.rejectedHeading(page)).toBeFocused();
   await expect(page.getByRole("button", { name: /create a new account/i })).toBeVisible();
