@@ -3,6 +3,7 @@ import { AdminController } from "./controllers/AdminController.ts";
 import { AuthorController } from "./controllers/AuthorController.ts";
 import { ClassController } from "./controllers/ClassController.ts";
 import { ClassService } from "./services/ClassService.ts";
+import { ClassBoardService } from "./services/ClassBoardService.ts";
 import { answerFingerprint } from "../shared/answer-fingerprint.ts";
 import { AuthController } from "./controllers/AuthController.ts";
 import { ContentController } from "./controllers/ContentController.ts";
@@ -116,7 +117,9 @@ export const createApp = (deps: AppDeps): App => {
   });
 
   const classController = new ClassController({
-    classes: new ClassService({ repos, limiter, releasedCaseIds: () => Object.keys(secrets.cases), now }), auth, guard: adminGuard, audit,
+    classes: new ClassService({ repos, limiter, releasedCaseIds: () => Object.keys(secrets.cases), now, purger: deps.cachePurger }),
+    boards: new ClassBoardService({ repos, game, publicCaseIds: () => Object.keys(secrets.cases), now }),
+    auth, guard: adminGuard, audit,
   });
 
   const route = (req: Request, ip: string): MethodTable | null => {
@@ -177,6 +180,10 @@ export const createApp = (deps: AppDeps): App => {
       };
       return table[second ?? ""] ?? null;
     }
+    if (area === "classboard" && first !== undefined && segments.length === 3) {
+      const token = first;
+      return { GET: () => classController.board(req, token) };
+    }
     if (area === "classes" && first !== undefined) {
       const classId = first;
       const [, , , , third, fourth] = segments;
@@ -185,6 +192,7 @@ export const createApp = (deps: AppDeps): App => {
       if (segments.length === 4 && second === "restore") return { POST: () => classController.restore(req, classId) };
       if (segments.length === 4 && second === "leave") return { POST: () => classController.leave(req, classId) };
       if (segments.length === 4 && second === "members") return { GET: () => classController.members(req, classId) };
+      if (segments.length === 4 && second === "progress") return { GET: () => classController.progress(req, classId) };
       if (segments.length === 5 && second === "join-code" && third === "rotate") return { POST: () => classController.rotateJoinCode(req, classId) };
       if (segments.length === 5 && second === "board-token" && third === "rotate") return { POST: () => classController.rotateBoardToken(req, classId) };
       if (segments.length === 6 && second === "members" && third !== undefined) {

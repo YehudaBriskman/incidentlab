@@ -24,6 +24,8 @@ import { json, noContent, parseBody, publicJson, sessionCookie, sessionToken, wi
 export const PUBLIC_CACHE = {
   event: { maxAgeSeconds: 10, staleSeconds: 20 },
   leaderboard: { maxAgeSeconds: 10, staleSeconds: 20 },
+  /** a class board (#181): like the leaderboard; class edits purge its `class:<id>` tag, solves don't */
+  classBoard: { maxAgeSeconds: 10, staleSeconds: 20 },
   today: { maxAgeSeconds: 60, staleSeconds: 60 },
 } as const;
 

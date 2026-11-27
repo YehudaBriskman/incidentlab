@@ -2,8 +2,10 @@
 // instead of after the cache's max-age (see `publicJson` in controllers/http.ts and docs/API.md).
 // Production purges through Netlify's cache API; tests and the local server use the no-op purger.
 
-/** One tag per public, non-personalised GET that the CDN may cache. */
-export type CacheTag = "event" | "today" | "leaderboard";
+/** One tag per public, non-personalised GET that the CDN may cache; `class:<classId>` is one class's board (#181). */
+export type CacheTag = "event" | "today" | "leaderboard" | `class:${string}`;
+
+export const classBoardTag = (classId: string): CacheTag => `class:${classId}`;
 
 export interface CachePurger {
   purge(tags: readonly CacheTag[]): Promise<void>;

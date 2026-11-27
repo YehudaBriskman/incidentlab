@@ -20,6 +20,8 @@ import type { Versioned } from "../repositories/KvStore.ts";
 import type { Repositories } from "../repositories/repositories.ts";
 import { ACCOUNT_ID_PATTERN, generateAccountId, sha256Hex } from "./crypto.ts";
 import { assertEventWindow } from "./EventService.ts";
+import { classBoardTag, noopCachePurger } from "./CachePurger.ts";
+import type { CachePurger } from "./CachePurger.ts";
 import type { RateLimitRule, RateLimiter } from "./RateLimiter.ts";
 import { isValidTimeZone, localDate } from "./ScheduleService.ts";
 
@@ -71,13 +73,15 @@ export class ClassService {
   private readonly limiter: RateLimiter;
   private readonly releasedCaseIds: () => readonly string[];
   private readonly now: () => Date;
+  private readonly purger: CachePurger;
 
-  constructor(deps: { repos: Repositories; limiter: RateLimiter; releasedCaseIds: () => readonly string[]; now: () => Date }) {
+  constructor(deps: { repos: Repositories; limiter: RateLimiter; releasedCaseIds: () => readonly string[]; now: () => Date; purger?: CachePurger | undefined }) {
     this.repos = deps.repos;
     this.classes = deps.repos.classes;
     this.limiter = deps.limiter;
     this.releasedCaseIds = deps.releasedCaseIds;
     this.now = deps.now;
+    this.purger = deps.purger ?? noopCachePurger;
   }
 
   // ---- create and list ------------------------------------------------------
@@ -151,6 +155,13 @@ export class ClassService {
   async detail(actor: ClassActor, classId: string): Promise<ClassDetail> {
     const access = await this.access(actor, classId);
     return this.toDetail(access.found.data, access.member, access.isAdmin);
+  }
+
+  /** The class record, for class admins and the site admin only (404 for non-members, 403 for plain members). */
+  async requireClassAdmin(actor: ClassActor, classId: string): Promise<ClassRecord> {
+    const access = await this.access(actor, classId);
+    if (!access.isAdmin) throw new AppError(403, "only class admins can do that", { code: "not-class-admin" });
+    return access.found.data;
   }
 
   // ---- settings (class admins) ---------------------------------------------
@@ -249,6 +260,7 @@ export class ClassService {
       throw this.fullError();
     }
     await this.classes.saveMemberOf(account.id, record.id, reverseOf(member));
+    if (member.status === "active") await this.purgeBoard(record.id); // a new active member may bring solves
     return toClassSummary(record, member);
   }
 
@@ -278,9 +290,11 @@ export class ClassService {
     const access = await this.access(actor, classId);
     if (!access.isAdmin) throw new AppError(403, "only class admins can do that", { code: "not-class-admin" });
     this.assertActive(access.found.data);
-    return this.changeMember(classId, accountId, (member) =>
-      member.status === "active" ? member : { ...member, status: "active", decidedAt: this.now().toISOString() },
+    const member = await this.changeMember(classId, accountId, (m) =>
+      m.status === "active" ? m : { ...m, status: "active", decidedAt: this.now().toISOString() },
     );
+    await this.purgeBoard(classId);
+    return member;
   }
 
   /**
@@ -351,7 +365,10 @@ export class ClassService {
       if (!access.isAdmin) throw new AppError(403, "only class admins can do that", { code: "not-class-admin" });
       if (options.allowArchived !== true) this.assertActive(access.found.data);
       const next: ClassRecord = { ...change(access.found.data), id: classId, updatedAt: this.now().toISOString() };
-      if (await this.classes.saveIfMatch(next, access.found.etag)) return this.toDetail(next, access.member, true);
+      if (await this.classes.saveIfMatch(next, access.found.etag)) {
+        await this.purgeBoard(classId); // every edit can change the board: its window, cases, name, token or status
+        return this.toDetail(next, access.member, true);
+      }
     }
     throw new AppError(409, "concurrent update, please retry");
   }
@@ -381,6 +398,15 @@ export class ClassService {
   private async removeMembership(classId: string, accountId: string): Promise<void> {
     await this.classes.deleteMember(classId, accountId);
     await this.classes.deleteMemberOf(accountId, classId);
+    await this.purgeBoard(classId);
+  }
+
+  /**
+   * Drops the CDN copy of the class board after an edit, so a rotated token, an archive or a removed member takes
+   * effect at once instead of after the board's cache window. Solves never purge (see ClassBoardService).
+   */
+  private purgeBoard(classId: string): Promise<void> {
+    return this.purger.purge([classBoardTag(classId)]);
   }
 
   private async repairReverse(accountId: string, classId: string, member: ClassMemberRecord): Promise<void> {

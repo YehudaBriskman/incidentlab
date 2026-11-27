@@ -474,6 +474,10 @@ export const AuditResponseSchema = z.object({ entries: z.array(AuditEntrySchema)
 // GET  /api/classes/:id/members                     -> {members: ClassMember[]}  (class admins)
 // POST /api/classes/:id/members/:accountId/approve {} | /role {role} -> {member}; .../remove {} -> 204  (docs/API.md)
 // POST /api/classes/:id/leave {}                    -> 204  (the owner can't leave: archive instead)
+// GET  /api/classes/:id/progress?caseId=<id>       -> {generatedAt, caseId, players: AdminProgress[]}  (class admins,
+//                                                     #181: the active members' progress on that case, like the Live tab)
+// GET  /api/classboard/:boardToken?caseId=<id>      -> ClassBoardResponse  (#181: public, no cookie, CDN-cached; the
+//                                                     token is the capability. Unknown, rotated or archived: 404)
 // GET  /api/admin/classes                           -> {classes: AdminClass[]}
 // PUT  /api/admin/classes/:id/limits {memberLimit}  -> {class}
 // PUT  /api/admin/accounts/:id/class-limit {classLimit} -> {accountId, classLimit}
@@ -582,6 +586,19 @@ export const ClassMembersResponseSchema = z.object({ members: z.array(ClassMembe
 export const ClassMemberResponseSchema = z.object({ member: ClassMemberSchema });
 export const AdminClassesResponseSchema = z.object({ classes: z.array(AdminClassSchema) });
 export const AccountClassLimitResponseSchema = z.object({ accountId: z.string(), classLimit: z.number().int().min(0).nullable() });
+
+/**
+ * The class board (#181): the leaderboard's shape, so the client reuses the leaderboard view, plus the class's
+ * name, event and assigned cases. Only the class's active members are listed, and only what counts by the
+ * class's window rules (server/domain/class-board.ts). `frozen`/`frozenAt` are the class event's freeze.
+ */
+export const ClassBoardResponseSchema = LeaderboardResponseSchema.extend({
+  classId: z.string(),
+  className: z.string(),
+  event: ClassEventSchema,
+  caseIds: z.array(z.string()),
+});
+export type ClassBoardResponse = z.infer<typeof ClassBoardResponseSchema>;
 
 // Scoring: solved points = max(0, question.points - sum(cost of the first `hintsRevealed` hints)).
 // Rate limit: max 5 wrong answers per account per question per 60s -> 429 with retryAfterSeconds.
