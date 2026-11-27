@@ -348,6 +348,22 @@ input.admin-input[type="search"] {
 .status-pill.is-author { --pill-fg: var(--info-fg); --pill-bg: var(--info-bg); --pill-line: var(--info-fg); }
 .status-pill.is-rejected { --pill-fg: var(--danger-fg); --pill-bg: var(--danger-bg); --pill-line: var(--danger-fg); }
 .acct-row.is-rejected .player-name { color: var(--text-muted); text-decoration: line-through; }
+/* The owner console (#185): guests, classes and their events, the users pager, the limit dialog. */
+.status-pill.is-guest { --pill-fg: var(--text-2); --pill-bg: transparent; --pill-line: var(--border-strong); }
+.status-pill.is-class-active { --pill-fg: var(--success-fg); --pill-bg: var(--success-bg); --pill-line: var(--success-fg); }
+.status-pill.is-class-archived { --pill-fg: var(--text-2); --pill-bg: transparent; --pill-line: var(--border-strong); }
+.status-pill.is-event-live { --pill-fg: var(--success-fg); --pill-bg: var(--success-bg); --pill-line: var(--success-fg); }
+.status-pill.is-event-upcoming { --pill-fg: var(--info-fg); --pill-bg: var(--info-bg); --pill-line: var(--info-fg); }
+.status-pill.is-event-none, .status-pill.is-event-open, .status-pill.is-event-ended { --pill-fg: var(--text-2); --pill-bg: transparent; --pill-line: var(--border-strong); }
+.owner-class-row.is-archived .owner-class-link { color: var(--text-muted); }
+.owner-class-link { font-weight: 600; overflow-wrap: anywhere; }
+.owner-class-table .is-full { color: var(--warning-fg); font-weight: 600; }
+.acct-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); margin-top: var(--space-3); }
+.acct-pager[hidden] { display: none; }
+.acct-pager-buttons { display: inline-flex; gap: var(--space-2); }
+.limit-dialog-body { display: grid; gap: var(--space-2); }
+.limit-input { width: min(100%, 10rem); }
+.owner-class-search { width: min(100%, 18rem); }
 .acct-toggle {
   font: inherit;
   color: inherit;

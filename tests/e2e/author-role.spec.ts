@@ -35,6 +35,8 @@ test("admin makes a player an author and back from the Accounts tab", async ({ p
     await ui.signInSubmit(page).click();
     await page.waitForURL((url) => !url.hash.startsWith("#/login"));
     await page.goto("/#/admin?tab=accounts");
+    // The users list is paged on the server (#185): search for the player.
+    await page.locator("input.admin-search").first().fill(username);
     await ui.actions(page, username).click();
     await ui.menuItem(page, /^make author$/i).click();
     await expect(ui.row(page, username).getByText("Author", { exact: true })).toBeVisible();

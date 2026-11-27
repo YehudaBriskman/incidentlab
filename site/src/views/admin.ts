@@ -1,6 +1,12 @@
-// Instructor dashboard (#/admin). All API data (usernames above all) is rendered via textContent / attributes only — never innerHTML.
-// Tabs: Accounts (approve sign-ups, per-user stats, invite code, CSV) · Live (one case, polled) · Event (window, freeze,
-// announcement) · Schedule (incident of the day) · Stats (per case) · Audit log.
+// The platform owner console (#/admin, #185). All API data (usernames above all) is rendered via textContent /
+// attributes only — never innerHTML.
+// Sections: Users (search, filters and paging on the server; ban, roles, class limits, resets, trash, invite code)
+// · Classes (every class, member limits, archive) · Live (one case, polled) · Stats (per case) · Global daily case
+// (the site schedule) · Site announcement (the site-wide clock, freeze and banner) · Audit log, plus a Reviews link
+// (the owner's review queue) with its count.
+// Budget (docs/DATA.md): only Live and the site announcement poll (every 5 s, visible tabs). Users, Classes, Stats
+// and Audit read a lot on the server, so they load on demand: opening the section, a search or filter, a page, an
+// action, or Refresh.
 // Auth: the `admin` session cookie (signed in on #/login with the ADMIN_KEY) or an admin key typed into the gate.
 // The panels a class dashboard reuses (members, live, event, schedule, stats, projector board) live in views/manage/*:
 // this file mounts them with the /api/admin/* calls and keeps the shell (gate, sections, URL, poll, banner), the
@@ -15,8 +21,10 @@ import {
   type LiveEvent,
   type Schedule,
   type Settings,
+  type AdminUsersResponse,
   type TodayResponse,
   type TrashEntry,
+  type UserStats,
 } from "../../shared/contract";
 import { cachedCase } from "../content/load";
 import { cachedEvent, serverNow as publicServerNow } from "../lib/event";
@@ -34,7 +42,7 @@ import {
   approveAll,
   clearAdminKey,
   deleteAccount,
-  fetchAccounts,
+  fetchAdminClasses,
   fetchAudit,
   fetchCaseStats,
   fetchEvent,
@@ -42,10 +50,12 @@ import {
   fetchMe,
   fetchProgress,
   fetchPublicLeaderboard,
+  fetchReviewCount,
   fetchSchedule,
   fetchSettings,
   fetchToday,
   fetchTrash,
+  fetchUsers,
   getAdminKey,
   logoutSession,
   resetAccountPassword,
@@ -55,11 +65,13 @@ import {
   saveEvent,
   saveSchedule,
   saveSettings,
+  setAccountClassLimit,
   setAccountRole,
   setAccountStatus,
   setAccountsStatus,
   setAdminKey,
-  type AdminAccountsResult,
+  setClassArchived,
+  setClassMemberLimit,
   type AdminAuditResult,
   type AdminProgressResult,
   type AdminStatsResult,
@@ -83,6 +95,8 @@ import { createSchedulePanel } from "./manage/schedule";
 import { createEventPanel } from "./manage/event";
 import { createBoardPanel } from "./manage/board";
 import { createStatsPanel } from "./manage/stats";
+import { createOwnerClassesPanel } from "./manage/ownerClasses";
+import type { MembersQuery } from "./manage/members";
 import { NARROW_QUERY, createManageHost } from "./manage/host";
 
 const POLL_MS = 5000;
@@ -91,8 +105,13 @@ const TODAY_REFRESH_MS = 60_000;
 const MAX_BACKOFF_MS = 60000;
 const TAB_STORAGE = "il.adminTab";
 
-type TabId = "accounts" | "live" | "event" | "schedule" | "stats" | "audit";
-const TABS: readonly TabId[] = ["accounts", "live", "event", "schedule", "stats", "audit"];
+type TabId = "accounts" | "classes" | "live" | "event" | "schedule" | "stats" | "audit";
+const TABS: readonly TabId[] = ["accounts", "classes", "live", "stats", "schedule", "event", "audit"];
+/** The sections whose data changes by the second: only these poll. The rest load on demand (#185). */
+const POLLED_TABS: ReadonlySet<TabId> = new Set<TabId>(["live", "event"]);
+/** How a load was asked for: the poll's tick, opening a section, or a refresh (the button, an action). */
+type LoadMode = "tick" | "enter" | "manual";
+const LOAD_RANK: Readonly<Record<LoadMode, number>> = { tick: 0, enter: 1, manual: 2 };
 const isTabId = (v: string | null): v is TabId => TABS.some((t) => t === v);
 
 /** Rail icons (decorative: the link carries the name). 24px grid, stroke drawn in currentColor. */
@@ -100,6 +119,7 @@ const svgIcon = (paths: string): string =>
   `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true">${paths}</svg>`;
 const SECTION_ICONS: Readonly<Record<TabId, string>> = {
   accounts: svgIcon('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/>'),
+  classes: svgIcon('<path d="M3 9l9-5 9 5-9 5z"/><path d="M7 11.5V16c0 1.5 2.5 3 5 3s5-1.5 5-3v-4.5"/><path d="M21 9v5"/>'),
   live: svgIcon('<path d="M3 12h4l3-8 4 16 3-8h4"/>'),
   stats: svgIcon('<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/>'),
   event: svgIcon('<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M9 2h6"/>'),
@@ -229,7 +249,16 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   const state = {
     auth: null as AuthMode | null,
     tab: urlState.tab ?? readStoredTab(),
-    accounts: null as AdminAccountsResult | null,
+    /** the dashboard passed the sign-in check and is built */
+    ready: false,
+    /** the users page on screen (fetched on demand, #185) */
+    users: null as AdminUsersResponse | null,
+    /** bumped by every users request: an older response never replaces a newer one */
+    usersSeq: 0,
+    /** the overall top 10 on the Stats section */
+    topUsers: [] as UserStats[],
+    /** cases waiting for the owner's review (the Reviews link's badge); null until known */
+    reviews: null as number | null,
     today: null as TodayResponse | null,
     progress: null as AdminProgressResult | null,
     stats: null as AdminStatsResult | null,
@@ -237,7 +266,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     lastUpdated: 0,
     paused: false,
     loading: false,
-    queued: false,
+    queued: null as LoadMode | null,
     banner: null as string | null,
     failures: 0,
     // recently deleted (Accounts tab)
@@ -268,7 +297,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     container,
     disposed: () => disposed,
     narrow: () => state.narrow,
-    refresh: () => void load(),
+    refresh: () => void load("manual"),
     handleAuthError: (err) => handleAuthError(err),
     setBanner: (text) => {
       state.banner = text;
@@ -385,7 +414,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     alive: () => !disposed,
     reattach: () => {
       syncShellSidebar();
-      if (state.accounts) applyUrlState();
+      if (state.ready) applyUrlState();
       setPageCrumb(tabLabel(state.tab));
       if (lastFocused && lastFocused.isConnected) lastFocused.focus({ preventScroll: true });
     },
@@ -395,7 +424,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     if (document.visibilityState === "hidden") {
       if (pollId !== null) window.clearTimeout(pollId);
       pollId = null;
-    } else if (state.accounts && !state.paused) {
+    } else if (state.ready && !state.paused && POLLED_TABS.has(state.tab)) {
       void load();
     }
   }
@@ -420,7 +449,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   function onNarrowChange(): void {
     state.narrow = narrowMq.matches;
     closeMenu();
-    if (state.accounts) renderActiveTab();
+    if (state.ready) renderActiveTab();
   }
   narrowMq.addEventListener("change", onNarrowChange);
   window.addEventListener("hashchange", onHashChange);
@@ -433,7 +462,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
 
   function showLogin(error: string | null): void {
     stopTimers();
-    state.accounts = null;
+    state.ready = false;
     state.auth = null;
     gateShown = true;
     syncShellSidebar();
@@ -533,7 +562,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       void load();
     }
   });
-  refreshBtn.addEventListener("click", () => void load());
+  refreshBtn.addEventListener("click", () => void load("manual"));
   boardBtn.addEventListener("click", () => board.open());
   logoutBtn.addEventListener("click", () => {
     const wasSession = state.auth === "session";
@@ -557,6 +586,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     switch (tab) {
       case "accounts":
         return T().admTabAccounts;
+      case "classes":
+        return T().admTabClasses;
       case "live":
         return T().admTabLive;
       case "event":
@@ -576,6 +607,23 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   // so the router doesn't rebuild the page) and goes through selectTab's unsaved-edits guard.
   const pendingTabBadge = h("span", { class: "tab-badge nav-sub-badge" });
   pendingTabBadge.hidden = true;
+  // The review queue (#184) lives on its own page; the console links it with the number waiting.
+  const reviewsBadge = h("span", { class: "tab-badge nav-sub-badge" });
+  reviewsBadge.hidden = true;
+  const reviewsLink = navSubLink("#/author/reviews", {
+    label: T().admReviewsLink,
+    icon: { svg: svgIcon('<path d="M4 4h16v12H8l-4 4z"/><path d="M9 10l2 2 4-4"/>') },
+    badge: reviewsBadge,
+    className: "admin-side-link admin-reviews-link",
+  });
+  function renderReviewsBadge(): void {
+    const n = state.reviews ?? 0;
+    reviewsBadge.textContent = fmtInt(n);
+    reviewsBadge.hidden = n === 0;
+    reviewsBadge.setAttribute("aria-label", T().admReviewsBadge(n));
+    reviewsLink.dataset.navTip = n === 0 ? T().admReviewsLink : `${T().admReviewsLink}, ${T().admReviewsBadge(n)}`;
+    refreshNav();
+  }
   const sectionLinks = new Map<TabId, HTMLAnchorElement[]>();
   const tabPanels = new Map<TabId, HTMLElement>();
   const navSpec: NavSection = { under: "admin", label: TS().adminSections, content: side.content };
@@ -607,9 +655,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   }
 
   const sectionGroups: ReadonlyArray<{ id: string; label: string; tabs: readonly TabId[] }> = [
-    { id: "people", label: TS().adminGroupPeople, tabs: ["accounts"] },
+    { id: "people", label: TS().adminGroupPeople, tabs: ["accounts", "classes"] },
     { id: "live", label: TS().adminGroupLive, tabs: ["live", "stats"] },
-    { id: "event", label: TS().adminGroupEvent, tabs: ["event", "schedule"] },
+    { id: "event", label: TS().adminGroupEvent, tabs: ["schedule", "event"] },
     { id: "audit", label: TS().adminGroupAudit, tabs: ["audit"] },
   ];
 
@@ -617,7 +665,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   function buildSidebar(): void {
     sectionLinks.clear();
     side.content.setAttribute("aria-label", T().admTabsLabel);
-    setChildren(side.content, sectionGroups.flatMap((g) => g.tabs).map((tab) => h("li", {}, sectionLink(tab))));
+    setChildren(side.content, sectionGroups.flatMap((g) => g.tabs).map((tab) => h("li", {}, sectionLink(tab))), h("li", {}, reviewsLink));
+    renderReviewsBadge();
   }
 
   /** Shows (or, at the sign-in gate, removes) this dashboard's nav section, when it is the page on screen. */
@@ -666,7 +715,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     renderActiveTab();
     if (tab === "schedule" && !schedule.draft()) void schedule.load();
     if (tab === "event" && !eventForm.draft()) void eventForm.load();
-    void load();
+    void load("enter");
     return true;
   }
 
@@ -708,6 +757,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     gateShown = false;
     syncShellSidebar();
     buildAccountsPanel();
+    ownerClasses.mount(tabPanels.get("classes") ?? container);
     live.mount(tabPanels.get("live") ?? container);
     statsPanel.mount(tabPanels.get("stats") ?? container);
     buildAuditPanel();
@@ -753,13 +803,10 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
 
   const members = createMembersPanel({
     host,
-    accounts: {
-      get: () => state.accounts?.accounts ?? null,
-      set: (list) => {
-        if (state.accounts && list) state.accounts = { ...state.accounts, accounts: [...list] };
-      },
-    },
+    page: { get: () => state.users, set: (page) => void (state.users = page) },
+    fetch: (query) => void loadUsers(query),
     api: {
+      setClassLimit: setAccountClassLimit,
       setStatus: setAccountStatus,
       setRole: setAccountRole,
       setStatuses: setAccountsStatus,
@@ -788,6 +835,27 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
    * The trash entry a soft delete just created (newest first from the server), for the Undo in its toast.
    * Matched by the server's label; null when it can't be found (the toast then has no Undo).
    */
+  /**
+   * Fetches one page of the users list (#185) and shows it. On demand only: a search, filter, sort or page change
+   * calls this directly; opening the section and Refresh go through load(). Older responses are dropped.
+   */
+  async function loadUsers(query: MembersQuery): Promise<void> {
+    const seq = ++state.usersSeq;
+    try {
+      const page = await fetchUsers(query);
+      if (disposed || seq !== state.usersSeq) return;
+      state.users = page;
+      state.lastUpdated = Date.now();
+      renderUpdated();
+      if (state.tab === "accounts") renderAccounts();
+      else members.renderPending();
+    } catch (err: unknown) {
+      if (disposed || handleAuthError(err)) return;
+      state.banner = T().admActionFailed(errMessage(err));
+      renderBanner();
+    }
+  }
+
   async function newestTrash(match: (e: TrashEntry) => boolean): Promise<TrashEntry | null> {
     try {
       const entries = await fetchTrash();
@@ -966,7 +1034,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       if (disposed) return;
       t.msg = { text: T().admRestored(entry.label, res.restored, res.skipped), ok: true };
       t.entries = (t.entries ?? []).filter((e) => e.id !== entry.id);
-      void load();
+      void load("manual");
     } catch (err: unknown) {
       if (disposed || handleAuthError(err)) return;
       const conflict = err instanceof AdminApiError && (err.status === 409 || err.code === "conflict");
@@ -1072,9 +1140,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     state.liveCaseId = caseId;
     state.progress = null;
     if (updateUrl && state.tab === "live") setUrl(adminHash("live", caseId), "replace");
-    if (state.accounts) {
+    if (state.ready) {
       live.render();
-      void load();
+      void load("enter");
     }
   }
 
@@ -1163,7 +1231,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     renderAudit();
   });
   const auditDetailText = (e: AuditEntry): string => {
-    const name = e.target === null ? "" : (auditNames.get(e.target) ?? T().admUnknownAccount);
+    const isAccount = e.action.startsWith("account.") || e.action === "progress.restart";
+    const name = e.target === null ? "" : (auditNames.get(e.target) ?? (isAccount ? T().admUnknownAccount : e.target));
     let detail = e.detail ?? "";
     if (e.detail !== null && (e.action === "progress.restart" || e.action === "progress.reset")) detail = e.detail === "all cases" ? T().admAllCases : caseTitle(e.detail);
     return [name, detail].filter((x) => x !== "").join(" · ");
@@ -1245,10 +1314,14 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     const out: Child[] = [];
     if (e.target !== null) {
       const name = names.get(e.target);
+      // Account targets that are gone say so; other targets (a case id, a trash entry) show as they are.
+      const isAccount = e.action.startsWith("account.") || e.action === "progress.restart";
       out.push(
         name !== undefined
           ? h("span", { class: "player-name", dir: "auto" }, name)
-          : h("span", { class: "muted", title: e.target }, T().admUnknownAccount),
+          : isAccount
+            ? h("span", { class: "muted", title: e.target }, T().admUnknownAccount)
+            : h("code", { class: "muted", dir: "ltr" }, e.target),
       );
     }
     if (e.detail !== null) {
@@ -1298,10 +1371,19 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   // Stats tab: the stats panel (views/manage/stats.ts) on the admin API
   // =====================================================================================
 
+  // =====================================================================================
+  // Classes (#185): every class on the site, on demand (views/manage/ownerClasses.ts)
+  // =====================================================================================
+
+  const ownerClasses = createOwnerClassesPanel({
+    host,
+    api: { list: fetchAdminClasses, setMemberLimit: setClassMemberLimit, setArchived: setClassArchived },
+  });
+
   const statsPanel = createStatsPanel({
     api: { progress: fetchProgress },
     stats: () => state.stats,
-    accounts: () => state.accounts?.accounts ?? [],
+    accounts: () => state.topUsers,
     todayId: () => state.today?.caseId ?? null,
   });
 
@@ -1326,6 +1408,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     switch (state.tab) {
       case "accounts":
         renderAccounts();
+        break;
+      case "classes":
+        ownerClasses.render();
         break;
       case "live":
         live.render();
@@ -1376,39 +1461,55 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     t.entries = res;
   }
 
-  async function load(): Promise<void> {
+  /**
+   * Loads what the section on screen needs. A tick (the poll) fetches only what changes by the second: the Live
+   * case's progress and the site announcement. Opening a section ("enter") and a refresh ("manual") also fetch
+   * the on-demand sections (users, classes, stats, audit, trash, invite code); a refresh updates the review count.
+   */
+  async function load(mode: LoadMode = "tick"): Promise<void> {
     if (disposed) return;
     if (state.loading) {
-      state.queued = true;
+      if (state.queued === null || LOAD_RANK[mode] > LOAD_RANK[state.queued]) state.queued = mode;
       return;
     }
     if (state.auth === null) return showLogin(null);
     state.loading = true;
-    state.queued = false;
+    state.queued = null;
     const tab = state.tab;
+    const onDemand = mode !== "tick";
     const liveCase = state.liveCaseId;
     const settingsRev = state.settings.rev;
     const eventRev = eventForm.rev();
+    const usersSeq = tab === "accounts" && onDemand ? ++state.usersSeq : null;
     // The projector board refreshes with the dashboard (public endpoint; its errors stay on the board).
     board.refresh();
-    // Recently deleted is optional: a server without it (404) or a failure must not break the poll.
+    // Recently deleted is optional: a server without it (404) or a failure must not break the dashboard.
     const trashReq: Promise<TrashEntry[] | AdminApiError | Error> | null =
-      tab === "accounts" ? fetchTrash().catch((err: unknown) => (err instanceof Error ? err : new Error(T().admUnknownError))) : null;
+      tab === "accounts" && onDemand ? fetchTrash().catch((err: unknown) => (err instanceof Error ? err : new Error(T().admUnknownError))) : null;
     try {
       // Today's case changes at most once a day (or on a schedule save, which reloads it itself): once a minute
       // is plenty, and it halves the dashboard's calls per tick.
       const todayDue = Date.now() - todayFetchedAt >= TODAY_REFRESH_MS;
-      const [accounts, today, progress, stats, settings, event, audit] = await Promise.all([
-        fetchAccounts(),
+      const [users, today, progress, stats, settings, event, audit, top, reviews] = await Promise.all([
+        usersSeq !== null ? fetchUsers(members.query()) : Promise.resolve(null),
         todayDue ? fetchToday() : Promise.resolve(null),
         tab === "live" && liveCase ? fetchProgress(liveCase) : Promise.resolve(null),
-        tab === "stats" ? fetchCaseStats() : Promise.resolve(null),
-        tab === "accounts" ? fetchSettings() : Promise.resolve(null),
+        tab === "stats" && onDemand ? fetchCaseStats() : Promise.resolve(null),
+        tab === "accounts" && onDemand ? fetchSettings() : Promise.resolve(null),
         tab === "event" && !eventForm.saving() ? fetchEvent() : Promise.resolve(null),
-        tab === "audit" ? fetchAudit(AUDIT_LIMIT) : Promise.resolve(null),
+        tab === "audit" && onDemand ? fetchAudit(AUDIT_LIMIT) : Promise.resolve(null),
+        tab === "stats" && onDemand ? fetchUsers({ sort: "rank", kind: "user", status: "approved", limit: 10 }) : Promise.resolve(null),
+        mode === "manual" ? fetchReviewCount().catch(() => null) : Promise.resolve(null),
+        // The class list reports its own errors in its section.
+        tab === "classes" && onDemand ? ownerClasses.load() : Promise.resolve(),
       ]);
       if (disposed) return;
-      state.accounts = accounts;
+      if (users && usersSeq === state.usersSeq) state.users = users;
+      if (top) state.topUsers = top.accounts;
+      if (reviews !== null) {
+        state.reviews = reviews;
+        renderReviewsBadge();
+      }
       if (today) {
         state.today = today;
         todayFetchedAt = Date.now();
@@ -1428,7 +1529,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       state.banner = null;
       state.failures = 0;
       // The tab or the live case changed mid-flight: fetch again right away.
-      if (state.tab !== tab || state.liveCaseId !== liveCase) state.queued = true;
+      if ((state.tab !== tab || state.liveCaseId !== liveCase) && state.queued === null) state.queued = "enter";
       renderData();
     } catch (err: unknown) {
       if (disposed) return;
@@ -1438,9 +1539,10 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       renderBanner();
     } finally {
       state.loading = false;
-      if (state.queued && !disposed && state.accounts) {
-        state.queued = false;
-        void load();
+      const queued = state.queued;
+      if (queued !== null && !disposed && state.ready) {
+        state.queued = null;
+        void load(queued);
       } else {
         scheduleNext();
       }
@@ -1455,7 +1557,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   function scheduleNext(): void {
     if (pollId !== null) window.clearTimeout(pollId);
     pollId = null;
-    if (disposed || state.paused || !state.accounts || document.visibilityState === "hidden") return;
+    // Only the live sections poll; the others wait for the instructor (on-demand, #185).
+    if (disposed || state.paused || !state.ready || !POLLED_TABS.has(state.tab) || document.visibilityState === "hidden") return;
     pollId = window.setTimeout(() => {
       pollId = null;
       if (!container.isConnected) return dispose();
@@ -1466,9 +1569,11 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   async function start(): Promise<void> {
     if (state.auth === null) return showLogin(null);
     try {
-      const [accounts, today, settings] = await Promise.all([fetchAccounts(), fetchToday(), fetchSettings()]);
+      // The settings call is the sign-in check (admin only, one record); the users list loads with its section.
+      const [today, settings, reviews] = await Promise.all([fetchToday(), fetchSettings(), fetchReviewCount().catch(() => null)]);
       if (disposed) return;
-      state.accounts = accounts;
+      state.ready = true;
+      state.reviews = reviews;
       state.today = today;
       todayFetchedAt = Date.now();
       state.settings.server = settings;
@@ -1489,9 +1594,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     renderActiveTab();
     if (state.tab === "schedule") void schedule.load();
     if (state.tab === "event") void eventForm.load();
-    // Live, Stats, Audit and Recently deleted (Accounts) need a second request before they have data.
-    if (state.tab === "live" || state.tab === "stats" || state.tab === "audit" || state.tab === "accounts") void load();
-    else scheduleNext();
+    // The section on screen loads its data (the on-demand ones once, the live ones then poll).
+    void load("enter");
     tickId = window.setInterval(() => {
       if (!container.isConnected) return dispose();
       renderUpdated();

@@ -35,6 +35,7 @@ export const PAGES: Record<Who, readonly string[]> = {
     "/#/admin",
     "/#/author",
     "/#/author/reviews",
+    "/#/admin?tab=classes",
     "/#/admin?tab=live",
     "/#/admin?tab=stats",
     "/#/admin?tab=event",

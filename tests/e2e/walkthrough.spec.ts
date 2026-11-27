@@ -29,7 +29,7 @@ const ui = {
   signOut: (p: Page) => p.getByRole("dialog", { name: "Account" }).getByRole("button", { name: /^sign out$/i }),
   headerSignIn: (p: Page) => p.getByRole("banner").getByRole("link", { name: /^sign in$/i }),
   adminKeyPrompt: (p: Page) => p.getByLabel(/admin key/i),
-  adminDashboard: (p: Page) => p.getByRole("heading", { name: /class dashboard/i }),
+  adminDashboard: (p: Page) => p.getByRole("heading", { name: /platform console/i }),
 };
 
 type Progress = {

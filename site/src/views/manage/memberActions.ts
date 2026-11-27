@@ -1,11 +1,14 @@
-// The members table's row actions: approve, reject or revoke (asks first: it signs the player out), the author
-// role, a password reset with its one-time password dialog (lib/overlay.ts), and delete (typed name, then the
-// dashboard's Undo). Shared by the table rows and the phone cards of manage/members.ts.
+// The members table's row actions: approve or reject a sign-up, ban (asks first: it signs the player out) or
+// unban, the author role, the class limit (#185), a password reset with its one-time password dialog
+// (lib/overlay.ts), and delete (typed name, then the dashboard's Undo). Shared by the table rows and the phone
+// cards of manage/members.ts. Ban is the account's `rejected` status.
 import { T } from "../../i18n/strings-tools";
 import { copyButton, h } from "../../lib/dom";
-import { openDialog, type MenuItem } from "../../lib/overlay";
-import { TRASH_RETENTION_DAYS, type AccountRecordRole, type AccountView, type UserStats } from "../../../shared/contract";
+import { openDialog, toast, type MenuItem } from "../../lib/overlay";
+import { CLASS_DEFAULTS, TRASH_RETENTION_DAYS, type AccountRecordRole, type AccountView, type UserStats } from "../../../shared/contract";
+import { fmtInt } from "./format";
 import type { ManageHost, Slot } from "./host";
+import { limitDialog } from "./limitDialog";
 
 export type MemberActionsApi = {
   setStatus(accountId: string, action: "approve" | "reject"): Promise<AccountView>;
@@ -13,6 +16,8 @@ export type MemberActionsApi = {
   /** Resolves to a one-time temporary password, shown once in a dialog. */
   resetPassword(accountId: string): Promise<string>;
   deleteAccount(accountId: string): Promise<void>;
+  /** How many active classes the account may own; null = the site default. Optional: no menu item without it. */
+  setClassLimit?(accountId: string, classLimit: number | null): Promise<number | null>;
 };
 
 export type MemberActionsOptions = {
@@ -104,7 +109,9 @@ export function createMemberActions(opts: MemberActionsOptions): MemberActions {
   function acctMenuItems(a: UserStats): MenuItem[] {
     const key = `acct:${a.accountId}`;
     const items: MenuItem[] = [];
-    if (a.status !== "approved") items.push({ label: T().admApprove, run: () => void changeStatus(a, "approve") });
+    // Pending sign-ups are approved; banned accounts are unbanned (the same call: back to approved).
+    if (a.status === "pending") items.push({ label: T().admApprove, run: () => void changeStatus(a, "approve") });
+    if (a.status === "rejected") items.push({ label: T().admUnban, run: () => void changeStatus(a, "approve") });
     // Revoke signs the player out at once, so it asks first: approving again later can't bring the session back.
     if (a.status === "approved") {
       items.push({
@@ -121,7 +128,12 @@ export function createMemberActions(opts: MemberActionsOptions): MemberActions {
           }),
       });
     } else if (a.status === "pending") items.push({ label: T().admReject, run: () => void changeStatus(a, "reject") });
-    items.push(a.role === "author" ? { label: T().admRemoveAuthor, run: () => void changeRole(a, "player") } : { label: T().admMakeAuthor, run: () => void changeRole(a, "author") });
+    // Guests can't author or own classes (they have no password to sign in with).
+    if (a.kind !== "guest") {
+      items.push(a.role === "author" ? { label: T().admRemoveAuthor, run: () => void changeRole(a, "player") } : { label: T().admMakeAuthor, run: () => void changeRole(a, "author") });
+      const setClassLimit = opts.api.setClassLimit;
+      if (setClassLimit) items.push({ label: T().admSetClassLimitItem, run: () => void editClassLimit(a, setClassLimit, key) });
+    }
     items.push({
       label: T().admResetPwItem,
       run: () =>
@@ -165,6 +177,33 @@ export function createMemberActions(opts: MemberActionsOptions): MemberActions {
         }),
     });
     return items;
+  }
+
+  async function editClassLimit(a: UserStats, save: (id: string, limit: number | null) => Promise<number | null>, key: string): Promise<void> {
+    const fallback = fmtInt(CLASS_DEFAULTS.OWNED_LIMIT);
+    try {
+      const saved = await limitDialog({
+        title: T().admClassLimitTitle(a.username),
+        label: T().admClassLimitLabel,
+        help: T().admClassLimitHelp(fallback),
+        value: a.classLimit,
+        defaultValue: CLASS_DEFAULTS.OWNED_LIMIT,
+        min: 0,
+        max: CLASS_DEFAULTS.MAX_CLASS_LIMIT,
+        allowDefault: true,
+        save: async (value) => {
+          await save(a.accountId, value);
+        },
+        returnFocus: () => host.menuTriggerEl(key),
+      });
+      if (saved === undefined || host.disposed()) return;
+      const list = opts.accounts.get();
+      if (list) opts.accounts.set(list.map((x) => (x.accountId === a.accountId ? { ...x, classLimit: saved } : x)));
+      opts.rerender();
+      toast({ tone: "success", text: T().admClassLimitSaved(a.username, saved === null ? fallback : fmtInt(saved)) });
+    } catch (err: unknown) {
+      host.showActionError(err);
+    }
   }
 
   function menu(a: UserStats): HTMLButtonElement {

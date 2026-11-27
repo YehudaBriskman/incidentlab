@@ -246,6 +246,12 @@ may reclaim unreferenced ones). CLI: `scripts/data.ts upload` (see `docs/CASE_CO
 
 ### Admin (`X-Admin-Key: <ADMIN_KEY>` or the `admin` session cookie)
 
+The platform owner console is `#/admin` (`src/views/admin.ts`, panels in `src/views/manage/*`, #185): Users, Classes,
+Live, Stats, Global daily case (`/api/admin/schedule`), Site announcement (`/api/admin/event`), Audit log, and a
+Reviews link to `#/author/reviews` with the number waiting. Only Live (`/api/admin/progress`) and the site
+announcement poll, every 5 s in a visible tab; Users, Classes, Stats and Audit load on demand (opening the
+section, a search, filter or page, an action, or Refresh).
+
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/api/admin/accounts` | | `{generatedAt, accounts: UserStats[]}` (every account with stats and rank; cached 2 s). A full scan of accounts and progress: scripts and tests only, the console uses `/api/admin/users`. |
