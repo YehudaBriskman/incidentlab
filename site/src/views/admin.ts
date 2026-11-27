@@ -2,6 +2,9 @@
 // Tabs: Accounts (approve sign-ups, per-user stats, invite code, CSV) · Live (one case, polled) · Event (window, freeze,
 // announcement) · Schedule (incident of the day) · Stats (per case) · Audit log.
 // Auth: the `admin` session cookie (signed in on #/login with the ADMIN_KEY) or an admin key typed into the gate.
+// The panels a class dashboard reuses (members, live, event, schedule, stats, projector board) live in views/manage/*:
+// this file mounts them with the /api/admin/* calls and keeps the shell (gate, sections, URL, poll, banner), the
+// trash, the invite code and the audit log.
 import "../admin.css";
 import { T } from "../i18n/strings-tools";
 import { getLang } from "../i18n/i18n";
