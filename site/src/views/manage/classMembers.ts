@@ -1,16 +1,17 @@
-// The class members panel (#182): KPI tiles, the requests to join (approve or decline) and the members table with
-// a per-row actions menu (promote, demote, remove). It is the class counterpart of manage/members.ts: class
+// The class members panel (#182): KPI tiles, the requests to join (approve or decline), the password reset
+// requests a class admin may vouch for (#254), and the members table with a per-row actions menu (promote, demote,
+// remove). It is the class counterpart of manage/members.ts: class
 // members carry a username and a membership only (never an account's stats), so it has its own columns, and its
 // `api` has no password reset and no account delete: class admins never get either (docs/API.md, the
 // permission matrix). Which actions a row offers comes from lib/class-permissions.ts; the server checks again.
 // Built on the same host (views/manage/host.ts): confirms, row menus, the banner and the foldable tiles.
 import { TC } from "../../i18n/strings-classes";
 import { getLang } from "../../i18n/i18n";
-import type { ClassMember, ClassRole } from "../../../shared/contract";
+import type { ClassMember, ClassResetRequest, ClassRole } from "../../../shared/contract";
 import { dataTable, type Column } from "../../components/dataTable";
 import { statGrid } from "../../components/statGrid";
 import { h, setChildren } from "../../lib/dom";
-import type { MenuItem } from "../../lib/overlay";
+import { toast, type MenuItem } from "../../lib/overlay";
 import { memberActions, type ClassCaller } from "../../lib/class-permissions";
 import { fmtInt, formatDateTime, ms, relativeAgo } from "./format";
 import { NARROW_QUERY, setTilesSummary, type ManageHost, type Slot } from "./host";
@@ -21,6 +22,8 @@ export type ClassMembersApi = {
   /** Removes a member, or declines a request. */
   remove(accountId: string): Promise<void>;
   setRole(accountId: string, role: ClassRole): Promise<ClassMember>;
+  /** "I know this student" for a password reset request (#254). Never sets or shows a password. */
+  vouch(accountId: string): Promise<ClassResetRequest>;
 };
 
 export type ClassMembersOptions = {
@@ -34,6 +37,8 @@ export type ClassMembersOptions = {
   memberLimit(): number | null;
   /** How people join (a tile): with the code at once, or with approval. */
   joinMode(): "code" | "approval" | null;
+  /** Open password reset requests of active members (#254); null before the first load or when it failed. */
+  resetRequests: Slot<readonly ClassResetRequest[] | null>;
 };
 
 export type ClassMembersPanel = {
@@ -60,6 +65,17 @@ export function createClassMembersPanel(opts: ClassMembersOptions): ClassMembers
   const tableEl = h("div", { class: "admin-table-wrap" });
   const countEl = h("span", { class: "muted small" });
   const requestCountEl = h("span", { class: "muted small" });
+  const resetEl = h("div", { class: "admin-table-wrap" });
+  const resetCountEl = h("span", { class: "muted small" });
+  // Shown only while there is a request: most classes never have one.
+  const resetPanel = h(
+    "section",
+    { class: "panel admin-panel class-requests-panel class-reset-panel", "aria-labelledby": "class-reset-title", hidden: true },
+    h("h2", { class: "admin-h2", id: "class-reset-title", tabindex: "-1" }, TC().resetTitle, " ", resetCountEl),
+    h("p", { class: "muted small" }, TC().resetHint),
+    resetEl,
+  );
+  const vouching = new Set<string>();
 
   const nameCell = (m: ClassMember): HTMLElement => {
     const self = m.accountId === opts.caller().accountId;
@@ -176,8 +192,63 @@ export function createClassMembersPanel(opts: ClassMembersOptions): ClassMembers
     );
   }
 
+  /** Vouch asks first, saying to vouch only for a student known in person; the confirm stays busy until it settles. */
+  function askVouch(r: ClassResetRequest): void {
+    void host
+      .askConfirm({
+        title: TC().vouchTitle(r.username),
+        body: TC().vouchBody,
+        confirmLabel: TC().vouchConfirm(r.username),
+        cancelLabel: TC().cancel,
+        busyLabel: TC().vouching,
+        tone: "primary",
+        run: async () => {
+          vouching.add(r.accountId);
+          try {
+            const updated = await opts.api.vouch(r.accountId);
+            const list = opts.resetRequests.get();
+            if (list) opts.resetRequests.set(list.map((x) => (x.accountId === updated.accountId ? updated : x)));
+          } finally {
+            vouching.delete(r.accountId);
+          }
+        },
+        returnFocus: () => host.container.querySelector<HTMLElement>("#class-reset-title"),
+      })
+      .then((ok) => {
+        render();
+        if (ok) toast({ tone: "success", text: TC().vouchDone(r.username) });
+      });
+  }
+
+  function resetRow(r: ClassResetRequest): HTMLLIElement {
+    let action: HTMLElement;
+    if (r.vouchedByMe) action = h("span", { class: "chip pill-info" }, TC().vouched);
+    else {
+      const btn = h("button", { type: "button", class: "btn btn-sm", "data-testid": "vouch", "aria-disabled": vouching.has(r.accountId) ? "true" : null }, TC().vouch);
+      btn.addEventListener("click", () => {
+        if (!vouching.has(r.accountId)) askVouch(r);
+      });
+      action = btn;
+    }
+    return h(
+      "li",
+      { class: "class-request", "data-id": r.accountId },
+      h("span", { class: "player-name", dir: "auto" }, r.username),
+      tipped(h("span", {}, TC().resetRequested(relativeAgo(r.createdAt, now))), formatDateTime(r.createdAt)),
+      h("span", { class: "class-request-actions" }, action),
+    );
+  }
+
+  function renderResets(): void {
+    const list = opts.resetRequests.get() ?? [];
+    resetPanel.hidden = list.length === 0;
+    resetCountEl.textContent = `(${fmtInt(list.length)})`;
+    setChildren(resetEl, list.length === 0 ? null : h("ul", { class: "class-requests", "aria-labelledby": "class-reset-title" }, list.map(resetRow)));
+  }
+
   function render(): void {
     now = Date.now();
+    renderResets();
     const all = opts.members.get();
     if (all === null) {
       setChildren(tableEl, h("p", { class: "muted admin-empty-small" }, TC().loading));
@@ -215,6 +286,7 @@ export function createClassMembersPanel(opts: ClassMembersOptions): ClassMembers
         h("p", { class: "muted small admin-hint is-touch-only" }, TC().requestsHint),
         requestsEl,
       ),
+      resetPanel,
       h(
         "section",
         { class: "panel admin-panel acct-panel", "aria-labelledby": "class-members-title" },

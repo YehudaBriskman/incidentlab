@@ -230,6 +230,8 @@ input[type="checkbox"].switch:checked::before { transform: none; background: var
 .center-card { padding: var(--pad-card-lg); border: 0; }
 .center-card.gate { padding: var(--pad-card); gap: var(--gap-stack); }
 .center-card.gate .input { min-block-size: 40px; }
+/* teacher-vouched reset (#254): the numbered next steps after a reset request */
+.reset-steps { margin: 0; padding-inline-start: var(--space-5); display: flex; flex-direction: column; gap: var(--gap-related); color: var(--text-2); }
 /* guest play (#176): the quieter second card under the sign-in form, and the upgrade dialog's form */
 .center-card.guest-choice { margin-block-start: var(--space-4); }
 .guest-choice h2 { margin: 0; font-size: var(--step-1); }

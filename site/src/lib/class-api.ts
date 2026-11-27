@@ -9,6 +9,9 @@ import {
   ClassMemberResponseSchema,
   ClassMembersResponseSchema,
   ClassResponseSchema,
+  ClassResetRequestResponseSchema,
+  ClassResetRequestsResponseSchema,
+  type ClassResetRequest,
   type ClassBoardResponse,
   type ClassDetail,
   type ClassMember,
@@ -84,6 +87,16 @@ export async function removeClassMember(id: string, accountId: string): Promise<
 
 export async function setClassMemberRole(id: string, accountId: string, role: ClassRole): Promise<ClassMember> {
   return (await request("POST", classPath(id, `/members/${seg(accountId)}/role`), ClassMemberResponseSchema, { role })).member;
+}
+
+/** Open password reset requests of the class's active members (#254; class admins). */
+export async function fetchClassResetRequests(id: string): Promise<ClassResetRequest[]> {
+  return (await request("GET", classPath(id, "/reset-requests"), ClassResetRequestsResponseSchema)).requests;
+}
+
+/** "I know this student" (#254). It changes no password: the site owner approves the request. */
+export async function vouchResetRequest(id: string, accountId: string): Promise<ClassResetRequest> {
+  return (await request("POST", classPath(id, `/reset-requests/${seg(accountId)}/vouch`), ClassResetRequestResponseSchema, {})).request;
 }
 
 /** Live progress of the class's active members on one case (class admins; the admin Live tab's shape). */

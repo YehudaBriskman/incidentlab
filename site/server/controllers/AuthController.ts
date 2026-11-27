@@ -8,9 +8,14 @@ import {
   RecoverRequestSchema,
   RegenerateRecoveryCodeRequestSchema,
   RegisterRequestSchema,
+  RESET_REQUEST_ACCEPTED,
+  ResetRequestCreateSchema,
 } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
+import { passwordChangeRequired } from "../services/AuthService.ts";
 import type { AuthService } from "../services/AuthService.ts";
+import type { AuditService } from "../services/AuditService.ts";
+import type { PasswordResetService } from "../services/PasswordResetService.ts";
 import type { CaseAccessService, CaseViewer } from "../services/CaseAccessService.ts";
 import type { EventService } from "../services/EventService.ts";
 import type { GlobalBoardService } from "../services/GlobalBoardService.ts";
@@ -65,9 +70,23 @@ export class AuthController {
   private readonly events: EventService;
   private readonly board: GlobalBoardService;
   private readonly access: CaseAccessService | null;
+  private readonly resets: PasswordResetService | null;
+  private readonly audit: AuditService | null;
 
-  constructor(deps: { auth: AuthService; schedule: ScheduleService; stats: StatsService; events: EventService; board: GlobalBoardService; access?: CaseAccessService }) {
+  constructor(deps: {
+    auth: AuthService;
+    schedule: ScheduleService;
+    stats: StatsService;
+    events: EventService;
+    board: GlobalBoardService;
+    access?: CaseAccessService;
+    /** the teacher-vouched reset (#254); without it POST /api/auth/reset-request is a 404 */
+    resets?: PasswordResetService;
+    audit?: AuditService;
+  }) {
     this.access = deps.access ?? null;
+    this.resets = deps.resets ?? null;
+    this.audit = deps.audit ?? null;
     this.auth = deps.auth;
     this.schedule = deps.schedule;
     this.stats = deps.stats;
@@ -92,6 +111,18 @@ export class AuthController {
   async recover(req: Request, ip: string): Promise<Response> {
     const body = await parseBody(req, RecoverRequestSchema);
     return json(200, await this.auth.recover({ ...body, ip }));
+  }
+
+  /**
+   * POST /api/auth/reset-request (#254): always 202 with the same body, so it never tells whether the name exists.
+   * Only a request actually written is audited (by account id): unknown names leave no trace to flood the log with.
+   */
+  async resetRequest(req: Request, ip: string): Promise<Response> {
+    if (this.resets === null) throw new AppError(404, "not found");
+    const body = await parseBody(req, ResetRequestCreateSchema);
+    const accountId = await this.resets.request({ ...body, ip });
+    if (accountId !== null) await this.audit?.record({ action: "account.reset-request", target: accountId, via: "session", actor: null });
+    return json(202, RESET_REQUEST_ACCEPTED);
   }
 
   async regenerateRecoveryCode(req: Request): Promise<Response> {
@@ -130,13 +161,14 @@ export class AuthController {
 
   async changePassword(req: Request): Promise<Response> {
     const body = await parseBody(req, ChangePasswordRequestSchema);
-    const { account, session } = await this.auth.changePassword(sessionToken(req), body);
-    return withCookie(json(200, { account }), sessionCookie(req, session));
+    const { account, session, recoveryCode } = await this.auth.changePassword(sessionToken(req), body);
+    return withCookie(json(200, { account, ...(recoveryCode === null ? {} : { recoveryCode }) }), sessionCookie(req, session));
   }
 
   async myStats(req: Request): Promise<Response> {
     const { principal } = await this.auth.authenticate(sessionToken(req));
     if (principal.kind === "admin") throw new AppError(403, "the admin account has no player stats", { code: "admin" });
+    if (principal.account.mustChangePassword) throw passwordChangeRequired();
     return json(200, { stats: await this.stats.forAccount(principal.account) });
   }
 

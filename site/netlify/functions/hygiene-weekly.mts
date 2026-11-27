@@ -11,7 +11,7 @@ export default async (): Promise<Response> => {
     console.log(
       `[incidentlab-hygiene] trashed ${report.idleGuests.length} idle guests (${report.guestProgress} progress records), ` +
         `deleted ${report.expiredSessions} expired sessions, ${report.staleRateLimits} stale rate limits, ` +
-        `${report.oldAudit} old audit entries, ${report.expiredTrash} expired trash entries`,
+        `${report.oldAudit} old audit entries, ${report.expiredTrash} expired trash entries, ${report.expiredResetRequests} expired reset requests`,
     );
     return new Response(null, { status: 204 });
   } catch (error) {
