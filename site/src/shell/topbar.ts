@@ -7,6 +7,8 @@ import { TB } from "../i18n/strings-board";
 import { TG } from "../i18n/strings-game";
 import { TS } from "../i18n/strings-shell";
 import { TC } from "../i18n/strings-classes";
+import { TSe, settingsSectionLabel } from "../i18n/strings-settings";
+import { isSettingsSection, settingsHref } from "../lib/settings-route";
 import { cachedClassName } from "../lib/class-api";
 import { onConnectivity } from "../lib/api";
 import { h, html, setChildren } from "../lib/dom";
@@ -48,6 +50,11 @@ function crumbsFor(parts: readonly string[]): Crumb[] {
     if (sub === "toolbox") out.push({ label: TS().sideToolbox });
     if (sub === "explorer") out.push({ label: TS().sideExplorer });
     return out;
+  }
+  if (section === "settings") {
+    // #219: Home / Settings / the section on screen
+    if (id === undefined || !isSettingsSection(id)) return [homeCrumb, { label: TSe().title }];
+    return [homeCrumb, { label: TSe().title, href: settingsHref("account") }, { label: settingsSectionLabel(id) }];
   }
   if (key === "home") return [{ label: TS().navHome }];
   if (key === "classes") {
@@ -253,6 +260,7 @@ function createAccountMenu(): HTMLElement {
         { class: "account-items" },
         guest ? h("li", {}, h("button", { type: "button", class: "account-item", onclick: upgradeFromMenu }, TGu().createAccount)) : null,
         showStats ? h("li", {}, h("a", { class: "account-item", href: "#/me" }, TA().myStats)) : null,
+        h("li", {}, h("a", { class: "account-item", href: settingsHref("account") }, TSe().menuSettings)),
         h("li", {}, out),
       ),
     );
