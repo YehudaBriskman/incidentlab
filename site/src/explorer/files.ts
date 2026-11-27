@@ -34,19 +34,6 @@ export interface EvidenceFile {
   profile: Profile;
 }
 
-/** 3am-outage's hand-written size hints and localized descriptions. Descriptions describe the format only, never the findings. */
-const LEGACY_3AM: ReadonlyArray<{ path: string; size: string; description: () => string }> = [
-  { path: "README_FIRST.txt", size: "2 KB", description: () => T().fdReadme },
-  { path: "nginx/access.log", size: "~40 MB", description: () => T().fdAccess },
-  { path: "app/checkout-service.log", size: "~7 MB", description: () => T().fdCheckout },
-  { path: "metrics/checkout_metrics.csv", size: "25 KB", description: () => T().fdMetrics },
-  { path: "db/postgresql-slow.log", size: "16 KB", description: () => T().fdPg },
-  { path: "deploys/deploys.log", size: "2 KB", description: () => T().fdDeploys },
-  { path: "slack/inc-checkout.json", size: "8 KB", description: () => T().fdSlack },
-  { path: "nginx/nginx.conf.snippet", size: "2 KB", description: () => T().fdNginx },
-  { path: "repo/git-log.txt", size: "", description: () => T().fdGit },
-];
-
 // Binary twins live only in the zip (see scripts/package.sh); the Explorer can't show them.
 const BINARY_EXTENSIONS = [".bundle", ".pcap", ".tar.gz", ".bin"];
 
@@ -90,7 +77,6 @@ export function evidenceFilesFor(c: Case): EvidenceFile[] {
     const mode = modeFor(path, en);
     return { path, size, format: localFormat.get(path) ?? en, description, mode, profile: profileFor(path, en, mode) };
   };
-  if (c.id === "3am-outage") return LEGACY_3AM.map((f) => build(f.path, f.size, f.description()));
   const files = c.evidence
     .filter((f) => !BINARY_EXTENSIONS.some((ext) => f.path.toLowerCase().endsWith(ext)))
     .map((f) => build(f.path, "", plainText(f.description)));
