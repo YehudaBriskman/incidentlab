@@ -9,6 +9,7 @@ import type { EventService } from "../services/EventService.ts";
 import type { ScheduleService } from "../services/ScheduleService.ts";
 import type { AccountDirectory, StatsService } from "../services/StatsService.ts";
 import type { TrashService } from "../services/TrashService.ts";
+import type { PasswordResetService } from "../services/PasswordResetService.ts";
 import { json, noContent, parseBody, sessionToken } from "./http.ts";
 
 const EmptyBodySchema = z.object({}).strict();
@@ -23,6 +24,8 @@ export type AdminControllerDeps = {
   readonly trash: TrashService;
   readonly guard: AdminAuthService;
   readonly now: () => Date;
+  /** the teacher-vouched reset queue (#254); without it its routes are a 404 */
+  readonly resets?: PasswordResetService;
 };
 
 export class AdminController {
@@ -117,6 +120,39 @@ export class AdminController {
     await parseBody(req, EmptyBodySchema);
     const temporaryPassword = await this.mutation(req, { action: "account.reset-password", target: accountId }, () => this.deps.accounts.resetPassword(accountId));
     return json(200, { temporaryPassword });
+  }
+
+  // ---- teacher-vouched password resets (#254) ----------------------------------
+
+  private resets(): PasswordResetService {
+    if (this.deps.resets === undefined) throw new AppError(404, "not found");
+    return this.deps.resets;
+  }
+
+  /** GET /api/admin/reset-requests: live requests with at least one valid vouch. */
+  async listResetRequests(req: Request): Promise<Response> {
+    await this.assertAdmin(req);
+    return json(200, { requests: await this.resets().forOwner() });
+  }
+
+  /**
+   * POST /api/admin/reset-requests/:accountId/approve: the temporary password is in this response only. The audit
+   * names who vouched, never the password.
+   */
+  async approveResetRequest(req: Request, accountId: string): Promise<Response> {
+    await parseBody(req, EmptyBodySchema);
+    const via = await this.assertAdmin(req);
+    const { temporaryPassword, vouchedBy } = await this.resets().approve(accountId);
+    this.accountsCache = null;
+    this.directoryCache = null;
+    await this.deps.audit.record({ action: "account.reset-approve", target: accountId, detail: `vouched by ${vouchedBy.join(", ")}`, via, actor: AUDIT_ADMIN_ACTOR });
+    return json(200, { temporaryPassword });
+  }
+
+  async rejectResetRequest(req: Request, accountId: string): Promise<Response> {
+    await parseBody(req, EmptyBodySchema);
+    await this.mutation(req, { action: "account.reset-reject", target: accountId }, () => this.resets().reject(accountId));
+    return noContent();
   }
 
   async deleteAccount(req: Request, accountId: string): Promise<Response> {

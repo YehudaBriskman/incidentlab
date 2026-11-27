@@ -9,7 +9,7 @@
 // Nothing else polls. Class data is admin-authored and rendered as text only.
 import "../admin.css";
 import "../classes.css";
-import type { ClassDetail, ClassMember, LiveEvent, Schedule, TodayResponse } from "../../shared/contract";
+import type { ClassDetail, ClassMember, ClassResetRequest, LiveEvent, Schedule, TodayResponse } from "../../shared/contract";
 import { formActions, formField } from "../components/formLayout";
 import { caseSummaries } from "../content/load";
 import { getLang } from "../i18n/i18n";
@@ -23,6 +23,8 @@ import {
   classToday,
   fetchClass,
   fetchClassMembers,
+  fetchClassResetRequests,
+  vouchResetRequest,
   fetchClassProgress,
   joinLink,
   removeClassMember,
@@ -142,6 +144,8 @@ function renderManage(root: HTMLElement, side: HTMLElement, id: string): void {
     tab: readTab() ?? ("members" as TabId),
     cls: null as ClassDetail | null,
     members: null as ClassMember[] | null,
+    /** open password reset requests of active members (#254) */
+    resetRequests: null as ClassResetRequest[] | null,
     progress: null as AdminProgressResult | null,
     liveCaseId: null as string | null,
     narrow: narrowMq.matches,
@@ -328,10 +332,12 @@ function renderManage(root: HTMLElement, side: HTMLElement, id: string): void {
       approve: (accountId) => approveClassMember(id, accountId),
       remove: (accountId) => removeClassMember(id, accountId),
       setRole: (accountId, role) => setClassMemberRole(id, accountId, role),
+      vouch: (accountId) => vouchResetRequest(id, accountId),
     },
     caller,
     memberLimit: () => state.cls?.admin?.memberLimit ?? null,
     joinMode: () => state.cls?.admin?.joinMode ?? null,
+    resetRequests: { get: () => state.resetRequests, set: (list) => void (state.resetRequests = list === null ? null : [...list]) },
   });
 
   // ---- live ---------------------------------------------------------------------------------------------
@@ -720,7 +726,10 @@ function renderManage(root: HTMLElement, side: HTMLElement, id: string): void {
     switch (state.tab) {
       case "members":
         try {
-          state.members = await fetchClassMembers(id);
+          // Reset requests (#254) ride along; a failure there must not hide the members.
+          const [list, resets] = await Promise.all([fetchClassMembers(id), fetchClassResetRequests(id).catch((): null => null)]);
+          state.members = list;
+          state.resetRequests = resets;
           if (!disposed && state.tab === "members") members.render();
         } catch (err: unknown) {
           showActionError(err);

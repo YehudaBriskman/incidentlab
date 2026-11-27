@@ -45,7 +45,7 @@ plan allows 125,000 function calls a month.
   hidden tab, and not after 15 minutes without pointer or key input until the viewer presses Resume. A projector
   during a live event keeps polling. An answer that shows the same standings is not redrawn.
 - Errors are non-2xx with body `{ "error": string, "code"?: string, "retryAfterSeconds"?: number, "details"?: string[] }` (`details` lists every failed check of a rejected upload). Status codes: 400 validation, 401 signed out, 403 forbidden (see codes), 404, 405, 409 conflict (username taken, no more hints, concurrent update: retry; code `stale` from a play route also carries `progress`, see below), 413, 415, 429 rate limit (also sends `Retry-After`), 500 `{"error":"internal"}`, 503 admin disabled.
-- Error codes the UI acts on (also, for private cases and review, #184: `not-admin`, `not-published`, `already-public`, `not-submitted`): `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-class-code` (`bad-invite-code` before #204), `pending`, `rejected`, `admin`, `password-change-required`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`, and for classes (#179) `guest`, `not-class-admin`, `not-class-owner`, `class-limit`, `class-full`, `class-archived`, `owner-locked`, `pending-member`.
+- Error codes the UI acts on (also, for private cases and review, #184: `not-admin`, `not-published`, `already-public`, `not-submitted`): `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-class-code` (`bad-invite-code` before #204), `pending`, `rejected`, `admin`, `password-change-required`, `no-vouch` and `no-reset-request` (#254), `locked`, `unknown-case`, `unknown-command`, `rate-limited`, and for classes (#179) `guest`, `not-class-admin`, `not-class-owner`, `class-limit`, `class-full`, `class-archived`, `owner-locked`, `pending-member`.
 
 ## Accounts and sessions
 
@@ -75,6 +75,29 @@ plan allows 125,000 function calls a month.
   lockout and issues a new code; it sets no cookie.
 - **Password reset:** the admin (the owner) gets a one-time temporary password; the account is signed out and
   must set a new password (`POST /api/me/password`) before playing. Nobody else can reset a password.
+- **Forced password change:** while `mustChangePassword` is set, the session works only for
+  `POST /api/me/password`, `GET /api/me`, `GET /api/session` and sign-out. Every other signed-in route answers 403
+  `password-change-required`. The change clears the flag and, because the player lost their recovery code, issues a
+  new one, returned once as `recoveryCode` in its response.
+- **Teacher-vouched reset (#254):** for a player who lost both the password and the recovery code. Classes are
+  open (anyone can make one and get someone to join), so **a class admin never resets, sets or sees a password**:
+  that would let anyone take over an account. Three people take part instead:
+  1. the player (or anyone) asks with `POST /api/auth/reset-request {username}`. It always answers 202
+     `{status: "received"}`, whether or not the name exists, and is rate-limited per IP (20 an hour) and per
+     username (5 an hour), counting every request. Only an existing user account gets a request
+     (`resetrequest:<accountId>`, open for 7 days; a repeat moves the expiry and keeps the vouches). Guests,
+     rejected accounts, `admin` and a filled `website` honeypot field do nothing. Audited as
+     `account.reset-request` (actor null) only when a request was written;
+  2. an active admin of an active class the player is an active member of vouches ("I know this student") on the
+     class's Members tab. Vouching changes no credential. An admin of an unrelated class gets 404, a plain member
+     403 `not-class-admin`, and the site owner can't vouch (their vouch would skip the second person). Audited as
+     `account.reset-vouch`;
+  3. the site owner sees vouched requests in the console and approves. Approval needs at least one vouch that
+     still holds (the class is active, the voucher still an active admin and the player still an active member;
+     409 `no-vouch` otherwise), runs the same reset as `reset-password` (temporary password, `mustChangePassword`,
+     every session ends) and returns the temporary password once, for the owner to pass on. It is never stored in
+     plain text or logged; the audit (`account.reset-approve`) names the vouchers only. Reject closes a request.
+     Expired requests can't be vouched for or approved (404 `no-reset-request`); the weekly hygiene job deletes them.
 - **Guests (#176):** `POST /api/guest` gives a signed-out visitor a guest account (`kind: "guest"`, `approved`,
   role `player`, username `guest-<id>`) and a player session, so every approved-player route works. A guest has
   no password and its generated name is never claimed in the `username:` index, so login always refuses it
@@ -111,6 +134,7 @@ it, and no public or CDN-cached response carries stage records. Constants: `SCOR
 | POST | `/api/auth/register` | none | `{username, password, inviteCode?, website?, elapsedMs?}` | 201 `{account, recoveryCode, class?}` + cookie (`class` when `inviteCode` was a class code) |
 | POST | `/api/auth/login` | none | `{username, password}` | `{account, recoveryCode?}` + cookie (`recoveryCode` only when this sign-in issued the account's first one) |
 | POST | `/api/auth/recover` | none | `{username, recoveryCode, newPassword}` | `{recoveryCode}` (the new code; no cookie) |
+| POST | `/api/auth/reset-request` | none | `{username, website?}` | 202 `{status: "received"}`, always the same (#254, see above) |
 | POST | `/api/auth/logout` | cookie | `{}` | 204, clears the cookie |
 | POST | `/api/guest` | optional cookie | `{}` | 201 `{account}` + cookie (a new guest), or 200 `{account}` for an existing session |
 | POST | `/api/auth/upgrade` | guest cookie | `{username, password}` | `{account}` + fresh cookie (same id, `kind: "user"`) |
@@ -127,7 +151,7 @@ it, and no public or CDN-cached response carries stage records. Constants: `SCOR
 | POST | `/api/cases/:caseId/reveal` | approved | `{questionId}` | `{progress}` (0 points, `revealedAnswer` set, next stage active) |
 | POST | `/api/cases/:caseId/reveal-command` | approved | `{toolId, expectedStage?}` | `{progress}` (−5 on the active stage; free if already paid or the case is done). `expectedStage` (additive): charge only if that stage is active, else 409 `stale` |
 | GET | `/api/cases/:caseId/debrief?lang=en\|he` | approved | | `{markdown}`, 403 until every stage is finished |
-| POST | `/api/me/password` | cookie | `{currentPassword, newPassword}` | `{account}` + fresh cookie (other sessions end) |
+| POST | `/api/me/password` | cookie | `{currentPassword, newPassword}` | `{account, recoveryCode?}` + fresh cookie (other sessions end; `recoveryCode` when the change cleared `mustChangePassword`, #254) |
 | POST | `/api/me/recovery-code` | cookie | `{currentPassword}` | `{recoveryCode}` (replaces the old code; 400 `bad-credentials`; wrong passwords count against the username's sign-in limit) |
 | GET | `/api/event` | none | | `{event, serverTime}` |
 | GET | `/api/leaderboard?caseId=` | none | | `{caseId, frozen, frozenAt, generatedAt, entries}` (overall without caseId). Lists only approved, non-guest players who opted in and solved a stage. Built from the `globalboard:` markers and those players' `score:` summaries, never from every account or progress record. The summaries keep each solve's time, so the frozen board needs no progress record either. |
@@ -282,6 +306,9 @@ section, a search, filter or page, an action, or Refresh).
 | PUT | `/api/admin/schedule` | `Schedule` | `{schedule}` (case ids must be released; time zone must be valid) |
 | GET | `/api/admin/stats` | | `{generatedAt, cases: CaseSummary[]}` |
 | POST | `/api/admin/accounts/:id/reset-password` | `{}` | `{temporaryPassword}` |
+| GET | `/api/admin/reset-requests` | | `{requests: [{accountId, username, createdAt, expiresAt, vouches: [{classId, className, byAccountId, byUsername, at, memberSince}]}]}` (#254): open, unexpired requests with at least one vouch that still holds, oldest first. One key listing, then reads per request. |
+| POST | `/api/admin/reset-requests/:accountId/approve` | `{}` | `{temporaryPassword}` (once). 409 `no-vouch`, 404 `no-reset-request` (none open, or expired) |
+| POST | `/api/admin/reset-requests/:accountId/reject` | `{}` | 204 |
 | PUT | `/api/admin/accounts/:id/role` | admin | `{role: "player"\|"author"}` | `{account}`; audited as `account.role`. Authors may manage cases they created (the Author routes above). |
 | POST | `/api/admin/accounts/approve-all` | `{}` | `{approved}` |
 | GET/PUT | `/api/admin/settings` | `{inviteCode}` | `{settings}`. Legacy (#204): classes replaced the site invite code and the owner console no longer edits it; GET stays the console's sign-in check. |
@@ -358,6 +385,8 @@ class response is personalised (`no-store`), except the public class board (belo
 | POST | `/api/classes/:id/board-token/rotate` | `{}` | class admin | `{class}`; old board links stop working |
 | GET | `/api/classes/:id/members` | | class admin | `{members: [{accountId, username, role, status, isOwner, joinedAt, decidedAt}]}` |
 | GET | `/api/classes/:id/progress?caseId=` | | class admin | `{generatedAt, caseId, players: AdminProgress[]}` (active members only) |
+| GET | `/api/classes/:id/reset-requests` | | class admin | `{requests: [{accountId, username, createdAt, expiresAt, vouchedByMe}]}` (#254): open requests of the class's active members. No password or credential in it |
+| POST | `/api/classes/:id/reset-requests/:accountId/vouch` | `{}` | active class admin (not the site owner) | `{request}`; idempotent; 404 unless the player is an active member with an open request |
 | GET | `/api/classboard/:boardToken?caseId=` | | anyone with the token | `ClassBoardResponse` (public, CDN-cached; 404 when unknown, rotated or archived) |
 | POST | `/api/classes/:id/members/:accountId/approve` | `{}` | class admin | `{member}` (idempotent) |
 | POST | `/api/classes/:id/members/:accountId/remove` | `{}` | see the matrix | 204 (a removed account can join again with the code: rotate it to stop that) |

@@ -7,7 +7,7 @@ click may lose it. This document is the contract for anyone changing stored reco
 
 | Store | What | Notes |
 |---|---|---|
-| `incidentlab-v2` | Live data: `account:`, `username:`, `session:`, `progress:<case>:<account>`, `score:<account>`, `globalboard:<account>`, `class:`, `classcode:`, `classmember:`, `memberof:` (#179), `config:*` (schedule, settings, event, migrations ledger), `firstblood:`, `audit:`, `trash:`, `legacy:`, `ratelimit:`, `case:`, `evidence:` (binary), `upload:` | Never rename. A new name means an empty store. That's how round-1 players were orphaned. |
+| `incidentlab-v2` | Live data: `account:`, `username:`, `session:`, `progress:<case>:<account>`, `score:<account>`, `globalboard:<account>`, `class:`, `classcode:`, `classmember:`, `memberof:` (#179), `resetrequest:` (#254), `config:*` (schedule, settings, event, migrations ledger), `firstblood:`, `audit:`, `trash:`, `legacy:`, `ratelimit:`, `case:`, `evidence:` (binary), `upload:` | Never rename. A new name means an empty store. That's how round-1 players were orphaned. |
 | `incidentlab-backups` | `daily/<YYYY-MM-DD>.json` snapshots, 30 days | Written by the scheduled function `backup-daily` |
 | `incidentlab-players` | Round-1 anonymous players (pre-accounts) | Read-only. Migration 002 copies it to `legacy:<id>` |
 | `~/.incidentlab-backups/` (your machine) | Pre-deploy, pre-migrate, pre-restore and manual snapshots | Mode 600, never in the repo |
@@ -238,6 +238,18 @@ Migration 003 backfills `score:` for every account. Accounts that have no summar
 - `status`: since #173 sign-ups are `approved` at once (`decidedAt` = `createdAt`). `pending` remains for
   accounts from before it (migration 003 approves them); `rejected` blocks sign-in and recovery.
 - A recovery bumps `sessionEpoch` (every session ends), clears `mustChangePassword` and replaces the code.
+- A password change that clears `mustChangePassword` (after an owner reset, #254) also replaces the recovery code.
+
+### Password reset requests (`resetrequest:<accountId>`, since #254)
+
+`ResetRequestRecordSchema` in `site/server/domain/reset-requests.ts`, one per account, written with `setIfMatch`:
+`{schemaVersion, accountId, status (open|done|rejected, default open), createdAt, expiresAt, vouches (default []),
+decidedAt (default null)}`. Each vouch is `{classId, byAccountId, at}`: a class admin saying "I know this student".
+No password, temporary password or hash is ever in it; approval writes the account (`passwordHash`,
+`mustChangePassword: true`, `sessionEpoch` + 1) and marks the request `done` first, so two approvals can't both
+reset. `expiresAt` is 7 days after the request (a repeat of a live request moves it). The weekly hygiene job deletes
+requests past `expiresAt`, whatever their status. Cost: the owner's list and a class's list each start from one
+listing of the prefix, which stays small because of the expiry.
 
 ### Progress (`progress:<caseId>:<accountId>`)
 
@@ -326,6 +338,7 @@ same pass by hand: a dry run that only reads and reports, then `--apply`, which 
 | `ratelimit:` | newest hit more than 24 h ago (the longest window, class creates, is 24 h) | deleted |
 | `audit:` | key timestamp older than 90 days | deleted; keys that don't start with a timestamp are left alone |
 | `trash:` | past the 7-day restore window | deleted (Recently deleted drops them too, but only when someone opens it) |
+| `resetrequest:` (#254) | past `expiresAt` (7 days after the request) | deleted, whatever the status |
 
 A restored guest still has its old `lastSeenAt`, so the next weekly run trashes it again unless it plays.
 Cost: one listing per prefix plus one read per `account:`, `session:` and `ratelimit:` key, once a week. It

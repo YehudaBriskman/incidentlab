@@ -83,6 +83,9 @@
 .class-request:last-child { border-block-end: 0; }
 .class-request .admin-tipped { color: var(--text-2); font-size: var(--type-small-size); }
 .class-request-actions { display: flex; gap: var(--gap-related); }
+/* the owner's password reset queue (#254): the request, its vouches under it, then the actions */
+.reset-request { grid-template-columns: minmax(0, 1fr) auto; }
+.reset-vouches { list-style: none; margin: var(--space-1) 0 0; padding: 0; }
 .class-members-table .col-actions { inline-size: 1%; }
 .class-member-card .ac-facts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-related); }
 .class-case-set { border: 0; padding: 0; margin: 0; min-inline-size: 0; }

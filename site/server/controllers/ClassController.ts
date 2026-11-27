@@ -18,6 +18,7 @@ import type { AuthService } from "../services/AuthService.ts";
 import type { ClassBoardService } from "../services/ClassBoardService.ts";
 import { classBoardTag } from "../services/CachePurger.ts";
 import type { ClassActor, ClassService } from "../services/ClassService.ts";
+import type { PasswordResetService } from "../services/PasswordResetService.ts";
 import { PUBLIC_CACHE } from "./AuthController.ts";
 import { json, noContent, parseBody, publicJson, sessionToken } from "./http.ts";
 
@@ -40,8 +41,10 @@ export class ClassController {
   private readonly auth: AuthService;
   private readonly guard: AdminAuthService;
   private readonly audit: AuditService;
+  private readonly resets: PasswordResetService | null;
 
-  constructor(deps: { classes: ClassService; boards: ClassBoardService; auth: AuthService; guard: AdminAuthService; audit: AuditService }) {
+  constructor(deps: { classes: ClassService; boards: ClassBoardService; auth: AuthService; guard: AdminAuthService; audit: AuditService; resets?: PasswordResetService }) {
+    this.resets = deps.resets ?? null;
     this.classes = deps.classes;
     this.boards = deps.boards;
     this.auth = deps.auth;
@@ -154,6 +157,29 @@ export class ClassController {
     const { role } = await parseBody(req, SetClassRoleRequestSchema);
     const member = await this.write(actor, { action: "class.member.role", target: classId, detail: `${accountId}=${role}` }, () => this.classes.setRole(actor, classId, accountId, role));
     return json(200, { member });
+  }
+
+  // ---- teacher-vouched password resets (#254): class admins vouch, they never see or set a password ----
+
+  private resetService(): PasswordResetService {
+    if (this.resets === null) throw new AppError(404, "not found");
+    return this.resets;
+  }
+
+  /** GET /api/classes/:id/reset-requests: open requests of the class's active members (class admins). */
+  async resetRequests(req: Request, classId: string): Promise<Response> {
+    return json(200, { requests: await this.resetService().forClass(await this.actor(req), classId) });
+  }
+
+  /** POST /api/classes/:id/reset-requests/:accountId/vouch {}: records "I know this student". */
+  async vouch(req: Request, classId: string, accountId: string): Promise<Response> {
+    const actor = await this.actor(req);
+    await parseBody(req, EmptyBodySchema);
+    const request = await this.resetService().vouch(actor, classId, accountId);
+    // The account is the target (its name resolves in the audit log); the class goes in the detail.
+    const by = actor.kind === "player" ? actor.account.username : "admin";
+    await this.audit.record({ action: "account.reset-vouch", target: accountId, detail: `class ${classId} by ${by}`, via: "session", actor: actor.kind === "player" ? actor.account.id : AUDIT_ADMIN_ACTOR });
+    return json(200, { request });
   }
 
   /** GET /api/classes/:id/progress?caseId=: class admins' live view of their active members on one case (no-store). */

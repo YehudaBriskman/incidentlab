@@ -37,6 +37,7 @@ import { StatsService } from "./services/StatsService.ts";
 import type { BoardPlayer } from "./services/StatsService.ts";
 import { BoardCache } from "./services/BoardCache.ts";
 import { TrashService } from "./services/TrashService.ts";
+import { PasswordResetService } from "./services/PasswordResetService.ts";
 import { TrashRepository } from "./repositories/trash-repository.ts";
 import { UploadRepository } from "./repositories/upload-repository.ts";
 import { AuthorAuthService } from "./services/AuthorAuthService.ts";
@@ -121,12 +122,14 @@ export const createApp = (deps: AppDeps): App => {
   const access = new CaseAccessService({ cases, classes, secrets, auth });
   const authoring = new CaseAuthoringService({ cases: caseRepo, progress: repos.progress, accounts: repos.accounts, classes, trash, bundledFingerprint, now, purger: deps.cachePurger });
 
-  const authController = new AuthController({ auth, schedule, stats, events, board, access });
+  // Teacher-vouched resets (#254): class admins vouch, only the site owner's approval sets a password.
+  const resets = new PasswordResetService({ repos, classes, accounts, limiter, now });
+  const authController = new AuthController({ auth, schedule, stats, events, board, access, resets, audit });
   const gameController = new GameController({ auth, game, access });
   const guestController = new GuestController({ guests: new GuestService({ repos, auth, limiter, now }) });
   const contentController = new ContentController({ cases, access });
   const adminGuard = new AdminAuthService({ adminKey: deps.adminKey, auth });
-  const adminController = new AdminController({ accounts, schedule, stats, events, audit, trash, guard: adminGuard, now });
+  const adminController = new AdminController({ accounts, schedule, stats, events, audit, trash, guard: adminGuard, now, resets });
   const authorController = new AuthorController({
     guard: new AuthorAuthService({ admin: adminGuard, auth }), uploads: caseUploads, authoring, audit,
     onPublishedChange: () => secrets.refresh(true), // this instance plays the new version at once; others within SECRETS_REFRESH_MS
@@ -135,7 +138,7 @@ export const createApp = (deps: AppDeps): App => {
   const classController = new ClassController({
     classes,
     boards: new ClassBoardService({ repos, game, publicCaseIds: () => Object.keys(secrets.cases), now }),
-    auth, guard: adminGuard, audit,
+    auth, guard: adminGuard, audit, resets,
   });
 
   const route = (req: Request, ip: string): MethodTable | null => {
@@ -144,6 +147,7 @@ export const createApp = (deps: AppDeps): App => {
       "/api/auth/register": { POST: () => authController.register(req, ip) },
       "/api/auth/login": { POST: () => authController.login(req, ip) },
       "/api/auth/recover": { POST: () => authController.recover(req, ip) },
+      "/api/auth/reset-request": { POST: () => authController.resetRequest(req, ip) },
       "/api/auth/logout": { POST: () => authController.logout(req) },
       "/api/auth/upgrade": { POST: () => guestController.upgrade(req, ip) },
       "/api/guest": { POST: () => guestController.start(req, ip) },
@@ -174,6 +178,7 @@ export const createApp = (deps: AppDeps): App => {
       "/api/admin/export.csv": { GET: () => adminController.exportCsv(req) },
       "/api/admin/audit": { GET: () => adminController.auditLog(req) },
       "/api/admin/trash": { GET: () => adminController.listTrash(req) },
+      "/api/admin/reset-requests": { GET: () => adminController.listResetRequests(req) },
       "/api/author/uploads": { POST: () => authorController.createUpload(req) },
       "/api/author/cases": { GET: () => authorController.listCases(req) },
     };
@@ -212,6 +217,11 @@ export const createApp = (deps: AppDeps): App => {
       if (segments.length === 4 && second === "leave") return { POST: () => classController.leave(req, classId) };
       if (segments.length === 4 && second === "members") return { GET: () => classController.members(req, classId) };
       if (segments.length === 4 && second === "progress") return { GET: () => classController.progress(req, classId) };
+      if (segments.length === 4 && second === "reset-requests") return { GET: () => classController.resetRequests(req, classId) };
+      if (segments.length === 6 && second === "reset-requests" && third !== undefined && fourth === "vouch") {
+        const accountId = third;
+        return { POST: () => classController.vouch(req, classId, accountId) };
+      }
       if (segments.length === 5 && second === "join-code" && third === "rotate") return { POST: () => classController.rotateJoinCode(req, classId) };
       if (segments.length === 5 && second === "board-token" && third === "rotate") return { POST: () => classController.rotateBoardToken(req, classId) };
       if (segments.length === 6 && second === "members" && third !== undefined) {
@@ -253,6 +263,12 @@ export const createApp = (deps: AppDeps): App => {
       if (segments.length === 5 && action === "role") return { PUT: () => adminController.setRole(req, second) };
       if (segments.length === 5 && action === "class-limit") return { PUT: () => adminController.setClassLimit(req, second) };
       if (segments.length === 5 && action === "reset-password") return { POST: () => adminController.resetPassword(req, second) };
+    }
+    if (area === "admin" && first === "reset-requests" && second !== undefined && segments.length === 5) {
+      const accountId = second;
+      if (segments[4] === "approve") return { POST: () => adminController.approveResetRequest(req, accountId) };
+      if (segments[4] === "reject") return { POST: () => adminController.rejectResetRequest(req, accountId) };
+      return null;
     }
     if (area === "admin" && first === "trash" && second !== undefined && segments.length === 5 && segments[4] === "restore") {
       return { POST: () => adminController.restoreTrash(req, second) };

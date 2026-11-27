@@ -8,6 +8,7 @@ import {
   CasesResponseSchema,
   RecoveryCodeResponseSchema,
   RegisterResponseSchema,
+  ResetRequestAcceptedSchema,
   SessionResponseSchema,
   AnswerResponseSchema,
   DebriefResponseSchema,
@@ -229,6 +230,14 @@ export async function recoverAccount(input: { username: string; recoveryCode: st
   return (await request("POST", "/api/auth/recover", RecoveryCodeResponseSchema, input)).recoveryCode;
 }
 
+/**
+ * No password and no recovery code (#254): asks for a teacher-vouched reset. The answer is the same whether or
+ * not the username exists, so this only says the request was received.
+ */
+export async function requestPasswordReset(username: string): Promise<void> {
+  await request("POST", "/api/auth/reset-request", ResetRequestAcceptedSchema, { username });
+}
+
 /** Replaces the signed-in player's recovery code (needs the current password). */
 export async function regenerateRecoveryCode(input: { currentPassword: string }): Promise<string> {
   return (await request("POST", "/api/me/recovery-code", RecoveryCodeResponseSchema, input)).recoveryCode;
@@ -275,8 +284,10 @@ export async function setBoardVisibility(show: boolean): Promise<AccountView> {
 }
 
 /** Sets a new password (also clears the "must change password" flag after an instructor reset). */
-export async function changePassword(input: { currentPassword: string; newPassword: string }): Promise<AccountView> {
-  return (await request("POST", "/api/me/password", AccountResponseSchema, input)).account;
+/** Changes the password. After an owner reset (#254) the change also issues a new recovery code: show it once. */
+export async function changePassword(input: { currentPassword: string; newPassword: string }): Promise<SignedIn> {
+  const body = await request("POST", "/api/me/password", AuthResponseSchema, input);
+  return { account: body.account, recoveryCode: body.recoveryCode ?? null };
 }
 
 /** A plain request to the API with the session cookie (the upload client parses the responses itself). */

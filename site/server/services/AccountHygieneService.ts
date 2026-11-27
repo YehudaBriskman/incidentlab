@@ -7,7 +7,8 @@
 // - stale rate limits: `ratelimit:` windows whose newest hit is older than every rule's window;
 // - old audit: `audit:` entries older than AUDIT_RETENTION_DAYS (the key starts with the timestamp);
 // - expired trash: entries past the 7-day restore window (TrashService.list also drops them, but only when
-//   someone opens Recently deleted).
+//   someone opens Recently deleted);
+// - expired password reset requests (#254): `resetrequest:` records past `expiresAt`, whatever their status.
 // Dry run (apply false) only reads: it reports what a real run would remove.
 import type { AccountRecord } from "../domain/types.ts";
 import { AuditRepository } from "../repositories/config-repositories.ts";
@@ -34,6 +35,7 @@ export type HygieneReport = {
   readonly staleRateLimits: number;
   readonly oldAudit: number;
   readonly expiredTrash: number;
+  readonly expiredResetRequests: number;
 };
 
 const AUDIT_KEY_TIME = /^audit:(\d{4}-\d{2}-\d{2}T[0-9:.]+Z):/;
@@ -62,7 +64,8 @@ export class AccountHygieneService {
     const staleRateLimits = await this.sweepRateLimits(nowMs, apply);
     const oldAudit = await this.sweepAudit(nowMs, apply);
     const expiredTrash = await this.sweepTrash(apply);
-    return { applied: apply, idleGuests: guests.map((g) => g.username), guestProgress, expiredSessions, staleRateLimits, oldAudit, expiredTrash };
+    const expiredResetRequests = await this.sweepResetRequests(nowMs, apply);
+    return { applied: apply, idleGuests: guests.map((g) => g.username), guestProgress, expiredSessions, staleRateLimits, oldAudit, expiredTrash, expiredResetRequests };
   }
 
   private async idleGuests(nowMs: number): Promise<AccountRecord[]> {
@@ -129,6 +132,13 @@ export class AccountHygieneService {
     const expired = await this.trash.expiredIds();
     if (apply) for (const id of expired) await this.trash.discard(id);
     return expired.length;
+  }
+
+  /** Reset requests (#254) past their expiry can't be vouched for or approved any more. */
+  private async sweepResetRequests(nowMs: number, apply: boolean): Promise<number> {
+    const doomed = (await this.repos.resetRequests.list()).filter((r) => Date.parse(r.expiresAt) <= nowMs).map((r) => r.accountId);
+    if (apply) await mapWithConcurrency(doomed, (id) => this.repos.resetRequests.delete(id));
+    return doomed.length;
   }
 }
 

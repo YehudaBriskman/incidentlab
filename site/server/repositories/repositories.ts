@@ -8,6 +8,7 @@
 //   score:<accountId>                   ScoreRecord        (board-repositories.ts, #175)
 //   globalboard:<accountId>             { accountId, since } (only while opted in to the public board)
 //   class:, classcode:, classmember:, memberof:   classes (class-repository.ts, #179)
+//   resetrequest:<accountId>            ResetRequestRecord (reset-request-repository.ts, #254)
 import { z } from "zod";
 import { ScheduleSchema } from "../../shared/contract.ts";
 import type { Schedule } from "../../shared/contract.ts";
@@ -15,6 +16,7 @@ import { AccountRecordSchema, ProgressRecordSchema, SessionRecordSchema } from "
 import type { AccountRecord, ProgressRecord, SessionRecord } from "../domain/types.ts";
 import { GlobalBoardRepository, ScoreRepository } from "./board-repositories.ts";
 import { ClassRepository } from "./class-repository.ts";
+import { ResetRequestRepository } from "./reset-request-repository.ts";
 import { mapWithConcurrency } from "./KvStore.ts";
 import type { KvStore, Versioned } from "./KvStore.ts";
 
@@ -172,6 +174,7 @@ export type Repositories = {
   readonly scores: ScoreRepository;
   readonly globalBoard: GlobalBoardRepository;
   readonly classes: ClassRepository;
+  readonly resetRequests: ResetRequestRepository;
 };
 
 export const createRepositories = (kv: KvStore): Repositories => ({
@@ -184,4 +187,5 @@ export const createRepositories = (kv: KvStore): Repositories => ({
   scores: new ScoreRepository(kv),
   globalBoard: new GlobalBoardRepository(kv),
   classes: new ClassRepository(kv),
+  resetRequests: new ResetRequestRepository(kv),
 });

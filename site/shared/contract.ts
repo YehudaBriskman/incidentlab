@@ -364,7 +364,8 @@ export const RegisterRequestSchema = CredentialsSchema.extend({
   website: z.string().max(200).optional(),
   elapsedMs: z.number().int().min(0).max(86_400_000 * 30).optional(),
 });
-// POST /api/me/password {currentPassword, newPassword} -> {account}  (also clears mustChangePassword)
+// POST /api/me/password {currentPassword, newPassword} -> {account, recoveryCode?}  (also clears mustChangePassword;
+//                             when it was set, a new recovery code is issued and returned once, #254)
 export const ChangePasswordRequestSchema = z.object({ currentPassword: z.string().min(1).max(128), newPassword: PasswordSchema });
 export const LoginRequestSchema = z.object({ username: z.string().trim().min(1).max(64), password: z.string().min(1).max(128) });
 export const AccountResponseSchema = z.object({ account: AccountViewSchema });
@@ -383,6 +384,61 @@ export const RecoverRequestSchema = z.object({
 });
 export const RegenerateRecoveryCodeRequestSchema = z.object({ currentPassword: z.string().min(1).max(128) });
 export const RecoveryCodeResponseSchema = z.object({ recoveryCode: z.string() });
+
+// ---- teacher-vouched password reset (#254) ------------------------------------------
+// For a player who lost both the password and the recovery code. Nobody but the site owner ever sets a password:
+// a class admin only vouches ("I know this student"), the owner approves and gets a one-time temporary password.
+// POST /api/auth/reset-request {username, website?} -> 202 RESET_REQUEST_ACCEPTED, always the same body, whether or
+//      not the name exists (rate-limited per IP and per name like recovery). Opens `resetrequest:<accountId>` for an
+//      existing user account (status open, expires after RESET_REQUEST_TTL_DAYS); a repeat refreshes the expiry.
+// GET  /api/classes/:id/reset-requests            -> {requests: ClassResetRequest[]}  (class admins: open requests of
+//      the class's active members)
+// POST /api/classes/:id/reset-requests/:accountId/vouch {} -> {request: ClassResetRequest}  (an active class admin of
+//      an active class the player is an active member of; 404 otherwise; never changes credentials)
+// GET  /api/admin/reset-requests                   -> {requests: AdminPasswordResetRequest[]}  (site admin: open,
+//      unexpired requests with at least one valid vouch)
+// POST /api/admin/reset-requests/:accountId/approve {} -> {temporaryPassword}  (409 "no-vouch" without a valid vouch,
+//      404 when no open request; sets the password, forces a change, ends every session; shown once)
+// POST /api/admin/reset-requests/:accountId/reject {}  -> 204
+export const RESET_REQUEST_TTL_DAYS = 7;
+export const ResetRequestCreateSchema = z.object({
+  username: z.string().trim().min(1).max(64),
+  /** the hidden honeypot field: people leave it empty (a filled one gets the same 202 and does nothing) */
+  website: z.string().max(200).optional(),
+});
+export const RESET_REQUEST_ACCEPTED = { status: "received" } as const;
+export const ResetRequestAcceptedSchema = z.object({ status: z.literal("received") });
+export const ClassResetRequestSchema = z.object({
+  accountId: z.string(),
+  username: z.string(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+  /** this class admin already vouched for it */
+  vouchedByMe: z.boolean(),
+});
+export type ClassResetRequest = z.infer<typeof ClassResetRequestSchema>;
+export const ClassResetRequestsResponseSchema = z.object({ requests: z.array(ClassResetRequestSchema) });
+export const ClassResetRequestResponseSchema = z.object({ request: ClassResetRequestSchema });
+export const ResetVouchViewSchema = z.object({
+  classId: z.string(),
+  className: z.string(),
+  byAccountId: z.string(),
+  byUsername: z.string(),
+  at: z.string(),
+  /** when the player joined that class: a membership younger than the request deserves a closer look */
+  memberSince: z.string(),
+});
+export type ResetVouchView = z.infer<typeof ResetVouchViewSchema>;
+export const AdminPasswordResetRequestSchema = z.object({
+  accountId: z.string(),
+  username: z.string(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+  /** only the vouches that still count: the voucher is an active admin and the player an active member */
+  vouches: z.array(ResetVouchViewSchema),
+});
+export type AdminPasswordResetRequest = z.infer<typeof AdminPasswordResetRequestSchema>;
+export const AdminPasswordResetRequestsResponseSchema = z.object({ requests: z.array(AdminPasswordResetRequestSchema) });
 // POST /api/auth/logout (body {}) -> 204, clears the cookie
 // GET  /api/me -> {account}   (401 when not signed in)
 // GET  /api/session -> {account | null}   (always 200: the signed-out probe the browser uses, so a visitor's console stays clean)
