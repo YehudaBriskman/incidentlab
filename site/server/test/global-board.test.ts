@@ -128,8 +128,13 @@ test("only opted-in, approved, full accounts are listed; opting out removes you"
   assert.deepEqual([adaStats.stats.rank, adaStats.stats.onGlobalBoard], [null, false]);
 
   // Pending accounts and the admin can't opt in; the body is validated.
+  // Sign-up approves at once (#173), so a pre-#173 pending account is written into the store directly.
   const pending = harness.client();
-  await pending.call("/auth/register", { body: { username: "Pending", password: "password1" } });
+  const pendingRes = await pending.call("/auth/register", { body: { username: "Pending", password: "password1" } });
+  const pendingId = (await pending.json(pendingRes, AccountResponseSchema)).account.id;
+  const pendingAccount = await kv.get(`account:${pendingId}`);
+  assert.ok(pendingAccount);
+  await kv.set(`account:${pendingId}`, { ...(pendingAccount.data as Record<string, unknown>), status: "pending" });
   await expectStatus(optIn(pending), 403, "pending");
   await expectStatus(harness.admin("/me/board", { method: "PUT", body: { show: true } }), 401);
   await expectStatus(ada.player.call("/me/board", { method: "PUT", body: { show: "yes" } }), 400);
