@@ -16,7 +16,7 @@ import { TB } from "../i18n/strings-board";
 import { TG, achievementInfo } from "../i18n/strings-game";
 import { TO } from "../i18n/strings-onboard";
 import { T } from "../i18n/strings-player";
-import { passwordChangeForm, withApprovedAccount } from "./auth";
+import { passwordChangeForm, recoveryCodeSection, withApprovedAccount } from "./auth";
 
 const locale = (): string => (getLang() === "he" ? "he-IL" : "en-GB");
 
@@ -274,6 +274,8 @@ function draw(root: HTMLElement, account: AccountView, stats: UserStats, board: 
         h("summary", { class: "section-title" }, TG().pwTitle),
         passwordChangeForm({ forced: false, idPrefix: "me-pw", onChanged: (account) => setAccount(account) }),
       ),
+      // Recovery code (#174): replace it, with the current password. Kept in its own section (auth.ts owns it).
+      recoveryCodeSection(stats.username),
     ),
   );
 }

@@ -98,6 +98,7 @@ test("class-code link: ?code= prefills the field and sign-up is approved immedia
     await ui.username(page).fill(username);
     await ui.password(page).fill(PASSWORD);
     await ui.createAccount(page).click();
+    await page.getByRole("button", { name: /i've saved it, continue/i }).click();
 
     await page.waitForURL((url) => !url.hash.startsWith("#/signup"));
     await expect(ui.pendingTitle(page)).toHaveCount(0);

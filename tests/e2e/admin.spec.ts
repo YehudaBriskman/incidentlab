@@ -19,9 +19,6 @@ const ui = {
   acctRow: (p: Page, name: string) => p.locator("tr.acct-row", { hasText: name }),
   search: (p: Page) => p.locator("input.admin-search").first(),
   columnsButton: (p: Page) => p.getByRole("button", { name: /^columns/i }),
-  pendingTable: (p: Page) => p.locator("table.pending-table"),
-  selectBox: (p: Page, name: string) => p.getByRole("checkbox", { name: `Select ${name}` }),
-  approveSelected: (p: Page) => p.locator("#pending-bulk-approve"),
   actionsFor: (p: Page, name: string) => p.locator(`button[aria-haspopup="menu"][aria-label="Actions for ${name}"]:visible`),
   menuItems: (p: Page) => p.getByRole("menu").getByRole("menuitem"),
   confirm: (p: Page) => p.getByRole("alertdialog"),
@@ -130,22 +127,6 @@ test("accounts: the column picker adds a column and remembers it", async ({ page
   await ui.columnsButton(page).click();
   await page.getByRole("button", { name: /default columns/i }).click();
   await expect(page.locator("table.acct-table thead th", { hasText: /^hints/i })).toHaveCount(0);
-});
-
-test("pending: tick two sign-ups and approve them together", async ({ page, request }) => {
-  const a = await register(request, "e2ebulk");
-  const b = await register(request, "e2ebulk");
-  await signInAdmin(page);
-  await page.goto("/#/admin?tab=accounts");
-  await expect(ui.pendingTable(page)).toBeVisible();
-  await ui.selectBox(page, a).check();
-  await ui.selectBox(page, b).check();
-  await expect(ui.approveSelected(page)).toHaveText(/approve 2 selected/i);
-  await ui.approveSelected(page).click();
-  await expect(ui.selectBox(page, a)).toHaveCount(0);
-  await expect(ui.selectBox(page, b)).toHaveCount(0);
-  await expect.poll(() => accountStatus(request, a)).toBe("approved");
-  await expect.poll(() => accountStatus(request, b)).toBe("approved");
 });
 
 test("live and audit: Export CSV downloads the rows on screen", async ({ page, playwright, baseURL, request }) => {

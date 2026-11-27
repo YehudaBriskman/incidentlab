@@ -38,21 +38,30 @@ plan allows 125,000 function calls a month.
   starts within an hour, every 2 minutes otherwise. It doesn't poll at all while the tab is hidden, and polls
   once when the tab comes back.
 - Errors are non-2xx with body `{ "error": string, "code"?: string, "retryAfterSeconds"?: number, "details"?: string[] }` (`details` lists every failed check of a rejected upload). Status codes: 400 validation, 401 signed out, 403 forbidden (see codes), 404, 405, 409 conflict (username taken, already finished, no more hints, concurrent update: retry), 413, 415, 429 rate limit (also sends `Retry-After`), 500 `{"error":"internal"}`, 503 admin disabled.
-- Error codes the UI acts on: `signed-out`, `bad-credentials`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `not-today`, `event-closed`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`.
+- Error codes the UI acts on: `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `not-today`, `event-closed`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`.
 
 ## Accounts and sessions
 
 - Usernames are 3–24 chars (unicode letters, digits, `.`, `_`, `-`; no spaces) and **unique case-insensitively** (NFKC + lowercase). Uniqueness is enforced with a conditional write on a username index, so two simultaneous sign-ups can't both win.
 - Passwords: 8–128 chars, stored as `scrypt` (N=16384, r=8, p=1, per-user salt). Login always runs scrypt, even for unknown usernames.
-- New accounts are `pending`. They can sign in and see `/api/me`, but every `/api/cases/*` route returns 403 `pending` until the instructor approves them. `rejected` accounts can't sign in.
+- **Open sign-up (#173):** new accounts are `approved` at once. Accounts from before it may still be `pending`: they can sign in and see `/api/me`, but every `/api/cases/*` route returns 403 `pending` until approved. `rejected` accounts can't sign in or recover.
+- **Bot checks on sign-up (#173):** the form sends a hidden honeypot field `website` (people leave it empty) and `elapsedMs`, how long the form was open. A filled `website` or `elapsedMs` under 2000 gets a generic 400 `signup-refused`, which still counts against the IP limit. Both fields are optional, so older clients still work. Sign-ups are limited to 20 per IP per hour (429 `rate-limited`).
 - The session is an opaque random token in the cookie `il_session` (`HttpOnly; SameSite=Lax; Path=/api; Secure`; 30 days, renewed when under 15 days remain). The store keeps `sha256(token)` only. Logout deletes the session; rejecting or deleting an account kills all of its sessions.
 - CSRF: SameSite=Lax plus JSON-only bodies (a cross-site form can't send `application/json`).
 - **Admin sign-in:** username `admin` with the `ADMIN_KEY` as password creates an admin session (12 h, ended
   when the key rotates). It works on every admin route instead of the `X-Admin-Key` header, and it can't
   play. Reserved usernames: `admin`, `administrator`, `root`, `instructor`, `system`.
-- **Class code:** when the admin sets an invite code, sign-ups that send it are approved immediately.
-- **Password reset:** the admin gets a one-time temporary password; the account is signed out and must
-  set a new password (`POST /api/me/password`) before playing.
+- **Class code:** the admin's invite code no longer decides approval (everyone is approved). A sign-up that sends a wrong code still gets 400 `bad-invite-code`. Classes replace it in Phase 2.
+- **Recovery code (#174):** 4 groups of 5 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ`
+  (`ABCDE-FGHJK-MNPQR-STUVW`; case, spaces and dashes are ignored when typed), stored only as a scrypt hash.
+  The plain code is returned once: in the sign-up response, in the first sign-in response of an account that has
+  none yet, by a recovery and by a regeneration. `POST /api/auth/recover` checks it like login checks a password
+  (scrypt always runs, with a dummy hash for unknown names or accounts without a code; 401 `bad-recovery-code`
+  either way) and is rate-limited like login: 60 failures per IP and 8 per username per 15 minutes, in their own
+  buckets. A success sets the new password, ends every session, clears `mustChangePassword`, lifts a sign-in
+  lockout and issues a new code; it sets no cookie.
+- **Password reset:** the admin (the owner) gets a one-time temporary password; the account is signed out and
+  must set a new password (`POST /api/me/password`) before playing. Nobody else can reset a password.
 
 ## Paid content and scoring
 
@@ -76,8 +85,9 @@ it, and no public or CDN-cached response carries stage records. Constants: `SCOR
 
 | Method | Path | Auth | Body | Response |
 |---|---|---|---|---|
-| POST | `/api/auth/register` | none | `{username, password}` | 201 `{account}` + cookie |
-| POST | `/api/auth/login` | none | `{username, password}` | `{account}` + cookie |
+| POST | `/api/auth/register` | none | `{username, password, inviteCode?, website?, elapsedMs?}` | 201 `{account, recoveryCode}` + cookie |
+| POST | `/api/auth/login` | none | `{username, password}` | `{account, recoveryCode?}` + cookie (`recoveryCode` only when this sign-in issued the account's first one) |
+| POST | `/api/auth/recover` | none | `{username, recoveryCode, newPassword}` | `{recoveryCode}` (the new code; no cookie) |
 | POST | `/api/auth/logout` | cookie | `{}` | 204, clears the cookie |
 | GET | `/api/me` | cookie | | `{account}` (401 when signed out) |
 | GET | `/api/session` | optional cookie | | `{account}` or `{account: null}`, always 200. The browser uses this to probe sign-in without logging a 401. |
@@ -92,6 +102,7 @@ it, and no public or CDN-cached response carries stage records. Constants: `SCOR
 | POST | `/api/cases/:caseId/reveal-command` | approved | `{toolId}` | `{progress}` (−5 on the active stage; free if already paid or the case is done) |
 | GET | `/api/cases/:caseId/debrief?lang=en\|he` | approved | | `{markdown}`, 403 until every stage is finished |
 | POST | `/api/me/password` | cookie | `{currentPassword, newPassword}` | `{account}` + fresh cookie (other sessions end) |
+| POST | `/api/me/recovery-code` | cookie | `{currentPassword}` | `{recoveryCode}` (replaces the old code; 400 `bad-credentials`; wrong passwords count against the username's sign-in limit) |
 | GET | `/api/event` | none | | `{event, serverTime}` |
 | GET | `/api/leaderboard?caseId=` | none | | `{caseId, frozen, frozenAt, generatedAt, entries}` (overall without caseId). Lists only approved, non-guest players who opted in and solved a stage. Built from the `globalboard:` markers and those players' `score:` summaries, never from every account or progress record. The summaries keep each solve's time, so the frozen board needs no progress record either. |
 

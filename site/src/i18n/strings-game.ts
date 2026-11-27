@@ -82,14 +82,13 @@ export const TG = defineStrings({
 
     // auth
     inviteLabel: "Class code (optional)",
-    inviteHelp: "Got a code from your instructor? Enter it to skip the approval wait.",
+    inviteHelp: "Joining with a class? Enter its code. Otherwise leave this empty.",
     reservedName: "That username is reserved. Pick another one.",
-    badInvite: "That class code isn't valid. Check it with your instructor, or leave it empty and wait for approval.",
-    forgotPassword: "Forgot your password? Ask the instructor to reset it. You'll get a temporary password.",
+    badInvite: "That class code isn't valid. Check it, or leave the field empty.",
 
     // password
     pwTitleForced: "Set a new password",
-    pwHelpForced: "Your instructor reset your password. Enter the temporary password you signed in with, then choose your own.",
+    pwHelpForced: "Your password was reset. Enter the temporary password you signed in with, then choose your own.",
     pwTitle: "Change password",
     currentPw: "Current password",
     currentPwForced: "Temporary password",
@@ -214,13 +213,12 @@ export const TG = defineStrings({
     parLabel: (n: number): string => `יעד ${n}`,
 
     inviteLabel: "קוד כיתה (לא חובה)",
-    inviteHelp: "קיבלתם קוד מהמדריך/ה? הזינו אותו כדי לדלג על ההמתנה לאישור.",
+    inviteHelp: "מצטרפים עם כיתה? הזינו את הקוד שלה. אחרת השאירו ריק.",
     reservedName: "שם המשתמש הזה שמור. בחרו שם אחר.",
-    badInvite: "קוד הכיתה לא תקין. בדקו אותו מול המדריך/ה, או השאירו ריק וחכו לאישור.",
-    forgotPassword: "שכחתם סיסמה? בקשו מהמדריך/ה לאפס אותה. תקבלו סיסמה זמנית.",
+    badInvite: "קוד הכיתה לא תקין. בדקו אותו, או השאירו את השדה ריק.",
 
     pwTitleForced: "הגדרת סיסמה חדשה",
-    pwHelpForced: "המדריך/ה איפס/ה את הסיסמה שלכם. הזינו את הסיסמה הזמנית שאיתה נכנסתם, ואז בחרו סיסמה משלכם.",
+    pwHelpForced: "הסיסמה שלכם אופסה. הזינו את הסיסמה הזמנית שאיתה נכנסתם, ואז בחרו סיסמה משלכם.",
     pwTitle: "שינוי סיסמה",
     currentPw: "סיסמה נוכחית",
     currentPwForced: "סיסמה זמנית",

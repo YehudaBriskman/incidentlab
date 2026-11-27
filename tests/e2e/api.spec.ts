@@ -9,10 +9,13 @@ test.describe("public API contract", () => {
     expect(await res.json()).toMatchObject({ code: "reserved" });
   });
 
-  test("a fresh username registers as pending (201)", async ({ request }) => {
+  test("a fresh username registers approved, with a one-time recovery code (201)", async ({ request }) => {
     const res = await request.post("/api/auth/register", { data: { username: randomUsername("e2eapi"), password: "e2e-password-123" } });
     expect(res.status()).toBe(201);
-    expect(await res.json()).toMatchObject({ account: { status: "pending" } });
+    const body = (await res.json()) as { account: { status: string }; recoveryCode: string };
+    expect(body.account.status).toBe("approved");
+    expect(body.recoveryCode).toMatch(/^[A-Z2-9]{5}(-[A-Z2-9]{5}){3}$/);
+    expect(JSON.stringify(body)).not.toMatch(/scrypt|Hash/);
   });
 
   test("leaderboard is public (200)", async ({ request }) => {

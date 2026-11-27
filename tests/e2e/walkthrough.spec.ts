@@ -1,7 +1,7 @@
-// Full player walkthrough in a real browser: sign up -> approval -> today's incident -> setup ->
+// Full player walkthrough in a real browser: sign up (approved at once) -> recovery code -> today's incident -> setup ->
 // (paid command reveal) -> wrong + right answer -> stats -> sign out -> admin sign-in -> dashboard.
 import { expect, test, type Page } from "@playwright/test";
-import { ADMIN_KEY, ADMIN_USERNAME, answerFor, approveAccount, randomUsername, scheduleToday } from "./support";
+import { ADMIN_KEY, ADMIN_USERNAME, answerFor, randomUsername, scheduleToday } from "./support";
 
 const CASE_ID = "ghost-in-the-network";
 const PASSWORD = "e2e-password-123";
@@ -12,8 +12,8 @@ const ui = {
   password: (p: Page) => p.getByLabel("Password", { exact: true }),
   createAccount: (p: Page) => p.getByRole("button", { name: /^create account$/i }),
   signInSubmit: (p: Page) => p.locator("form").getByRole("button", { name: /^sign in$/i }),
-  pendingTitle: (p: Page) => p.getByText(/waiting for approval/i),
-  checkNow: (p: Page) => p.getByRole("button", { name: /check now/i }),
+  codeTitle: (p: Page) => p.getByRole("heading", { level: 1, name: /save your recovery code/i }),
+  codeSaved: (p: Page) => p.getByRole("button", { name: /i've saved it, continue/i }),
   todayCard: (p: Page) => p.getByRole("region", { name: "Today's case" }),
   openTodayCase: (p: Page) => ui.todayCard(p).locator(`a[href^="#/case/"]`).first(),
   readyButton: (p: Page) => p.getByRole("button", { name: /ready/i }),
@@ -53,17 +53,16 @@ test("player walkthrough: sign up to first solved stage, then admin sign-in", as
     await scheduleToday(request, CASE_ID);
   });
 
-  await test.step("sign up -> pending screen", async () => {
+  await test.step("sign up -> the one-time recovery code screen", async () => {
     await page.goto("/#/signup");
     await ui.username(page).fill(username);
     await ui.password(page).fill(PASSWORD);
     await ui.createAccount(page).click();
-    await expect(ui.pendingTitle(page)).toBeVisible();
+    await expect(ui.codeTitle(page)).toBeVisible();
   });
 
-  await test.step("admin approves via API -> home shows today's incident", async () => {
-    await approveAccount(request, username);
-    await ui.checkNow(page).click();
+  await test.step("no approval wait: saving the code leads home, to today's incident", async () => {
+    await ui.codeSaved(page).click();
     await page.goto("/#/");
     await expect(ui.todayCard(page)).toBeVisible();
     await expect(ui.todayCard(page)).toContainText(/ghost in the network/i);

@@ -117,8 +117,8 @@ test("stats: per user, rank, per case, admin live view and resets", async () => 
   const harness = createHarness();
   const ada = await approvedPlayer(harness, "Ada");
   const bob = await approvedPlayer(harness, "Bob");
-  const pending = harness.client();
-  await pending.call("/auth/register", { body: { username: "Pending", password: "password1" } });
+  const idle = harness.client(); // signed up, approved at once (#173), never played
+  await idle.call("/auth/register", { body: { username: "Idle", password: "password1" } });
   for (const p of [ada, bob]) await expectStatus(p.player.call("/me/board", { method: "PUT", body: { show: true } }), 200);
 
   await ada.player.call("/cases/alpha/setup-done", { body: {} });
@@ -140,7 +140,7 @@ test("stats: per user, rank, per case, admin live view and resets", async () => 
   assert.equal(bobStats.stats.onGlobalBoard, true);
 
   const all = await ada.player.json(await harness.admin("/admin/accounts"), AdminAccountsResponseSchema);
-  assert.deepEqual(all.accounts.map((a) => [a.username, a.status, a.rank]), [["Ada", "approved", 1], ["Bob", "approved", 2], ["Pending", "pending", null]]);
+  assert.deepEqual(all.accounts.map((a) => [a.username, a.status, a.rank]), [["Ada", "approved", 1], ["Bob", "approved", 2], ["Idle", "approved", 2]]);
 
   const live = await ada.player.json(await harness.admin("/admin/progress?caseId=alpha"), AdminProgressResponseSchema);
   assert.deepEqual(live.players.map((p) => [p.username, p.currentStage]), [["Ada", "q2"], ["Bob", "setup"]]);
