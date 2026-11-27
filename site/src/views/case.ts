@@ -36,7 +36,7 @@ type StepState = "locked" | "active" | "solved" | "revealed";
  * falls back to <body>: the stage heading (stepper, Continue, I'm ready), the result title (solve, reveal)
  * or the hint that was just bought.
  */
-type FocusTarget = { kind: "heading" } | { kind: "result" } | { kind: "hint"; index: number };
+type FocusTarget = { kind: "heading" } | { kind: "result" } | { kind: "hint"; index: number } | { kind: "command"; toolId: string };
 
 const timers = new Set<number>();
 const drafts = new Map<QuestionId, string>();
@@ -235,7 +235,9 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
         ? stage.querySelector<HTMLElement>(".result-title")
         : target.kind === "hint"
           ? stage.querySelector<HTMLElement>(`[data-hint="${target.index}"]`)
-          : null;
+          : target.kind === "command"
+            ? (stage.querySelector(`[data-tool="${CSS.escape(target.toolId)}"]`)?.querySelector<HTMLElement>(".btn-copy") ?? null)
+            : null;
     const heading = el ?? stage.querySelector<HTMLElement>(".stage-goal") ?? stage;
     heading.focus({ preventScroll: true });
     heading.scrollIntoView({ block: "nearest", behavior: "auto" });
@@ -828,7 +830,12 @@ function renderQuestionStage(
   const toolIds = stage?.tools ?? [];
   const tools = c.toolbox.flatMap((sec) => sec.items).filter((it) => it.id !== undefined && toolIds.includes(it.id));
 
-  const commandCtx: CommandContext = { caseId: c.id, progress: player, onProgress: (next) => update(next, id) };
+  // After a command reveal the redraw keeps the player at that card's Copy button, not the stage heading (#210).
+  const commandCtx: CommandContext = {
+    caseId: c.id,
+    progress: player,
+    onProgress: (next, revealedTool) => update(next, id, revealedTool === undefined ? { kind: "heading" } : { kind: "command", toolId: revealedTool }),
+  };
 
   /* hints: the texts come from the server (paid-for content), never from the bundle */
   const hintTexts = player.unlocked.hints[id] ?? [];
