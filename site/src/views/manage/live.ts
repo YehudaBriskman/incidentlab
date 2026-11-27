@@ -17,8 +17,8 @@ import { finishDurationMs, helpEntries, isDone, isFinishedStatus, stageLabel, st
 import { tile } from "./ui";
 
 export type LiveApi = LiveGridApi & {
-  /** Move everyone's progress on the case to the trash. */
-  resetCase(caseId: string): Promise<void>;
+  /** Move everyone's progress on the case to the trash. Optional: without it there is no danger zone (classes). */
+  resetCase?(caseId: string): Promise<void>;
 };
 
 export type LiveOptions = {
@@ -67,7 +67,8 @@ export function createLivePanel(opts: LiveOptions): LivePanel {
   const resetTextEl = h("p", { class: "muted small" });
   resetBtn.addEventListener("click", () => {
     const caseId = opts.caseId();
-    if (!caseId) return;
+    const resetCase = opts.api.resetCase;
+    if (!caseId || resetCase === undefined) return;
     const title = caseTitle(caseId);
     void host
       .askConfirm({
@@ -77,7 +78,7 @@ export function createLivePanel(opts: LiveOptions): LivePanel {
         busyLabel: T().admResetting,
         tone: "danger",
         typedName: caseId,
-        run: () => opts.api.resetCase(caseId),
+        run: () => resetCase(caseId),
         returnFocus: () => resetBtn,
       })
       .then(async (ok) => {
@@ -109,14 +110,16 @@ export function createLivePanel(opts: LiveOptions): LivePanel {
       liveTiles,
       grid.section(),
       h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, T().admStageFunnel), funnelEl),
-      h(
-        "section",
-        { class: "panel admin-panel admin-danger" },
-        h("h2", { class: "admin-h2" }, T().admDangerZone),
-        resetTextEl,
-        h("div", { class: "admin-reset" }, resetBtn),
-      ),
-    ];
+      opts.api.resetCase === undefined
+        ? null
+        : h(
+            "section",
+            { class: "panel admin-panel admin-danger" },
+            h("h2", { class: "admin-h2" }, T().admDangerZone),
+            resetTextEl,
+            h("div", { class: "admin-reset" }, resetBtn),
+          ),
+    ].filter((el): el is HTMLElement => el !== null);
   }
 
   function syncLiveCaseOptions(): void {
