@@ -4,12 +4,11 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { build, fixture } from "../../site/server/test/package-fixture.ts";
 import { uploadCasePackage } from "../../site/shared/upload-client.ts";
-import { ADMIN_KEY, ADMIN_USERNAME, adminHeaders, randomUsername } from "./support";
+import { ADMIN_KEY, ADMIN_USERNAME, adminHeaders, randomUsername, searchUsers } from "./support";
 
 const PASSWORD = "e2e-password-123";
 
 const ui = {
-  search: (p: Page) => p.locator("input.admin-search").first(),
   row: (p: Page, name: string) => p.locator("tr.acct-row", { hasText: name }),
   actionsFor: (p: Page, name: string) => p.locator(`button[aria-haspopup="menu"][aria-label="Actions for ${name}"]:visible`),
   classActions: (p: Page, name: string) => p.locator(`button[aria-haspopup="menu"][aria-label="Actions for class ${name}"]:visible`),
@@ -66,7 +65,7 @@ test("owner console: search, ban and unban, class limit, classes and member limi
   await page.goto("/#/admin?tab=accounts");
 
   await test.step("search finds the user (server-side)", async () => {
-    await ui.search(page).fill(target.username);
+    await searchUsers(page, target.username);
     await expect(ui.row(page, target.username)).toBeVisible();
     await expect(page.locator("tr.acct-row")).toHaveCount(1);
   });

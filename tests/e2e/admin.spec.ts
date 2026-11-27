@@ -3,7 +3,7 @@
 // delete, the one-time password guard, and the Recently deleted table at 390px in Hebrew.
 import { readFile } from "node:fs/promises";
 import { expect, test, type APIRequestContext, type Page, type PlaywrightWorkerArgs } from "@playwright/test";
-import { ADMIN_KEY, ADMIN_USERNAME, adminHeaders, answerFor, approveAccount, randomUsername } from "./support";
+import { ADMIN_KEY, ADMIN_USERNAME, adminHeaders, answerFor, approveAccount, randomUsername, searchUsers } from "./support";
 
 const PASSWORD = "e2e-password-123";
 /** Every test makes its own data (CI starts an empty server): players on this case, scored by solving stages. */
@@ -155,7 +155,7 @@ test("row menu: author role, password reset guard, delete with undo", async ({ p
   await approveAccount(request, username);
   await signInAdmin(page);
   await page.goto("/#/admin?tab=accounts");
-  await ui.search(page).fill(username);
+  await searchUsers(page, username);
 
   await test.step("the menu lists the actions, Delete last", async () => {
     await ui.actionsFor(page, username).click();
@@ -198,7 +198,7 @@ test("row menu: Ban asks first, and Cancel changes nothing (#128, #185)", async 
   await approveAccount(request, username);
   await signInAdmin(page);
   await page.goto("/#/admin?tab=accounts");
-  await ui.search(page).fill(username);
+  await searchUsers(page, username);
   // The account menu in the top bar carries Sign out; the page header no longer repeats it.
   await expect(page.locator(".admin-head").getByRole("button", { name: /^sign out$/i })).toHaveCount(0);
   await expect(page.locator(".admin-head")).not.toContainText(/signed in as admin/i);

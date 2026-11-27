@@ -1,7 +1,7 @@
 // The author role (#67): the instructor grants and revokes it from the Accounts tab, and the player's own
 // session sees it without signing in again.
 import { expect, test, type Page } from "@playwright/test";
-import { ADMIN_KEY, ADMIN_USERNAME, approveAccount, randomUsername } from "./support";
+import { ADMIN_KEY, ADMIN_USERNAME, approveAccount, randomUsername, searchUsers } from "./support";
 
 const PASSWORD = "e2e-password-123";
 
@@ -36,7 +36,7 @@ test("admin makes a player an author and back from the Accounts tab", async ({ p
     await page.waitForURL((url) => !url.hash.startsWith("#/login"));
     await page.goto("/#/admin?tab=accounts");
     // The users list is paged on the server (#185): search for the player.
-    await page.locator("input.admin-search").first().fill(username);
+    await searchUsers(page, username);
     await ui.actions(page, username).click();
     await ui.menuItem(page, /^make author$/i).click();
     await expect(ui.row(page, username).getByText("Author", { exact: true })).toBeVisible();
