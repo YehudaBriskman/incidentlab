@@ -89,6 +89,49 @@ a.home-row:hover { background: var(--hover); }
 .home-skel-title { block-size: 1.25rem; inline-size: 60%; }
 .home-skel-btn { block-size: var(--control-sm); inline-size: 6rem; margin-block-start: auto; }
 
+/* the challenge row (#183): your classes (or the call to action, or a guest's upgrade card) beside your streak,
+   on the same 7:5 columns as the cards above so the edges line up */
+.home-chal { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--gap-stack); flex: none; }
+.home-chal[hidden] { display: none; }
+.home-chal-card { block-size: 11rem; }
+.home-card-link { color: var(--text-2); font-size: var(--type-label-size); white-space: nowrap; }
+.home-card-link:hover { color: var(--text); }
+.home-card-more { margin: var(--space-1) var(--space-2) 0; font-size: var(--type-label-size); }
+
+.home-class-row { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.5fr) minmax(0, 1fr) auto; }
+.home-class-name { font-weight: 600; }
+.home-class-event { display: inline-flex; align-items: center; gap: var(--space-2); min-inline-size: 0; color: var(--text-2); font-size: var(--type-label-size); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+.home-class-event-name { overflow: hidden; text-overflow: ellipsis; }
+.home-class-event.is-live .home-class-event-name { color: var(--text); font-weight: 600; }
+.home-class-event.is-live .dot { flex: none; background: var(--info-fg); }
+.home-class-event [hidden] { display: none; }
+.home-class-frozen { font-size: var(--type-label-size); }
+.home-class-case { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--type-label-size); }
+.home-class-case-label, .home-class-note { color: var(--text-2); font-size: var(--type-label-size); }
+.home-class-case-title { color: var(--text); }
+
+/* call to action and the guest card: one short line and one action, the action at the card's foot */
+.home-cta-body { display: flex; flex-direction: column; align-items: flex-start; gap: var(--gap-related); padding: 0 var(--space-4) var(--space-3); }
+.home-cta-text { margin: 0; max-inline-size: var(--measure); color: var(--text-2); font-size: var(--type-small-size); line-height: var(--type-small-lh); }
+.home-cta-body .btn { margin-block-start: auto; }
+.home-points { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--gap-tight) var(--gap-stack); inline-size: 100%; font-size: var(--type-small-size); line-height: var(--type-small-lh); }
+.home-points li { display: flex; gap: var(--space-2); align-items: baseline; }
+.home-point-mark { flex: none; color: var(--success-fg); font-size: var(--type-label-size); }
+
+/* your streak: the day count, then the closest locked achievement with a progress bar */
+.home-streak .home-card-body { display: flex; flex-direction: column; gap: var(--space-1); padding: 0 var(--space-4) var(--space-3); }
+.home-streak-value { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); }
+.home-streak-days { font-size: var(--type-title-size); line-height: var(--type-title-lh); font-weight: 600; font-variant-numeric: tabular-nums; }
+.home-streak-best, .home-streak-note { color: var(--text-2); font-size: var(--type-label-size); font-variant-numeric: tabular-nums; }
+.home-streak-note { margin: 0; }
+.home-next { margin-block-start: auto; display: grid; gap: var(--gap-tight); }
+.home-next-label { margin: 0; color: var(--text-2); font-size: var(--type-label-size); }
+.home-next-name { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-1) var(--space-3); font-size: var(--type-small-size); }
+.home-next-count { color: var(--text-2); font-size: var(--type-label-size); font-variant-numeric: tabular-nums; }
+.home-next-desc, .home-next-none { margin: 0; color: var(--text-2); font-size: var(--type-label-size); }
+.home-next-bar { display: block; block-size: 6px; border-radius: var(--radius-full); background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--border-strong); overflow: hidden; }
+.home-next-fill { display: block; block-size: 100%; background: var(--accent); border-radius: inherit; }
+
 /* difficulty: three bars filled up to the level, plus the word */
 .home-diff { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
 .home-diff-bars { display: inline-flex; align-items: flex-end; gap: 2px; block-size: 10px; }
@@ -133,10 +176,16 @@ a.home-row:hover { background: var(--hover); }
   .home-top { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .home-row { grid-template-columns: minmax(0, 1fr) auto auto; }
   .home-row-kind { display: none; }
+  .home-chal { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  /* a class row on three short lines: name, event, case of the day */
+  .home-class-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 0; padding-block: var(--space-1); }
+  .home-class-row > :not(.home-row-go) { grid-column: 1; }
+  .home-class-row .home-row-go { grid-column: 2; grid-row: 1 / 4; }
 }
 @media (max-width: 640px) {
-  .home-top { grid-template-columns: minmax(0, 1fr); }
+  .home-top, .home-chal { grid-template-columns: minmax(0, 1fr); }
   .home-card { block-size: auto; max-block-size: 18rem; }
+  .home-chal-card { min-block-size: 0; }
   .home-toolbar { justify-content: flex-start; }
   .home-search-wrap { flex: 1 1 100%; }
   .home-shown { order: 0; inline-size: 100%; }
@@ -158,4 +207,6 @@ a.home-row:hover { background: var(--hover); }
   .home-card, .home-cases, .home-intro { border: 1px solid CanvasText; }
   .home-diff-bars > span { forced-color-adjust: none; background: Canvas; outline: 1px solid CanvasText; }
   .home-diff-bars > span.is-on { background: CanvasText; }
+  .home-next-bar { forced-color-adjust: none; background: Canvas; border: 1px solid CanvasText; box-shadow: none; }
+  .home-next-fill { forced-color-adjust: none; background: Highlight; }
 }
