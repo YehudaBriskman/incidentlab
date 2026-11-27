@@ -3,6 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { InMemoryKvStore } from "../repositories/KvStore.ts";
+import { eventCacheWindow } from "../controllers/AuthController.ts";
 import { createApp } from "../router.ts";
 import type { CachePurger, CacheTag } from "../services/CachePurger.ts";
 import { secondsUntilNextDay } from "../services/ScheduleService.ts";
@@ -83,4 +84,29 @@ test("instructor writes purge the public responses they change", async () => {
   const before = purges.length;
   assert.equal((await call("/admin/schedule", { method: "PUT", admin: true, body: { timezone: "Mars/Olympus", defaultCaseId: null, days: {}, lockToToday: false } })).status, 400);
   assert.equal(purges.length, before);
+});
+
+const ev = (startsAt: string | null, endsAt: string | null) => ({ name: "Night", startsAt, endsAt, freezeAt: null, enforceWindow: false, announcement: null });
+const NOW = Date.parse("2026-11-26T12:00:00Z");
+const SHORT = { maxAgeSeconds: 10, staleSeconds: 20 };
+const QUIET = { maxAgeSeconds: 300, staleSeconds: 600 };
+
+test("the event window is long while no event is near, and short around one (#242)", () => {
+  assert.deepEqual(eventCacheWindow(ev(null, null), NOW), QUIET, "a name or announcement only");
+  assert.deepEqual(eventCacheWindow(ev("2026-11-27T19:00:00Z", "2026-11-27T21:00:00Z"), NOW), QUIET, "tomorrow");
+  assert.deepEqual(eventCacheWindow(ev("2026-11-26T12:15:01Z", null), NOW), QUIET, "starts just past the 15-minute reach");
+  assert.deepEqual(eventCacheWindow(ev("2026-11-26T12:15:00Z", null), NOW), SHORT, "starts within the reach");
+  assert.deepEqual(eventCacheWindow(ev("2026-11-26T11:00:00Z", "2026-11-26T13:00:00Z"), NOW), SHORT, "running");
+  assert.deepEqual(eventCacheWindow(ev("2026-11-26T11:00:00Z", null), NOW), SHORT, "running, open-ended");
+  assert.deepEqual(eventCacheWindow(ev(null, "2026-11-26T12:05:00Z"), NOW), SHORT, "no start, ends soon");
+  assert.deepEqual(eventCacheWindow(ev("2026-11-26T09:00:00Z", "2026-11-26T11:00:00Z"), NOW), QUIET, "over");
+});
+
+test("GET /api/event sends the quiet window with no event near, the short one during an event, and edits purge it", async () => {
+  const { call } = setup();
+  const header = async (): Promise<string> => (await call("/event")).headers.get("netlify-cdn-cache-control") ?? "";
+  assert.equal(await header(), "public, durable, max-age=300, stale-while-revalidate=600");
+  assert.equal((await call("/admin/event", { method: "PUT", admin: true, body: ev("2026-11-26T11:30:00Z", "2026-11-26T13:30:00Z") })).status, 200);
+  assert.deepEqual(purges.at(-1), ["event", "leaderboard"], "the edit reaches every cached copy at once");
+  assert.equal(await header(), "public, durable, max-age=10, stale-while-revalidate=20");
 });

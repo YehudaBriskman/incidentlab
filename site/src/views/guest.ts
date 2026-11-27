@@ -10,7 +10,7 @@ import { ApiError, startGuest, upgradeGuest } from "../lib/api";
 import { h, setChildren } from "../lib/dom";
 import { showDialog, toast } from "../lib/overlay";
 import { setAccount } from "../lib/session";
-import { recoveryCodePanel } from "./auth";
+import { confirmCodeSaved, recoveryCodePanel } from "./auth";
 import "../player.css";
 
 /**
@@ -115,10 +115,22 @@ export function openUpgradeDialog(): void {
     formError,
     formActions(submit, cancel),
   );
-  const handle = showDialog({ title: TGu().upgradeTitle, body: form, size: "sm", closeButton: true, initialFocus: () => user.input });
+  // Once the one-time recovery code shows (#205), the dialog outlives the route refresh the upgrade causes (class
+  // pages re-render on an account change), and Escape or × without Copy or Download asks first.
+  const shownCode = { shown: false, saved: false };
+  const handle = showDialog({
+    title: TGu().upgradeTitle,
+    body: form,
+    size: "sm",
+    closeButton: true,
+    initialFocus: () => user.input,
+    persistent: () => shownCode.shown,
+    beforeDismiss: () => (shownCode.shown ? confirmCodeSaved(shownCode.saved) : true),
+  });
   open = true;
   void handle.result.finally(() => {
     open = false;
+    if (shownCode.shown) toast({ tone: "success", text: TGu().upgraded });
   });
   cancel.addEventListener("click", () => handle.close(null));
 
@@ -157,20 +169,23 @@ export function openUpgradeDialog(): void {
     submit.textContent = TGu().upgrading;
     upgradeGuest({ username: user.input.value.trim(), password: pw.input.value })
       .then(({ account, recoveryCode }) => {
-        setAccount(account);
         if (recoveryCode === null) {
+          setAccount(account);
           handle.close(null);
           toast({ tone: "success", text: TGu().upgraded });
           return;
         }
-        // Show the new account's one-time recovery code (#174) before the dialog closes, as sign-up does.
+        // Show the new account's one-time recovery code (#174) before the dialog closes, as sign-up does. The
+        // dialog is persistent from here, before setAccount can re-render the route under it.
+        shownCode.shown = true;
         const lead = h("p", { class: "recovery-code-warning", tabindex: "-1" }, TA().codeLeadSignUp);
-        const done = h("button", { type: "button", class: "btn btn-primary" }, TA().codeDone);
-        done.addEventListener("click", () => {
-          handle.close(null);
-          toast({ tone: "success", text: TGu().upgraded });
-        });
-        setChildren(form, lead, recoveryCodePanel(recoveryCode, account.username), formActions(done));
+        const done = h("button", { type: "button", class: "btn btn-primary" }, TA().codeSaved);
+        done.addEventListener("click", () => handle.close(null));
+        const markSaved = (): void => {
+          shownCode.saved = true;
+        };
+        setChildren(form, lead, recoveryCodePanel(recoveryCode, account.username, markSaved), formActions(done));
+        setAccount(account);
         lead.focus();
       })
       .catch((err: unknown) => {

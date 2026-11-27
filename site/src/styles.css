@@ -1737,6 +1737,8 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
 .lb-unranked-note { color: var(--text-2); font-size: var(--step--1); }
 .lb-table tr.is-unranked > * { border-block-start: 2px dashed var(--border-strong); }
 .lb-sub { margin: var(--space-3) 0 0; }
+.lb-paused { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-block-start: var(--space-3); }
+.lb-paused > p { margin: 0; }
 .lb-event { color: var(--text-2); font-variant-numeric: tabular-nums; }
 .lb-exit { position: fixed; inset-block-start: var(--space-2); inset-inline-end: var(--space-2); font-size: var(--step--1); color: var(--text-muted); padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); min-block-size: var(--target-min); display: inline-flex; align-items: center; }
 .lb-exit:hover { color: var(--text); background: var(--hover); }

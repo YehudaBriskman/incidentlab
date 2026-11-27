@@ -115,43 +115,39 @@ export class StatsService {
   }
 
   /**
-   * Streak = consecutive "incident days" (scheduled dates, or every date while a default case is set)
-   * on which the player completed that day's case on that very date (schedule time zone).
-   * Returns the streak and when each length was first reached.
+   * Streak = consecutive calendar days (schedule time zone) on which the player solved at least one stage of any
+   * case (#212). Not having played yet today doesn't break it. The old rule (finish that day's scheduled case on
+   * that day) could never pass 5 with 5 cases, since each case completes only once.
+   * Returns the streak, whether today already counts, and when each length was first reached.
    */
-  private streak(records: readonly ProgressRecord[], schedule: Schedule): { current: number; best: number; reachedAt: Map<number, string> } {
+  private streak(records: readonly ProgressRecord[], schedule: Schedule): { current: number; best: number; activeToday: boolean; reachedAt: Map<number, string> } {
     const today = localDate(this.now(), schedule.timezone);
-    const scheduledCase = (date: string): string | null => schedule.days[date] ?? schedule.defaultCaseId;
-    const qualifying = new Map<string, string>(); // date -> completedAt
+    const active = new Map<string, string>(); // date -> first solve that day
     for (const r of records) {
-      if (!r.completedAt) continue;
-      const date = localDate(new Date(r.completedAt), schedule.timezone);
-      if (scheduledCase(date) === r.caseId) qualifying.set(date, r.completedAt);
+      for (const st of stagesOf(r)) {
+        if (st.status !== "solved" || st.finishedAt === null) continue;
+        const date = localDate(new Date(st.finishedAt), schedule.timezone);
+        const seen = active.get(date);
+        if (seen === undefined || st.finishedAt < seen) active.set(date, st.finishedAt);
+      }
     }
-    if (qualifying.size === 0) return { current: 0, best: 0, reachedAt: new Map() };
-
-    const firstDate = [...qualifying.keys(), ...Object.keys(schedule.days)].sort()[0] ?? today;
-    const incidentDays: string[] = [];
-    if (schedule.defaultCaseId !== null) {
-      for (let d = firstDate; d <= today; d = shiftDate(d, 1)) incidentDays.push(d);
-    } else {
-      incidentDays.push(...Object.keys(schedule.days).filter((d) => d <= today).sort());
-    }
+    if (active.size === 0) return { current: 0, best: 0, activeToday: false, reachedAt: new Map() };
 
     let run = 0;
     let best = 0;
     const reachedAt = new Map<number, string>();
-    for (const day of incidentDays) {
-      const doneAt = qualifying.get(day);
-      if (doneAt) {
+    const firstDate = [...active.keys()].sort()[0] ?? today;
+    for (let day = firstDate; day <= today; day = shiftDate(day, 1)) {
+      const at = active.get(day);
+      if (at !== undefined) {
         run += 1;
         best = Math.max(best, run);
-        if (!reachedAt.has(run)) reachedAt.set(run, doneAt);
+        if (!reachedAt.has(run)) reachedAt.set(run, at);
       } else if (day !== today) {
-        run = 0; // not having done today's incident yet doesn't break the streak
+        run = 0;
       }
     }
-    return { current: run, best, reachedAt };
+    return { current: run, best, activeToday: active.has(today), reachedAt };
   }
 
   private achievements(records: readonly ProgressRecord[], streakReached: ReadonlyMap<number, string>): Achievement[] {
@@ -210,7 +206,7 @@ export class StatsService {
       wrongAttempts: wrong,
       accuracy: solved + wrong === 0 ? null : Math.round((solved / (solved + wrong)) * 1000) / 1000,
       achievements: this.achievements(records, streak.reachedAt),
-      streak: { current: streak.current, best: streak.best },
+      streak: { current: streak.current, best: streak.best, activeToday: streak.activeToday },
       cases,
     };
   }

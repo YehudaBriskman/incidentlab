@@ -80,7 +80,6 @@ export const createApp = (deps: AppDeps): App => {
   const firstBlood = new FirstBloodRepository(deps.store);
 
   const limiter = new RateLimiter(repos.rateLimits, now);
-  const auth = new AuthService({ repos, settings: settingsRepo, limiter, adminKey: deps.adminKey, now });
   const events = new EventService({ events: new EventRepository(deps.store), settings: settingsRepo, now, purger: deps.cachePurger });
   const schedule = new ScheduleService({ repository: repos.schedule, releasedCaseIds: () => Object.keys(secrets.cases), now, purger: deps.cachePurger });
   // The global board's opted-in players, shared for a few seconds (#185); every writer that changes them clears it.
@@ -92,7 +91,7 @@ export const createApp = (deps: AppDeps): App => {
   const game = new GameService({ repository: repos.progress, firstBlood, secrets: secrets.playable, scores, now });
   const stats = new StatsService({ repos, secrets, privateCaseIds: () => secrets.privateCaseIds(), now, boardCache });
   const trashRepo = new TrashRepository(deps.store);
-  const trash = new TrashService({ trash: trashRepo, repos, cases: caseRepo, scores, board, now });
+  const trash = new TrashService({ trash: trashRepo, repos, cases: caseRepo, scores, board, now, purger: deps.cachePurger });
   const accounts = new AccountAdminService({ repos, firstBlood, game, stats, trash, trashRepo, scores, now, onBoardChange: clearBoard });
   const audit = new AuditService({ repository: new AuditRepository(deps.store), repos, now });
 
@@ -117,8 +116,10 @@ export const createApp = (deps: AppDeps): App => {
     return meta && meta.visibility === "private" && meta.publishedVersion !== null && isLiveVersion(meta, meta.publishedVersion) ? meta.classIds : null;
   };
   const classes = new ClassService({ repos, limiter, releasedCaseIds: () => Object.keys(secrets.cases), privateCaseClasses, now, purger: deps.cachePurger });
+  // A class code at sign-up joins that class (#204), so auth comes after classes.
+  const auth = new AuthService({ repos, settings: settingsRepo, limiter, adminKey: deps.adminKey, now, classes });
   const access = new CaseAccessService({ cases, classes, secrets, auth });
-  const authoring = new CaseAuthoringService({ cases: caseRepo, progress: repos.progress, accounts: repos.accounts, classes, trash, bundledFingerprint, now });
+  const authoring = new CaseAuthoringService({ cases: caseRepo, progress: repos.progress, accounts: repos.accounts, classes, trash, bundledFingerprint, now, purger: deps.cachePurger });
 
   const authController = new AuthController({ auth, schedule, stats, events, board, access });
   const gameController = new GameController({ auth, game, access });

@@ -188,7 +188,7 @@ test("content and catalog: public cache headers, ETag and 304", async () => {
 
   const first = await s.get("/cases/cached/content?lang=he");
   assert.equal(first.status, 200);
-  assert.equal(first.headers.get("cache-control"), "public, max-age=60, stale-while-revalidate=600");
+  assert.equal(first.headers.get("cache-control"), "public, max-age=0, must-revalidate");
   const etag = first.headers.get("etag");
   assert.equal(etag, `"${"a".repeat(64)}-v1-he"`);
   const again = await s.get("/cases/cached/content?lang=he", { "if-none-match": `W/${etag ?? ""}` });
@@ -199,7 +199,7 @@ test("content and catalog: public cache headers, ETag and 304", async () => {
   const catalog = await s.get("/cases");
   const catalogTag = catalog.headers.get("etag") ?? "";
   assert.match(catalogTag, /^"[0-9a-f]{32}"$/);
-  assert.equal(catalog.headers.get("cache-control"), "public, max-age=60, stale-while-revalidate=600");
+  assert.equal(catalog.headers.get("netlify-cache-tag"), "catalog");
   assert.equal((await s.get("/cases", { "if-none-match": catalogTag })).status, 304);
   await seedCase(s.repos, { id: "newer" });
   assert.equal((await s.get("/cases", { "if-none-match": catalogTag })).status, 200, "a new case changes the tag");

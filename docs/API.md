@@ -21,9 +21,10 @@ plan allows 125,000 function calls a month.
 
 | Route | `Netlify-CDN-Cache-Control` | Tag | Purged by |
 |---|---|---|---|
-| `/api/event` | `public, durable, max-age=10, stale-while-revalidate=20` | `event` | `PUT /api/admin/event` |
+| `/api/event` | `public, durable, max-age=10, stale-while-revalidate=20` while the event runs or starts or ends within 15 minutes; otherwise `max-age=300, stale-while-revalidate=600` (#242, `eventCacheWindow`) | `event` | `PUT /api/admin/event` |
 | `/api/leaderboard` | `public, durable, max-age=10, stale-while-revalidate=20` | `leaderboard` | `PUT /api/admin/event` (freeze), `PUT /api/me/board` (a player opts in or out) |
 | `/api/today` | `max-age` and `stale-while-revalidate` up to 60 s each, capped at the seconds left until midnight in the schedule's time zone | `today` | `PUT /api/admin/schedule` |
+| `/api/cases`, `/api/cases/:caseId/content` (#243) | `public, durable, max-age=3600, stale-while-revalidate=86400` | `catalog`, `case:<caseId>` | publish, rollback, approve, delete, restore (below) |
 | `/api/classboard/:boardToken` (#181) | `public, durable, max-age=10, stale-while-revalidate=20` | `class:<classId>` | every class edit: `PATCH`, archive, restore, join-code and board-token rotation, an active join, approve, remove, leave. Solves don't purge it. |
 
 - Browsers get `Cache-Control: public, max-age=0, must-revalidate`, so they always ask the CDN.
@@ -33,14 +34,18 @@ plan allows 125,000 function calls a month.
 - Changes nobody purges (answers moving the leaderboard or a class board, a case being published) show within
   10 s for the boards and 60 s for today. Solves never purge: a purge per correct answer would add an API call per
   solve on a class night, while the 10 s window already bounds how stale a board can be.
-- **Clock:** a cached `serverTime` can be up to about 30 s old. The client (`src/lib/clock.ts`) takes the server
+- **Clock:** a cached `serverTime` can be up to about 15 minutes old (30 s near an event). The client (`src/lib/clock.ts`) takes the server
   clock from responses the origin answered: their `Date` header, or `/api/event`'s `serverTime` when its
   `Cache-Status` is not a hit. A cached `/api/event` counts only when its `Age` header is present.
 - **Event poll:** the client (`src/lib/event.ts`) polls `/api/event` every 30 s while an event is running or
   starts within an hour, every 2 minutes otherwise. It doesn't poll at all while the tab is hidden, and polls
   once when the tab comes back.
+- **Board poll (#242):** the leaderboard and class board views (`src/lib/boardPoll.ts`) poll every 10 s while
+  the event they follow is live, every 60 s otherwise (and at the moment an upcoming event starts), never in a
+  hidden tab, and not after 15 minutes without pointer or key input until the viewer presses Resume. A projector
+  during a live event keeps polling. An answer that shows the same standings is not redrawn.
 - Errors are non-2xx with body `{ "error": string, "code"?: string, "retryAfterSeconds"?: number, "details"?: string[] }` (`details` lists every failed check of a rejected upload). Status codes: 400 validation, 401 signed out, 403 forbidden (see codes), 404, 405, 409 conflict (username taken, already finished, no more hints, concurrent update: retry), 413, 415, 429 rate limit (also sends `Retry-After`), 500 `{"error":"internal"}`, 503 admin disabled.
-- Error codes the UI acts on (also, for private cases and review, #184: `not-admin`, `not-published`, `already-public`, `not-submitted`): `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`, and for classes (#179) `guest`, `not-class-admin`, `not-class-owner`, `class-limit`, `class-full`, `class-archived`, `owner-locked`, `pending-member`.
+- Error codes the UI acts on (also, for private cases and review, #184: `not-admin`, `not-published`, `already-public`, `not-submitted`): `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-class-code` (`bad-invite-code` before #204), `pending`, `rejected`, `admin`, `password-change-required`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`, and for classes (#179) `guest`, `not-class-admin`, `not-class-owner`, `class-limit`, `class-full`, `class-archived`, `owner-locked`, `pending-member`.
 
 ## Accounts and sessions
 
@@ -53,7 +58,13 @@ plan allows 125,000 function calls a month.
 - **Admin sign-in:** username `admin` with the `ADMIN_KEY` as password creates an admin session (12 h, ended
   when the key rotates). It works on every admin route instead of the `X-Admin-Key` header, and it can't
   play. Reserved usernames: `admin`, `administrator`, `root`, `instructor`, `system`.
-- **Class code:** the admin's invite code no longer decides approval (everyone is approved). A sign-up that sends a wrong code still gets 400 `bad-invite-code`. Classes replace it in Phase 2.
+- **Class code at sign-up (#204):** the optional `inviteCode` is a class join code (case, spaces and dashes are
+  ignored). It is checked before the account is written: a code no live class has gets 400 `bad-class-code` and a
+  full class 409 `class-full`, and neither creates an account. Otherwise the new account joins that class (or asks
+  to, when the class is in approval mode), the response's `class` is its summary, and the client opens the class
+  page. Wrong codes count against the class-join limit per address. Classes replaced the old site-wide invite code
+  (`config:settings.inviteCode`): the owner console no longer edits it, but while one is still stored a sign-up
+  with it passes (and joins no class). No code ever decides approval: everyone is approved.
 - **Recovery code (#174):** 4 groups of 5 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ`
   (`ABCDE-FGHJK-MNPQR-STUVW`; case, spaces and dashes are ignored when typed), stored only as a scrypt hash.
   The plain code is returned once: in the sign-up response, in the first sign-in response of an account that has
@@ -97,7 +108,7 @@ it, and no public or CDN-cached response carries stage records. Constants: `SCOR
 
 | Method | Path | Auth | Body | Response |
 |---|---|---|---|---|
-| POST | `/api/auth/register` | none | `{username, password, inviteCode?, website?, elapsedMs?}` | 201 `{account, recoveryCode}` + cookie |
+| POST | `/api/auth/register` | none | `{username, password, inviteCode?, website?, elapsedMs?}` | 201 `{account, recoveryCode, class?}` + cookie (`class` when `inviteCode` was a class code) |
 | POST | `/api/auth/login` | none | `{username, password}` | `{account, recoveryCode?}` + cookie (`recoveryCode` only when this sign-in issued the account's first one) |
 | POST | `/api/auth/recover` | none | `{username, recoveryCode, newPassword}` | `{recoveryCode}` (the new code; no cookie) |
 | POST | `/api/auth/logout` | cookie | `{}` | 204, clears the cookie |
@@ -133,8 +144,13 @@ visible; drafts, older versions and trashed cases are 404.
 | GET | `/api/cases` | none | `{cases: CatalogEntry[]}` (`site/shared/catalog.ts`; `file` is the case id, `version` the published version). `ETag` = hash of the body. |
 | GET | `/api/cases/:caseId/content?lang=en\|he` | none | `{id, version, lang, content: CaseContent, evidence: {filesBase, zip}}` (`CaseContentResponseSchema` in `site/shared/case-records.ts`). `lang` is the one served: `he` falls back to `en`. `evidence` says where this version's evidence lives (below). The browser adds `&v=<version>` (ignored by the server) so its HTTP cache keeps one entry per version. `ETag` = `"<contentSha>-v<version>-<lang>"`. 400 for another `lang`, 404 unless published. |
 
-Both send `Cache-Control: public, max-age=60, stale-while-revalidate=600` and answer `If-None-Match`
-with 304. Errors (404, 400) stay `no-store`.
+Both are durable at the CDN (#243): `Netlify-CDN-Cache-Control: public, durable, max-age=3600,
+stale-while-revalidate=86400`, tagged `catalog` (the catalog) and `case:<caseId>` (every language and version of
+that case's content), `Netlify-Vary: query`. Browsers get `Cache-Control: public, max-age=0, must-revalidate`, so a
+purge reaches them on their next request. Both answer `If-None-Match` with a 304 that carries the same headers.
+Every change to what they serve purges both tags at once: publish, rollback, the owner's approval, delete, and
+restore (from the author route or the admin trash). A draft upload, a version waiting for review and a rejection
+change nothing public and purge nothing. Errors (404, 400) and private content stay `no-store`.
 
 **Private cases (#184).** A case whose meta says `visibility: "private"` is never in `GET /api/cases`, the
 released ids (`/api/today`, schedules, other classes' assignments), the global leaderboard or a class board's
@@ -183,7 +199,7 @@ non-current versions are 404 `no-store`. The function is not bound by the Functi
 **Caching and `netlify.toml`.** Netlify applies `[[headers]]` rules only to files it serves itself, not to
 Function or Edge Function responses. So the `/api/*` `no-store` rule never reached function responses;
 each route sets its own `Cache-Control` (`http.ts` defaults to `no-store`). The CDN may cache the two
-content routes for 60 s (they vary only by URL, including `?lang`). The Edge Function does not opt in
+content routes for an hour plus a day stale, purged by tag (they vary only by URL, including `?lang`). The Edge Function does not opt in
 to CDN caching (`cache = "manual"` is unset), so its responses are cached by browsers only.
 
 ### Author: upload, publish, rollback, delete (#66)
@@ -268,7 +284,7 @@ section, a search, filter or page, an action, or Refresh).
 | POST | `/api/admin/accounts/:id/reset-password` | `{}` | `{temporaryPassword}` |
 | PUT | `/api/admin/accounts/:id/role` | admin | `{role: "player"\|"author"}` | `{account}`; audited as `account.role`. Authors may manage cases they created (the Author routes above). |
 | POST | `/api/admin/accounts/approve-all` | `{}` | `{approved}` |
-| GET/PUT | `/api/admin/settings` | `{inviteCode}` | `{settings}` |
+| GET/PUT | `/api/admin/settings` | `{inviteCode}` | `{settings}`. Legacy (#204): classes replaced the site invite code and the owner console no longer edits it; GET stays the console's sign-in check. |
 | GET/PUT | `/api/admin/event` | `LiveEvent` | `{event, serverTime}`: the site announcement and the global event clock; `freezeAt` freezes the global leaderboard. `enforceWindow` is deprecated: stored, never enforced (#180). |
 | GET | `/api/admin/export.csv` | | CSV, one row per account per opened case |
 | GET | `/api/admin/audit?limit=` | | `{entries, names}` newest first (every admin, class and author write is recorded). Each entry has `actor` (#185): `"admin"` for the site owner (by key or session, see `via`), or the acting account's id; null on entries written before it. `names` maps the actor and target ids it mentions to usernames and class names (one read per distinct id). |
@@ -370,7 +386,8 @@ for viewing and leaving.
 
 `Schedule = { timezone, defaultCaseId, days: {"YYYY-MM-DD": caseId}, lockToToday }`. "Today" is the
 date in `timezone` (default `Asia/Jerusalem`). Today's case is `days[today] ?? defaultCaseId`: the daily card on
-the home page and the streaks count it.
+the home page shows it. Streaks don't depend on it (#212): a streak is consecutive days (in `timezone`) with at
+least one solved stage of any case, and `streak.activeToday` in `UserStats` says whether today already counts.
 
 **Players can always play every published case** (#180). `lockToToday` (schedule) and `enforceWindow` (event)
 are deprecated: they stay in the stored records and the responses, but nothing enforces them, and the admin

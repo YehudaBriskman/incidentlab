@@ -125,3 +125,72 @@ test("classes: guests see the upgrade note and visitors the sign-in links", asyn
   await expect(page.getByRole("dialog", { name: "Create your account" })).toBeVisible();
   await visitor.close();
 });
+
+/** A class made through the API by a fresh signed-in owner: its id and join code. */
+async function apiClass(browser: Browser, name: string): Promise<{ owner: BrowserContext; id: string; code: string }> {
+  const owner = await signedIn(browser, "e2euco");
+  const res = await owner.page.request.post("/api/classes", { data: { name } });
+  expect(res.status(), await res.text()).toBe(201);
+  const body = (await res.json()) as { class: { id: string; admin?: { joinCode: string } } };
+  return { owner: owner.context, id: body.class.id, code: body.class.admin?.joinCode ?? "" };
+}
+
+test("a guest upgrading on a join link keeps the recovery code until it is acknowledged (#205)", async ({ browser }) => {
+  const cls = await apiClass(browser, "E2E recovery class");
+  const context = await browser.newContext();
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const page = await context.newPage();
+  expect((await page.request.post("/api/guest", { data: {} })).status()).toBe(201);
+  await page.goto(`/#/join/${cls.code}`);
+  await page.locator(".class-note").getByRole("button", { name: "Create account" }).click();
+  const dialog = page.getByRole("dialog", { name: "Create your account" });
+  await dialog.getByLabel(/username/i).fill(randomUsername("e2eucg"));
+  await dialog.getByLabel(/^password$/i).fill(PASSWORD);
+  await dialog.getByRole("button", { name: /create account/i }).click();
+  const code = dialog.getByTestId("recovery-code");
+  await expect(code).toBeVisible();
+
+  // The upgrade re-renders the join route under the dialog (it joins the class now); the code stays.
+  await expect.poll(async () => JSON.stringify(await (await page.request.get("/api/classes")).json()), { timeout: 10_000 }).toContain(cls.id);
+  await page.waitForTimeout(1_000);
+  await expect(code).toBeVisible();
+
+  // Escape and × without Copy or Download ask first; "Show the code" keeps it open.
+  const ask = page.getByRole("alertdialog", { name: "Did you save your recovery code?" });
+  await page.keyboard.press("Escape");
+  await expect(ask).toBeVisible();
+  await ask.getByRole("button", { name: "Show the code" }).click();
+  await expect(ask).toBeHidden();
+  await expect(code).toBeVisible();
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect(ask).toBeVisible();
+  await ask.getByRole("button", { name: "Show the code" }).click();
+  await expect(code).toBeVisible();
+
+  // Once copied, Escape closes without asking.
+  await dialog.getByRole("button", { name: "Copy code" }).click();
+  await expect(page.locator(".toast-host .toast").filter({ hasText: "Recovery code copied." })).toBeVisible();
+  await dialog.getByTestId("recovery-code").click(); // focus back inside the dialog, off the toast
+  await page.keyboard.press("Escape");
+  await expect(ask).toHaveCount(0);
+  await expect(dialog).toBeHidden();
+  await context.close();
+  await cls.owner.close();
+});
+
+test("signing up from a join link carries the class code and lands on the class page (#204)", async ({ browser }) => {
+  const cls = await apiClass(browser, "E2E sign-up class");
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto(`/#/join/${cls.code}`);
+  await page.getByRole("button", { name: "New here? Create an account" }).click();
+  await expect(page.getByLabel("Class code (optional)")).toHaveValue(cls.code.replace(/-/g, ""));
+  await page.locator("#auth-username").fill(randomUsername("e2eucs"));
+  await page.locator("#auth-password").fill(PASSWORD);
+  await page.locator("form.gate").getByRole("button", { name: "Create account" }).click();
+  await page.getByRole("button", { name: /i've saved it, continue/i }).click();
+  await expect(page).toHaveURL(new RegExp(`#/class/${cls.id}$`));
+  await expect(page.getByRole("heading", { level: 1, name: "E2E sign-up class" })).toBeVisible();
+  await context.close();
+  await cls.owner.close();
+});

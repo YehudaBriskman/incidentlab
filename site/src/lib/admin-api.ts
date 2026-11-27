@@ -314,7 +314,7 @@ export async function saveSchedule(schedule: Schedule): Promise<Schedule> {
   return (await parseJson(await adminFetch(path, jsonInit("PUT", local.data)), ScheduleResponseSchema, path)).schedule;
 }
 
-// ---- settings (class invite code) ---------------------------------------------
+// ---- settings (the legacy site invite code, #204: no longer edited in the UI) ----
 
 export async function fetchSettings(): Promise<Settings> {
   const path = "/api/admin/settings";

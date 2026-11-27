@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { LiveEvent } from "../../shared/contract.ts";
 import {
   BoardVisibilityRequestSchema,
   CaseIdSchema,
@@ -23,7 +24,13 @@ import { json, noContent, parseBody, publicJson, sessionCookie, sessionToken, wi
  * these bounds only apply to changes nobody purges (answers moving the leaderboard, a case being published).
  */
 export const PUBLIC_CACHE = {
+  /** while an event runs, or starts or ends within `eventQuiet`'s reach */
   event: { maxAgeSeconds: 10, staleSeconds: 20 },
+  /**
+   * no event near (#242): every admin event write purges the `event` tag, so a long window costs nothing in
+   * freshness, and an idle site's open tabs then cost one call per 5 minutes instead of one per 10 s
+   */
+  eventQuiet: { maxAgeSeconds: 300, staleSeconds: 600 },
   leaderboard: { maxAgeSeconds: 10, staleSeconds: 20 },
   /** a class board (#181): like the leaderboard; class edits purge its `class:<id>` tag, solves don't */
   classBoard: { maxAgeSeconds: 10, staleSeconds: 20 },
@@ -31,6 +38,24 @@ export const PUBLIC_CACHE = {
 } as const;
 
 const EmptyBodySchema = z.object({}).strict();
+
+/**
+ * The CDN window for GET /api/event at `nowMs`: the quiet one when no start or end of the event falls inside it
+ * (so a copy served from it, stale part included, never spans the moment the event goes live or ends), the
+ * short one otherwise. The body only changes on an admin write, which purges; the short window near an event is
+ * a safety net for a failed purge when it matters most.
+ */
+export const eventCacheWindow = (event: LiveEvent, nowMs: number): { maxAgeSeconds: number; staleSeconds: number } => {
+  const quiet = PUBLIC_CACHE.eventQuiet;
+  const reach = nowMs + (quiet.maxAgeSeconds + quiet.staleSeconds) * 1000;
+  const start = event.startsAt === null ? null : Date.parse(event.startsAt);
+  const end = event.endsAt === null ? null : Date.parse(event.endsAt);
+  const over = end !== null && end <= nowMs;
+  if (over) return quiet;
+  const running = (start === null || start <= nowMs) && (start !== null || end !== null);
+  const boundaryNear = [start, end].some((t) => t !== null && t > nowMs && t <= reach);
+  return running || boundaryNear ? PUBLIC_CACHE.event : quiet;
+};
 
 /** Accounts, sessions and the public read-only endpoints (today, event, leaderboard). */
 export class AuthController {
@@ -52,8 +77,9 @@ export class AuthController {
 
   async register(req: Request, ip: string): Promise<Response> {
     const body = await parseBody(req, RegisterRequestSchema);
-    const { account, session, recoveryCode } = await this.auth.register({ ...body, ip });
-    return withCookie(json(201, { account, ...(recoveryCode === null ? {} : { recoveryCode }) }), sessionCookie(req, session));
+    const { account, session, recoveryCode, joinedClass } = await this.auth.register({ ...body, ip });
+    const body201 = { account, ...(recoveryCode === null ? {} : { recoveryCode }), ...(joinedClass === null ? {} : { class: joinedClass }) };
+    return withCookie(json(201, body201), sessionCookie(req, session));
   }
 
   async login(req: Request, ip: string): Promise<Response> {
@@ -132,7 +158,8 @@ export class AuthController {
   }
 
   async event(): Promise<Response> {
-    return publicJson(await this.events.get(), { ...PUBLIC_CACHE.event, tags: ["event"] });
+    const body = await this.events.get();
+    return publicJson(body, { ...eventCacheWindow(body.event, Date.parse(body.serverTime)), tags: ["event"] });
   }
 
   async leaderboard(req: Request): Promise<Response> {

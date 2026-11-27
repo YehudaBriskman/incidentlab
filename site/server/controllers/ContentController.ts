@@ -1,7 +1,9 @@
 // Public, cacheable case content from the DB: GET /api/cases and GET /api/cases/:id/content.
-// These are the only /api routes that may be cached: they are the same for every visitor and carry no
-// account data. Every other route keeps `cache-control: no-store` (http.ts). Netlify does not apply
-// netlify.toml [[headers]] to function responses, so the header set here is what the CDN and browser see.
+// They are the same for every visitor and carry no account data, so Netlify's CDN keeps them durably (#243):
+// 1 h plus a day of stale-while-revalidate, tagged `catalog` and `case:<id>`. A change to a case's live version
+// (publish, rollback, approve, delete, restore) purges both tags at once (CaseAuthoringService, TrashService),
+// so the long window never delays a fix. Netlify does not apply netlify.toml [[headers]] to function responses,
+// so the headers set here are what the CDN and browser see.
 //
 // Private cases (#184) never reach a cacheable response: the catalog lists public cases only, and a private
 // case's content is answered no-store, only to its author, the site admin and members of an assigned class
@@ -12,10 +14,12 @@ import { AppError } from "../domain/types.ts";
 import { sha256Hex } from "../repositories/case-repository.ts";
 import type { CaseAccessService } from "../services/CaseAccessService.ts";
 import type { CaseService } from "../services/CaseService.ts";
+import { caseContentTag, type CacheTag } from "../services/CachePurger.ts";
 import { evidenceLocation } from "../services/evidenceStream.ts";
-import { json, sessionToken } from "./http.ts";
+import { json, publicCacheHeaders, sessionToken } from "./http.ts";
 
-export const PUBLIC_CONTENT_CACHE = "public, max-age=60, stale-while-revalidate=600";
+/** CDN window of the content routes (seconds): long, because every change to what they serve purges them. */
+export const PUBLIC_CONTENT_CACHE = { maxAgeSeconds: 3600, staleSeconds: 86_400 } as const;
 
 const matchesEtag = (req: Request, etag: string): boolean => {
   const header = req.headers.get("if-none-match");
@@ -25,9 +29,9 @@ const matchesEtag = (req: Request, etag: string): boolean => {
   });
 };
 
-/** 304 when the client already has this representation, else 200 with the body. */
-const cacheable = (req: Request, etag: string, body: unknown): Response => {
-  const headers = { etag, "cache-control": PUBLIC_CONTENT_CACHE };
+/** 304 when the client already has this representation, else 200 with the body. Both carry the cache headers. */
+const cacheable = (req: Request, etag: string, tag: CacheTag, body: unknown): Response => {
+  const headers = { etag, ...publicCacheHeaders({ ...PUBLIC_CONTENT_CACHE, tags: [tag] }) };
   if (matchesEtag(req, etag)) return new Response(null, { status: 304, headers });
   return json(200, body, headers);
 };
@@ -45,7 +49,7 @@ export class ContentController {
   async catalog(req: Request): Promise<Response> {
     const body = { cases: await this.cases.listPublished() };
     const etag = `"${(await sha256Hex(new TextEncoder().encode(JSON.stringify(body)))).slice(0, 32)}"`;
-    return cacheable(req, etag, body);
+    return cacheable(req, etag, "catalog", body);
   }
 
   /** GET /api/me/cases -> {cases: CatalogEntry[]}: the private cases this session may play (no-store). */
@@ -73,7 +77,7 @@ export class ContentController {
       });
     }
     const etag = `"${published.meta.contentSha}-v${published.version}-${published.lang}"`;
-    return cacheable(req, etag, {
+    return cacheable(req, etag, caseContentTag(caseId), {
       id: caseId, version: published.version, lang: published.lang, content: published.content,
       evidence: evidenceLocation(caseId, published.version),
     });

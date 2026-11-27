@@ -196,8 +196,8 @@ export const UserStatsSchema = z.object({
   classLimit: z.number().int().min(0).nullable().default(null),
   commandsRevealed: z.number().int().min(0),
   achievements: z.array(z.object({ id: z.string(), earnedAt: z.string() })),
-  /** consecutive incident-of-the-day dates completed on that date */
-  streak: z.object({ current: z.number().int().min(0), best: z.number().int().min(0) }),
+  /** `activeToday`: a stage was solved today (schedule time zone), so the streak is safe (#212); older servers omit it */
+  streak: z.object({ current: z.number().int().min(0), best: z.number().int().min(0), activeToday: z.boolean().default(false) }),
   cases: z.array(CaseStatsSchema),
 });
 export type UserStats = z.infer<typeof UserStatsSchema>;
@@ -337,9 +337,13 @@ export const ErrorBodySchema = z.object({
   details: z.array(z.string()).optional(),
 });
 
-// POST /api/auth/register  -> 201 {account, recoveryCode} + cookie (approved at once since #173; the plain recovery
+// POST /api/auth/register  -> 201 {account, recoveryCode, class?} + cookie (approved at once since #173; the plain recovery
 //                             code is in this response only). 409 code "reserved" / "username-taken". 400 (no code
 //                             the UI acts on) when the bot checks fail: `website` filled, or `elapsedMs` under 2 s.
+//                             `inviteCode` (optional, #204) is a class join code: the new account joins that class
+//                             (or asks to, in approval mode) and `class` is its summary. 400 "bad-class-code" when no
+//                             class has it (and it isn't the legacy site invite code), 409 "class-full"; either way
+//                             no account is created.
 // POST /api/auth/login     -> 200 {account, recoveryCode?} + cookie (403 code "rejected" for rejected accounts).
 //                             `recoveryCode` only when this sign-in issued the account's first code (#174).
 //                             username "admin" + the ADMIN_KEY -> an admin session (account.role "admin", 12 h).
@@ -651,6 +655,8 @@ export type AdminClass = z.infer<typeof AdminClassSchema>;
 export const ClassesResponseSchema = z.object({ classes: z.array(ClassSummarySchema) });
 export const ClassResponseSchema = z.object({ class: ClassDetailSchema });
 export const ClassJoinResponseSchema = z.object({ class: ClassSummarySchema });
+/** POST /api/auth/register: the sign-in answer, plus the class a class code joined (#204). */
+export const RegisterResponseSchema = AuthResponseSchema.extend({ class: ClassSummarySchema.optional() });
 export const ClassMembersResponseSchema = z.object({ members: z.array(ClassMemberSchema) });
 export const ClassMemberResponseSchema = z.object({ member: ClassMemberSchema });
 export const AdminClassesResponseSchema = z.object({ classes: z.array(AdminClassSchema) });

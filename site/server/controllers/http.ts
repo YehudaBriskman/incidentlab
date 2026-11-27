@@ -20,13 +20,19 @@ export type PublicCache = { readonly maxAgeSeconds: number; readonly staleSecond
  * don't read or set the session: browsers always revalidate (max-age=0), the CDN keys on the URL and its query
  * string only (never the cookie), and admin writes purge by tag (services/CachePurger.ts).
  */
-export const publicJson = (body: unknown, cache: PublicCache): Response =>
-  json(200, body, {
-    "cache-control": "public, max-age=0, must-revalidate",
-    "netlify-cdn-cache-control": `public, durable, max-age=${cache.maxAgeSeconds}, stale-while-revalidate=${cache.staleSeconds}`,
-    "netlify-cache-tag": cache.tags.join(","),
-    "netlify-vary": "query",
-  });
+export const publicJson = (body: unknown, cache: PublicCache): Response => json(200, body, publicCacheHeaders(cache));
+
+/**
+ * The headers behind `publicJson`, for public routes that build their own response (the content routes answer
+ * `If-None-Match` with a 304 that must carry the same cache headers). The durable directive keeps one copy for
+ * every edge node, so a miss on one node is served from the shared cache instead of the function.
+ */
+export const publicCacheHeaders = (cache: PublicCache): Record<string, string> => ({
+  "cache-control": "public, max-age=0, must-revalidate",
+  "netlify-cdn-cache-control": `public, durable, max-age=${cache.maxAgeSeconds}, stale-while-revalidate=${cache.staleSeconds}`,
+  "netlify-cache-tag": cache.tags.join(","),
+  "netlify-vary": "query",
+});
 
 export const errorResponse = (
   status: number,

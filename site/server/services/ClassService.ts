@@ -274,6 +274,24 @@ export class ClassService {
     return toClassSummary(record, member);
   }
 
+  /**
+   * Sign-up with a class code (#204), checked before the account exists so a bad code creates nothing. Returns
+   * whether a live class takes this code; a full class is refused here (409 "class-full"). It counts nothing:
+   * the caller calls `countWrongSignupCode` once it knows no other code matched either.
+   */
+  async checkSignupCode(code: string, ip: string): Promise<boolean> {
+    await this.limiter.assertAllowed(CLASS_JOIN_IP_LIMIT, ip);
+    const found = await this.findByCode(code);
+    if (!found) return false;
+    if ((await this.classes.countMembers(found.data.id)) >= found.data.memberLimit) throw this.fullError();
+    return true;
+  }
+
+  /** A sign-up code that opened nothing counts against the address like a wrong join. */
+  async countWrongSignupCode(ip: string): Promise<void> {
+    await this.limiter.hit(CLASS_JOIN_IP_LIMIT, ip);
+  }
+
   async leave(actor: ClassActor, classId: string): Promise<void> {
     const access = await this.access(actor, classId);
     if (actor.kind === "site-admin" || access.member === null) throw new AppError(403, "the admin isn't a member of any class", { code: "admin" });
