@@ -40,6 +40,10 @@ plan allows 125,000 function calls a month.
 - **Event poll:** the client (`src/lib/event.ts`) polls `/api/event` every 30 s while an event is running or
   starts within an hour, every 2 minutes otherwise. It doesn't poll at all while the tab is hidden, and polls
   once when the tab comes back.
+- **Board poll (#242):** the leaderboard and class board views (`src/lib/boardPoll.ts`) poll every 10 s while
+  the event they follow is live, every 60 s otherwise (and at the moment an upcoming event starts), never in a
+  hidden tab, and not after 15 minutes without pointer or key input until the viewer presses Resume. A projector
+  during a live event keeps polling. An answer that shows the same standings is not redrawn.
 - Errors are non-2xx with body `{ "error": string, "code"?: string, "retryAfterSeconds"?: number, "details"?: string[] }` (`details` lists every failed check of a rejected upload). Status codes: 400 validation, 401 signed out, 403 forbidden (see codes), 404, 405, 409 conflict (username taken, already finished, no more hints, concurrent update: retry), 413, 415, 429 rate limit (also sends `Retry-After`), 500 `{"error":"internal"}`, 503 admin disabled.
 - Error codes the UI acts on (also, for private cases and review, #184: `not-admin`, `not-published`, `already-public`, `not-submitted`): `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`, and for classes (#179) `guest`, `not-class-admin`, `not-class-owner`, `class-limit`, `class-full`, `class-archived`, `owner-locked`, `pending-member`.
 
