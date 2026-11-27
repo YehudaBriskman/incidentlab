@@ -301,9 +301,12 @@ export async function fetchCaseStats(): Promise<AdminStatsResult> {
   return parseJson(await adminFetch(path), AdminStatsResponseSchema, path);
 }
 
-export async function fetchAudit(limit = 100): Promise<AuditEntry[]> {
+export type AdminAuditResult = { entries: AuditEntry[]; names: Readonly<Record<string, string>> };
+
+/** The newest audit entries, with the usernames and class names behind their actor and target ids (#185). */
+export async function fetchAudit(limit = 100): Promise<AdminAuditResult> {
   const path = `/api/admin/audit?limit=${limit}`;
-  return (await parseJson(await adminFetch(path), AuditResponseSchema, "/api/admin/audit")).entries;
+  return parseJson(await adminFetch(path), AuditResponseSchema, "/api/admin/audit");
 }
 
 /** Downloads the results CSV with the same auth as every other admin call. */

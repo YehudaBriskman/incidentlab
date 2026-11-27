@@ -514,6 +514,9 @@ export const T = defineStrings({
     admColAction: "Action",
     admColTarget: "Target / detail",
     admColVia: "Via",
+    admColActor: "By",
+    admActorOwner: "Site owner",
+    admActorGone: "Deleted account",
     admAuditAction: (a: string) =>
       ({
         "account.approve": "Approved account",
@@ -527,7 +530,7 @@ export const T = defineStrings({
         "settings.save": "Saved invite code",
         "event.save": "Saved event",
       } as Record<string, string>)[a] ?? a,
-    admVia: (v: string) => (v === "key" ? "admin key" : "admin sign-in"),
+    admVia: (v: string, owner = true) => (v === "key" ? "admin key" : owner ? "admin sign-in" : "sign-in"),
     admUnknownAccount: "removed account",
     admAllCases: "all cases",
     admBdBase: "base",
@@ -1211,6 +1214,9 @@ export const T = defineStrings({
     admColAction: "פעולה",
     admColTarget: "יעד / פרטים",
     admColVia: "דרך",
+    admColActor: "על ידי",
+    admActorOwner: "בעל האתר",
+    admActorGone: "חשבון שנמחק",
     admAuditAction: (a: string) =>
       ({
         "account.approve": "אישור חשבון",
@@ -1224,7 +1230,7 @@ export const T = defineStrings({
         "settings.save": "שמירת קוד ההזמנה",
         "event.save": "שמירת האירוע",
       } as Record<string, string>)[a] ?? a,
-    admVia: (v: string) => (v === "key" ? "מפתח ניהול" : "כניסת מנהל"),
+    admVia: (v: string, owner = true) => (v === "key" ? "מפתח ניהול" : owner ? "כניסת מנהל" : "כניסה לחשבון"),
     admUnknownAccount: "חשבון שנמחק",
     admAllCases: "כל התיקים",
     admBdBase: "בסיס",

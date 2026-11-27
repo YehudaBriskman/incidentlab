@@ -288,8 +288,15 @@ export const AuditEntrySchema = z.object({
   target: z.string().nullable(),
   detail: z.string().nullable(),
   via: z.enum(["key", "session"]),
+  /**
+   * additive (#185): who did it: "admin" (the ADMIN_KEY owner, by key or session, see `via`) or the acting
+   * account's id (a class admin, an author, a player joining a class). Null on entries written before it.
+   */
+  actor: z.string().nullable().default(null),
 });
 export type AuditEntry = z.infer<typeof AuditEntrySchema>;
+/** The audit actor of the site owner (the ADMIN_KEY), by key or session. */
+export const AUDIT_ADMIN_ACTOR = "admin";
 
 // ---- trash (soft deletes) ---------------------------------------------------
 // Deleting an account or a case, or resetting progress, moves the data to the trash first. Entries can be restored
@@ -453,7 +460,8 @@ export const SetAccountRoleRequestSchema = z.object({ role: AccountRecordRoleSch
 // GET    /api/admin/event                       -> {event, serverTime}
 // PUT    /api/admin/event      LiveEvent        -> {event, serverTime}
 // GET    /api/admin/export.csv                  -> text/csv (one row per account per case)
-// GET    /api/admin/audit?limit=100             -> {entries: AuditEntry[]}  (newest first)
+// GET    /api/admin/audit?limit=100             -> {entries: AuditEntry[], names}  (newest first; names: actor and
+//                                                  target ids -> username or class name)
 // Admin auth: header X-Admin-Key, OR the session cookie of `admin` signed in with the ADMIN_KEY.
 export const AdminAccountsResponseSchema = z.object({ generatedAt: z.string(), accounts: z.array(UserStatsSchema) });
 export const AdminProgressResponseSchema = z.object({ generatedAt: z.string(), caseId: z.string(), players: z.array(AdminProgressSchema) });
@@ -463,7 +471,11 @@ export const AdminStatsResponseSchema = z.object({ generatedAt: z.string(), case
 export const ResetPasswordResponseSchema = z.object({ temporaryPassword: z.string() });
 export const ApproveAllResponseSchema = z.object({ approved: z.number().int().min(0) });
 export const SettingsResponseSchema = z.object({ settings: SettingsSchema });
-export const AuditResponseSchema = z.object({ entries: z.array(AuditEntrySchema) });
+export const AuditResponseSchema = z.object({
+  entries: z.array(AuditEntrySchema),
+  /** additive (#185): display names for the account and class ids among the entries' actors and targets */
+  names: z.record(z.string(), z.string()).default({}),
+});
 
 // ---- classes (#179) ---------------------------------------------------------
 // Any approved full account may own up to CLASS_DEFAULTS.OWNED_LIMIT classes (account.classLimit overrides it) of

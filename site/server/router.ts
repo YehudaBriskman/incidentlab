@@ -89,7 +89,7 @@ export const createApp = (deps: AppDeps): App => {
   const trashRepo = new TrashRepository(deps.store);
   const trash = new TrashService({ trash: trashRepo, repos, cases: caseRepo, scores, board, now });
   const accounts = new AccountAdminService({ repos, firstBlood, game, stats, trash, trashRepo, scores, now });
-  const audit = new AuditService({ repository: new AuditRepository(deps.store), now });
+  const audit = new AuditService({ repository: new AuditRepository(deps.store), repos, now });
 
   // Static (test-fixture) cases: only the admin may upload their ids, and their answer key is the drift
   // baseline until a DB version of the case is published. Empty in production: ownership of the DB meta

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AccountClassLimitRequestSchema, AdminResetRequestSchema, CaseIdSchema, EventSchema, ScheduleSchema, SetAccountRoleRequestSchema, SettingsSchema } from "../../shared/contract.ts";
+import { AUDIT_ADMIN_ACTOR, AccountClassLimitRequestSchema, AdminResetRequestSchema, CaseIdSchema, EventSchema, ScheduleSchema, SetAccountRoleRequestSchema, SettingsSchema } from "../../shared/contract.ts";
 import type { AuditEntry } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
 import type { AccountAdminService } from "../services/AccountAdminService.ts";
@@ -43,7 +43,7 @@ export class AdminController {
     const via = await this.assertAdmin(req);
     const result = await run();
     this.accountsCache = null;
-    await this.deps.audit.record({ ...audit, via });
+    await this.deps.audit.record({ ...audit, via, actor: AUDIT_ADMIN_ACTOR });
     return result;
   }
 
@@ -197,6 +197,6 @@ export class AdminController {
   async auditLog(req: Request): Promise<Response> {
     await this.assertAdmin(req);
     const limit = Number(new URL(req.url).searchParams.get("limit") ?? "100");
-    return json(200, { entries: await this.deps.audit.latest(Number.isFinite(limit) ? limit : 100) });
+    return json(200, await this.deps.audit.page(Number.isFinite(limit) ? limit : 100));
   }
 }

@@ -147,7 +147,7 @@ test("live and audit: Export CSV downloads the rows on screen", async ({ page, p
   await expect(page.locator("table.audit-table")).toBeVisible();
   const [audit] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: /^export csv$/i }).click()]);
   const auditCsv = await readFile(await audit.path(), "utf8");
-  expect(auditCsv.replace(/^﻿/, "").split(/\r\n/)[0]).toBe("Time,Action,Target / detail,Via");
+  expect(auditCsv.replace(/^﻿/, "").split(/\r\n/)[0]).toBe("Time,Action,By,Target / detail,Via");
 });
 
 test("row menu: author role, password reset guard, delete with undo", async ({ page, request }) => {

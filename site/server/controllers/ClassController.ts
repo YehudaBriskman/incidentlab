@@ -2,6 +2,7 @@
 // which is public and CDN-cached behind its capability token. Every write is audited.
 import { z } from "zod";
 import {
+  AUDIT_ADMIN_ACTOR,
   CaseIdSchema,
   ClassLimitsRequestSchema,
   CreateClassRequestSchema,
@@ -58,7 +59,7 @@ export class ClassController {
 
   private async record(actor: ClassActor, audit: { action: string; target: string | null; detail?: string }): Promise<void> {
     const by = actor.kind === "site-admin" ? "by admin" : `by ${actor.account.username}`;
-    await this.audit.record({ action: audit.action, target: audit.target, detail: audit.detail === undefined ? by : `${audit.detail} ${by}`, via: actor.kind === "site-admin" ? actor.via : "session" });
+    await this.audit.record({ action: audit.action, target: audit.target, detail: audit.detail === undefined ? by : `${audit.detail} ${by}`, via: actor.kind === "site-admin" ? actor.via : "session", actor: actor.kind === "site-admin" ? AUDIT_ADMIN_ACTOR : actor.account.id });
   }
 
   /** Runs a write and audits it once it succeeded. */

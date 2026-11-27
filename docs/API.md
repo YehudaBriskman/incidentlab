@@ -264,7 +264,7 @@ may reclaim unreferenced ones). CLI: `scripts/data.ts upload` (see `docs/CASE_CO
 | GET/PUT | `/api/admin/settings` | `{inviteCode}` | `{settings}` |
 | GET/PUT | `/api/admin/event` | `LiveEvent` | `{event, serverTime}`: the site announcement and the global event clock; `freezeAt` freezes the global leaderboard. `enforceWindow` is deprecated: stored, never enforced (#180). |
 | GET | `/api/admin/export.csv` | | CSV, one row per account per opened case |
-| GET | `/api/admin/audit?limit=` | | `{entries}` newest first (every admin mutation is recorded) |
+| GET | `/api/admin/audit?limit=` | | `{entries, names}` newest first (every admin, class and author write is recorded). Each entry has `actor` (#185): `"admin"` for the site owner (by key or session, see `via`), or the acting account's id; null on entries written before it. `names` maps the actor and target ids it mentions to usernames and class names (one read per distinct id). |
 | GET | `/api/admin/trash` | | `{entries}` soft-deleted accounts, cases and progress resets, newest first (expire after 7 days) |
 | POST | `/api/admin/trash/:id/restore` | `{}` | `{restored, skipped}` (never overwrites newer data; 409 `conflict` if the account or username exists again, or the case is no longer deleted) |
 | GET | `/api/admin/reviews` | | `{reviews: ReviewItem[]}` (#184): cases waiting for the owner's review, oldest submission first: `caseId`, `title`, `createdBy`, `author` (username), `version` (the one to approve), `publishedVersion`, `visibility`, `langs`, `submittedAt`, `answerKeyChanged`. No answers. Authors get 403 `not-admin`. UI: `#/author/reviews`. |

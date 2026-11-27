@@ -9,6 +9,7 @@ import "../admin.css";
 import { T } from "../i18n/strings-tools";
 import { getLang } from "../i18n/i18n";
 import {
+  AUDIT_ADMIN_ACTOR,
   TRASH_RETENTION_DAYS,
   type AuditEntry,
   type LiveEvent,
@@ -59,6 +60,7 @@ import {
   setAccountsStatus,
   setAdminKey,
   type AdminAccountsResult,
+  type AdminAuditResult,
   type AdminProgressResult,
   type AdminStatsResult,
 } from "../lib/admin-api";
@@ -258,7 +260,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       /** bumped by every save: a poll that started earlier must not overwrite the saved value */
       rev: 0,
     },
-    audit: null as AuditEntry[] | null,
+    audit: null as AdminAuditResult | null,
   };
 
   // The services every manage panel gets (views/manage/host.ts): the root, the poll, errors, confirms and menus.
@@ -1179,8 +1181,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         csv: (e) => e.at,
       },
       { id: "action", header: T().admColAction, cell: (e) => h("span", { title: e.action }, T().admAuditAction(e.action)), sortValue: (e) => T().admAuditAction(e.action), csv: (e) => e.action },
+      { id: "actor", header: T().admColActor, className: "audit-actor", cell: (e) => auditActor(e, auditNames), sortValue: (e) => auditActorText(e), csv: (e) => (e.actor === null ? "" : `${auditActorText(e)} (${e.actor})`) },
       { id: "target", header: T().admColTarget, className: "audit-target", cell: (e) => auditTarget(e, auditNames), csv: auditDetailText },
-      { id: "via", header: T().admColVia, cell: (e) => h("span", { class: `via-pill is-${e.via}` }, T().admVia(e.via)), sortValue: (e) => e.via, csv: (e) => e.via },
+      { id: "via", header: T().admColVia, cell: (e) => h("span", { class: `via-pill is-${e.via}` }, T().admVia(e.via, e.actor === null || e.actor === AUDIT_ADMIN_ACTOR)), sortValue: (e) => e.via, csv: (e) => e.via },
     ],
     rows: [],
     className: "admin-table audit-table",
@@ -1219,6 +1222,25 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     auditSig = "";
   }
 
+  /** Who did it, as text: the site owner, the account's username, or "deleted account" (search, sort, CSV). */
+  function auditActorText(e: AuditEntry): string {
+    if (e.actor === null) return "";
+    if (e.actor === AUDIT_ADMIN_ACTOR) return T().admActorOwner;
+    return auditNames.get(e.actor) ?? T().admActorGone;
+  }
+
+  /** The actor cell (#185): the owner pill, or the account's name with its id (the id survives a delete). */
+  function auditActor(e: AuditEntry, names: ReadonlyMap<string, string>): Child[] {
+    if (e.actor === null) return ["—"];
+    if (e.actor === AUDIT_ADMIN_ACTOR) return [h("span", { class: "via-pill is-owner" }, T().admActorOwner)];
+    const name = names.get(e.actor);
+    return [
+      name !== undefined ? h("span", { class: "player-name", dir: "auto" }, name) : h("span", { class: "muted" }, T().admActorGone),
+      " ",
+      h("code", { class: "muted small audit-actor-id", dir: "ltr" }, e.actor),
+    ];
+  }
+
   function auditTarget(e: AuditEntry, names: ReadonlyMap<string, string>): Child[] {
     const out: Child[] = [];
     if (e.target !== null) {
@@ -1242,8 +1264,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   }
 
   function renderAudit(): void {
-    const entries = state.audit;
-    const names = new Map((state.accounts?.accounts ?? []).map((a) => [a.accountId, a.username] as const));
+    const entries = state.audit?.entries ?? null;
+    const names = new Map(Object.entries(state.audit?.names ?? {}));
     const sig = JSON.stringify([getLang(), entries, [...names]]);
     if (sig === auditSig) return;
     auditSig = sig;
@@ -1261,7 +1283,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     const shown = entries.filter(
       (e) =>
         (auditKind === "all" || auditKindOf(e.action) === auditKind) &&
-        (q === "" || `${T().admAuditAction(e.action)} ${e.action} ${auditDetailText(e)}`.toLowerCase().includes(q)),
+        (q === "" || `${T().admAuditAction(e.action)} ${e.action} ${auditActorText(e)} ${e.actor ?? ""} ${auditDetailText(e)}`.toLowerCase().includes(q)),
     );
     auditCountEl.textContent = `(${shown.length === entries.length ? fmtInt(entries.length) : T().admAuditShown(fmtInt(shown.length), fmtInt(entries.length))})`;
     if (shown.length === 0) {

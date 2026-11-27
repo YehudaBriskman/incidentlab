@@ -188,6 +188,12 @@ Migration 003 backfills `score:` for every account. Accounts that have no summar
   accounts from before it (migration 003 approves them); `rejected` blocks sign-in and recovery.
 - A recovery bumps `sessionEpoch` (every session ends), clears `mustChangePassword` and replaces the code.
 
+### Audit (`audit:<isoTimestamp>:<random>`)
+
+`AuditEntrySchema` in `site/shared/contract.ts`: `{at, action, target, detail, via}` plus `actor` (#185, additive,
+default null): `"admin"` for the site owner (key or session) or the acting account's id. Entries written before
+#185 parse with `actor: null`. The weekly hygiene job deletes entries older than 90 days.
+
 ### Classes (`class:`, `classcode:`, `classmember:`, `memberof:`, since #179)
 
 Schemas in `site/server/domain/classes.ts`, storage in `site/server/repositories/class-repository.ts`. All four

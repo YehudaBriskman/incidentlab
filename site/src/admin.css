@@ -532,6 +532,10 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 .audit-target { overflow-wrap: anywhere; }
 .via-pill { font-weight: 400; --pill-bg: transparent; }
 .via-pill.is-session { --pill-fg: var(--info-fg); --pill-line: var(--info-fg); }
+.via-pill.is-owner { font-weight: 600; }
+/* The actor's account id stays readable after the account is deleted; it wraps rather than widening the row. */
+.audit-actor { overflow-wrap: anywhere; }
+.audit-actor-id { font-size: var(--step--1); }
 
 /* ---- responsive ---- */
 @media (max-width: 900px) {
