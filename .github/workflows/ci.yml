@@ -40,10 +40,15 @@ jobs:
           cache: npm
           cache-dependency-path: site/package-lock.json
 
+      # Both usually ship with the runner image, so apt only runs when one is missing. A failing third-party
+      # repo in the image (the Microsoft one has answered 403) must not fail the build: update tolerates errors,
+      # and the install itself still has to succeed.
       - name: Install system tools (zip, GNU awk for the POSIX-awk check)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends zip gawk
+          if ! command -v zip > /dev/null || ! command -v gawk > /dev/null; then
+            sudo apt-get update || echo "apt-get update had errors; installing from what was fetched"
+            sudo apt-get install -y --no-install-recommends zip gawk
+          fi
 
       - name: Configure git identity for the generated case repos
         run: |
@@ -86,7 +91,7 @@ jobs:
       # zip ships with the runner image; apt only runs if it ever goes missing (gawk is for the build lane's checks).
       - name: System tools and git identity
         run: |
-          command -v zip > /dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends zip; }
+          command -v zip > /dev/null || { sudo apt-get update || true; sudo apt-get install -y --no-install-recommends zip; }
           git config --global user.name "IncidentLab CI"
           git config --global user.email "ci@incidentlab.invalid"
           git config --global init.defaultBranch main
