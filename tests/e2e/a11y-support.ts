@@ -14,7 +14,7 @@ export type Who = "visitor" | "guest" | "player" | "admin";
 // The class pages (#182): `:class` and `:board` become the id and board token of a class the signed-in player (or
 // the site admin) creates before the scan.
 export const PAGES: Record<Who, readonly string[]> = {
-  visitor: ["/#/", "/#/login", "/#/signup", "/#/leaderboard", `/#/case/${CASE}`, `/#/case/${CASE}/explorer`, "/#/classes", "/#/join/ABCDE-FGHJK"],
+  visitor: ["/#/", "/#/cases", "/#/login", "/#/signup", "/#/leaderboard", `/#/case/${CASE}`, `/#/case/${CASE}/explorer`, "/#/classes", "/#/join/ABCDE-FGHJK"],
   // a guest (#176) sees the guest banner on every page, and the account menu says "Guest"
   guest: ["/#/", `/#/case/${CASE}`, `/#/case/${CASE}/toolbox`, "/#/me", "/#/classes"],
   player: [
@@ -34,7 +34,7 @@ export const PAGES: Record<Who, readonly string[]> = {
   admin: [
     "/#/admin",
     "/#/author",
-    "/#/author/reviews",
+    "/#/admin/reviews",
     "/#/admin?tab=classes",
     "/#/admin?tab=live",
     "/#/admin?tab=stats",
@@ -76,9 +76,13 @@ export async function signIn(page: Page, who: Who): Promise<void> {
   expect((await page.request.post("/api/auth/login", { data: { username, password } })).ok()).toBe(true);
 }
 
+/** Switches to Hebrew through the account menu (#220: the language radios live there), then closes it. */
 export async function toHebrew(page: Page): Promise<void> {
-  const he = page.locator("button.lang-btn[lang=he]:visible").first();
-  if ((await he.count()) > 0 && (await he.getAttribute("aria-pressed")) !== "true") await he.click();
+  if ((await page.locator("html").getAttribute("lang")) !== "he") {
+    await page.locator(".account-btn").click();
+    await page.locator(".account-panel").getByRole("radio", { name: "עברית" }).check();
+    await page.keyboard.press("Escape");
+  }
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
 }
 

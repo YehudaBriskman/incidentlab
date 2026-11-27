@@ -33,9 +33,9 @@ for (const lang of ["en", "he"]) {
   });
 }
 
-test("the site lists exactly the API catalog, and an id outside it is a 404", async ({ page, request }) => {
+test("the catalog (#/cases) lists exactly the API catalog, and an id outside it is a 404", async ({ page, request }) => {
   const ids = ((await (await request.get("/api/cases")).json()) as { cases: Array<{ en: { id: string } }> }).cases.map((c) => c.en.id);
-  await page.goto("/#/");
+  await page.goto("/#/cases"); // home lists only the recommended few since #221; the catalog lists them all
   for (const id of ids) await expect(page.locator(`a[href="#/case/${id}"]`).first()).toBeVisible();
   await page.goto("about:blank");
   await page.goto("/#/case/no-such-case");

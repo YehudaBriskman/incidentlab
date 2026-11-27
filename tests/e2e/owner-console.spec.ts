@@ -111,7 +111,7 @@ test("owner console: search, ban and unban, class limit, classes and member limi
 
   await test.step("the Reviews link carries the number waiting", async () => {
     const reviews = ui.nav(page).getByRole("link", { name: /^Reviews/ });
-    await expect(reviews).toHaveAttribute("href", "#/author/reviews");
+    await expect(reviews).toHaveAttribute("href", "#/admin/reviews");
     const badge = reviews.locator(".nav-sub-badge");
     await expect(badge).toBeVisible();
     expect(Number(await badge.textContent())).toBeGreaterThanOrEqual(1);

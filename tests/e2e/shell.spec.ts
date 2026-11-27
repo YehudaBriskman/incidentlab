@@ -1,13 +1,13 @@
-// App shell (#59, frame #97): nav aria-current, language toggle, the ⚙ display settings (persistence and
-// keyboard) and reflow at phone width in Hebrew.
+// App shell (#59, frame #97): nav aria-current, the language and display settings (persistence; since #220 they
+// live in the account menu and on #/settings/display) and reflow at phone width in Hebrew. The account menu's own
+// keyboard, sheet and persona behaviour is in account-menu.spec.ts.
 import { expect, test, type Page } from "@playwright/test";
+import { accountButton, accountPanel, switchLanguage } from "./support";
 
 const ui = {
   nav: (p: Page) => p.getByRole("navigation", { name: /^(main|ראשי)$/i }),
-  settingsButton: (p: Page) => p.locator(".settings-btn"),
-  settingsPanel: (p: Page) => p.locator("#settings-panel"),
-  radio: (p: Page, name: string, value: string) => p.locator(`#settings-panel input[name="set-${name}"][value="${value}"]`),
-  langButton: (p: Page, label: "EN" | "עב") => p.getByRole("group", { name: /^(language|שפה)$/i }).getByRole("button", { name: label }),
+  menuRadio: (p: Page, name: string, value: string) => accountPanel(p).locator(`input[name="menu-set-${name}"][value="${value}"]`),
+  pageRadio: (p: Page, name: string, value: string) => p.locator(`.settings-section input[name="page-set-${name}"][value="${value}"]`),
 };
 
 test.beforeEach(async ({ page }) => {
@@ -20,12 +20,14 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("theme, text size and contrast survive a reload", async ({ page }) => {
-  await ui.settingsButton(page).click();
-  await expect(ui.settingsPanel(page)).toBeVisible();
-  await ui.radio(page, "theme", "dark").check();
-  await ui.radio(page, "text-scale", "125").check();
-  await ui.radio(page, "contrast", "on").check();
-  await ui.radio(page, "spacing", "wide").check();
+  await accountButton(page).click();
+  await expect(accountPanel(page)).toBeVisible();
+  await ui.menuRadio(page, "theme", "dark").check();
+  await page.keyboard.press("Escape");
+  await page.goto("/#/settings/display");
+  await ui.pageRadio(page, "text-scale", "125").check();
+  await ui.pageRadio(page, "contrast", "on").check();
+  await ui.pageRadio(page, "spacing", "wide").check();
   const html = page.locator("html");
   await expect(html).toHaveAttribute("data-theme", "dark");
   await expect(html).toHaveAttribute("data-text-scale", "125");
@@ -40,10 +42,12 @@ test("theme, text size and contrast survive a reload", async ({ page }) => {
   const rootSize = await page.evaluate(() => getComputedStyle(document.documentElement).fontSize);
   expect(rootSize).toBe("20px");
 
-  await ui.settingsButton(page).click();
-  await expect(ui.radio(page, "theme", "dark")).toBeChecked();
-  await ui.radio(page, "theme", "system").check();
+  // One stored state: the menu shows what the page set, and a change in the menu shows on the page at once.
+  await accountButton(page).click();
+  await expect(ui.menuRadio(page, "theme", "dark")).toBeChecked();
+  await ui.menuRadio(page, "theme", "system").check();
   await expect(html).not.toHaveAttribute("data-theme", /.*/);
+  await expect(ui.pageRadio(page, "theme", "system")).toBeChecked();
 });
 
 test("a corrupt settings value falls back to defaults", async ({ page }) => {
@@ -54,37 +58,18 @@ test("a corrupt settings value falls back to defaults", async ({ page }) => {
   await expect(html).toHaveAttribute("data-text-scale", "112.5");
 });
 
-test("language toggle switches to Hebrew RTL and back", async ({ page }) => {
-  await ui.langButton(page, "עב").click();
+test("the language switch goes to Hebrew RTL and back, and survives a reload", async ({ page }) => {
+  await switchLanguage(page, "he");
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
-  await expect(page.locator("html")).toHaveAttribute("lang", "he");
   await expect(ui.nav(page).getByRole("link", { name: "תיקים" })).toBeVisible();
-  await expect(ui.langButton(page, "עב")).toHaveAttribute("aria-pressed", "true");
+  await accountButton(page).click();
+  await expect(accountPanel(page).getByRole("radio", { name: "עברית" })).toBeChecked();
+  await page.keyboard.press("Escape");
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
-  await ui.langButton(page, "EN").click();
+  await switchLanguage(page, "en");
   await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
   await expect(ui.nav(page).getByRole("link", { name: "Cases" })).toBeVisible();
-});
-
-test("settings menu works from the keyboard", async ({ page }) => {
-  const button = ui.settingsButton(page);
-  await button.focus();
-  await page.keyboard.press("Enter");
-  await expect(ui.settingsPanel(page)).toBeVisible();
-  await expect(button).toHaveAttribute("aria-expanded", "true");
-  // focus lands on the checked theme radio; arrows move within the group and apply the setting
-  await expect(ui.radio(page, "theme", "system")).toBeFocused();
-  await page.keyboard.press("ArrowRight");
-  await expect(ui.radio(page, "theme", "light")).toBeFocused();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  // Tab moves to the next group
-  await page.keyboard.press("Tab");
-  await expect(ui.radio(page, "text-scale", "100")).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(ui.settingsPanel(page)).toBeHidden();
-  await expect(button).toBeFocused();
-  await expect(button).toHaveAttribute("aria-expanded", "false");
 });
 
 test("navigation marks the current page with aria-current", async ({ page }) => {
@@ -106,7 +91,7 @@ test("no horizontal overflow at 390px in Hebrew; navigation opens from the top b
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => localStorage.setItem("il.lang", "he"));
   await page.reload();
-  for (const path of ["/#/", "/#/leaderboard", "/#/case/ghost-in-the-network"]) {
+  for (const path of ["/#/", "/#/cases", "/#/leaderboard", "/#/case/ghost-in-the-network"]) {
     await page.goto(path);
     await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
     await page.waitForLoadState("networkidle");
@@ -131,10 +116,10 @@ test("reflow: at 320px with 200% text the top bar wraps instead of scrolling sid
     await page.addInitScript((l) => localStorage.setItem("il.lang", l), lang);
     await page.goto("/#/login");
     await page.evaluate(() => (document.documentElement.style.fontSize = "200%"));
-    await expect(ui.settingsButton(page)).toBeVisible();
+    await expect(accountButton(page)).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow, `${lang}: horizontal overflow`).toBeLessThanOrEqual(0);
-    const box = await ui.settingsButton(page).boundingBox();
-    expect(box && box.x >= 0 && box.x + box.width <= 320, `${lang}: settings button on screen`).toBe(true);
+    const box = await accountButton(page).boundingBox();
+    expect(box && box.x >= 0 && box.x + box.width <= 320, `${lang}: language and display button on screen`).toBe(true);
   }
 });
