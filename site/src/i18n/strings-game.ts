@@ -82,7 +82,8 @@ export const TG = defineStrings({
     inviteLabel: "Class code (optional)",
     inviteHelp: "Joining with a class? Enter its code. Otherwise leave this empty.",
     reservedName: "That username is reserved. Pick another one.",
-    badInvite: "That class code isn't valid. Check it, or leave the field empty.",
+    badInvite: "No class has that code. Check it with your teacher, or leave the field empty.",
+    classFullSignUp: "That class is full. Ask its admin to make room, or leave the field empty.",
 
     // password
     pwTitleForced: "Set a new password",
@@ -211,7 +212,8 @@ export const TG = defineStrings({
     inviteLabel: "קוד כיתה (לא חובה)",
     inviteHelp: "מצטרפים עם כיתה? הזינו את הקוד שלה. אחרת השאירו ריק.",
     reservedName: "שם המשתמש הזה שמור. בחרו שם אחר.",
-    badInvite: "קוד הכיתה לא תקין. בדקו אותו, או השאירו את השדה ריק.",
+    badInvite: "אין כיתה עם הקוד הזה. בדקו אותו מול המורה, או השאירו את השדה ריק.",
+    classFullSignUp: "הכיתה מלאה. בקשו מהמנהל שלה לפנות מקום, או השאירו את השדה ריק.",
 
     pwTitleForced: "הגדרת סיסמה חדשה",
     pwHelpForced: "הסיסמה שלכם אופסה. הזינו את הסיסמה הזמנית שאיתה נכנסתם, ואז בחרו סיסמה משלכם.",

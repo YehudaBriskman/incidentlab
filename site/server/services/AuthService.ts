@@ -2,11 +2,12 @@
 // token in an HttpOnly cookie, and the store keeps sha256(token), never the token itself.
 // Signing in as `admin` with the ADMIN_KEY creates an admin session (no account record behind it).
 import { ADMIN_USERNAME, MIN_SIGNUP_FORM_MS, normalizeRecoveryCode, RESERVED_USERNAMES, usernameKey } from "../../shared/contract.ts";
-import type { AccountView } from "../../shared/contract.ts";
+import type { AccountView, ClassSummary } from "../../shared/contract.ts";
 import { ACCOUNT_SCHEMA_VERSION, AppError } from "../domain/types.ts";
 import type { AccountRecord, SessionRecord } from "../domain/types.ts";
 import type { SettingsRepository } from "../repositories/config-repositories.ts";
 import type { Repositories } from "../repositories/repositories.ts";
+import type { ClassService } from "./ClassService.ts";
 import {
   generateAccountId,
   generateRecoveryCode,
@@ -39,6 +40,10 @@ export type Session = { readonly token: string; readonly maxAgeSeconds: number }
 export type AuthResult = { readonly account: AccountView; readonly session: Session };
 /** Register and login: `recoveryCode` is the plain code when this call issued one (it is never stored). */
 export type SignInResult = AuthResult & { readonly recoveryCode: string | null };
+/** Register: `joinedClass` is the class the sign-up's class code joined (or asked to join), if any (#204). */
+export type RegisterResult = SignInResult & { readonly joinedClass: ClassSummary | null };
+/** What sign-up needs from classes: check a code before the account exists, then join with it. */
+export type SignupClasses = Pick<ClassService, "checkSignupCode" | "countWrongSignupCode" | "join">;
 export type CredentialsInput = { readonly username: string; readonly password: string; readonly ip: string };
 export type RegisterInput = CredentialsInput & {
   readonly inviteCode?: string | undefined;
@@ -95,8 +100,18 @@ export class AuthService {
   private readonly limiter: RateLimiter;
   private readonly adminKey: () => string | undefined;
   private readonly now: () => Date;
+  private readonly classes: SignupClasses | null;
 
-  constructor(deps: { repos: Repositories; settings: SettingsRepository; limiter: RateLimiter; adminKey: () => string | undefined; now: () => Date }) {
+  constructor(deps: {
+    repos: Repositories;
+    settings: SettingsRepository;
+    limiter: RateLimiter;
+    adminKey: () => string | undefined;
+    now: () => Date;
+    /** class codes at sign-up (#204); without it only the legacy site invite code is accepted */
+    classes?: SignupClasses | undefined;
+  }) {
+    this.classes = deps.classes ?? null;
     this.repos = deps.repos;
     this.settings = deps.settings;
     this.limiter = deps.limiter;
@@ -104,7 +119,7 @@ export class AuthService {
     this.now = deps.now;
   }
 
-  async register(input: RegisterInput): Promise<SignInResult> {
+  async register(input: RegisterInput): Promise<RegisterResult> {
     await this.limiter.assertAllowed(REGISTER_LIMIT, input.ip);
     // Bot checks (#173): a filled honeypot or a form sent faster than a person types. The answer is deliberately
     // generic, and still counts against the IP limit, so a script learns nothing and can't retry for free.
@@ -119,12 +134,17 @@ export class AuthService {
     const hashedKey = sha256Hex(key);
     if (await this.repos.usernames.lookup(hashedKey)) throw new AppError(409, "that username is taken", { code: "username-taken" });
 
-    // The class code no longer decides approval (sign-up is open); a wrong one is still refused so a typo shows.
-    const { inviteCode } = await this.settings.get();
-    const hasValidCode =
-      inviteCode !== null && input.inviteCode !== undefined && input.inviteCode.trim().length > 0 && safeEqual(input.inviteCode.trim().toLowerCase(), inviteCode.toLowerCase());
-    if (input.inviteCode !== undefined && input.inviteCode.trim().length > 0 && !hasValidCode) {
-      throw new AppError(400, "that class code isn't valid", { code: "bad-invite-code" });
+    // An optional code (#204) is a class join code; the old site-wide invite code (config:settings.inviteCode,
+    // replaced by classes) still passes while it is set. Both are checked before anything is written, so a wrong
+    // code creates no account. The code never decides site approval: sign-up is open.
+    const typedCode = input.inviteCode?.trim() ?? "";
+    const opensClass = typedCode.length > 0 && this.classes !== null && (await this.classes.checkSignupCode(typedCode, input.ip));
+    if (typedCode.length > 0 && !opensClass) {
+      const { inviteCode } = await this.settings.get();
+      if (inviteCode === null || !safeEqual(typedCode.toLowerCase(), inviteCode.toLowerCase())) {
+        await this.classes?.countWrongSignupCode(input.ip);
+        throw new AppError(400, "no class has that code", { code: "bad-class-code" });
+      }
     }
 
     const nowIso = this.now().toISOString();
@@ -155,7 +175,24 @@ export class AuthService {
       throw new AppError(409, "id collision, retry");
     }
     await this.limiter.hit(REGISTER_LIMIT, input.ip);
-    return { account: toAccountView(account), session: await this.createSession({ role: "player", account }), recoveryCode: recovery.code };
+    const session = await this.createSession({ role: "player", account });
+    const joinedClass = opensClass ? await this.joinAfterSignup(account, typedCode, input.ip) : null;
+    return { account: toAccountView(account), session, recoveryCode: recovery.code, joinedClass };
+  }
+
+  /**
+   * Joins (or asks to join, by the class's approval mode) the class the sign-up code opened. The account exists by
+   * now, so a join that fails anyway (the class filled up or was archived meanwhile) doesn't fail the sign-up: the
+   * player keeps the account and can join from the class page later.
+   */
+  private async joinAfterSignup(account: AccountRecord, code: string, ip: string): Promise<ClassSummary | null> {
+    if (this.classes === null) return null;
+    try {
+      return await this.classes.join({ kind: "player", account }, code, ip);
+    } catch (err: unknown) {
+      if (err instanceof AppError) return null;
+      throw err;
+    }
   }
 
   async login(input: CredentialsInput): Promise<SignInResult> {

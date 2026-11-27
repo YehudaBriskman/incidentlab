@@ -49,7 +49,7 @@ test("a guest plays, upgrades from the banner and keeps the progress", async ({ 
     await dialog.getByRole("button", { name: /create account/i }).click();
     // the new account's one-time recovery code (#174) is shown before the dialog closes
     await expect(dialog.getByTestId("recovery-code")).toHaveText(/^[2-9A-HJ-NP-Z]{5}(-[2-9A-HJ-NP-Z]{5}){3}$/);
-    await dialog.getByRole("button", { name: "Done", exact: true }).click();
+    await dialog.getByRole("button", { name: "I've saved it", exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(banner).toBeHidden();
     await expect(page.locator(".toast-host .toast").filter({ hasText: /account created/i })).toBeVisible();
@@ -90,4 +90,15 @@ test("a guest's sign-out warns that the progress will be lost", async ({ page })
   await expect(prompt).toContainText(/can't sign back in/i);
   await prompt.getByRole("button", { name: /cancel/i }).click();
   await expect(page.getByRole("region", { name: /guest mode/i })).toBeVisible();
+});
+
+test("a guest's #/me offers the upgrade, not password or recovery-code forms (#207)", async ({ page }) => {
+  await page.request.post("/api/guest", { data: {} });
+  await page.goto("/#/me");
+  const upgrade = page.locator(".stats-upgrade");
+  await expect(upgrade.getByRole("heading", { name: "Keep your progress" })).toBeVisible();
+  await expect(upgrade.getByRole("button", { name: /create account/i })).toBeVisible();
+  await expect(page.locator(".pw-section")).toHaveCount(0);
+  await expect(page.locator("#me-pw-current, #me-recovery-current")).toHaveCount(0);
+  await expect(page.getByText("Change password")).toHaveCount(0);
 });

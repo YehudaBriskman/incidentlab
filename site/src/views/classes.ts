@@ -319,6 +319,8 @@ function renderJoin(root: HTMLElement, code: string): void {
         },
         {
           signInTitle: TC().joinSignIn,
+          // Sign-up here carries the code (#204): the new account joins at once and lands on the class page.
+          inviteCode: code,
           onAdmin: () => setChildren(body, noteCard({ title: TC().joinPageTitle, body: h("p", {}, TC().adminJoin), actions: h("a", { class: "btn", href: "#/classes" }, TC().allClasses) })),
         },
       );

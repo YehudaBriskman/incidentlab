@@ -40,7 +40,7 @@ plan allows 125,000 function calls a month.
   starts within an hour, every 2 minutes otherwise. It doesn't poll at all while the tab is hidden, and polls
   once when the tab comes back.
 - Errors are non-2xx with body `{ "error": string, "code"?: string, "retryAfterSeconds"?: number, "details"?: string[] }` (`details` lists every failed check of a rejected upload). Status codes: 400 validation, 401 signed out, 403 forbidden (see codes), 404, 405, 409 conflict (username taken, already finished, no more hints, concurrent update: retry), 413, 415, 429 rate limit (also sends `Retry-After`), 500 `{"error":"internal"}`, 503 admin disabled.
-- Error codes the UI acts on (also, for private cases and review, #184: `not-admin`, `not-published`, `already-public`, `not-submitted`): `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`, and for classes (#179) `guest`, `not-class-admin`, `not-class-owner`, `class-limit`, `class-full`, `class-archived`, `owner-locked`, `pending-member`.
+- Error codes the UI acts on (also, for private cases and review, #184: `not-admin`, `not-published`, `already-public`, `not-submitted`): `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-class-code` (`bad-invite-code` before #204), `pending`, `rejected`, `admin`, `password-change-required`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`, and for classes (#179) `guest`, `not-class-admin`, `not-class-owner`, `class-limit`, `class-full`, `class-archived`, `owner-locked`, `pending-member`.
 
 ## Accounts and sessions
 
@@ -53,7 +53,13 @@ plan allows 125,000 function calls a month.
 - **Admin sign-in:** username `admin` with the `ADMIN_KEY` as password creates an admin session (12 h, ended
   when the key rotates). It works on every admin route instead of the `X-Admin-Key` header, and it can't
   play. Reserved usernames: `admin`, `administrator`, `root`, `instructor`, `system`.
-- **Class code:** the admin's invite code no longer decides approval (everyone is approved). A sign-up that sends a wrong code still gets 400 `bad-invite-code`. Classes replace it in Phase 2.
+- **Class code at sign-up (#204):** the optional `inviteCode` is a class join code (case, spaces and dashes are
+  ignored). It is checked before the account is written: a code no live class has gets 400 `bad-class-code` and a
+  full class 409 `class-full`, and neither creates an account. Otherwise the new account joins that class (or asks
+  to, when the class is in approval mode), the response's `class` is its summary, and the client opens the class
+  page. Wrong codes count against the class-join limit per address. Classes replaced the old site-wide invite code
+  (`config:settings.inviteCode`): the owner console no longer edits it, but while one is still stored a sign-up
+  with it passes (and joins no class). No code ever decides approval: everyone is approved.
 - **Recovery code (#174):** 4 groups of 5 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ`
   (`ABCDE-FGHJK-MNPQR-STUVW`; case, spaces and dashes are ignored when typed), stored only as a scrypt hash.
   The plain code is returned once: in the sign-up response, in the first sign-in response of an account that has
@@ -97,7 +103,7 @@ it, and no public or CDN-cached response carries stage records. Constants: `SCOR
 
 | Method | Path | Auth | Body | Response |
 |---|---|---|---|---|
-| POST | `/api/auth/register` | none | `{username, password, inviteCode?, website?, elapsedMs?}` | 201 `{account, recoveryCode}` + cookie |
+| POST | `/api/auth/register` | none | `{username, password, inviteCode?, website?, elapsedMs?}` | 201 `{account, recoveryCode, class?}` + cookie (`class` when `inviteCode` was a class code) |
 | POST | `/api/auth/login` | none | `{username, password}` | `{account, recoveryCode?}` + cookie (`recoveryCode` only when this sign-in issued the account's first one) |
 | POST | `/api/auth/recover` | none | `{username, recoveryCode, newPassword}` | `{recoveryCode}` (the new code; no cookie) |
 | POST | `/api/auth/logout` | cookie | `{}` | 204, clears the cookie |
@@ -268,7 +274,7 @@ section, a search, filter or page, an action, or Refresh).
 | POST | `/api/admin/accounts/:id/reset-password` | `{}` | `{temporaryPassword}` |
 | PUT | `/api/admin/accounts/:id/role` | admin | `{role: "player"\|"author"}` | `{account}`; audited as `account.role`. Authors may manage cases they created (the Author routes above). |
 | POST | `/api/admin/accounts/approve-all` | `{}` | `{approved}` |
-| GET/PUT | `/api/admin/settings` | `{inviteCode}` | `{settings}` |
+| GET/PUT | `/api/admin/settings` | `{inviteCode}` | `{settings}`. Legacy (#204): classes replaced the site invite code and the owner console no longer edits it; GET stays the console's sign-in check. |
 | GET/PUT | `/api/admin/event` | `LiveEvent` | `{event, serverTime}`: the site announcement and the global event clock; `freezeAt` freezes the global leaderboard. `enforceWindow` is deprecated: stored, never enforced (#180). |
 | GET | `/api/admin/export.csv` | | CSV, one row per account per opened case |
 | GET | `/api/admin/audit?limit=` | | `{entries, names}` newest first (every admin, class and author write is recorded). Each entry has `actor` (#185): `"admin"` for the site owner (by key or session, see `via`), or the acting account's id; null on entries written before it. `names` maps the actor and target ids it mentions to usernames and class names (one read per distinct id). |

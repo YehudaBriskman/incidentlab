@@ -1,6 +1,6 @@
 // The platform owner console (#/admin, #185). All API data (usernames above all) is rendered via textContent /
 // attributes only — never innerHTML.
-// Sections: Users (search, filters and paging on the server; ban, roles, class limits, resets, trash, invite code)
+// Sections: Users (search, filters and paging on the server; ban, roles, class limits, resets, trash)
 // · Classes (every class, member limits, archive) · Live (one case, polled) · Stats (per case) · Global daily case
 // (the site schedule) · Site announcement (the site-wide clock, freeze and banner) · Audit log, plus a Reviews link
 // (the owner's review queue) with its count.
@@ -10,7 +10,7 @@
 // Auth: the `admin` session cookie (signed in on #/login with the ADMIN_KEY) or an admin key typed into the gate.
 // The panels a class dashboard reuses (members, live, event, schedule, stats, projector board) live in views/manage/*:
 // this file mounts them with the /api/admin/* calls and keeps the shell (gate, sections, URL, poll, banner), the
-// trash, the invite code and the audit log.
+// trash and the audit log (classes replaced the site invite code, #204).
 import "../admin.css";
 import { T } from "../i18n/strings-tools";
 import { getLang } from "../i18n/i18n";
@@ -20,7 +20,6 @@ import {
   type AuditEntry,
   type LiveEvent,
   type Schedule,
-  type Settings,
   type AdminUsersResponse,
   type TodayResponse,
   type TrashEntry,
@@ -29,8 +28,7 @@ import {
 import { cachedCase } from "../content/load";
 import { cachedEvent, serverNow as publicServerNow } from "../lib/event";
 import { dataTable } from "../components/dataTable";
-import { formActions, formField } from "../components/formLayout";
-import { copyButton, h, setChildren, type Child } from "../lib/dom";
+import { h, setChildren, type Child } from "../lib/dom";
 import { TS } from "../i18n/strings-shell";
 import { clickClosedDrawer, navSubLink, refreshNav, showSubNav } from "../shell/nav";
 import { setPageCrumb } from "../shell/topbar";
@@ -64,7 +62,6 @@ import {
   restoreTrash,
   saveEvent,
   saveSchedule,
-  saveSettings,
   setAccountClassLimit,
   setAccountRole,
   setAccountStatus,
@@ -127,7 +124,6 @@ const SECTION_ICONS: Readonly<Record<TabId, string>> = {
   audit: svgIcon('<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 12h7"/><path d="M9 16h7"/>'),
 };
 const AUDIT_LIMIT = 100;
-const INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O, 1/I/L: easy to read aloud and type
 
 type AuthMode = "key" | "session";
 /** How long a "saved" note stays in the save bar before the bar hides again. */
@@ -158,13 +154,6 @@ let carried: { schedule: Schedule | null; event: LiveEvent | null } | null = nul
 // ---- schedule ---------------------------------------------------------------------
 
 
-
-function randomInviteCode(): string {
-  const bytes = new Uint8Array(8);
-  crypto.getRandomValues(bytes);
-  const chars = [...bytes].map((b) => INVITE_ALPHABET[b % INVITE_ALPHABET.length] ?? "X");
-  return `${chars.slice(0, 4).join("")}-${chars.slice(4).join("")}`;
-}
 
 function readStoredTab(): TabId {
   try {
@@ -279,16 +268,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     },
     /** phone/tablet layout (cards instead of grids, compact chrome) */
     narrow: window.matchMedia(NARROW_QUERY).matches,
-    // class invite code (Accounts tab)
-    settings: {
-      server: null as Settings | null,
-      input: "",
-      saving: false,
-      error: null as string | null,
-      msg: null as string | null,
-      /** bumped by every save: a poll that started earlier must not overwrite the saved value */
-      rev: 0,
-    },
     audit: null as AdminAuditResult | null,
   };
 
@@ -798,7 +777,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   }
 
   // =====================================================================================
-  // Accounts tab: the members panel (views/manage/members.ts) on the admin API, then the trash and invite code
+  // Accounts tab: the members panel (views/manage/members.ts) on the admin API, then the trash
   // =====================================================================================
 
   const members = createMembersPanel({
@@ -870,121 +849,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   /** "Deleted …" with Undo, which restores the trash entry right away. */
   function undoToast(text: string, entry: TrashEntry | null): void {
     toast({ tone: "success", text, ...(entry ? { action: { label: T().admUndo, run: () => void restoreEntry(entry) } } : {}) });
-  }
-
-  // ---- class invite code ----
-  const inviteCurrentEl = h("div", { class: "invite-current" });
-  const inviteInput = h("input", {
-    type: "text",
-    id: "admin-invite",
-    class: "admin-input invite-input",
-    placeholder: T().admInvitePh,
-    autocomplete: "off",
-    spellcheck: "false",
-    maxlength: 40,
-    dir: "ltr",
-  });
-  const inviteField = formField({ input: inviteInput, label: T().admInviteInputLabel });
-  inviteInput.addEventListener("input", () => {
-    state.settings.input = inviteInput.value;
-    state.settings.msg = null;
-    state.settings.error = null;
-    renderInvite();
-  });
-  const inviteSetBtn = h("button", { type: "submit", class: "btn btn-outline btn-sm" }, T().admInviteSave);
-  const inviteGenBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admInviteGenerate);
-  const inviteClearBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admInviteClear);
-  const inviteMsgEl = h("p", { class: "small invite-msg", role: "status" });
-  const inviteForm = h("form", { class: "invite-form", novalidate: true }, inviteField.nodes, formActions(inviteSetBtn, inviteGenBtn, inviteClearBtn));
-  inviteForm.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const code = state.settings.input.trim();
-    if (code.length < 4 || code.length > 40) {
-      state.settings.error = T().admInviteInvalid;
-      renderInvite();
-      inviteInput.focus();
-      return;
-    }
-    void storeInvite(code);
-  });
-  inviteGenBtn.addEventListener("click", () => {
-    inviteInput.value = randomInviteCode();
-    state.settings.input = inviteInput.value;
-    state.settings.msg = null;
-    state.settings.error = null;
-    renderInvite();
-    inviteInput.focus();
-    inviteInput.select();
-  });
-  // Turning the code off changes how every new sign-up is handled: ask, then offer Undo (puts the old code back).
-  inviteClearBtn.addEventListener("click", () => {
-    const previous = state.settings.server?.inviteCode ?? null;
-    if (previous === null) return;
-    void askConfirm({
-      title: T().admInviteOffTitle,
-      body: T().admInviteOffBody,
-      confirmLabel: T().admInviteOffConfirm,
-      tone: "primary",
-      returnFocus: () => inviteInput,
-    }).then(async (ok) => {
-      if (!ok) return;
-      await storeInvite(null);
-      if (state.settings.error !== null) return;
-      toast({ tone: "success", text: T().admInviteOffToast, action: { label: T().admUndo, run: () => void storeInvite(previous) } });
-    });
-  });
-
-  async function storeInvite(code: string | null): Promise<void> {
-    const st = state.settings;
-    st.rev += 1;
-    st.saving = true;
-    st.error = null;
-    st.msg = null;
-    renderInvite();
-    try {
-      st.server = await saveSettings({ inviteCode: code });
-      if (disposed) return;
-      st.msg = code === null ? T().admInviteCleared : T().admInviteSaved;
-      st.input = "";
-      inviteInput.value = "";
-    } catch (err: unknown) {
-      if (disposed || handleAuthError(err)) return;
-      st.error = T().admSaveFailed(errMessage(err));
-    } finally {
-      st.saving = false;
-    }
-    renderInvite();
-  }
-
-  let inviteCurrentSig = "";
-  function renderInvite(): void {
-    const st = state.settings;
-    const code = st.server?.inviteCode ?? null;
-    const sig = JSON.stringify([getLang(), st.server === null, code]);
-    if (sig !== inviteCurrentSig) {
-      inviteCurrentSig = sig;
-      if (st.server === null) setChildren(inviteCurrentEl, h("p", { class: "muted small" }, T().admLoading));
-      else if (code === null) setChildren(inviteCurrentEl, h("p", { class: "muted invite-off" }, T().admInviteOff));
-      else {
-        setChildren(
-          inviteCurrentEl,
-          h("span", { class: "admin-label" }, T().admInviteCurrent),
-          h("code", { class: "admin-share-url invite-code" }, code),
-          copyButton(() => code, T().admCopyCode),
-        );
-      }
-    }
-    if (inviteInput.value !== st.input) inviteInput.value = st.input;
-    // Never a disabled submit: an empty or short code gets an inline error on submit instead.
-    inviteSetBtn.disabled = st.saving;
-    inviteGenBtn.disabled = st.saving;
-    inviteClearBtn.disabled = st.saving || code === null;
-    const fieldError = st.error !== null && st.error === T().admInviteInvalid;
-    inviteField.setError(fieldError ? st.error : null);
-    const msg = fieldError ? st.msg : (st.error ?? st.msg);
-    inviteMsgEl.textContent = msg ?? "";
-    inviteMsgEl.className = `small invite-msg${st.error && !fieldError ? " sched-invalid" : ""}`;
-    inviteMsgEl.hidden = msg === null;
   }
 
   // ---- recently deleted (trash): deleted accounts and reset case progress, restorable for a few days ----
@@ -1094,22 +958,11 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         trashMsgEl,
         trashBodyEl,
       ),
-      h(
-        "section",
-        { class: "panel admin-panel invite-panel" },
-        headWithHint(h("h2", { class: "admin-h2" }, T().admInviteTitle), T().admInviteHelp),
-        h("p", { class: "muted small admin-hint is-touch-only" }, T().admInviteHelp),
-        inviteCurrentEl,
-        inviteForm,
-        inviteMsgEl,
-      ),
     );
-    renderInvite();
   }
 
   function renderAccounts(): void {
     members.render();
-    renderInvite();
     renderTrash();
   }
 
@@ -1464,7 +1317,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   /**
    * Loads what the section on screen needs. A tick (the poll) fetches only what changes by the second: the Live
    * case's progress and the site announcement. Opening a section ("enter") and a refresh ("manual") also fetch
-   * the on-demand sections (users, classes, stats, audit, trash, invite code); a refresh updates the review count.
+   * the on-demand sections (users, classes, stats, audit, trash); a refresh updates the review count.
    */
   async function load(mode: LoadMode = "tick"): Promise<void> {
     if (disposed) return;
@@ -1478,7 +1331,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     const tab = state.tab;
     const onDemand = mode !== "tick";
     const liveCase = state.liveCaseId;
-    const settingsRev = state.settings.rev;
     const eventRev = eventForm.rev();
     const usersSeq = tab === "accounts" && onDemand ? ++state.usersSeq : null;
     // The projector board refreshes with the dashboard (public endpoint; its errors stay on the board).
@@ -1490,12 +1342,11 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       // Today's case changes at most once a day (or on a schedule save, which reloads it itself): once a minute
       // is plenty, and it halves the dashboard's calls per tick.
       const todayDue = Date.now() - todayFetchedAt >= TODAY_REFRESH_MS;
-      const [users, today, progress, stats, settings, event, audit, top, reviews] = await Promise.all([
+      const [users, today, progress, stats, event, audit, top, reviews] = await Promise.all([
         usersSeq !== null ? fetchUsers(members.query()) : Promise.resolve(null),
         todayDue ? fetchToday() : Promise.resolve(null),
         tab === "live" && liveCase ? fetchProgress(liveCase) : Promise.resolve(null),
         tab === "stats" && onDemand ? fetchCaseStats() : Promise.resolve(null),
-        tab === "accounts" && onDemand ? fetchSettings() : Promise.resolve(null),
         tab === "event" && !eventForm.saving() ? fetchEvent() : Promise.resolve(null),
         tab === "audit" && onDemand ? fetchAudit(AUDIT_LIMIT) : Promise.resolve(null),
         tab === "stats" && onDemand ? fetchUsers({ sort: "rank", kind: "user", status: "approved", limit: 10 }) : Promise.resolve(null),
@@ -1521,7 +1372,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         if (disposed) return;
       }
       if (trashReq) applyTrash(await trashReq);
-      if (settings && settingsRev === state.settings.rev && !state.settings.saving) state.settings.server = settings;
       if (event && eventRev === eventForm.rev() && !eventForm.saving()) eventForm.applyPoll(event);
       if (audit) state.audit = audit;
       ensureLiveCase();
@@ -1570,13 +1420,13 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     if (state.auth === null) return showLogin(null);
     try {
       // The settings call is the sign-in check (admin only, one record); the users list loads with its section.
-      const [today, settings, reviews] = await Promise.all([fetchToday(), fetchSettings(), fetchReviewCount().catch(() => null)]);
+      // Its value (the legacy site invite code, #204) is no longer shown: classes replaced it.
+      const [today, , reviews] = await Promise.all([fetchToday(), fetchSettings(), fetchReviewCount().catch(() => null)]);
       if (disposed) return;
       state.ready = true;
       state.reviews = reviews;
       state.today = today;
       todayFetchedAt = Date.now();
-      state.settings.server = settings;
       ensureLiveCase();
       state.lastUpdated = Date.now();
       state.banner = null;

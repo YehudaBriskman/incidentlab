@@ -5,7 +5,7 @@ import { formField, type FormField } from "../components/formLayout";
 import { MIN_SIGNUP_FORM_MS, PasswordSchema, UsernameSchema, type AccountView } from "../../shared/contract";
 import { ApiError, changePassword, login, recoverAccount, regenerateRecoveryCode, register, type SignedIn } from "../lib/api";
 import { h, setChildren } from "../lib/dom";
-import { toast } from "../lib/overlay";
+import { confirm, toast } from "../lib/overlay";
 import "../player.css";
 import { getLang, isRelabel } from "../i18n/i18n";
 import { isAdmin, loadAccount, setAccount, signOut } from "../lib/session";
@@ -38,6 +38,11 @@ type ShownCode = { code: string; username: string; lead: () => string; signedIn:
 let shownCode: ShownCode | null = null;
 /** After a recovery: the sign-in form opens with this username and says the password changed. */
 let afterRecovery: { username: string } | null = null;
+/**
+ * A sign-up with a class code joined (or asked to join) this class (#204): once the account is ready (after the
+ * recovery-code screen) the gate opens the class page instead of continuing where it was.
+ */
+let classLanding: string | null = null;
 
 export function stopAuthTimers(): void {
   if (pendingTimer !== null) window.clearInterval(pendingTimer);
@@ -95,7 +100,7 @@ export type GateOptions = {
   onAdmin?: () => void;
   /** The form shown when signed out (default: sign in). */
   signedOutMode?: Mode;
-  /** Class code from a `?code=` link: prefills the sign-up form's class-code field. */
+  /** Class code from a `?code=` link or `#/join/<code>`: prefills the sign-up form's class-code field (#204). */
   inviteCode?: string;
   /** Set `document.title` for the auth screens (the #/login and #/signup routes). */
   titled?: boolean;
@@ -145,6 +150,7 @@ export function withApprovedAccount(
       }
       if (account === null) {
         carriedTempPassword = null;
+        classLanding = null;
         // Guest play (#176): the form renders into its own host, so switching sign-in/sign-up keeps the choice.
         const formRoot = options.allowGuest ? h("div", { class: "gate-form" }) : root;
         if (formRoot !== root) setChildren(root, formRoot, guestChoice(() => again()));
@@ -162,7 +168,10 @@ export function withApprovedAccount(
       else if (account.mustChangePassword) renderForcedPasswordChange(root, context, again);
       else {
         draft = null;
-        onReady(account);
+        const landing = classLanding;
+        classLanding = null;
+        if (landing !== null) window.location.hash = `#/class/${encodeURIComponent(landing)}`;
+        else onReady(account);
       }
     })
     .catch((err: unknown) => {
@@ -185,7 +194,8 @@ function errorText(err: unknown): string {
   if (err.status === 0) return TO().offline;
   if (err.code === "username-taken") return TA().usernameTaken;
   if (err.code === "reserved") return TG().reservedName;
-  if (err.code === "bad-invite-code") return TG().badInvite;
+  if (err.code === "bad-class-code" || err.code === "bad-invite-code") return TG().badInvite;
+  if (err.code === "class-full") return TG().classFullSignUp;
   if (err.code === "bad-credentials") return TA().badCredentials;
   if (err.code === "rejected") return TA().rejectedLogin;
   if (err.code === "signup-refused") return TA().signupRefused;
@@ -507,7 +517,8 @@ export function renderAuthForm(
       return new Promise<void>((resolve) => window.setTimeout(resolve, wait)).then(() => register({ ...registration, elapsedMs: Date.now() - shownAt }));
     };
     send()
-      .then(({ account, recoveryCode }) => {
+      .then(({ account, recoveryCode, joinedClass }) => {
+        classLanding = joinedClass?.id ?? null;
         carriedTempPassword = !isSignUp && account.mustChangePassword ? credentials.password : null;
         summary.clear();
         if (recoveryCode !== null && !isAdmin(account)) {
@@ -530,7 +541,8 @@ export function renderAuthForm(
           startRateLimit(err.retryAfterSeconds ?? 60);
           return;
         }
-        const field = code === "username-taken" || code === "reserved" ? user : code === "bad-invite-code" ? invite : null;
+        const codeProblem = code === "bad-class-code" || code === "bad-invite-code" || code === "class-full";
+        const field = code === "username-taken" || code === "reserved" ? user : codeProblem ? invite : null;
         if (field !== null) {
           reportProblems([{ field, message: errorText(err) }], fields, summary);
           return;
@@ -669,15 +681,19 @@ function renderRecoverForm(root: HTMLElement, opts: AuthFormOptions): void {
 }
 
 /**
- * The code itself with Copy and Download (.txt). Shared by the gate's "save your recovery code" screen and the
- * regenerate section on #/me. The code is text in the page (selectable), never stored by the browser.
+ * The code itself with Copy and Download (.txt). Shared by the gate's "save your recovery code" screen, the
+ * regenerate section on #/me and the guest upgrade dialog. The code is text in the page (selectable), never stored
+ * by the browser. `onSaved` runs after a successful copy or a download (#205: closing unsaved asks first).
  */
-export function recoveryCodePanel(code: string, username: string): HTMLElement {
+export function recoveryCodePanel(code: string, username: string, onSaved?: () => void): HTMLElement {
   const copy = h("button", { type: "button", class: "btn" }, TA().codeCopy);
   copy.addEventListener("click", () => {
     const write = navigator.clipboard?.writeText(code) ?? Promise.reject(new Error("no clipboard"));
     write.then(
-      () => void toast({ text: TA().codeCopied, tone: "success" }),
+      () => {
+        onSaved?.();
+        toast({ text: TA().codeCopied, tone: "success" });
+      },
       () => void toast({ text: TA().codeCopyFailed, tone: "error" }),
     );
   });
@@ -689,6 +705,7 @@ export function recoveryCodePanel(code: string, username: string): HTMLElement {
     link.click();
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    onSaved?.();
   });
   return h(
     "div",
@@ -717,6 +734,15 @@ function renderRecoveryCodeScreen(root: HTMLElement, context: string, shown: Sho
     ),
   );
   title.focus();
+}
+
+/**
+ * Asks "Did you save your recovery code?" before a shown code is closed without Copy or Download (#205).
+ * Resolves true when it may close.
+ */
+export function confirmCodeSaved(saved: boolean): Promise<boolean> {
+  if (saved) return Promise.resolve(true);
+  return confirm({ title: TA().codeUnsavedTitle, body: TA().codeUnsavedBody, confirmLabel: TA().codeUnsavedClose, cancelLabel: TA().codeUnsavedBack });
 }
 
 /** A code made on #/me, kept in memory until "Done" so a language switch re-shows it instead of losing it. */
@@ -772,7 +798,8 @@ export function recoveryCodeSection(username: string): HTMLElement {
     const shown = regeneratedCode;
     if (shown === null) return showForm();
     const lead = h("p", { class: "recovery-code-warning", tabindex: "-1" }, TA().codeLeadRegenerated);
-    const done = h("button", { type: "button", class: "btn btn-primary" }, TA().codeDone);
+    // The label is the acknowledgement (#205): the code is gone once this is pressed.
+    const done = h("button", { type: "button", class: "btn btn-primary" }, TA().codeSaved);
     done.addEventListener("click", () => {
       regeneratedCode = null;
       showForm();

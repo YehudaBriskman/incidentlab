@@ -128,6 +128,6 @@ test("#/me: a new recovery code needs the current password", async ({ page }) =>
   await expect(section.getByTestId("recovery-code")).toHaveText(CODE);
   await expect(section.getByText(/old code no longer works/i)).toBeVisible();
   expect(await seriousViolations(page)).toEqual([]);
-  await section.getByRole("button", { name: /^done$/i }).click();
+  await section.getByRole("button", { name: /^i've saved it$/i }).click();
   await expect(section.getByTestId("recovery-code")).toHaveCount(0);
 });

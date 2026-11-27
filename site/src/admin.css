@@ -496,7 +496,7 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 }
 .admin-table tr.is-first > :is(td, th) { background: var(--accent-soft); }
 
-/* ---- admin session, invite code, temp password, event, audit ---- */
+/* ---- admin session, temp password, event, audit ---- */
 .admin-login-alt { margin: var(--space-4) 0 0; }
 .admin-login-alt a { color: var(--text-1); }
 .pending-panel .admin-table-head { margin-bottom: var(--space-3); }
@@ -504,15 +504,6 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
 .pending-status { margin: -6px 0 var(--space-3); color: var(--success-fg); }
 .pending-status[hidden] { display: none; }
 .acct-detail-meta { margin: var(--space-2) 0 0; }
-
-.invite-current { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
-.invite-current p { margin: 0; }
-.invite-code { font-size: var(--step-1); letter-spacing: var(--track-label); }
-.invite-form { display: grid; gap: var(--space-3); max-width: 36rem; }
-.invite-input { font-family: var(--font-mono); }
-.invite-msg { margin: var(--space-2) 0 0; color: var(--success-fg); }
-.invite-msg.sched-invalid { color: var(--danger-fg); }
-.invite-msg[hidden] { display: none; }
 
 /* one-time password: content of an .ov-dialog (lib/overlay.ts) */
 .admin-pw { display: flex; flex-wrap: wrap; justify-content: flex-start; margin: var(--space-1) 0 0; }
@@ -573,7 +564,6 @@ html.admin-savebar-open { scroll-padding-bottom: 120px; }
   .cal-wd { display: inline; }
   .cal-select { font-size: var(--step--1); }
   .adm-ev-form { grid-template-columns: minmax(0, 1fr); }
-  .invite-input { width: 100%; flex: 1 1 100%; }
   .admin-pw .admin-share-url { font-size: var(--step-0); }
 }
 

@@ -7,6 +7,7 @@ import {
   AuthResponseSchema,
   CasesResponseSchema,
   RecoveryCodeResponseSchema,
+  RegisterResponseSchema,
   SessionResponseSchema,
   AnswerResponseSchema,
   DebriefResponseSchema,
@@ -17,6 +18,7 @@ import {
   TodayResponseSchema,
   UserStatsResponseSchema,
   type AccountView,
+  type ClassSummary,
   type LeaderboardResponse,
   type LiveEvent,
   type ProgressView,
@@ -191,12 +193,15 @@ type Credentials = { username: string; password: string };
 /** Sign-up also sends the bot checks (#173): the hidden `website` field and how long the form was open. */
 type Registration = Credentials & { inviteCode?: string; website?: string; elapsedMs?: number };
 /** The account, plus a recovery code when the server just issued one (#174): show it once, never store it. */
-export type SignedIn = { account: AccountView; recoveryCode: string | null };
+export type SignedIn = { account: AccountView; recoveryCode: string | null; joinedClass?: ClassSummary | null };
 
-/** Creates the account (approved at once) and returns its first recovery code. */
+/**
+ * Creates the account (approved at once) and returns its first recovery code. With a class code (#204) the account
+ * also joins that class (or asks to), and `joinedClass` names it.
+ */
 export async function register(registration: Registration): Promise<SignedIn> {
-  const body = await request("POST", "/api/auth/register", AuthResponseSchema, registration);
-  return { account: body.account, recoveryCode: body.recoveryCode ?? null };
+  const body = await request("POST", "/api/auth/register", RegisterResponseSchema, registration);
+  return { account: body.account, recoveryCode: body.recoveryCode ?? null, joinedClass: body.class ?? null };
 }
 
 /** Signs in. Accounts without a recovery code get their first one here. */
