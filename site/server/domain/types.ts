@@ -1,6 +1,6 @@
 // Server-side domain types: stored records, secrets and case config.
 import { z } from "zod";
-import { AccountRecordRoleSchema, AccountStatusSchema, QuestionIdSchema, StageProgressSchema } from "../../shared/contract.ts";
+import { AccountKindSchema, AccountRecordRoleSchema, AccountStatusSchema, QuestionIdSchema, StageProgressSchema } from "../../shared/contract.ts";
 import type { QuestionId } from "../../shared/contract.ts";
 import { CaseSealedSchema } from "../../shared/case-records.ts";
 
@@ -27,6 +27,15 @@ export const AccountRecordSchema = z.object({
   mustChangePassword: z.boolean().default(false),
   /** additive (author role): accounts saved before it are players */
   role: AccountRecordRoleSchema.default("player"),
+  // Open access (#171, #172), all additive: accounts saved before them parse with these defaults.
+  /** a guest plays without signing up (#176) and can be upgraded to a user, keeping the same id */
+  kind: AccountKindSchema.default("user"),
+  /** opt-in to the public global leaderboard (#175); off by default for privacy */
+  showOnGlobalBoard: z.boolean().default(false),
+  /** scrypt hash of the one-time recovery code (#174); null until one is issued */
+  recoveryCodeHash: z.string().nullable().default(null),
+  /** how many classes this account may own (#179); null means the site default */
+  classLimit: z.number().int().min(0).nullable().default(null),
 });
 export type AccountRecord = z.infer<typeof AccountRecordSchema>;
 

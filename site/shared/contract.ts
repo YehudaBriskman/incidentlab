@@ -35,6 +35,9 @@ export type AccountStatus = z.infer<typeof AccountStatusSchema>;
 /** "admin" is the ADMIN_KEY session only; stored accounts are "player" or "author" (authors may upload cases). */
 export const AccountRoleSchema = z.enum(["player", "author", "admin"]);
 export type AccountRole = z.infer<typeof AccountRoleSchema>;
+/** A full account, or a guest playing without signing up (#176). */
+export const AccountKindSchema = z.enum(["user", "guest"]);
+export type AccountKind = z.infer<typeof AccountKindSchema>;
 /** The roles an admin can give a stored account. */
 export const AccountRecordRoleSchema = z.enum(["player", "author"]);
 export type AccountRecordRole = z.infer<typeof AccountRecordRoleSchema>;
@@ -47,6 +50,9 @@ export const AccountViewSchema = z.object({
   role: AccountRoleSchema,
   /** true after an admin password reset: the player must set a new password before playing */
   mustChangePassword: z.boolean(),
+  /** additive (#172): user or guest, and whether the player shows on the global leaderboard */
+  kind: AccountKindSchema.default("user"),
+  showOnGlobalBoard: z.boolean().default(false),
 });
 export type AccountView = z.infer<typeof AccountViewSchema>;
 
