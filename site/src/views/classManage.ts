@@ -346,6 +346,12 @@ function renderManage(root: HTMLElement, side: HTMLElement, id: string): void {
     caseId: () => state.liveCaseId,
     cases: () => ({ released: classCases(), todayId: todayCaseId() }),
     progress: () => state.progress,
+    // Everyone who should be playing (#229): active members, not the class's admins.
+    roster: () => state.members?.filter((m) => m.status === "active" && m.role === "member").map((m) => ({ accountId: m.accountId, username: m.username })) ?? null,
+    shareUrl: () => {
+      const code = state.cls?.admin?.joinCode;
+      return code === undefined ? null : joinLink(code);
+    },
     loadError: () => state.liveError,
     onRetry: () => void loadLive(),
     onSelectCase: (caseId) => {
@@ -378,6 +384,8 @@ function renderManage(root: HTMLElement, side: HTMLElement, id: string): void {
     if (state.liveLoading) return;
     state.liveLoading = true;
     try {
+      // The roster once per visit (the Members tab refreshes it), so Live can count who hasn't started (#229).
+      if (state.members === null) state.members = await fetchClassMembers(id).catch((): null => null);
       const progress = await fetchClassProgress(id, caseId);
       if (disposed) return;
       if (progress.caseId === state.liveCaseId) state.progress = progress;

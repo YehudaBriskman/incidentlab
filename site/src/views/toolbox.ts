@@ -39,7 +39,8 @@ const shellLabel = (k: Shell): string => (k === "bash" ? "Bash" : k === "powersh
 export type CommandContext = {
   readonly caseId: string;
   readonly progress: ProgressView | null;
-  readonly onProgress: (next: ProgressView) => void;
+  /** `revealedTool`: the command just bought, so the page can keep the player at that card (#210). */
+  readonly onProgress: (next: ProgressView, revealedTool?: string) => void;
 };
 
 function readShell(): Shell {
@@ -187,7 +188,7 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
           .then((ok) => {
             const next = charged.progress;
             if (!ok || next === null) return;
-            ctx.onProgress(next);
+            ctx.onProgress(next, toolId);
             announce(TG().commandRevealedAnnounce(item.title));
             window.requestAnimationFrame(() => {
               const card = document.querySelector(`[data-tool="${CSS.escape(toolId)}"]`);
