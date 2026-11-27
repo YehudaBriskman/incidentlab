@@ -369,6 +369,18 @@ export const RecoveryCodeResponseSchema = z.object({ recoveryCode: z.string() })
 // GET  /api/session -> {account | null}   (always 200: the signed-out probe the browser uses, so a visitor's console stays clean)
 export const SessionResponseSchema = z.object({ account: AccountViewSchema.nullable() });
 
+// ---- guests (#176) --------------------------------------------------------
+// POST /api/guest {} -> 201 {account} + cookie: a new guest (kind "guest", approved, username "guest-<id>", which
+//                        is never claimed and can't sign in). 200 {account} when the cookie already holds a
+//                        session (no new account). 429 "rate-limited" past GUEST_LIMIT per IP.
+// POST /api/auth/upgrade {username, password} -> 200 {account} + a new cookie: the signed-in guest becomes a user
+//                        with the SAME id (progress stays). 409 "username-taken" / "reserved" / "not-guest".
+//                        TODO(#174): the response will also carry the one-time recovery code, like register.
+/** Usernames of guests: never claimed, and nobody may sign up or upgrade with one. */
+export const GUEST_USERNAME_PREFIX = "guest-";
+export const UpgradeRequestSchema = CredentialsSchema;
+export type UpgradeRequest = z.infer<typeof UpgradeRequestSchema>;
+
 // ---- DB-stored case content (public, cacheable: Cache-Control public, max-age=60, stale-while-revalidate=600) ----
 // GET /api/cases                          -> {cases: CatalogEntry[]}   (published DB cases only; ETag, 304)
 // GET /api/cases/:caseId/content?lang=en|he -> {id, version, lang, content: CaseContent}

@@ -62,6 +62,16 @@ plan allows 125,000 function calls a month.
   lockout and issues a new code; it sets no cookie.
 - **Password reset:** the admin (the owner) gets a one-time temporary password; the account is signed out and
   must set a new password (`POST /api/me/password`) before playing. Nobody else can reset a password.
+- **Guests (#176):** `POST /api/guest` gives a signed-out visitor a guest account (`kind: "guest"`, `approved`,
+  role `player`, username `guest-<id>`) and a player session, so every approved-player route works. A guest has
+  no password and its generated name is never claimed in the `username:` index, so login always refuses it
+  (401 `bad-credentials`). If the cookie already holds a live session, the call returns that account (200) and
+  creates nothing. Rate limited to 30 per IP per hour. `POST /api/auth/upgrade {username, password}` turns the
+  signed-in guest into a user with the **same id**, so its progress stays: the name is claimed with the same
+  race-free conditional write as register, the guest's other sessions end and a fresh cookie is set. It counts
+  against the sign-up limit. 409 `username-taken`, `reserved` (also any `guest-` name) or `not-guest`.
+  Guests are on no leaderboard. Idle guests are trashed after 30 days by the weekly hygiene job
+  (`docs/DATA.md`). The upgrade response carries the account's one-time recovery code (`recoveryCode`), like a sign-up.
 
 ## Paid content and scoring
 
@@ -89,6 +99,8 @@ it, and no public or CDN-cached response carries stage records. Constants: `SCOR
 | POST | `/api/auth/login` | none | `{username, password}` | `{account, recoveryCode?}` + cookie (`recoveryCode` only when this sign-in issued the account's first one) |
 | POST | `/api/auth/recover` | none | `{username, recoveryCode, newPassword}` | `{recoveryCode}` (the new code; no cookie) |
 | POST | `/api/auth/logout` | cookie | `{}` | 204, clears the cookie |
+| POST | `/api/guest` | optional cookie | `{}` | 201 `{account}` + cookie (a new guest), or 200 `{account}` for an existing session |
+| POST | `/api/auth/upgrade` | guest cookie | `{username, password}` | `{account}` + fresh cookie (same id, `kind: "user"`) |
 | GET | `/api/me` | cookie | | `{account}` (401 when signed out) |
 | GET | `/api/session` | optional cookie | | `{account}` or `{account: null}`, always 200. The browser uses this to probe sign-in without logging a 401. |
 | GET | `/api/me/stats` | cookie | | `{stats: UserStats}`. `rank` is the place on the live overall public board, null when not on it; `onGlobalBoard` says whether the player opted in (#175). Reads only the player's own progress plus the opted-in players' score summaries. |
@@ -227,7 +239,7 @@ so nobody is cut off at midnight.
 
 - Stages are sequential: setup, then q1 to q6, then the debrief. Acting on a locked stage returns 403. Acting on a finished stage returns 409, except that re-answering a solved stage returns `correct:true` without re-scoring and re-revealing a revealed stage returns the current progress.
 - Score for a solved stage = `max(0, points - sum(cost of the first hintsRevealed hints))`. Points and hint costs come from the case JSON (copied into the secrets by `scripts/make_flags.py`).
-- Rate limits: 5 wrong answers per account per question per 60 s; 8 failed logins per username and 60 per IP per 15 min; 100 sign-ups per IP per hour (classrooms share a NAT IP).
+- Rate limits: 5 wrong answers per account per question per 60 s; 8 failed logins per username and 60 per IP per 15 min; 100 sign-ups (and guest upgrades) per IP per hour and 30 new guests per IP per hour (classrooms share a NAT IP).
 - Writes use optimistic concurrency (Blobs etags, up to 3 retries), so parallel requests for one player stay consistent.
 
 ## Storage

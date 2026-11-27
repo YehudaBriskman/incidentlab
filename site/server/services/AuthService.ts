@@ -168,7 +168,7 @@ export class AuthService {
     const found = accountId ? await this.repos.accounts.get(accountId) : null;
     // Always run scrypt so response time doesn't reveal whether the username exists.
     const isValid = await verifyPassword(input.password, found?.data.passwordHash ?? (await getDummyPasswordHash()));
-    if (!found || !isValid) {
+    if (!found || !isValid || found.data.kind === "guest") { // guests have no password (#176)
       await this.failLogin(input.ip, key);
       throw new AppError(401, "wrong username or password", { code: "bad-credentials" });
     }
