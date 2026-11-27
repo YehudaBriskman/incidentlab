@@ -36,14 +36,14 @@ async function englishHome(page: Page, hash = "#/"): Promise<void> {
   await expect(ui.rows(page).first()).toBeVisible();
 }
 
-test("signed out: intro with a sign-up action, how-it-works card, today's card and the table", async ({ page, request }) => {
+test("signed out: intro with sign-up and guest actions, how-it-works card, today's card and the table", async ({ page, request }) => {
   await scheduleToday(request, CASE_ID);
   await englishHome(page);
   await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
   await expect(page.getByRole("region", { name: "About IncidentLab" }).getByRole("link", { name: "Create account" })).toBeVisible();
   await expect(ui.continueCard(page)).toContainText(/how it works/i);
   await expect(ui.todayCard(page)).toContainText("Ghost in the Network");
-  await expect(ui.todayCard(page).getByRole("link", { name: "Sign in to play" })).toBeVisible();
+  await expect(ui.todayCard(page).getByRole("link", { name: "Play", exact: true })).toHaveAttribute("href", `#/case/${CASE_ID}`);
   await expect(ui.table(page).getByRole("columnheader", { name: /status/i })).toHaveCount(0);
   // home puts nothing in the page panel (filters live in the toolbar popover); #sidebar no longer exists, so
   // check the frame's real panel and that the shared filter button is the one in the toolbar
