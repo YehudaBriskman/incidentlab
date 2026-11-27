@@ -446,6 +446,7 @@ function renderManage(root: HTMLElement, side: HTMLElement, id: string): void {
     },
     isActive: () => state.tab === "event",
     onSaved: () => clearSavedNoteLater(),
+    audience: "class",
   });
 
   // ---- assigned cases -----------------------------------------------------------------------------------
