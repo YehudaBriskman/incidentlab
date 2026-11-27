@@ -5,7 +5,7 @@ import { formField, type FormField } from "../components/formLayout";
 import { MIN_SIGNUP_FORM_MS, PasswordSchema, UsernameSchema, type AccountView } from "../../shared/contract";
 import { ApiError, changePassword, login, recoverAccount, regenerateRecoveryCode, register, type SignedIn } from "../lib/api";
 import { h, setChildren } from "../lib/dom";
-import { toast } from "../lib/overlay";
+import { confirm, toast } from "../lib/overlay";
 import "../player.css";
 import { getLang, isRelabel } from "../i18n/i18n";
 import { isAdmin, loadAccount, setAccount, signOut } from "../lib/session";
@@ -681,15 +681,19 @@ function renderRecoverForm(root: HTMLElement, opts: AuthFormOptions): void {
 }
 
 /**
- * The code itself with Copy and Download (.txt). Shared by the gate's "save your recovery code" screen and the
- * regenerate section on #/me. The code is text in the page (selectable), never stored by the browser.
+ * The code itself with Copy and Download (.txt). Shared by the gate's "save your recovery code" screen, the
+ * regenerate section on #/me and the guest upgrade dialog. The code is text in the page (selectable), never stored
+ * by the browser. `onSaved` runs after a successful copy or a download (#205: closing unsaved asks first).
  */
-export function recoveryCodePanel(code: string, username: string): HTMLElement {
+export function recoveryCodePanel(code: string, username: string, onSaved?: () => void): HTMLElement {
   const copy = h("button", { type: "button", class: "btn" }, TA().codeCopy);
   copy.addEventListener("click", () => {
     const write = navigator.clipboard?.writeText(code) ?? Promise.reject(new Error("no clipboard"));
     write.then(
-      () => void toast({ text: TA().codeCopied, tone: "success" }),
+      () => {
+        onSaved?.();
+        toast({ text: TA().codeCopied, tone: "success" });
+      },
       () => void toast({ text: TA().codeCopyFailed, tone: "error" }),
     );
   });
@@ -701,6 +705,7 @@ export function recoveryCodePanel(code: string, username: string): HTMLElement {
     link.click();
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    onSaved?.();
   });
   return h(
     "div",
@@ -729,6 +734,15 @@ function renderRecoveryCodeScreen(root: HTMLElement, context: string, shown: Sho
     ),
   );
   title.focus();
+}
+
+/**
+ * Asks "Did you save your recovery code?" before a shown code is closed without Copy or Download (#205).
+ * Resolves true when it may close.
+ */
+export function confirmCodeSaved(saved: boolean): Promise<boolean> {
+  if (saved) return Promise.resolve(true);
+  return confirm({ title: TA().codeUnsavedTitle, body: TA().codeUnsavedBody, confirmLabel: TA().codeUnsavedClose, cancelLabel: TA().codeUnsavedBack });
 }
 
 /** A code made on #/me, kept in memory until "Done" so a language switch re-shows it instead of losing it. */
@@ -784,7 +798,8 @@ export function recoveryCodeSection(username: string): HTMLElement {
     const shown = regeneratedCode;
     if (shown === null) return showForm();
     const lead = h("p", { class: "recovery-code-warning", tabindex: "-1" }, TA().codeLeadRegenerated);
-    const done = h("button", { type: "button", class: "btn btn-primary" }, TA().codeDone);
+    // The label is the acknowledgement (#205): the code is gone once this is pressed.
+    const done = h("button", { type: "button", class: "btn btn-primary" }, TA().codeSaved);
     done.addEventListener("click", () => {
       regeneratedCode = null;
       showForm();

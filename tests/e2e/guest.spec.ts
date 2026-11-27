@@ -49,7 +49,7 @@ test("a guest plays, upgrades from the banner and keeps the progress", async ({ 
     await dialog.getByRole("button", { name: /create account/i }).click();
     // the new account's one-time recovery code (#174) is shown before the dialog closes
     await expect(dialog.getByTestId("recovery-code")).toHaveText(/^[2-9A-HJ-NP-Z]{5}(-[2-9A-HJ-NP-Z]{5}){3}$/);
-    await dialog.getByRole("button", { name: "Done", exact: true }).click();
+    await dialog.getByRole("button", { name: "I've saved it", exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(banner).toBeHidden();
     await expect(page.locator(".toast-host .toast").filter({ hasText: /account created/i })).toBeVisible();

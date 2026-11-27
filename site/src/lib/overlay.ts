@@ -77,7 +77,7 @@ function removeAfterExit(el: HTMLElement): void {
 
 /* ---------- modal stack and scroll lock ---------- */
 
-type ModalEntry = { el: HTMLDialogElement; opener: HTMLElement | null; dismiss: () => void };
+type ModalEntry = { el: HTMLDialogElement; opener: HTMLElement | null; dismiss: () => void; persistent: () => boolean };
 const modals = new ModalStack<ModalEntry>();
 
 function syncScrollLock(): void {
@@ -85,10 +85,13 @@ function syncScrollLock(): void {
   document.documentElement.classList.toggle("has-modal", modals.size > 0);
 }
 
-/** Closes every open modal and menu (the router calls this on navigation). Toasts and banners stay. */
+/**
+ * Closes every open modal and menu (the router calls this on navigation). Toasts and banners stay, and so does a
+ * dialog that is `persistent` right now (a one-time recovery code must outlive a route refresh, #205).
+ */
 export function closeOverlays(): void {
   closeMenu();
-  for (const entry of [...modals.all()].reverse()) entry.dismiss();
+  for (const entry of [...modals.all()].reverse()) if (!entry.persistent()) entry.dismiss();
 }
 
 /* ---------- dialog ---------- */
@@ -127,6 +130,16 @@ export interface DialogOptions<R extends string> {
   initialFocus?: () => HTMLElement | null;
   /** Where focus goes after closing when the opener is gone (re-rendered or removed meanwhile). Default: the main region. */
   returnFocus?: () => HTMLElement | null;
+  /**
+   * While this returns true, navigation (closeOverlays) leaves the dialog open. For content shown once that
+   * the page behind may re-render under, such as a new recovery code (#205).
+   */
+  persistent?: () => boolean;
+  /**
+   * Asked before Escape or × dismisses the dialog; false (or a promise of false) keeps it open. Typically a
+   * confirm() for "did you save it?". Actions and close() from code are not asked.
+   */
+  beforeDismiss?: () => boolean | Promise<boolean>;
 }
 
 export interface DialogHandle<R extends string> {
@@ -176,7 +189,7 @@ function showModal<R extends string>(kind: ModalKind, opts: DialogOptions<R>): D
   const active = document.activeElement;
   // The opener gets focus back on close (<body> counts as none: e.g. a busy confirm disabled its focused button).
   const opener = active instanceof HTMLElement && active !== document.body ? active : null;
-  const entry: ModalEntry = { el, opener, dismiss: () => close(null) };
+  const entry: ModalEntry = { el, opener, dismiss: () => close(null), persistent: () => opts.persistent?.() === true };
 
   function finish(): void {
     busy = false;
@@ -195,6 +208,24 @@ function showModal<R extends string>(kind: ModalKind, opts: DialogOptions<R>): D
     settled = true;
     finish();
     resolveResult(value);
+  }
+
+  /** Escape or ×: asks `beforeDismiss` first, when there is one. */
+  let asking = false;
+  function requestDismiss(): void {
+    if (busy || settled || asking) return;
+    const guard = opts.beforeDismiss;
+    if (guard === undefined) return close(null);
+    asking = true;
+    void Promise.resolve(guard()).then(
+      (ok) => {
+        asking = false;
+        if (ok) close(null);
+      },
+      () => {
+        asking = false;
+      },
+    );
   }
 
   function choose(action: DialogAction<R>): void {
@@ -230,7 +261,7 @@ function showModal<R extends string>(kind: ModalKind, opts: DialogOptions<R>): D
 
   const showClose = opts.closeButton ?? actions.length === 0;
   const closeBtn = showClose
-    ? h("button", { type: "button", class: "ov-close", "aria-label": TV().close, title: TV().close, onclick: () => close(null) }, h("span", { "aria-hidden": "true" }, "×"))
+    ? h("button", { type: "button", class: "ov-close", "aria-label": TV().close, title: TV().close, onclick: requestDismiss }, h("span", { "aria-hidden": "true" }, "×"))
     : null;
 
   appendChildren(el, [
@@ -242,11 +273,15 @@ function showModal<R extends string>(kind: ModalKind, opts: DialogOptions<R>): D
   // Escape: the native cancel would close at once; route it through close() so focus and the promise follow.
   el.addEventListener("cancel", (ev) => {
     ev.preventDefault();
-    if (!busy) close(null);
+    requestDismiss();
   });
-  // A close we did not ask for (the browser's close watcher after a repeated Escape) still settles.
+  // A close we did not ask for (the browser's close watcher after a repeated Escape) still settles, unless the
+  // dialog must ask first: then it opens again and asks.
   el.addEventListener("close", () => {
-    if (!settled) close(null);
+    if (settled) return;
+    if (opts.beforeDismiss === undefined) return close(null);
+    if (!el.open) el.showModal();
+    requestDismiss();
   });
   el.addEventListener("keydown", (ev) => {
     if (modals.top() === entry) trapTab(el, ev);
@@ -256,7 +291,7 @@ function showModal<R extends string>(kind: ModalKind, opts: DialogOptions<R>): D
     el.addEventListener("click", (ev) => {
       if (ev.target !== el || busy) return;
       const r = el.getBoundingClientRect();
-      if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) close(null);
+      if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) requestDismiss();
     });
   }
 
