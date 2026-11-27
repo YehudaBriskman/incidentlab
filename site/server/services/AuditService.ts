@@ -11,8 +11,8 @@ export type AuditInput = {
   readonly target?: string | null;
   readonly detail?: string | null;
   readonly via: AuditEntry["via"];
-  /** "admin" or the acting account's id */
-  readonly actor: string;
+  /** "admin", the acting account's id, or null for an anonymous public action (a reset request, #254) */
+  readonly actor: string | null;
 };
 
 /** The audit log page: the entries and display names for the ids they mention. */

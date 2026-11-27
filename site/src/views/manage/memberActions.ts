@@ -3,12 +3,12 @@
 // (lib/overlay.ts), and delete (typed name, then the dashboard's Undo). Shared by the table rows and the phone
 // cards of manage/members.ts. Ban is the account's `rejected` status.
 import { T } from "../../i18n/strings-tools";
-import { copyButton, h } from "../../lib/dom";
-import { openDialog, toast, type MenuItem } from "../../lib/overlay";
+import { toast, type MenuItem } from "../../lib/overlay";
 import { CLASS_DEFAULTS, TRASH_RETENTION_DAYS, type AccountRecordRole, type AccountView, type UserStats } from "../../../shared/contract";
 import { fmtInt } from "./format";
 import type { ManageHost, Slot } from "./host";
 import { limitDialog } from "./limitDialog";
+import { showTemporaryPassword } from "./tempPassword";
 
 export type MemberActionsApi = {
   setStatus(accountId: string, action: "approve" | "reject"): Promise<AccountView>;
@@ -44,32 +44,6 @@ export type MemberActions = {
 
 export function createMemberActions(opts: MemberActionsOptions): MemberActions {
   const { host } = opts;
-
-  // ---- one-time temporary password (a dialog from lib/overlay.ts) ----
-  async function showTempPassword(username: string, password: string): Promise<void> {
-    let copied = false;
-    // The password exists only in this dialog: Done or Escape without copying asks first, and "Back" reopens it.
-    for (;;) {
-      const copy = copyButton(() => password, T().admCopyPassword);
-      copy.addEventListener("click", () => (copied = true));
-      await openDialog({
-        size: "sm",
-        title: T().admTempPwTitle(username),
-        className: "admin-pw-dialog",
-        body: [h("p", { class: "muted" }, T().admTempPwHelp), h("div", { class: "admin-share admin-pw" }, h("code", { class: "admin-share-url admin-pw-value" }, password), copy)],
-        actions: [{ value: "done", label: T().admDone, tone: "primary", autofocus: true }],
-      });
-      if (copied) break;
-      const close = await host.askConfirm({
-        title: T().admPwUncopiedTitle,
-        body: T().admPwUncopiedBody,
-        confirmLabel: T().admPwCloseAnyway,
-        cancelLabel: T().admPwBack,
-        tone: "danger",
-      });
-      if (close || host.disposed()) break;
-    }
-  }
 
   async function changeStatus(account: UserStats, action: "approve" | "reject"): Promise<void> {
     const busyKey = `status:${account.accountId}`;
@@ -145,7 +119,7 @@ export function createMemberActions(opts: MemberActionsOptions): MemberActions {
           tone: "primary",
           run: async () => {
             const password = await opts.api.resetPassword(a.accountId);
-            void showTempPassword(a.username, password);
+            void showTemporaryPassword(host, { username: a.username, password });
           },
           returnFocus: () => host.menuTriggerEl(key),
         }),

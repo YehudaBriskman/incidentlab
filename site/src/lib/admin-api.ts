@@ -8,6 +8,8 @@ import {
   AccountClassLimitResponseSchema,
   AdminAccountsResponseSchema,
   AdminClassesResponseSchema,
+  AdminPasswordResetRequestsResponseSchema,
+  type AdminPasswordResetRequest,
   AdminUsersResponseSchema,
   ClassResponseSchema,
   AdminProgressResponseSchema,
@@ -240,6 +242,24 @@ export async function resetAccountPassword(id: string): Promise<string> {
   const path = `/api/admin/accounts/${seg(id)}/reset-password`;
   return (await parseJson(await adminFetch(path, jsonInit("POST", {})), ResetPasswordResponseSchema, "/api/admin/accounts/:id/reset-password"))
     .temporaryPassword;
+}
+
+// ---- teacher-vouched password resets (#254) ----------------------------------------
+
+/** Open requests a class admin vouched for (only vouches that still hold). */
+export async function fetchResetRequests(): Promise<AdminPasswordResetRequest[]> {
+  const path = "/api/admin/reset-requests";
+  return (await parseJson(await adminFetch(path), AdminPasswordResetRequestsResponseSchema, path)).requests;
+}
+
+/** Approves a vouched request: returns the one-time temporary password (the player is signed out everywhere). */
+export async function approveResetRequest(accountId: string): Promise<string> {
+  const path = `/api/admin/reset-requests/${seg(accountId)}/approve`;
+  return (await parseJson(await adminFetch(path, jsonInit("POST", {})), ResetPasswordResponseSchema, "/api/admin/reset-requests/:id/approve")).temporaryPassword;
+}
+
+export async function rejectResetRequest(accountId: string): Promise<void> {
+  await adminFetch(`/api/admin/reset-requests/${seg(accountId)}/reject`, jsonInit("POST", {}));
 }
 
 export async function deleteAccount(id: string): Promise<void> {

@@ -60,6 +60,9 @@ import {
   getAdminKey,
   logoutSession,
   resetAccountPassword,
+  fetchResetRequests,
+  approveResetRequest,
+  rejectResetRequest,
   resetProgress,
   restartPlayerCase,
   restoreTrash,
@@ -96,6 +99,7 @@ import { createEventPanel } from "./manage/event";
 import { createBoardPanel } from "./manage/board";
 import { createStatsPanel } from "./manage/stats";
 import { createOwnerClassesPanel } from "./manage/ownerClasses";
+import { createResetRequestsPanel } from "./manage/resetRequests";
 import type { MembersQuery } from "./manage/members";
 import { NARROW_QUERY, createManageHost } from "./manage/host";
 
@@ -802,6 +806,12 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   // Accounts tab: the members panel (views/manage/members.ts) on the admin API, then the trash
   // =====================================================================================
 
+  // Teacher-vouched password resets (#254): vouched requests, approved or rejected here.
+  const resetRequests = createResetRequestsPanel({
+    host,
+    api: { list: fetchResetRequests, approve: approveResetRequest, reject: rejectResetRequest },
+  });
+
   const members = createMembersPanel({
     host,
     page: { get: () => state.users, set: (page) => void (state.users = page) },
@@ -972,6 +982,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     setChildren(
       tabPanels.get("accounts") ?? container,
       members.sections(),
+      resetRequests.section(),
       h(
         "section",
         { class: "panel admin-panel trash-panel", "aria-labelledby": "admin-trash-title" },
@@ -985,6 +996,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
 
   function renderAccounts(): void {
     members.render();
+    resetRequests.render();
     renderTrash();
   }
 
@@ -1375,6 +1387,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         mode === "manual" ? fetchReviewCount().catch(() => null) : Promise.resolve(null),
         // The class list reports its own errors in its section.
         tab === "classes" && onDemand ? ownerClasses.load() : Promise.resolve(),
+        // So does the reset request queue (#254).
+        tab === "accounts" && onDemand ? resetRequests.load() : Promise.resolve(),
       ]);
       if (disposed) return;
       if (users && usersSeq === state.usersSeq) state.users = users;

@@ -3,7 +3,7 @@
 // `withApprovedAccount` is the single gate every playable view goes through.
 import { formField, type FormField } from "../components/formLayout";
 import { MIN_SIGNUP_FORM_MS, PasswordSchema, UsernameSchema, type AccountView } from "../../shared/contract";
-import { ApiError, changePassword, login, recoverAccount, regenerateRecoveryCode, register, type SignedIn } from "../lib/api";
+import { ApiError, changePassword, login, recoverAccount, regenerateRecoveryCode, register, requestPasswordReset, type SignedIn } from "../lib/api";
 import { h, setChildren } from "../lib/dom";
 import { confirm, toast } from "../lib/overlay";
 import "../player.css";
@@ -55,8 +55,8 @@ export function stopAuthTimers(): void {
   doneTimer = null;
 }
 
-type Mode = "sign-in" | "sign-up" | "recover";
-const isMode = (value: string | undefined): value is Mode => value === "sign-in" || value === "sign-up" || value === "recover";
+type Mode = "sign-in" | "sign-up" | "recover" | "ask-teacher";
+const isMode = (value: string | undefined): value is Mode => value === "sign-in" || value === "sign-up" || value === "recover" || value === "ask-teacher";
 
 /**
  * What the player had typed into a gate form, captured when the language switch re-renders the route, so
@@ -343,6 +343,10 @@ export function renderAuthForm(
   stopAuthTimers();
   if (opts.mode === "recover") {
     renderRecoverForm(root, opts);
+    return;
+  }
+  if (opts.mode === "ask-teacher") {
+    renderResetRequestForm(root, opts);
     return;
   }
   const isSignUp = opts.mode === "sign-up";
@@ -632,7 +636,27 @@ function renderRecoverForm(root: HTMLElement, opts: AuthFormOptions): void {
     next.nodes,
     submit,
     back,
-    h("p", { class: "muted small" }, TA().recoverNoCode),
+    h(
+      "p",
+      { class: "muted small" },
+      TA().recoverNoCode,
+      " ",
+      h(
+        "button",
+        {
+          type: "button",
+          class: "link-btn",
+          "data-testid": "ask-teacher",
+          onclick: () => {
+            const typed = user.input.value.trim();
+            renderAuthForm(root, { ...opts, mode: "ask-teacher" });
+            const askUser = root.querySelector<HTMLInputElement>("#ask-username");
+            if (askUser !== null && typed.length > 0) askUser.value = typed;
+          },
+        },
+        TA().askTeacherLink,
+      ),
+    ),
   );
 
   const check = (f: Field): string | null => {
@@ -675,6 +699,88 @@ function renderRecoverForm(root: HTMLElement, opts: AuthFormOptions): void {
           }
           return;
         }
+        summary.show([{ field: null, message: errorText(err) }]).focus();
+      });
+  });
+
+  setChildren(root, form);
+  if (!restoreDraft(form)) user.input.focus();
+}
+
+/**
+ * "No recovery code? Ask your teacher" (#254): sends a reset request by username. The server answers the same
+ * whether or not the name exists, so the next screen explains the steps without saying the account was found.
+ * A teacher only vouches; the site owner approves and gives the teacher a temporary password for the player.
+ */
+function renderResetRequestForm(root: HTMLElement, opts: AuthFormOptions): void {
+  const titleText = (): string => pageTitle(TA().askTitle);
+  if (opts.titled) document.title = titleText();
+  const baseTitle = (): string => (opts.titled ? titleText() : document.title.replace(TO().errorTitlePrefix, ""));
+  const user = makeField({
+    label: TA().username,
+    input: h("input", {
+      id: "ask-username",
+      class: "input input-lg",
+      type: "text",
+      name: "username",
+      autocomplete: "username",
+      autocapitalize: "none",
+      spellcheck: "false",
+      maxlength: "24",
+      required: true,
+      dir: "auto",
+      enterkeyhint: "send",
+    }),
+  });
+  const summary = errorSummary(baseTitle);
+  const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg btn-block" }, TA().askBtn);
+  const backToSignIn = (): void => renderAuthForm(root, { ...opts, mode: "sign-in" });
+  const form = h(
+    "form",
+    { class: "center-card gate", novalidate: true, "data-mode": "ask-teacher" },
+    summary.el,
+    h("p", { class: "eyebrow" }, opts.context),
+    h("h1", {}, TA().askTitle),
+    h("p", { class: "muted" }, TA().askHelp),
+    user.nodes,
+    submit,
+    h("button", { type: "button", class: "link-btn", onclick: backToSignIn }, TO().backToSignIn),
+    h("p", { class: "muted small" }, TA().askNoClass),
+  );
+  const check = (f: Field): string | null => (f.input.value.trim().length === 0 ? TO().enterUsername : null);
+  user.input.addEventListener("input", () => {
+    if (user.hasError() && check(user) === null) user.setError(null);
+  });
+
+  let busy = false;
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    if (busy) return;
+    if (reportProblems(collectProblems([user], check), [user], summary)) return;
+    busy = true;
+    setBusy(submit, true, TA().asking);
+    requestPasswordReset(user.input.value.trim())
+      .then(() => {
+        summary.clear();
+        const title = h("h1", { tabindex: "-1" }, TA().askSentTitle);
+        setChildren(
+          root,
+          h(
+            "section",
+            { class: "center-card gate", "data-testid": "reset-request-sent" },
+            h("p", { class: "eyebrow" }, opts.context),
+            title,
+            h("p", { class: "muted" }, TA().askSentLead),
+            h("ol", { class: "reset-steps" }, h("li", {}, TA().askStep1), h("li", {}, TA().askStep2), h("li", {}, TA().askStep3)),
+            h("button", { type: "button", class: "btn btn-primary btn-lg btn-block", onclick: backToSignIn }, TO().backToSignIn),
+          ),
+        );
+        if (opts.titled) document.title = pageTitle(TA().askSentTitle);
+        title.focus();
+      })
+      .catch((err: unknown) => {
+        busy = false;
+        setBusy(submit, false, TA().askBtn);
         summary.show([{ field: null, message: errorText(err) }]).focus();
       });
   });
@@ -875,10 +981,12 @@ export function passwordChangeForm(opts: { forced: boolean; onChanged: (account:
     busy = true;
     setBusy(submit, true, TG().pwSaving);
     changePassword({ currentPassword, newPassword: next.input.value })
-      .then((account) => {
+      .then(({ account, recoveryCode }) => {
         busy = false;
         setBusy(submit, false, TG().pwSave);
         carriedTempPassword = null;
+        // After an owner reset (#254) the change issues a new recovery code: the gate shows it next, once.
+        if (recoveryCode !== null) shownCode = { code: recoveryCode, username: account.username, lead: () => TA().codeLeadReset, signedIn: true };
         form.reset();
         okEl.textContent = opts.forced ? TO().pwChangedContinue : TG().pwSaved;
         opts.onChanged(account);
