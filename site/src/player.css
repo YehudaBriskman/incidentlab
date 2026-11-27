@@ -67,18 +67,79 @@
 .tip { border-inline-start: 0; background: var(--fill-inset); border-radius: var(--radius-card); padding: var(--space-4); }
 .reveal { border-top: 0; padding-top: var(--space-3); }
 
-/* command cards (case stage and toolbox): a soft card; the code keeps its dark surface at 8px */
-.cmd { background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift); padding: var(--space-4) var(--pad-card) var(--pad-card); }
-.cmd h4 { font-size: var(--type-body-size); font-weight: 600; }
+/* command rows (case stage and toolbox, #214): a list, not cards. Each command is a <details> row separated by a
+   hairline: the summary is the title, the free syntax on one ellipsised line and a cost or "revealed" tag;
+   the body holds the full text, the explanation, Reveal and Copy. The code keeps its dark surface at 8px. */
 .code-block, .code-block.syntax-block { border-radius: var(--radius-control); }
 .code-block.syntax-block { background: var(--fill-inset); border: 1px dashed var(--edge-control); }
-.syntax-label { margin-block: var(--space-3) var(--space-1); font-size: var(--type-label-size); font-weight: 500; letter-spacing: 0; text-transform: none; }
-.tool-list { gap: var(--gap-stack); }
+.tool-list { gap: 0; }
+.tool-list > .cmd { border-block-end: 1px solid var(--edge-subtle); }
+.tool-list > .cmd:first-child { border-block-start: 1px solid var(--edge-subtle); }
+.cmd-sum {
+  position: relative; display: flex; align-items: center; gap: var(--space-3); min-block-size: 44px; padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-control); list-style: none; cursor: pointer;
+}
+.cmd-sum::-webkit-details-marker { display: none; }
+.cmd-sum:hover { background: var(--hover-fill); }
+/* the disclosure chevron: points to the inline end when closed (mirrored in RTL), down when open */
+.cmd-sum::before {
+  content: ""; flex: none; inline-size: 6px; block-size: 6px; margin-inline: 2px;
+  border-right: 1.5px solid var(--text-3); border-bottom: 1.5px solid var(--text-3); transform: rotate(-45deg);
+  transition: transform var(--motion-settle) var(--ease-standard);
+}
+.cmd-sum:dir(rtl)::before { transform: rotate(135deg); }
+.cmd[open] > .cmd-sum::before { transform: rotate(45deg); }
+.cmd-title { flex: 0 1 auto; max-inline-size: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--type-body-size); font-weight: 600; color: var(--text-1); }
+.cmd-line { flex: 1 1 0; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--type-label-size); color: var(--text-2); }
+.cmd-line .ph { color: var(--accent-strong); font-style: italic; }
+.cmd-sum > :is(.cmd-tag, .cmd-cost) { flex: none; margin: 0; }
+.cmd-cost { font-size: var(--type-label-size); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-2); }
+.cmd-body { padding: var(--space-1) var(--space-2) var(--space-4); padding-inline-start: calc(var(--space-2) + 10px + var(--space-3)); }
+.cmd-body .code-wrap { margin-block: 0 var(--space-2); }
+.cmd-body .prose { margin-block-start: var(--space-2); }
+.cmd-shell-note, .cmd-body .lab-note { margin: 0 0 var(--space-2); }
 .btn-reveal { border-style: solid; }
+/* phones: the title and tag on the first line, the syntax under the title */
+@media (max-width: 640px) {
+  .cmd-sum { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "chev title tag" ". line line"; row-gap: 2px; column-gap: var(--space-3); }
+  .cmd-sum::before { grid-area: chev; }
+  .cmd-title { grid-area: title; max-inline-size: none; white-space: normal; }
+  .cmd-line { grid-area: line; }
+  .cmd-sum > :is(.cmd-tag, .cmd-cost) { grid-area: tag; }
+}
 
-/* ---- phones (#132): a sticky answer bar while the real field is off screen, command cards folded to title and
-   syntax. Both are phone-only: above 640px the bar and the Details toggle don't render and cards show everything. */
-.answer-bar, .cmd-more-toggle { display: none; }
+/* one shell switch above a stage's command rows: a compact segmented control over native radios. Both this and the
+   summary are positioned so their visually hidden parts stay inside the scrolling content area. */
+.cmd-shells { position: relative; border: 0; margin: 0 0 var(--space-2); padding: 0; min-inline-size: 0; }
+.cmd-shells-track { display: inline-flex; gap: 2px; padding: var(--space-1); border-radius: var(--radius-control); background: var(--segment-track); }
+.cmd-shell-opt {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; min-block-size: var(--control-xs); padding-inline: var(--space-3);
+  border-radius: var(--radius-control); font-size: var(--type-small-size); font-weight: 500; color: var(--text-2); cursor: pointer;
+  transition: background-color var(--motion-settle) var(--ease-standard), color var(--motion-settle) var(--ease-standard);
+}
+.cmd-shell-opt:hover { color: var(--text-1); }
+.cmd-shell-opt:has(input:checked) { background: var(--segment-thumb); color: var(--text-1); font-weight: 600; box-shadow: var(--surface-lift); }
+.cmd-shell-opt:has(input:focus-visible) { outline: var(--focus-width) solid var(--focus-ring); outline-offset: 1px; }
+.cmd-shell-opt input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.cmd-shells-legend { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* toolbox: the "This stage (n)" filter chip */
+.tb-chip {
+  display: inline-flex; align-items: center; min-block-size: var(--control-xs); margin-block-start: var(--space-2); padding: 0 var(--space-3);
+  border: 0; border-radius: var(--radius-pill); background: var(--fill-inset); color: var(--text-2);
+  font: inherit; font-size: var(--type-small-size); font-weight: 500; cursor: pointer;
+}
+.tb-chip:hover { color: var(--text-1); }
+.tb-chip[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; box-shadow: inset 0 0 0 1px var(--edge-selected); }
+@media (pointer: coarse) { .tb-chip, .cmd-shell-opt { min-block-size: var(--target-min); } }
+@media (forced-colors: active) {
+  .tb-chip, .cmd-shells-track { border: 1px solid CanvasText; }
+  :is(.tb-chip[aria-pressed="true"], .cmd-shell-opt:has(input:checked)) { forced-color-adjust: none; background: Highlight; color: HighlightText; box-shadow: none; }
+}
+
+/* ---- phones (#132): a sticky answer bar while the real field is off screen. Phone-only: above 640px the bar
+   doesn't render. (Command rows are collapsed at every width since #214.) */
+.answer-bar { display: none; }
 @media (max-width: 640px) {
   .answer-bar {
     display: grid; gap: var(--gap-tight); position: sticky; inset-block-end: var(--space-2); z-index: 2;
@@ -98,9 +159,6 @@
   .answer-bar-note { margin: 0; padding-inline: var(--space-1); font-size: var(--type-label-size); line-height: var(--type-label-lh); color: var(--text-2); }
   .answer-bar-note:empty { display: none; }
   .answer-bar-note.is-wrong { color: var(--danger-fg); }
-
-  .cmd-more-toggle { display: inline-flex; margin-block-start: var(--space-2); }
-  .cmd.is-collapsible:not(.is-open) .cmd-more { display: none; }
 }
 @media (max-width: 640px) and (forced-colors: active) {
   .answer-bar { border: 1px solid CanvasText; }
@@ -172,6 +230,8 @@ input[type="checkbox"].switch:checked::before { transform: none; background: var
 .center-card { padding: var(--pad-card-lg); border: 0; }
 .center-card.gate { padding: var(--pad-card); gap: var(--gap-stack); }
 .center-card.gate .input { min-block-size: 40px; }
+/* teacher-vouched reset (#254): the numbered next steps after a reset request */
+.reset-steps { margin: 0; padding-inline-start: var(--space-5); display: flex; flex-direction: column; gap: var(--gap-related); color: var(--text-2); }
 /* guest play (#176): the quieter second card under the sign-in form, and the upgrade dialog's form */
 .center-card.guest-choice { margin-block-start: var(--space-4); }
 .guest-choice h2 { margin: 0; font-size: var(--step-1); }
@@ -194,7 +254,7 @@ input[type="checkbox"].switch:checked::before { transform: none; background: var
 
 /* forced colours erase shadows: give the soft cards their edge back */
 @media (forced-colors: active) {
-  :is(.question-box, .result-panel, .hint, .cmd, .briefing, .score-card, .form-section, .error-summary, .lb-frozen-banner, .tip) { border: 1px solid CanvasText; }
+  :is(.question-box, .result-panel, .hint, .briefing, .score-card, .form-section, .error-summary, .lb-frozen-banner, .tip) { border: 1px solid CanvasText; }
   .step.is-viewing { border: 1px solid Highlight; }
 }
 
