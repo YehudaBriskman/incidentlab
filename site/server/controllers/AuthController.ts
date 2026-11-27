@@ -1,5 +1,13 @@
 import { z } from "zod";
-import { BoardVisibilityRequestSchema, CaseIdSchema, ChangePasswordRequestSchema, LoginRequestSchema, RegisterRequestSchema } from "../../shared/contract.ts";
+import {
+  BoardVisibilityRequestSchema,
+  CaseIdSchema,
+  ChangePasswordRequestSchema,
+  LoginRequestSchema,
+  RecoverRequestSchema,
+  RegenerateRecoveryCodeRequestSchema,
+  RegisterRequestSchema,
+} from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
 import type { AuthService } from "../services/AuthService.ts";
 import type { EventService } from "../services/EventService.ts";
@@ -39,14 +47,25 @@ export class AuthController {
 
   async register(req: Request, ip: string): Promise<Response> {
     const body = await parseBody(req, RegisterRequestSchema);
-    const { account, session } = await this.auth.register({ ...body, ip });
-    return withCookie(json(201, { account }), sessionCookie(req, session));
+    const { account, session, recoveryCode } = await this.auth.register({ ...body, ip });
+    return withCookie(json(201, { account, ...(recoveryCode === null ? {} : { recoveryCode }) }), sessionCookie(req, session));
   }
 
   async login(req: Request, ip: string): Promise<Response> {
     const body = await parseBody(req, LoginRequestSchema);
-    const { account, session } = await this.auth.login({ ...body, ip });
-    return withCookie(json(200, { account }), sessionCookie(req, session));
+    const { account, session, recoveryCode } = await this.auth.login({ ...body, ip });
+    return withCookie(json(200, { account, ...(recoveryCode === null ? {} : { recoveryCode }) }), sessionCookie(req, session));
+  }
+
+  /** Forgotten password: a recovery code sets a new one. No cookie: the player signs in afterwards. */
+  async recover(req: Request, ip: string): Promise<Response> {
+    const body = await parseBody(req, RecoverRequestSchema);
+    return json(200, await this.auth.recover({ ...body, ip }));
+  }
+
+  async regenerateRecoveryCode(req: Request): Promise<Response> {
+    const body = await parseBody(req, RegenerateRecoveryCodeRequestSchema);
+    return json(200, await this.auth.regenerateRecoveryCode(sessionToken(req), body));
   }
 
   async logout(req: Request): Promise<Response> {

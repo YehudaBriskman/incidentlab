@@ -1,4 +1,5 @@
-import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomInt, scrypt, timingSafeEqual } from "node:crypto";
+import { RECOVERY_CODE_ALPHABET, RECOVERY_CODE_GROUP_LENGTH, RECOVERY_CODE_GROUPS } from "../../shared/contract.ts";
 
 const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 export const ACCOUNT_ID_PATTERN = /^[0-9A-Za-z]{12}$/;
@@ -18,6 +19,12 @@ export const generateAccountId = (): string => {
   }
   return id;
 };
+
+/** A recovery code as shown to the player: `ABCDE-FGHJK-MNPQR-STUVW` (31^20, about 99 bits). Hash it normalized. */
+export const generateRecoveryCode = (): string =>
+  Array.from({ length: RECOVERY_CODE_GROUPS }, () =>
+    Array.from({ length: RECOVERY_CODE_GROUP_LENGTH }, () => RECOVERY_CODE_ALPHABET[randomInt(RECOVERY_CODE_ALPHABET.length)]).join(""),
+  ).join("-");
 
 export const generateSessionToken = (): string => randomBytes(32).toString("base64url");
 export const isWellFormedSessionToken = (token: string): boolean => SESSION_TOKEN_PATTERN.test(token);

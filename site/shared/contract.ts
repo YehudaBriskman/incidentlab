@@ -327,11 +327,15 @@ export const ErrorBodySchema = z.object({
   details: z.array(z.string()).optional(),
 });
 
-// POST /api/auth/register  -> 201 {account} + cookie (approved at once since #173). 409 code "reserved" /
-//                             "username-taken". 400 (no code the UI acts on) when the bot checks fail: `website`
-//                             filled, or `elapsedMs` under 2 s.
-// POST /api/auth/login     -> 200 {account} + cookie (403 code "rejected" for rejected accounts).
+// POST /api/auth/register  -> 201 {account, recoveryCode} + cookie (approved at once since #173; the plain recovery
+//                             code is in this response only). 409 code "reserved" / "username-taken". 400 (no code
+//                             the UI acts on) when the bot checks fail: `website` filled, or `elapsedMs` under 2 s.
+// POST /api/auth/login     -> 200 {account, recoveryCode?} + cookie (403 code "rejected" for rejected accounts).
+//                             `recoveryCode` only when this sign-in issued the account's first code (#174).
 //                             username "admin" + the ADMIN_KEY -> an admin session (account.role "admin", 12 h).
+// POST /api/auth/recover {username, recoveryCode, newPassword} -> 200 {recoveryCode}  (no cookie: sign in after it)
+//                             401 code "bad-recovery-code"; every session of the account ends; the old code is spent.
+// POST /api/me/recovery-code {currentPassword} -> 200 {recoveryCode}  (replaces the code; 400 "bad-credentials")
 export const CredentialsSchema = z.object({ username: UsernameSchema, password: PasswordSchema });
 /** Sign-up form: how long the form was open before submit; below this the server refuses it as a bot. */
 export const MIN_SIGNUP_FORM_MS = 2_000;
@@ -345,6 +349,21 @@ export const RegisterRequestSchema = CredentialsSchema.extend({
 export const ChangePasswordRequestSchema = z.object({ currentPassword: z.string().min(1).max(128), newPassword: PasswordSchema });
 export const LoginRequestSchema = z.object({ username: z.string().trim().min(1).max(64), password: z.string().min(1).max(128) });
 export const AccountResponseSchema = z.object({ account: AccountViewSchema });
+/** Recovery codes (#174): 4 groups of 5 from an alphabet without 0/O, 1/I/L, so they read back unambiguously. */
+export const RECOVERY_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+export const RECOVERY_CODE_GROUPS = 4;
+export const RECOVERY_CODE_GROUP_LENGTH = 5;
+/** Canonical form of a typed code: case, spaces and dashes don't matter. */
+export const normalizeRecoveryCode = (code: string): string => code.toUpperCase().replace(/[\s-]+/g, "");
+/** Register and login: the account, plus a freshly issued recovery code when there is one (shown once). */
+export const AuthResponseSchema = AccountResponseSchema.extend({ recoveryCode: z.string().optional() });
+export const RecoverRequestSchema = z.object({
+  username: z.string().trim().min(1).max(64),
+  recoveryCode: z.string().trim().min(1).max(64),
+  newPassword: PasswordSchema,
+});
+export const RegenerateRecoveryCodeRequestSchema = z.object({ currentPassword: z.string().min(1).max(128) });
+export const RecoveryCodeResponseSchema = z.object({ recoveryCode: z.string() });
 // POST /api/auth/logout (body {}) -> 204, clears the cookie
 // GET  /api/me -> {account}   (401 when not signed in)
 // GET  /api/session -> {account | null}   (always 200: the signed-out probe the browser uses, so a visitor's console stays clean)
