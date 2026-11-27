@@ -1,5 +1,5 @@
 // The opt-in global leaderboard (#175): a player is off the public board until they turn on the switch on
-// #/me, and turning it off removes them again.
+// #/settings/privacy (#219), and turning it off removes them again. My stats' rank tile follows.
 import { expect, test, type Page } from "@playwright/test";
 import { answerFor, approveAccount, randomUsername } from "./support";
 
@@ -35,29 +35,33 @@ test("opting in puts you on #/leaderboard, and opting out removes you", async ({
     await expect(page.getByRole("dialog", { name: "Account" })).toContainText("Hidden from the board");
     await page.keyboard.press("Escape");
     await note.getByRole("link", { name: "Show me on the board" }).click();
-    await expect(page).toHaveURL(/#\/me$/);
+    await expect(page).toHaveURL(/#\/settings\/privacy$/);
   });
 
   const toggle = page.getByRole("switch", { name: "Show me on the global leaderboard" });
+  const rankTile = page.locator(".stat-tile").filter({ hasText: "Global rank" });
   await test.step("turn the switch on: the rank tile and the board follow", async () => {
     await expect(toggle).not.toBeChecked();
-    await expect(page.locator(".stat-tile").filter({ hasText: "Global rank" })).toContainText("Not on the board");
-    await expect(page.locator("#me-board-note")).toContainText("your username and score are public");
+    await expect(page.locator("#settings-board-note")).toContainText("your username and score are public");
     await toggle.check();
     await expect(page.locator(".toast-host .toast")).toContainText("You're on the global leaderboard.");
     await expect(toggle).toBeChecked();
-    await expect(page.locator(".stat-tile").filter({ hasText: "Global rank" })).not.toContainText("Not on the board");
+    await page.goto("/#/me");
+    await expect(rankTile).toBeVisible();
+    await expect(rankTile).not.toContainText("Not on the board");
     await page.goto("/#/leaderboard");
     await expect(boardRow(page, username)).toHaveCount(1);
     await expect(boardRow(page, username)).toHaveClass(/is-me/);
     await expect(page.locator(".lb-optin")).not.toContainText("You're hidden");
   });
 
-  await test.step("turn it off: gone from the board", async () => {
-    await page.goto("/#/me");
+  await test.step("turn it off: gone from the board, and My stats says so", async () => {
+    await page.goto("/#/settings/privacy");
     await expect(toggle).toBeChecked();
     await toggle.uncheck();
     await expect(page.locator(".toast-host .toast").last()).toContainText("You're hidden from the global leaderboard.");
+    await page.goto("/#/me");
+    await expect(rankTile).toContainText("Not on the board");
     await page.goto("/#/leaderboard");
     await expect(page.locator(".lb-body")).toHaveAttribute("aria-busy", "false");
     await expect(page.locator(".lb-optin")).toContainText("You're hidden from this board.");
@@ -69,7 +73,7 @@ test("the switch keeps working in Hebrew (RTL)", async ({ page }) => {
   await scoringPlayer(page);
   await page.goto("/");
   await page.evaluate(() => localStorage.setItem("il.lang", "he"));
-  await page.goto("/#/me");
+  await page.goto("/#/settings/privacy");
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
   const toggle = page.getByRole("switch", { name: "הציגו אותי בטבלת המובילים העולמית" });

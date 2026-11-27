@@ -140,10 +140,7 @@
 .ach-desc { font-size: var(--type-small-size); }
 .achievements h2, .stats-page h2 { font-size: var(--type-title-size); }
 
-/* ---- My stats: the global-board opt-in (#175). A checkbox with role="switch", drawn as a pill track ---- */
-.board-pref { margin-block-end: var(--gap-section); }
-.board-pref .board-switch { align-items: center; min-block-size: var(--target-min); font-weight: 500; }
-.board-pref .board-note { margin-block: var(--space-2) 0; max-inline-size: 65ch; }
+/* ---- The global-board opt-in (#175, on #/settings/privacy since #219). A checkbox with role="switch", drawn as a pill track ---- */
 input[type="checkbox"].switch {
   inline-size: 36px; block-size: 20px; margin: 0; padding-inline: 2px; place-content: center start;
   border-radius: var(--radius-pill);
