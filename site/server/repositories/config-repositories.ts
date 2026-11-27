@@ -76,6 +76,13 @@ export class AuditRepository {
   async append(entry: AuditEntry): Promise<void> {
     await this.kv.set(`audit:${entry.at}:${randomBytes(4).toString("hex")}`, entry);
   }
+  /** Every audit key, oldest first (`audit:<isoTimestamp>:<random>`). */
+  async listKeys(): Promise<string[]> {
+    return (await this.kv.listKeys("audit:")).sort();
+  }
+  async delete(key: string): Promise<void> {
+    if (key.startsWith("audit:")) await this.kv.delete(key);
+  }
   /** Newest first. Keys sort by ISO timestamp, so the tail of the listing is the newest. */
   async latest(limit: number): Promise<AuditEntry[]> {
     const keys = (await this.kv.listKeys("audit:")).sort().slice(-Math.min(limit, MAX_AUDIT_READ)).reverse();

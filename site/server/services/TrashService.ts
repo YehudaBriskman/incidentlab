@@ -64,6 +64,12 @@ export class TrashService {
     return out.sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
   }
 
+  /** Ids of entries past the restore window (the hygiene job discards them). Read-only. */
+  async expiredIds(): Promise<string[]> {
+    const nowMs = this.now().getTime();
+    return (await this.trash.list()).filter(({ bundle }) => Date.parse(bundle.deletedAt) + TRASH_RETENTION_DAYS * DAY_MS <= nowMs).map(({ id }) => id);
+  }
+
   /** The newest live trash entry for a deleted case, or null. */
   async findCaseEntry(caseId: string): Promise<string | null> {
     const entries = await this.list();
@@ -89,7 +95,8 @@ export class TrashService {
     if (bundle.account) {
       const account = bundle.account;
       if (await this.repos.accounts.get(account.id)) throw new AppError(409, "that account exists again", { code: "conflict" });
-      if (!(await this.repos.usernames.claim(sha256Hex(account.usernameKey), account.id))) {
+      // Guests never hold a username (#176): restoring one must not claim its generated name.
+      if (account.kind !== "guest" && !(await this.repos.usernames.claim(sha256Hex(account.usernameKey), account.id))) {
         throw new AppError(409, `the username ${account.username} was taken by someone else since`, { code: "conflict" });
       }
       await this.repos.accounts.saveIfMatch(account, null);

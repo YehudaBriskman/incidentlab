@@ -11,6 +11,8 @@
 //   node --experimental-strip-types scripts/data.ts publish <case-id> <version> [--accept-answer-changes] [--url <base>]
 //   node --experimental-strip-types scripts/data.ts usage      (read-only: monthly bandwidth and counters vs the free plan)
 //   node --experimental-strip-types scripts/data.ts gc-evidence [--apply]   (evidence chunks nothing uses; dry run first)
+//   node --experimental-strip-types scripts/data.ts gc-accounts [--apply]   (idle guests, expired sessions and rate
+//     limits, old audit, expired trash: the weekly hygiene pass, #177; dry run first)
 //     upload/publish go through the HTTP API (scripts/upload-case.ts), not Blobs: the URL defaults to the
 //     local server, production needs an explicit --url.
 //
@@ -25,6 +27,7 @@ import { BACKUP_STORE, BlobsKvStore, LEGACY_STORE, PRIMARY_STORE } from "../site
 import type { BlobsCredentials } from "../site/server/repositories/KvStore.ts";
 import { BlobsByteStore } from "../site/server/repositories/ByteStore.ts";
 import { EvidenceGcService, GcAbort } from "../site/server/services/EvidenceGcService.ts";
+import { AUDIT_RETENTION_DAYS, GUEST_IDLE_DAYS, createAccountHygiene } from "../site/server/services/AccountHygieneService.ts";
 import { SnapshotSchema, diffSnapshot, restoreSnapshot, takeSnapshot } from "../site/server/services/BackupService.ts";
 import type { Snapshot, SnapshotDiff } from "../site/server/services/BackupService.ts";
 import { runPublishCli, runUploadCli } from "./upload-case.ts";
@@ -140,6 +143,24 @@ const main = async (): Promise<void> => {
       }
       return;
     }
+    case "gc-accounts": {
+      // The weekly hygiene pass (#177) by hand. Dry run unless --apply; --apply takes a backup first.
+      const hygiene = createAccountHygiene(store(PRIMARY_STORE), () => new Date());
+      const plan = await hygiene.run({ apply: false });
+      console.log(`[data] idle guests (not seen for ${GUEST_IDLE_DAYS} days): ${plan.idleGuests.length}, with ${plan.guestProgress} progress records`);
+      for (const name of plan.idleGuests.slice(0, 20)) console.log(`[data]   ${name}`);
+      if (plan.idleGuests.length > 20) console.log(`[data]   … and ${plan.idleGuests.length - 20} more`);
+      console.log(`[data] expired sessions: ${plan.expiredSessions}, stale rate limits: ${plan.staleRateLimits}`);
+      console.log(`[data] audit entries older than ${AUDIT_RETENTION_DAYS} days: ${plan.oldAudit}, expired trash entries: ${plan.expiredTrash}`);
+      if (!flag("--apply")) {
+        console.log("[data] dry run: nothing changed. Re-run with --apply (takes a backup first; guests go to the trash, restorable for 7 days).");
+        return;
+      }
+      await backupToDisk("pre-gc-accounts");
+      const done = await hygiene.run({ apply: true });
+      console.log(`[data] trashed ${done.idleGuests.length} guests (${done.guestProgress} progress records); deleted ${done.expiredSessions} sessions, ${done.staleRateLimits} rate limits, ${done.oldAudit} audit entries, ${done.expiredTrash} trash entries.`);
+      return;
+    }
     case "migrate": {
       const primary = store(PRIMARY_STORE);
       const pending = await pendingMigrations(primary, MIGRATIONS);
@@ -172,7 +193,7 @@ const main = async (): Promise<void> => {
       return;
     }
     default:
-      die("commands: backup | list-backups | restore <src> [--apply] [--prune] | migrate [--apply|--check] | upload <package> [--publish] [--accept-answer-changes] [--url <base>] | publish <case-id> <version> [--accept-answer-changes] [--url <base>] | usage | gc-evidence [--apply]", 2);
+      die("commands: backup | list-backups | restore <src> [--apply] [--prune] | migrate [--apply|--check] | upload <package> [--publish] [--accept-answer-changes] [--url <base>] | publish <case-id> <version> [--accept-answer-changes] [--url <base>] | usage | gc-evidence [--apply] | gc-accounts [--apply]", 2);
   }
 };
 
