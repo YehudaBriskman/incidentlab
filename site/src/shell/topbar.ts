@@ -3,6 +3,7 @@
 // the ⚙ display settings and the account menu. It replaces the old navbar and the live strip under it.
 import { T } from "../i18n/strings-player";
 import { TA } from "../i18n/strings-account";
+import { TB } from "../i18n/strings-board";
 import { TG } from "../i18n/strings-game";
 import { TS } from "../i18n/strings-shell";
 import { onConnectivity } from "../lib/api";
@@ -212,7 +213,14 @@ function createAccountMenu(): HTMLElement {
         "div",
         { class: "account-head" },
         h("span", { class: "avatar is-lg", "aria-hidden": "true" }, initials(name)),
-        h("span", { class: "account-who" }, h("bdi", { class: "account-name" }, name), h("span", { class: "account-role" }, role)),
+        h(
+          "span",
+          { class: "account-who" },
+          h("bdi", { class: "account-name" }, name),
+          h("span", { class: "account-role" }, role),
+          // Opt-in board (#175): say so while the player isn't listed publicly.
+          showStats && account.kind === "user" && !account.showOnGlobalBoard ? h("span", { class: "account-role account-board" }, TB().menuHidden) : null,
+        ),
       ),
       h(
         "ul",

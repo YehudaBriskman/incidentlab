@@ -10,6 +10,7 @@ import { cachedEvent, eventPhase, formatCountdown, isEventActive, onEventChange 
 import { cachedAccount, loadAccount } from "../lib/session";
 import type { AccountView } from "../../shared/contract";
 import { formatNumber, getLang } from "../i18n/i18n";
+import { TB } from "../i18n/strings-board";
 import { TG } from "../i18n/strings-game";
 import { TO } from "../i18n/strings-onboard";
 import { T } from "../i18n/strings-player";
@@ -86,16 +87,19 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): vo
   document.title = `${TG().lbTitle} · IncidentLab`;
   document.body.classList.toggle("projector", projector);
 
-  // Only an approved player can have a row; the admin session and pending players have none.
-  const keyOf = (a: AccountView | null): string | null => (a !== null && a.role !== "admin" && a.status === "approved" ? usernameKey(a.username) : null);
+  // Only an approved, opted-in player can have a row (#175); the admin session, guests, pending players and
+  // players who keep themselves off the board have none.
+  const canPlay = (a: AccountView | null): a is AccountView => a !== null && a.role !== "admin" && a.status === "approved" && a.kind === "user";
+  const keyOf = (a: AccountView | null): string | null => (canPlay(a) && a.showOnGlobalBoard ? usernameKey(a.username) : null);
   let me = cachedAccount();
   let myKey = keyOf(me);
   // Cold load: the account may answer after the first board; redraw with the "you" row then.
   void loadAccount().then(
     (account) => {
-      if (keyOf(account) === myKey) return;
+      if (keyOf(account) === myKey && canPlay(account) === canPlay(me)) return;
       me = account;
       myKey = keyOf(account);
+      drawOptIn();
       if (lastData !== null && root.contains(body)) drawTable(lastData);
     },
     () => undefined,
@@ -126,6 +130,16 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): vo
   const frozenEl = h("div", { class: "lb-frozen-banner", hidden: true });
   const frozenRegion = h("div", { role: "status" }, frozenEl);
   const updatedEl = h("p", { class: "lb-updated muted small" });
+  // Who is listed: only players who opted in. A signed-in player who isn't gets the way to the setting.
+  const optInEl = h("p", { class: "lb-optin muted small", hidden: projector });
+  const drawOptIn = (): void => {
+    const hidden = canPlay(me) && !me.showOnGlobalBoard;
+    setChildren(
+      optInEl,
+      TB().lbOptInNote,
+      hidden ? [" ", TB().lbYouHidden, " ", h("a", { href: "#/me" }, TB().lbOptInLink)] : null,
+    );
+  };
   const subEl = h("p", { class: "muted small lb-sub" });
   const body = h("div", { class: "lb-body", "aria-busy": "true" });
   const projectorLink = h(
@@ -273,6 +287,7 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): vo
         ),
         projector ? null : h("div", { class: "lb-tools" }, h("label", { class: "field-label", for: "lb-case" }, TG().lbShow), select, projectorLink),
       ),
+      optInEl,
       frozenRegion,
       body,
       subEl,
@@ -310,6 +325,7 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): vo
   }
 
   drawEvent();
+  drawOptIn();
   drawState(null);
   unsubscribe = onEventChange(drawEvent);
   tickTimer = window.setInterval(drawEvent, 1000);

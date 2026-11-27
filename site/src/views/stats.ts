@@ -1,10 +1,10 @@
 // "My stats": the signed-in player's totals, rank and per-case breakdown.
-import { ACHIEVEMENT_IDS, type CaseStats, type LeaderboardResponse, type UserStats } from "../../shared/contract";
+import { ACHIEVEMENT_IDS, type AccountView, type CaseStats, type LeaderboardResponse, type UserStats } from "../../shared/contract";
 import { caseSummary } from "../content/load";
-import { ApiError, fetchLeaderboard, fetchMyStats } from "../lib/api";
+import { ApiError, fetchLeaderboard, fetchMyStats, setBoardVisibility } from "../lib/api";
 import { h, html, setChildren, type Child } from "../lib/dom";
 import { iconSvg } from "../shell/icons";
-import { tooltip } from "../lib/overlay";
+import { toast, tooltip } from "../lib/overlay";
 import "../player.css";
 import { dataTable, type Column } from "../components/dataTable";
 import { statGrid, statTile } from "../components/statGrid";
@@ -12,6 +12,7 @@ import { formatElapsed } from "../lib/time";
 import { formatNumber, getLang } from "../i18n/i18n";
 import { setAccount } from "../lib/session";
 import { TA } from "../i18n/strings-account";
+import { TB } from "../i18n/strings-board";
 import { TG, achievementInfo } from "../i18n/strings-game";
 import { TO } from "../i18n/strings-onboard";
 import { T } from "../i18n/strings-player";
@@ -139,25 +140,92 @@ function median(values: readonly number[]): number | null {
   return sorted.length % 2 === 1 ? (sorted[mid] ?? null) : Math.round(((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2);
 }
 
-function draw(root: HTMLElement, stats: UserStats, board: LeaderboardResponse | null): void {
-  const since = new Intl.DateTimeFormat(locale(), { day: "numeric", month: "long", year: "numeric" }).format(new Date(stats.createdAt));
-  const tries = stats.stagesSolved + stats.wrongAttempts;
-  const pct = stats.accuracy === null ? null : new Intl.NumberFormat(locale(), { style: "percent", maximumFractionDigits: 0 }).format(stats.accuracy);
+/** The four KPI tiles. Rank: the place on the live public board, or why there is none (#175). */
+function kpiGrid(stats: UserStats, board: LeaderboardResponse | null): HTMLElement {
   const released = stats.cases.length;
   const inProgress = stats.cases.filter((c) => c.status === "in-progress").length;
-  const firstBloods = stats.cases.reduce((sum, c) => sum + c.firstBloods, 0);
   const completed = stats.cases.filter((c) => c.status === "completed");
   const parDiff = completed.length > 0 ? completed.reduce((sum, c) => sum + c.score - c.maxScore, 0) : null;
-  // Class comparisons come from the live public board (a frozen board would compare against stale scores).
+  // Comparisons come from the live public board (a frozen board would compare against stale scores).
   const live = board !== null && !board.frozen ? board : null;
   const classMedian = live !== null && live.entries.length >= 2 ? median(live.entries.map((e) => e.score)) : null;
   const ranked = live?.entries.length ?? null;
-  const rankValue =
-    stats.rank === null || stats.totalScore === 0
-      ? TO().unranked
-      : ranked !== null
-        ? TO().rankOfN(stats.rank, Math.max(ranked, stats.rank))
-        : TO().rankAlone(stats.rank);
+  const rankTile = !stats.onGlobalBoard
+    ? kpi(TB().kpiRank, TB().notOnBoard, null, [TB().notOnBoardSub])
+    : stats.rank === null || stats.totalScore === 0
+      ? kpi(TB().kpiRank, TO().unranked, null, [TO().unrankedSub])
+      : kpi(TB().kpiRank, ranked !== null ? TO().rankOfN(stats.rank, Math.max(ranked, stats.rank)) : TO().rankAlone(stats.rank), null, []);
+  return statGrid([
+    kpi(TO().kpiScore, formatNumber(stats.totalScore), TO().ptsUnit, [
+      classMedian !== null ? TO().vsMedian(stats.totalScore - classMedian, classMedian) : null,
+      parDiff !== null ? TO().vsPar(parDiff) : null,
+    ]),
+    rankTile,
+    kpi(TO().kpiCases, TO().casesOf(stats.casesCompleted, released), null, [inProgress > 0 ? TO().inProgress(inProgress) : null]),
+    kpi(TO().kpiStreak, TO().streakDays(stats.streak.current), null, [TO().streakBest(stats.streak.best)]),
+  ]);
+}
+
+/**
+ * The opt-in switch for the public global leaderboard (#175), off by default, with what turning it on makes
+ * public. A native checkbox with role="switch", so it keeps the keyboard, label and form behaviour.
+ */
+function boardSection(account: AccountView, stats: UserStats, onSaved: (account: AccountView) => void): HTMLElement {
+  const title = h("h2", { id: "board-h", class: "section-title" }, TB().sectionTitle);
+  if (account.kind === "guest") {
+    return h("section", { class: "board-pref", id: "board", "aria-labelledby": "board-h" }, title, h("p", { class: "muted small" }, TB().guestNote));
+  }
+  const input = h("input", { id: "me-board", type: "checkbox", role: "switch", class: "switch", "aria-describedby": "me-board-note" });
+  input.checked = stats.onGlobalBoard;
+  let busy = false;
+  input.addEventListener("change", () => {
+    const show = input.checked;
+    if (busy) {
+      input.checked = !show; // one change at a time
+      return;
+    }
+    busy = true;
+    input.setAttribute("aria-busy", "true");
+    setBoardVisibility(show)
+      .then((updated) => {
+        toast({ tone: "success", text: show ? TB().shownToast : TB().hiddenToast });
+        onSaved(updated);
+      })
+      .catch((err: unknown) => {
+        input.checked = !show;
+        toast({ tone: "error", text: err instanceof ApiError ? err.message : TB().saveFailed });
+      })
+      .finally(() => {
+        busy = false;
+        input.removeAttribute("aria-busy");
+      });
+  });
+  return h(
+    "section",
+    { class: "board-pref", id: "board", "aria-labelledby": "board-h" },
+    title,
+    h("label", { class: "check board-switch", for: "me-board" }, input, h("span", {}, TB().switchLabel)),
+    h("p", { id: "me-board-note", class: "muted small board-note" }, TB().privacyNote),
+  );
+}
+
+function draw(root: HTMLElement, account: AccountView, stats: UserStats, board: LeaderboardResponse | null): void {
+  const since = new Intl.DateTimeFormat(locale(), { day: "numeric", month: "long", year: "numeric" }).format(new Date(stats.createdAt));
+  const tries = stats.stagesSolved + stats.wrongAttempts;
+  const pct = stats.accuracy === null ? null : new Intl.NumberFormat(locale(), { style: "percent", maximumFractionDigits: 0 }).format(stats.accuracy);
+  const firstBloods = stats.cases.reduce((sum, c) => sum + c.firstBloods, 0);
+  let grid = kpiGrid(stats, board);
+  // After a toggle the rank changes: refresh the tiles only, so focus stays on the switch.
+  const onBoardSaved = (updated: AccountView): void => {
+    setAccount(updated);
+    Promise.all([fetchMyStats(), fetchLeaderboard(null).catch(() => null)])
+      .then(([fresh, freshBoard]) => {
+        const next = kpiGrid(fresh, freshBoard);
+        grid.replaceWith(next);
+        grid = next;
+      })
+      .catch(() => undefined); // the tiles keep the old rank until the next visit
+  };
   // Each pair in its own <div> (valid inside <dl>): the grid places whole pairs, so a label can never wrap away
   // from its value onto another row.
   const detail = (label: string, value: Child): HTMLElement => h("div", { class: "detail-pair" }, h("dt", {}, label), h("dd", {}, value));
@@ -170,15 +238,8 @@ function draw(root: HTMLElement, stats: UserStats, board: LeaderboardResponse | 
       h("a", { class: "back-link", href: "#/" }, T().navCases),
       h("h1", {}, TA().statsTitle),
       withTip(h("p", { class: "page-meta" }, h("strong", {}, h("bdi", {}, stats.username)), " · ", TA().memberSince(since)), TO().statsSub),
-      statGrid([
-        kpi(TO().kpiScore, formatNumber(stats.totalScore), TO().ptsUnit, [
-          classMedian !== null ? TO().vsMedian(stats.totalScore - classMedian, classMedian) : null,
-          parDiff !== null ? TO().vsPar(parDiff) : null,
-        ]),
-        kpi(TO().kpiRank, rankValue, null, [stats.rank === null || stats.totalScore === 0 ? TO().unrankedSub : null]),
-        kpi(TO().kpiCases, TO().casesOf(stats.casesCompleted, released), null, [inProgress > 0 ? TO().inProgress(inProgress) : null]),
-        kpi(TO().kpiStreak, TO().streakDays(stats.streak.current), null, [TO().streakBest(stats.streak.best)]),
-      ]),
+      grid,
+      boardSection(account, stats, onBoardSaved),
       h(
         "section",
         { class: "stat-details", "aria-labelledby": "detail-h" },
@@ -222,11 +283,11 @@ export function renderStats(root: HTMLElement): void {
   withApprovedAccount(
     root,
     TA().statsTitle,
-    () => {
+    (account) => {
       setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted" }, TA().statsLoading)));
       const board = fetchLeaderboard(null).catch(() => null); // comparisons only: never blocks the page
       Promise.all([fetchMyStats(), board])
-        .then(([stats, leaderboard]) => draw(root, stats, leaderboard))
+        .then(([stats, leaderboard]) => draw(root, account, stats, leaderboard))
         .catch((err: unknown) => {
           setChildren(
             root,
