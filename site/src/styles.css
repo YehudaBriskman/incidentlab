@@ -1877,6 +1877,16 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
 .status-pill.is-case-published { --pill-fg: var(--success-fg); --pill-bg: var(--success-bg); --pill-line: var(--success-fg); }
 .status-pill.is-case-draft { --pill-fg: var(--warning-fg); --pill-bg: var(--warning-bg); --pill-line: var(--warning-fg); }
 .status-pill.is-case-trashed { --pill-fg: var(--danger-fg); --pill-bg: var(--danger-bg); --pill-line: var(--danger-fg); }
+/* Private cases and the owner's review (#184): visibility pills, the review line under them, class picker. */
+.status-pill.is-vis-public { --pill-fg: var(--success-fg); --pill-bg: var(--success-bg); --pill-line: var(--success-fg); }
+.status-pill.is-vis-private { --pill-fg: var(--info-fg); --pill-bg: var(--info-bg); --pill-line: var(--info-fg); }
+.author-review { display: block; margin-block-start: var(--space-1); font-size: var(--step--1); color: var(--text-muted); }
+.author-review.is-warning { color: var(--warning-fg); }
+.author-classes { border: 0; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.author-classes legend { padding: 0; margin-block-end: var(--space-1); font-weight: 600; }
+.review-page { max-inline-size: none; padding-block: var(--space-6); }
+.review-page h1 { margin: 0 0 var(--space-1); }
+.review-note { inline-size: 100%; min-block-size: 6rem; }
 
 /* =====================================================================
    Soft UI layer (DESIGN.md 3.0.0, after Liba): geometry, depth, glass and motion on top of the Night Shift

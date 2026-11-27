@@ -2,6 +2,8 @@ import { getLang, type Lang } from "../i18n/i18n";
 import { TeasersSchema, type CaseSummary, type CatalogEntry, type Teaser } from "./catalog-schema";
 import type { Case } from "../../shared/case";
 import { fetchDbCatalog, loadDbCase } from "./db-cases";
+import { fetchMyCases } from "../lib/api";
+import { loadAccount, mayHavePrivateCases, onAccountChange } from "../lib/session";
 import teasersRaw from "./teasers.json";
 
 /*
@@ -13,6 +15,9 @@ import teasersRaw from "./teasers.json";
  * 2. Full cases: GET /api/cases/<id>/content, fetched by `loadCase` only when a case route opens, in the
  *    active language (content/db-cases.ts), and cached per id, version and language. Hint texts and
  *    runnable commands are never in it: the server hands them out in `progress.unlocked` after charging.
+ * 3. Private cases (#184): never in the public catalog. When the session says the account may have some, the
+ *    personalised GET /api/me/cases lists the ones it may play, and they join the catalog for this page load
+ *    (fetched again when someone else signs in). Their content comes from the same content route, no-store.
  */
 
 export const FEATURED_CASE_ID = "3am-outage";
@@ -30,19 +35,54 @@ export const teasers: readonly Teaser[] = parseTeasers();
 /* ---------- catalog ---------- */
 
 let catalog = new Map<string, CatalogEntry>();
+let publicEntries: CatalogEntry[] = [];
+let privateEntries: CatalogEntry[] = [];
+/** The account the private entries belong to (null: signed out), so a sign-in or sign-out fetches them again. */
+let privateOwner: string | null = null;
 let catalogState: "loading" | "ready" | "failed" = "loading";
 const catalogListeners = new Set<() => void>();
 
+const rebuildCatalog = (): void => {
+  catalog = new Map([...privateEntries, ...publicEntries].map((e) => [e.en.id, e]));
+};
+
+/** The private cases this session may play; [] for visitors and whenever the call fails (public cases still load). */
+async function fetchPrivateEntries(): Promise<CatalogEntry[]> {
+  try {
+    const account = await loadAccount();
+    privateOwner = account?.id ?? null;
+    return account !== null && mayHavePrivateCases() ? await fetchMyCases() : [];
+  } catch {
+    return [];
+  }
+}
+
 async function fetchCatalog(): Promise<void> {
-  const entries = await fetchDbCatalog();
+  const [entries, mine] = await Promise.all([fetchDbCatalog(), fetchPrivateEntries()]);
   if (entries === null) {
     catalogState = "failed";
   } else {
-    catalog = new Map(entries.map((e) => [e.en.id, e]));
+    publicEntries = entries;
+    privateEntries = mine;
+    rebuildCatalog();
     catalogState = "ready";
   }
   for (const fn of catalogListeners) fn();
 }
+
+// Someone signed in or out after the catalog loaded: their private cases come or go (one call per sign-in).
+onAccountChange((account) => {
+  const id = account?.id ?? null;
+  if (catalogState === "loading" || id === privateOwner) return;
+  privateOwner = id;
+  const next = account === null || account.kind === "guest" ? Promise.resolve([]) : fetchMyCases().catch((): CatalogEntry[] => []);
+  void next.then((mine) => {
+    if (privateOwner !== id) return; // another change won meanwhile
+    privateEntries = mine;
+    rebuildCatalog();
+    for (const fn of catalogListeners) fn();
+  });
+});
 
 /** Resolves once the catalog has loaded, or could not be fetched (`catalogFailed()`); it never rejects. */
 export let catalogReady: Promise<void> = fetchCatalog();
