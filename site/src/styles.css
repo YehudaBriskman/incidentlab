@@ -1955,7 +1955,7 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
 .ov-sheet.is-bottom { border-start-start-radius: var(--radius-surface); border-start-end-radius: var(--radius-surface); }
 .ov-popover { border: 1px solid var(--border); border-radius: var(--radius-surface); box-shadow: var(--elevation-2); background: var(--level-3); }
 .ov-menu { padding: var(--space-1); }
-.ov-menu-item { min-block-size: 32px; border-radius: var(--radius-control); padding-inline: var(--space-2); transition: background-color var(--motion-settle) var(--ease-standard); }
+.ov-menu-item { min-block-size: max(var(--control-sm) - var(--space-1), var(--target-min)); border-radius: var(--radius-control); padding-inline: var(--space-2); transition: background-color var(--motion-settle) var(--ease-standard); }
 .ov-menu-item:hover { background: var(--hover); }
 .ov-tooltip { border: 1px solid var(--border); border-radius: var(--radius-control); box-shadow: var(--elevation-1); background: var(--level-3); padding: 6px var(--space-3); }
 .toast { border-color: var(--border); border-radius: var(--radius-card); box-shadow: var(--elevation-2); }
@@ -2161,7 +2161,7 @@ input[type="radio"] { inline-size: 16px; block-size: 16px; accent-color: var(--a
 /* ---- menu: 32px rows, 8px corners, soft accent hover; a check gutter when any row is checkable;
         full-bleed separators; the focus ring is inset and only shows when the row is not hovered ---- */
 .ov-menu { min-inline-size: 8rem; max-block-size: calc(100dvh - 2 * var(--space-2)); overflow-y: auto; }
-.ov-menu-item { position: relative; min-block-size: 32px; padding-block: 6px; padding-inline: var(--space-2); font-size: var(--type-small-size); gap: var(--space-2); }
+.ov-menu-item { position: relative; min-block-size: max(var(--control-sm) - var(--space-1), var(--target-min)); /* 32, 44 on touch (#247) */ padding-block: 6px; padding-inline: var(--space-2); font-size: var(--type-small-size); gap: var(--space-2); }
 .ov-menu-item:hover:not([aria-disabled="true"]), .ov-menu-item:focus-visible { background: var(--accent-soft); color: var(--accent-strong); }
 .ov-menu-item:focus-visible:not(:hover) { outline: 2px solid var(--focus-ring); outline-offset: -2px; box-shadow: none; }
 .ov-menu-item:focus-visible:hover { outline: none; }
