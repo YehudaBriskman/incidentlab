@@ -6,7 +6,6 @@ import "../admin.css";
 import { T } from "../i18n/strings-tools";
 import { getLang } from "../i18n/i18n";
 import {
-  QUESTION_ORDER,
   TRASH_RETENTION_DAYS,
   type AccountRecordRole,
   type AccountStatus,
@@ -18,9 +17,7 @@ import {
   type LiveEvent,
   type QuestionId,
   type Schedule,
-  type ScoreBreakdown,
   type Settings,
-  type StageStatus,
   type TodayResponse,
   type TrashEntry,
   type UserStats,
@@ -28,7 +25,7 @@ import {
 import { cachedCase } from "../content/load";
 import { cachedEvent, eventPhase, formatCountdown, serverNow as publicServerNow } from "../lib/event";
 import { dataTable, type Column } from "../components/dataTable";
-import { statGrid, statTile } from "../components/statGrid";
+import { statGrid } from "../components/statGrid";
 import { formActions, formField } from "../components/formLayout";
 import type { SortState } from "../components/table-core";
 import { copyButton, h, setChildren, type Child } from "../lib/dom";
@@ -73,6 +70,54 @@ import {
   type AdminProgressResult,
   type AdminStatsResult,
 } from "../lib/admin-api";
+import { caseMaxScore, caseQuestionIds, caseStages, caseTitle, questionTitle, type StageKey } from "./manage/caseInfo";
+import {
+  errMessage,
+  fmtDec1,
+  fmtInt,
+  formatDateTime,
+  formatDateTimeSec,
+  formatDateTimeSecZone,
+  formatDateTimeZone,
+  formatDuration,
+  formatFinish,
+  formatMinutes,
+  formatPct,
+  formatSeconds,
+  isoDay,
+  locale,
+  median,
+  ms,
+  pad2,
+  readPref,
+  relativeAgo,
+  relativeIn,
+  writePref,
+} from "./manage/format";
+import {
+  HELP_PREVIEW,
+  STUCK_WARN_MIN,
+  WRONG_ALERT_MIN,
+  WRONG_HELP_MIN,
+  commandsUsed,
+  finishDurationMs,
+  helpEntries,
+  isDone,
+  isFinishedStatus,
+  isIdle,
+  minutesSince,
+  progressCount,
+  signed,
+  sortPlayers,
+  stageLabel,
+  stageLongLabel,
+  stageStatus,
+  stageTooltip,
+  stuckLevel,
+  type HelpEntry,
+  type LiveSortKey,
+} from "./manage/progressMetrics";
+import { headWithHint, th, tile, tipped } from "./manage/ui";
 
 const POLL_MS = 5000;
 /** The dashboard poll refetches /api/today at most this often (see load()). */
@@ -80,15 +125,6 @@ const TODAY_REFRESH_MS = 60_000;
 /** Rows on the projector board; the rest are summed up as "+N more". */
 const BOARD_ROWS = 10;
 const MAX_BACKOFF_MS = 60000;
-const STUCK_WARN_MIN = 8;
-const STUCK_ALERT_MIN = 15;
-/** Wrong answers on the current stage that put a player on the "Needs help" list (and make it urgent). */
-const WRONG_HELP_MIN = 3;
-const WRONG_ALERT_MIN = 5;
-/** A player who started, hasn't finished and hasn't been seen for this long counts as idle. */
-const IDLE_MIN = 10;
-/** Needs help shows this many players before "Show all": the list must not push the grid off the screen. */
-const HELP_PREVIEW = 6;
 const DENSITY_STORAGE = "il.adminDensity";
 const ACCT_COLS_STORAGE = "il.adminAcctCols";
 const TILES_STORAGE = "il.adminTilesOpen";
@@ -116,8 +152,6 @@ const AUDIT_LIMIT = 100;
 const EVENT_QUICK_MINUTES = 60;
 const INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O, 1/I/L: easy to read aloud and type
 
-type StageKey = "setup" | QuestionId;
-type LiveSortKey = "score" | "progress" | "name" | "stuck";
 type AcctSortKey = "rank" | "newest" | "seen" | "name";
 type AcctFilter = "all" | AccountStatus;
 type AuthMode = "key" | "session";
@@ -146,197 +180,6 @@ const isAdminHash = (hash: string): boolean => /^#\/?admin(\?|$)/.test(hash);
 /** Unsaved drafts carried over when the view re-renders in place (the language toggle re-runs the route). */
 let carried: { schedule: Schedule | null; event: LiveEvent | null } | null = null;
 
-// ---- content lookups (titles come from the case content, all loaded before this view renders; ids from the server) ----
-
-const QUESTION_IDS: ReadonlySet<string> = new Set<string>(QUESTION_ORDER);
-const isQuestionId = (id: string): id is QuestionId => QUESTION_IDS.has(id);
-
-function caseTitle(caseId: string): string {
-  return cachedCase(caseId)?.title ?? caseId;
-}
-
-function caseQuestionIds(caseId: string): QuestionId[] {
-  const c = cachedCase(caseId);
-  const ids = c ? c.questions.map((q) => q.id).filter(isQuestionId) : [];
-  return ids.length > 0 ? ids : [...QUESTION_ORDER];
-}
-
-function questionTitle(caseId: string, q: QuestionId): string {
-  return cachedCase(caseId)?.questions.find((x) => x.id === q)?.title ?? "";
-}
-
-function caseMaxScore(caseId: string): number | null {
-  const c = cachedCase(caseId);
-  return c ? c.questions.reduce((sum, q) => sum + q.points, 0) : null;
-}
-
-function caseStages(caseId: string): StageKey[] {
-  return ["setup", ...caseQuestionIds(caseId)];
-}
-
-// ---- formatting ----------------------------------------------------------------
-
-const locale = (): string => (getLang() === "he" ? "he-IL" : "en-GB");
-
-function ms(iso: string | null): number | null {
-  if (!iso) return null;
-  const t = Date.parse(iso);
-  return Number.isNaN(t) ? null : t;
-}
-
-type DurationUnit = "hour" | "minute" | "second";
-const unitFormats = new Map<string, Intl.NumberFormat>();
-/** "33 min" / "33 דק׳": one Intl unit formatter per locale and unit (cached; the poll formats hundreds a minute). */
-function formatUnit(n: number, unit: DurationUnit | "day"): string {
-  const key = `${locale()}|${unit}`;
-  let f = unitFormats.get(key);
-  if (!f) {
-    f = new Intl.NumberFormat(locale(), { style: "unit", unit, unitDisplay: "short" });
-    unitFormats.set(key, f);
-  }
-  return f.format(n);
-}
-
-/** Localized duration with two units at most: "1 hr 05 min", "33 min 38 sec", "33 דק׳ 38 שנ׳". */
-function formatDuration(totalMs: number): string {
-  const totalSec = Math.max(0, Math.round(totalMs / 1000));
-  const hrs = Math.floor(totalSec / 3600);
-  const mins = Math.floor((totalSec % 3600) / 60);
-  const secs = totalSec % 60;
-  if (hrs > 0) return mins > 0 ? `${formatUnit(hrs, "hour")} ${formatUnit(mins, "minute")}` : formatUnit(hrs, "hour");
-  if (mins > 0) return secs > 0 ? `${formatUnit(mins, "minute")} ${formatUnit(secs, "second")}` : formatUnit(mins, "minute");
-  return formatUnit(secs, "second");
-}
-
-/** A finish time: under a minute reads "< 1 min", not a broken-looking "0 sec". */
-const formatFinish = (totalMs: number): string => (totalMs < 60000 ? T().admUnderMinute : formatDuration(totalMs));
-
-/** Whole minutes ("12 min" / "12 דק׳"), for stuck and idle times. */
-const formatMinutes = (min: number): string => formatUnit(Math.max(0, Math.floor(min)), "minute");
-
-function formatSeconds(sec: number | null): string {
-  return sec === null ? "—" : formatDuration(sec * 1000);
-}
-
-/** Date and time in the app locale (en-GB / he-IL), never the browser's (often en-US) default. */
-function formatDateTime(iso: string | null): string {
-  const t = ms(iso);
-  if (t === null) return "—";
-  return new Intl.DateTimeFormat(locale(), { dateStyle: "medium", timeStyle: "short" }).format(t);
-}
-
-/** Puts a secondary detail (a full timestamp) into the shared tooltip instead of on screen. The trigger takes
- * keyboard focus, which opens the tooltip too, and carries the detail as visually hidden text so screen readers
- * get the full value whether or not the tooltip is open (#114). */
-function tipped<E extends HTMLElement>(el: E, detail: string): E {
-  el.tabIndex = 0;
-  el.classList.add("admin-tipped");
-  el.append(h("span", { class: "visually-hidden" }, `, ${detail}`));
-  tooltip(el, detail);
-  return el;
-}
-
-/** A section heading with its help text in a tooltip on an "i" button. The paragraph stays for touch screens,
- * where hover tooltips don't open (admin.css shows one or the other). */
-function headWithHint(heading: HTMLElement, hint: string): HTMLElement {
-  const btn = h("button", { type: "button", class: "admin-info", "aria-label": hint }, "i");
-  tooltip(btn, hint);
-  return h("div", { class: "admin-h2-row" }, heading, btn);
-}
-
-/** Date and time to the second ("25 Nov 2026, 14:04:11"), for the audit log. */
-function formatDateTimeSec(iso: string | null): string {
-  const t = ms(iso);
-  return t === null ? "—" : new Intl.DateTimeFormat(locale(), { dateStyle: "medium", timeStyle: "medium" }).format(t);
-}
-
-/** Same, with the browser's time zone named ("25 Nov 2026, 14:04:11 GMT+2"): the audit log's full-time tooltip. */
-function formatDateTimeSecZone(iso: string | null): string {
-  const t = ms(iso);
-  if (t === null) return "—";
-  return new Intl.DateTimeFormat(locale(), {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    timeZoneName: "short",
-  }).format(t);
-}
-
-/** Same, with the time zone named ("25 Nov 2026, 18:30 GMT+2"): for values typed in a browser-formatted picker. */
-function formatDateTimeZone(iso: string | null): string {
-  const t = ms(iso);
-  if (t === null) return "—";
-  return new Intl.DateTimeFormat(locale(), {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(t);
-}
-
-const numFormats = new Map<string, Intl.NumberFormat>();
-function numFormat(key: string, opts: Intl.NumberFormatOptions): Intl.NumberFormat {
-  const k = `${locale()}|${key}`;
-  let f = numFormats.get(k);
-  if (!f) {
-    f = new Intl.NumberFormat(locale(), opts);
-    numFormats.set(k, f);
-  }
-  return f;
-}
-/** Counts and scores with locale grouping ("1,475"). */
-const fmtInt = (n: number): string => numFormat("int", { maximumFractionDigits: 0 }).format(n);
-/** Averages with one decimal ("2.3"). */
-const fmtDec1 = (n: number): string => numFormat("dec1", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(n);
-
-function formatPct(ratio: number | null): string {
-  return ratio === null ? "—" : numFormat("pct", { style: "percent", maximumFractionDigits: 0 }).format(ratio);
-}
-
-/** "6 min ago" / "לפני 6 דק׳": the unit comes from Intl, the sentence from the catalogue. */
-function relativeAgo(iso: string | null, now: number): string {
-  const t = ms(iso);
-  if (t === null) return "—";
-  const sec = Math.max(0, Math.round((now - t) / 1000));
-  if (sec < 10) return T().admJustNow;
-  if (sec < 60) return T().admAgo(formatUnit(sec, "second"));
-  const min = Math.floor(sec / 60);
-  if (min < 60) return T().admAgo(formatUnit(min, "minute"));
-  const hrs = Math.floor(min / 60);
-  if (hrs < 24) return T().admAgo(formatUnit(hrs, "hour"));
-  return T().admAgo(formatUnit(Math.floor(hrs / 24), "day"));
-}
-
-/** "in 6 days" / "בעוד 6 ימים" for a future instant (localized by Intl). */
-function relativeIn(iso: string | null, now: number): string {
-  const t = ms(iso);
-  if (t === null) return "—";
-  const rtf = new Intl.RelativeTimeFormat(locale(), { numeric: "auto" });
-  const diffMin = Math.max(0, Math.round((t - now) / 60000));
-  if (diffMin >= 24 * 60) return rtf.format(Math.round(diffMin / (24 * 60)), "day");
-  if (diffMin >= 60) return rtf.format(Math.round(diffMin / 60), "hour");
-  return rtf.format(diffMin, "minute");
-}
-
-function median(values: readonly number[]): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const hi = sorted[mid] ?? 0;
-  if (sorted.length % 2 === 1) return hi;
-  const lo = sorted[mid - 1] ?? hi;
-  return (lo + hi) / 2;
-}
-
-const pad2 = (n: number): string => String(n).padStart(2, "0");
-const isoDay = (y: number, m0: number, d: number): string => `${y}-${pad2(m0 + 1)}-${pad2(d)}`;
-
 function isValidTimeZone(tz: string): boolean {
   if (tz.trim() === "") return false;
   try {
@@ -352,135 +195,6 @@ function timeZoneList(): string[] {
     return Intl.supportedValuesOf("timeZone");
   } catch {
     return [DEFAULT_TIMEZONE, "UTC"];
-  }
-}
-
-// ---- live (per case) player metrics ----------------------------------------------
-
-function stageLabel(stage: StageKey): string {
-  return stage === "setup" ? T().admSetup : stage.toUpperCase();
-}
-
-function stageLongLabel(caseId: string, stage: AdminProgress["currentStage"]): string {
-  if (stage === "done") return T().admFinished;
-  if (stage === "setup") return T().admSetup;
-  const title = questionTitle(caseId, stage);
-  return title ? `${stage.toUpperCase()} · ${title}` : stage.toUpperCase();
-}
-
-function stageStatus(p: AdminProgress, stage: StageKey): StageStatus {
-  if (stage === "setup") return p.setupDoneAt ? "solved" : p.startedAt ? "active" : "locked";
-  return p.stages[stage]?.status ?? "locked";
-}
-
-const isFinishedStatus = (s: StageStatus): boolean => s === "solved" || s === "revealed";
-
-function progressCount(p: AdminProgress, stages: readonly StageKey[]): number {
-  return stages.filter((s) => isFinishedStatus(stageStatus(p, s))).length;
-}
-
-const isDone = (p: AdminProgress): boolean => p.completedAt !== null || p.currentStage === "done";
-
-function stuckLevel(p: AdminProgress): "none" | "warn" | "alert" {
-  if (isDone(p)) return "none";
-  if (p.stuckMinutes >= STUCK_ALERT_MIN) return "alert";
-  if (p.stuckMinutes >= STUCK_WARN_MIN) return "warn";
-  return "none";
-}
-
-function minutesSince(iso: string | null, now: number): number | null {
-  const t = ms(iso);
-  return t === null ? null : Math.max(0, (now - t) / 60000);
-}
-
-/** Started, not finished, and not seen for IDLE_MIN minutes (left the room, or the tab is closed). */
-function isIdle(p: AdminProgress, now: number): boolean {
-  if (isDone(p) || p.startedAt === null) return false;
-  const seen = minutesSince(p.lastSeenAt, now);
-  return seen !== null && seen >= IDLE_MIN;
-}
-
-function currentWrong(p: AdminProgress): number {
-  const cur = p.currentStage;
-  return cur !== "setup" && cur !== "done" ? (p.stages[cur]?.wrongAttempts ?? 0) : 0;
-}
-
-type HelpLevel = "alert" | "warn" | "idle";
-type HelpEntry = { p: AdminProgress; level: HelpLevel; stuck: boolean; wrong: number; idleMin: number | null; urgency: number };
-
-/**
- * Who needs the instructor now: stuck >= STUCK_WARN_MIN on one stage, or >= WRONG_HELP_MIN wrong answers on it,
- * or idle. Urgent (alert) first, then warnings, then idle; inside a level the longest-stuck first.
- */
-function helpEntries(players: readonly AdminProgress[], now: number): HelpEntry[] {
-  const out: HelpEntry[] = [];
-  for (const p of players) {
-    if (isDone(p)) continue;
-    const wrong = currentWrong(p);
-    const stuck = p.stuckMinutes >= STUCK_WARN_MIN;
-    const manyWrong = wrong >= WRONG_HELP_MIN;
-    const idle = isIdle(p, now);
-    if (!stuck && !manyWrong && !idle) continue;
-    const level: HelpLevel =
-      p.stuckMinutes >= STUCK_ALERT_MIN || wrong >= WRONG_ALERT_MIN ? "alert" : stuck || manyWrong ? "warn" : "idle";
-    const rank = level === "alert" ? 2 : level === "warn" ? 1 : 0;
-    out.push({ p, level, stuck, wrong, idleMin: idle ? minutesSince(p.lastSeenAt, now) : null, urgency: rank * 1e6 + p.stuckMinutes * 10 + wrong });
-  }
-  return out.sort((a, b) => b.urgency - a.urgency || a.p.username.localeCompare(b.p.username));
-}
-
-/** Same definition the server uses for durationSeconds: setup done -> completed. */
-function finishDurationMs(p: AdminProgress): number | null {
-  const end = ms(p.completedAt);
-  const start = ms(p.setupDoneAt) ?? ms(p.startedAt);
-  return end !== null && start !== null ? Math.max(0, end - start) : null;
-}
-
-function stageTooltip(p: AdminProgress, stage: StageKey, now: number): string {
-  const status = stageStatus(p, stage);
-  if (stage === "setup") {
-    const start = ms(p.startedAt);
-    const end = ms(p.setupDoneAt) ?? now;
-    const spent = start !== null ? formatDuration(end - start) : "—";
-    return T().admSetupTip(p.setupDoneAt !== null, spent);
-  }
-  const sp = p.stages[stage];
-  const title = questionTitle(p.caseId, stage);
-  if (!sp || status === "locked") return `${stage.toUpperCase()} ${title}: ${T().admStatus("locked")}`;
-  const start = ms(sp.startedAt);
-  const end = ms(sp.finishedAt) ?? now;
-  const spent = start !== null ? formatDuration(end - start) : "—";
-  const lines = [
-    `${stage.toUpperCase()} ${title}: ${T().admStatus(status)}`,
-    T().admWrongAttempts(sp.wrongAttempts),
-    T().admHintsUsed(sp.hintsRevealed),
-    T().admCommandsUsed(sp.commandsRevealed),
-    T().admTime(spent),
-  ];
-  if (status === "solved") {
-    lines.push(T().admPoints(sp.points));
-    if (sp.breakdown) lines.push(...breakdownLines(sp.breakdown).map((l) => `  ${l}`));
-  }
-  return lines.join("\n");
-}
-
-function sortPlayers(players: readonly AdminProgress[], key: LiveSortKey, stages: readonly StageKey[]): AdminProgress[] {
-  const byName = (a: AdminProgress, b: AdminProgress): number => a.username.localeCompare(b.username);
-  const prog = (p: AdminProgress): number => progressCount(p, stages);
-  const list = [...players];
-  switch (key) {
-    case "score":
-      return list.sort((a, b) => b.score - a.score || prog(b) - prog(a) || byName(a, b));
-    case "progress":
-      return list.sort((a, b) => prog(b) - prog(a) || b.score - a.score || byName(a, b));
-    case "name":
-      return list.sort(byName);
-    case "stuck":
-      return list.sort((a, b) => {
-        const sa = isDone(a) ? -1 : a.stuckMinutes;
-        const sb = isDone(b) ? -1 : b.stuckMinutes;
-        return sb - sa || byName(a, b);
-      });
   }
 }
 
@@ -602,44 +316,6 @@ function randomInviteCode(): string {
   return `${chars.slice(0, 4).join("")}-${chars.slice(4).join("")}`;
 }
 
-// ---- scoring breakdown -------------------------------------------------------------------
-
-const signed = (n: number): string => (n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : "0");
-
-function breakdownLines(b: ScoreBreakdown): string[] {
-  const lines = [`${T().admBdBase} ${b.base}`];
-  if (b.hints) lines.push(`${T().admBdHints} ${signed(b.hints)}`);
-  if (b.commands) lines.push(`${T().admBdCommands} ${signed(b.commands)}`);
-  if (b.wrong) lines.push(`${T().admBdWrong} ${signed(b.wrong)}`);
-  if (b.time) lines.push(`${T().admBdTime} ${signed(b.time)}`);
-  if (b.clean) lines.push(`${T().admBdClean} ${signed(b.clean)}`);
-  if (b.firstBlood) lines.push(`${T().admBdFirstBlood} ${signed(b.firstBlood)}`);
-  lines.push(`${T().admBdTotal} ${b.total}`);
-  lines.push(T().admBdSolve(formatSeconds(b.solveSeconds), formatSeconds(b.targetSeconds)));
-  return lines;
-}
-
-/** Commands paid for on this case (summed over stages, like the server's UserStats). */
-function commandsUsed(p: AdminProgress): number {
-  return QUESTION_ORDER.reduce((sum, q) => sum + (p.stages[q]?.commandsRevealed ?? 0), 0);
-}
-
-function readPref(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null; // storage blocked: defaults apply
-  }
-}
-
-function writePref(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // storage blocked: the preference lasts for this page only
-  }
-}
-
 function readStoredTab(): TabId {
   try {
     const v = sessionStorage.getItem(TAB_STORAGE);
@@ -656,8 +332,6 @@ function storeTab(tab: TabId): void {
     // storage blocked: the tab just won't be remembered
   }
 }
-
-const errMessage = (err: unknown): string => (err instanceof Error ? err.message : T().admUnknownError);
 
 // ---- view ---------------------------------------------------------------------------
 
@@ -1282,15 +956,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     }
     statusBanner.update({ text: state.banner });
     statusBanner.show();
-  }
-
-  /** A KPI tile (components/statGrid.ts): label, value, one context line. */
-  function tile(label: string, value: string, sub?: string): HTMLElement {
-    return statTile({ label, value, subs: [sub ?? null], className: "admin-tile" });
-  }
-
-  function th(label: string, cls?: string): HTMLTableCellElement {
-    return h("th", { scope: "col", class: cls }, label);
   }
 
   // ---- confirms and row menus (lib/overlay.ts) ---------------------------------------------
