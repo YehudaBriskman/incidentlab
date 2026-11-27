@@ -295,13 +295,20 @@ export class AuthService {
 
   /** authenticate() + must be an approved player account that isn't waiting on a forced password change. */
   async requirePlayer(token: string | null): Promise<AccountRecord> {
-    const { principal } = await this.authenticate(token);
+    const principal = await this.requirePlayerOrAdmin(token);
     if (principal.kind === "admin") throw new AppError(403, "the admin account can't play; sign in as a player", { code: "admin" });
+    return principal.account;
+  }
+
+  /** The admin session, or a player that passes requirePlayer's checks (class routes accept both, #179). */
+  async requirePlayerOrAdmin(token: string | null): Promise<Principal> {
+    const { principal } = await this.authenticate(token);
+    if (principal.kind === "admin") return principal;
     const account = principal.account;
     if (account.status === "pending") throw new AppError(403, "this account is waiting for approval", { code: "pending" });
     if (account.status === "rejected") throw new AppError(403, "this account was not approved", { code: "rejected" });
     if (account.mustChangePassword) throw new AppError(403, "set a new password first", { code: "password-change-required" });
-    return account;
+    return principal;
   }
 
   /**
