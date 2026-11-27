@@ -52,8 +52,9 @@ export class AuthController {
 
   async register(req: Request, ip: string): Promise<Response> {
     const body = await parseBody(req, RegisterRequestSchema);
-    const { account, session, recoveryCode } = await this.auth.register({ ...body, ip });
-    return withCookie(json(201, { account, ...(recoveryCode === null ? {} : { recoveryCode }) }), sessionCookie(req, session));
+    const { account, session, recoveryCode, joinedClass } = await this.auth.register({ ...body, ip });
+    const body201 = { account, ...(recoveryCode === null ? {} : { recoveryCode }), ...(joinedClass === null ? {} : { class: joinedClass }) };
+    return withCookie(json(201, body201), sessionCookie(req, session));
   }
 
   async login(req: Request, ip: string): Promise<Response> {

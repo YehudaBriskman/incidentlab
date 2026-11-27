@@ -124,7 +124,7 @@ test("invite code still accepted; wrong code is refused; approve-all finds nothi
   const withCode = harness.client();
   const res = await withCode.json(await withCode.call("/auth/register", { body: { username: "coded", password: "password1", inviteCode: " class-2026 " } }), AccountResponseSchema);
   assert.equal(res.account.status, "approved");
-  await expectStatus(harness.client().call("/auth/register", { body: { username: "guess", password: "password1", inviteCode: "nope" } }), 400, "bad-invite-code");
+  await expectStatus(harness.client().call("/auth/register", { body: { username: "guess", password: "password1", inviteCode: "nope" } }), 400, "bad-class-code");
   // Sign-up is open (#173): accounts without a code are approved too, so approve-all has nothing to do.
   for (const name of ["open1", "open2", "open3"]) await harness.client().call("/auth/register", { body: { username: name, password: "password1" } });
   const all = await withCode.json(await harness.admin("/admin/accounts/approve-all", { body: {} }), ApproveAllResponseSchema);

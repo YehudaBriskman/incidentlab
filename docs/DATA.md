@@ -279,7 +279,10 @@ owned by `admin`):
 
 `config:*` stay as they are. Since #180 they no longer gate play: `config:schedule` is the global case of the day
 (the daily card and streaks), `config:event` the site announcement, global event clock and global-board freeze;
-`lockToToday` and `enforceWindow` are kept in the records (additive) but unused. The fixed id makes the migration
+`lockToToday` and `enforceWindow` are kept in the records (additive) but unused. `config:settings.inviteCode` is
+legacy too (#204): classes replaced the site invite code, sign-up resolves its optional code through `classcode:`
+and joins that class, and the owner console no longer edits the setting. A stored code is still accepted at
+sign-up (joining no class) and stays readable; nothing deletes it. The fixed id makes the migration
 idempotent: a second run changes nothing, and a run that stopped halfway is finished by the next one.
 
 ## Weekly hygiene (#177)
