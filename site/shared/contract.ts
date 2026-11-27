@@ -335,6 +335,11 @@ export const ErrorBodySchema = z.object({
   retryAfterSeconds: z.number().optional(),
   /** itemized problems (a rejected case upload lists every failed check) */
   details: z.array(z.string()).optional(),
+  /**
+   * Additive (#202, #203): a 409 `stale` from a play route carries the player's current progress, so a tab that
+   * acted on old state redraws from the server's instead of guessing.
+   */
+  progress: ProgressViewSchema.optional(),
 });
 
 // POST /api/auth/register  -> 201 {account, recoveryCode, class?} + cookie (approved at once since #173; the plain recovery
@@ -429,16 +434,22 @@ export type TodayResponse = z.infer<typeof TodayResponseSchema>;
 // GET  /api/cases/:caseId/progress           -> {progress}
 // POST /api/cases/:caseId/setup-done  {}     -> {progress}  (q1 becomes active)
 // POST /api/cases/:caseId/answer             -> {correct, progress}
-// POST /api/cases/:caseId/hint               -> {progress}
+// POST /api/cases/:caseId/hint {questionId, expectedHint?} -> {progress}
 // POST /api/cases/:caseId/reveal             -> {progress}
-// POST /api/cases/:caseId/reveal-command {toolId} -> {progress}  (−5 on the active stage; free if already
-//                                             revealed or the case is completed; 403 "locked" before setup)
+// POST /api/cases/:caseId/reveal-command {toolId, expectedStage?} -> {progress}  (−5 on the active stage; free if
+//                                             already revealed or the case is completed; 403 "locked" before setup)
+// The optional `expected*` fields (#202, #203) name what the client believes it is buying. When the server's state
+// differs (another tab bought it, a retried request already did), the route charges nothing and answers 409 code
+// "stale" with the current `progress` in the error body. Clients that leave them out keep the old behaviour.
 // GET  /api/cases/:caseId/debrief?lang=en|he -> {markdown}  (403 until every stage is finished)
 export const ProgressResponseSchema = z.object({ progress: ProgressViewSchema });
 export const AnswerRequestSchema = z.object({ questionId: QuestionIdSchema, answer: z.string().max(200) });
 export const AnswerResponseSchema = z.object({ correct: z.boolean(), progress: ProgressViewSchema });
 export const QuestionRequestSchema = z.object({ questionId: QuestionIdSchema });
-export const RevealCommandRequestSchema = z.object({ toolId: z.string().min(1).max(80) });
+/** `expectedHint`: the 0-based index of the hint being bought, i.e. how many hints the client shows as bought. */
+export const HintRequestSchema = QuestionRequestSchema.extend({ expectedHint: z.number().int().min(0).max(99).optional() });
+/** `expectedStage`: the stage the client shows as active, the one the command is charged to. */
+export const RevealCommandRequestSchema = z.object({ toolId: z.string().min(1).max(80), expectedStage: QuestionIdSchema.optional() });
 export const DebriefResponseSchema = z.object({ markdown: z.string() });
 
 // GET /api/me/stats -> UserStats

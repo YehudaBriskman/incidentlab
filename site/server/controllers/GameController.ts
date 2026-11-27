@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AnswerRequestSchema, QuestionRequestSchema, RevealCommandRequestSchema } from "../../shared/contract.ts";
+import { AnswerRequestSchema, HintRequestSchema, QuestionRequestSchema, RevealCommandRequestSchema } from "../../shared/contract.ts";
 import type { AuthService } from "../services/AuthService.ts";
 import type { CaseAccessService } from "../services/CaseAccessService.ts";
 import type { GameService, PlayContext } from "../services/GameService.ts";
@@ -47,14 +47,14 @@ export class GameController {
 
   async hint(req: Request, caseId: string): Promise<Response> {
     const ctx = await this.context(req, caseId);
-    const body = await parseBody(req, QuestionRequestSchema);
-    return json(200, { progress: await this.game.hint(ctx, body.questionId) });
+    const body = await parseBody(req, HintRequestSchema);
+    return json(200, { progress: await this.game.hint(ctx, body) });
   }
 
   async revealCommand(req: Request, caseId: string): Promise<Response> {
     const ctx = await this.context(req, caseId);
     const body = await parseBody(req, RevealCommandRequestSchema);
-    return json(200, { progress: await this.game.revealCommand(ctx, body.toolId) });
+    return json(200, { progress: await this.game.revealCommand(ctx, body) });
   }
 
   async reveal(req: Request, caseId: string): Promise<Response> {

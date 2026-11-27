@@ -1,8 +1,11 @@
 // Friendly text for API errors raised by gameplay actions (answers, hints, reveals) and failed loads.
+import type { ProgressView } from "../../shared/contract";
 import { ApiError } from "./api";
+import { toast } from "./overlay";
 import { TA } from "../i18n/strings-account";
 import { TE } from "../i18n/strings-errors";
 import { TG } from "../i18n/strings-game";
+import { TP } from "../i18n/strings-play";
 import { T } from "../i18n/strings-player";
 import { classifyLoadError } from "./load-recovery";
 
@@ -36,4 +39,15 @@ export function loadErrorText(err: unknown): string {
     case "other":
       return TE().loadFailedOther;
   }
+}
+
+/**
+ * After a play write the server refused as stale, or that got no clear answer (#202, #203): the server's progress
+ * to redraw from, with a toast saying why. Null when the error carries none (show it as usual).
+ */
+export function recoverFromWrite(err: unknown): ProgressView | null {
+  if (!(err instanceof ApiError) || err.progress === null) return null;
+  const stale = err.code === "stale";
+  toast({ tone: stale ? "info" : "warning", text: stale ? TP().staleWrite : TP().unconfirmedWrite });
+  return err.progress;
 }

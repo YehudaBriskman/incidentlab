@@ -3,9 +3,12 @@ import { canonicalAnswer, formatKind, matchesFormat, type FormatKind } from "../
 import type { Case, Question } from "../../shared/case";
 import { ApiError, getDebrief, getProgress, revealAnswer, revealHint, setupDone, submitAnswer } from "../lib/api";
 import { recordVisit } from "../lib/recent";
-import { playErrorText } from "../lib/errors";
+import { playErrorText, recoverFromWrite } from "../lib/errors";
 import { handleAuthLoss, onAuthLoss } from "../lib/auth-loss";
-import { signOut } from "../lib/session";
+import { followProgress, type ProgressFollower } from "../lib/progress-bus";
+import { cachedAccount, isGuest, signOut } from "../lib/session";
+import { TGu } from "../i18n/strings-guest";
+import { confirmGuestSignOut } from "../shell/frame";
 import { TG } from "../i18n/strings-game";
 import { withApprovedAccount } from "./auth";
 import { renderInstructorPreview } from "./present";
@@ -45,7 +48,18 @@ let lastView: { caseId: string; stage: StageKey } | null = null;
 /** Observers of the stage on screen (the sticky answer bar): disconnected with the timers on every redraw. */
 const cleanups = new Set<() => void>();
 
+/** Keeps the case on screen in step with the player's other tabs and the server (#203): one per case page. */
+let follower: ProgressFollower | null = null;
+
+/** Leaving the case page (main.ts) or rendering it again: the stage's timers and the progress follower stop. */
 export function stopCaseTimers(): void {
+  stopStageTimers();
+  follower?.stop();
+  follower = null;
+}
+
+/** Every redraw of the stage: its timers and observers only. */
+function stopStageTimers(): void {
   for (const t of timers) window.clearInterval(t);
   timers.clear();
   for (const stop of cleanups) stop();
@@ -190,12 +204,25 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
   let justSolved: QuestionId | null = null;
   let focusNext: FocusTarget | null = null;
 
-  const update = (next: ProgressView, view?: StageKey, focus: FocusTarget = { kind: "heading" }): void => {
+  /** `focus: null` (a sync from another tab): focus stays where it was, or on the same field once redrawn. */
+  const update = (next: ProgressView, view?: StageKey, focus: FocusTarget | null = { kind: "heading" }): void => {
     player = next;
-    viewing = view ?? currentStage(player);
+    // A stage the server's progress says is locked (after a reset seen in a stale-write reply) is never shown.
+    viewing = view !== undefined && stepState(player, view) !== "locked" ? view : currentStage(player);
     focusNext = focus;
+    const typing = focus === null && document.activeElement instanceof HTMLElement && root.contains(document.activeElement) ? document.activeElement.id : "";
     draw();
+    if (typing !== "") document.getElementById(typing)?.focus({ preventScroll: true });
   };
+
+  // Progress bought or answered in another tab, or changed while this one was hidden (#203). The player keeps
+  // the stage they were reading unless it was the current one and has moved on.
+  follower = followProgress({
+    initial: player,
+    load: () => getProgress(c.id),
+    alive: () => root.isConnected,
+    apply: (next) => update(next, viewing === currentStage(player) ? undefined : viewing, null),
+  });
 
   const applyFocus = (): void => {
     const target = focusNext;
@@ -216,9 +243,13 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
 
   // On a shared lab computer this is the quickest way to hand over, so it stays next to the name, but it asks
   // first: signing out clears the unchecked answer drafts. Then straight to sign-in (the local session clears
-  // even if logout fails).
+  // even if logout fails). A guest can never sign back in, so a guest gets the account menu's warning, with
+  // "Create an account first" (#206), instead of "your progress is saved".
   const switchPlayer = (): void => {
-    void confirm({ title: T().switchTitle, body: T().switchBody, confirmLabel: T().switchConfirm }).then((ok) => {
+    const asked = isGuest(cachedAccount())
+      ? confirmGuestSignOut()
+      : confirm({ title: T().switchTitle, body: T().switchBody, confirmLabel: T().switchConfirm });
+    void asked.then((ok) => {
       if (!ok) return;
       drafts.clear();
       void signOut()
@@ -309,7 +340,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
   };
 
   const draw = (): void => {
-    stopCaseTimers();
+    stopStageTimers();
     lastView = { caseId: c.id, stage: viewing };
     navStages();
     const header = h(
@@ -323,7 +354,8 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
           "span",
           { class: "player-tag" },
           T().playingAs,
-          h("strong", { dir: "auto" }, player.username), // textContent only
+          // textContent only; a guest's generated name (guest-<id>) means nothing to them, so "Guest" (#206)
+          h("strong", { dir: "auto" }, isGuest(cachedAccount()) ? TGu().guestName : player.username),
           " · ",
           h("button", { type: "button", class: "link-btn", onclick: switchPlayer }, T().switchPlayer),
         ),
@@ -444,6 +476,8 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
       })
       .catch((err: unknown) => {
         if (handleAuthLoss(err)) return;
+        const server = recoverFromWrite(err);
+        if (server !== null) return update(server);
         errorEl.textContent = errorMessage(err);
         ready.disabled = false;
       });
@@ -778,6 +812,9 @@ function renderQuestionStage(
       .catch((err: unknown) => {
         done();
         if (handleAuthLoss(err)) return; // the draft is kept: the stage re-renders with it after the gate
+        // Stale or unconfirmed (#202, #203): show what the server has; the draft stays for the player to resend.
+        const server = recoverFromWrite(err);
+        if (server !== null) return update(server, id);
         if (err instanceof ApiError && err.isRateLimited) {
           startCooldown(Date.now() + (err.retryAfterSeconds ?? 60) * 1000);
           return;
@@ -818,7 +855,9 @@ function renderQuestionStage(
       body: TP().hintPrompt(s.hintsRevealed + 1, nextHint.cost, SCORING.CLEAN_BONUS, cleanOpen),
       confirmLabel: TP().cmdConfirm(nextHint.cost),
       run: async () => {
-        charged.progress = await revealHint(c.id, id);
+        // Names the hint this page shows as next: if another tab (or a lost reply) already bought it, the
+        // server charges nothing and sends the current progress back (#202, #203).
+        charged.progress = await revealHint(c.id, id, s.hintsRevealed);
       },
     })
       .then((ok) => {
@@ -829,6 +868,8 @@ function renderQuestionStage(
       })
       .catch((err: unknown) => {
         if (handleAuthLoss(err)) return;
+        const server = recoverFromWrite(err);
+        if (server !== null) return update(server, id);
         hintError.textContent = errorMessage(err);
       });
   });
@@ -856,6 +897,8 @@ function renderQuestionStage(
       })
       .catch((err: unknown) => {
         if (handleAuthLoss(err)) return;
+        const server = recoverFromWrite(err);
+        if (server !== null) return update(server, id);
         revealError.textContent = errorMessage(err);
       });
   });

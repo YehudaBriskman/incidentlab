@@ -87,7 +87,7 @@ const progressRecord = (accountId: string, caseId: string, solved: number, start
   const completed = solved === QUESTION_ORDER.length;
   return {
     schemaVersion: 1, accountId, caseId, startedAt: iso(startMs), lastSeenAt: iso(t), setupDoneAt: iso(startMs + 60_000),
-    completedAt: completed ? iso(t) : null, stages, wrongAnswerTimestamps: {}, commandsRevealed: {}, completionBonus: completed ? 50 : 0,
+    completedAt: completed ? iso(t) : null, stages, wrongAnswerTimestamps: {}, commandsRevealed: {}, completionBonus: completed ? 50 : 0, lastWrongAnswers: {},
   };
 };
 
