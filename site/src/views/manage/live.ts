@@ -3,6 +3,8 @@
 // Scoped by its options: the case, the cases to pick from and the progress come from the dashboard's poll;
 // picking a case and the destructive actions go back through callbacks and `api`.
 import { T } from "../../i18n/strings-tools";
+import { TE } from "../../i18n/strings-errors";
+import { T as TP } from "../../i18n/strings-player";
 import { getLang } from "../../i18n/i18n";
 import { h, setChildren } from "../../lib/dom";
 import { statGrid } from "../../components/statGrid";
@@ -32,6 +34,13 @@ export type LiveOptions = {
   /** The instructor picked another case: the dashboard switches, fetches and calls render(). */
   onSelectCase(caseId: string): void;
   api: LiveApi;
+  /**
+   * Why the latest progress fetch failed (null: it did not). Without progress for the case on screen the panel
+   * shows this with Retry instead of an empty state; with older progress it keeps that and marks it stale.
+   */
+  loadError?(): string | null;
+  /** Retry after `loadError`: the dashboard fetches again and calls render(). */
+  onRetry?(): void;
   /** After a confirmed case reset: the admin dashboard offers Undo from its trash. */
   onCaseReset?: (caseId: string, title: string) => Promise<void>;
   /** After a confirmed player restart: the admin dashboard offers Undo from its trash. */
@@ -61,6 +70,20 @@ export function createLivePanel(opts: LiveOptions): LivePanel {
   const help = createLiveHelp({ onJump: (id) => grid.jumpTo(id), rerender: () => render() });
   const grid = createLiveGrid({ host, caseId: opts.caseId, progress: opts.progress, api: opts.api, onRestarted: opts.onRestarted });
   const liveBodyEl = h("div", { class: "admin-live-body" });
+  /** "Couldn't load" above data that is still on screen from an earlier fetch. */
+  const staleEl = h("p", { class: "admin-error", role: "alert", hidden: true });
+
+  /** The panel-scoped error: the fetch failed and there is nothing current to show. */
+  function errorPanel(detail: string): HTMLElement {
+    const retry = opts.onRetry;
+    return h(
+      "section",
+      { class: "panel admin-panel admin-empty admin-load-failed", role: "alert" },
+      h("p", { class: "admin-empty-title" }, TE().panelLoadFailed),
+      h("p", { class: "muted small" }, detail),
+      retry === undefined ? null : h("button", { type: "button", class: "btn btn-primary btn-sm", onclick: () => retry() }, TP().tryAgain),
+    );
+  }
 
   // Reset this case: a danger confirm that needs the case id typed in.
   const resetBtn = h("button", { type: "button", class: "btn btn-danger btn-sm" }, T().admResetCase);
@@ -105,6 +128,7 @@ export function createLivePanel(opts: LiveOptions): LivePanel {
 
   function liveBodySkeleton(): HTMLElement[] {
     return [
+      staleEl,
       // The first question on this tab is "who needs me right now?": answered before anything else.
       help.el,
       liveTiles,
@@ -196,6 +220,14 @@ export function createLivePanel(opts: LiveOptions): LivePanel {
   function render(): void {
     syncLiveCaseOptions();
     const caseId = opts.caseId();
+    const error = opts.loadError?.() ?? null;
+    const progress = opts.progress();
+    const current = caseId !== null && progress?.caseId === caseId;
+    // A failed fetch never reads as "no released cases" or an empty class: it gets its own message and Retry.
+    if (error !== null && !current) {
+      setChildren(liveBodyEl, errorPanel(error));
+      return;
+    }
     if (!caseId) {
       setChildren(liveBodyEl, h("section", { class: "panel admin-panel admin-empty" }, h("p", { class: "admin-empty-title" }, T().admNoReleased)));
       return;
@@ -205,8 +237,9 @@ export function createLivePanel(opts: LiveOptions): LivePanel {
       setChildren(liveBodyEl, liveBodySkeleton());
     }
     resetTextEl.textContent = T().admResetCaseText(caseTitle(caseId));
+    staleEl.hidden = error === null;
+    staleEl.textContent = error === null ? "" : `${TE().panelLoadFailed} ${TE().staleData}`;
     // A response for a previously selected case is ignored until the new one arrives.
-    const progress = opts.progress();
     const players = progress?.caseId === caseId ? progress.players : [];
     for (const id of grid.expandedIds) if (!players.some((p) => p.accountId === id)) grid.expandedIds.delete(id);
     const entries = progress?.caseId === caseId ? helpEntries(players, Date.now()) : null;

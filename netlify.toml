@@ -38,8 +38,22 @@
   function = "evidence"
   cache = "manual"
 
-# SPA fallback: client-side routes (e.g. /cases/3am-outage) serve index.html.
-# Real files (assets) still win because force = false.
+# A missing build file is a real 404 (#208), never the SPA page. Without this rule a chunk from an older deploy
+# came back as `200 text/html` under the immutable /assets/* header below, so the browser cached a broken module
+# for a year. force = false, so this only applies when no file exists at the path ("shadowing": Netlify serves an
+# existing file before any non-forced rule). Rules run top to bottom, first match wins, so it must stay above the
+# SPA fallback. The body is plain text, not HTML: [[headers]] for /assets/* may still be attached to it, and no HTML
+# document may ever be served under that header. The client reloads once when a chunk fails (main.ts).
+[[redirects]]
+  from = "/assets/*"
+  to = "/asset-missing.txt"
+  status = 404
+  force = false
+
+# SPA fallback. Routes are hash-based (#/case/<id>), so this is not needed for routing; it keeps a page up for a
+# mistyped or old path-style link, and share links built from `location.pathname` keep working. It never reaches
+# /api/* (the Function matches first) or /evidence/db/* (the Edge Function returns a response, ending the chain).
+# Real files win because force = false.
 [[redirects]]
   from = "/*"
   to = "/index.html"

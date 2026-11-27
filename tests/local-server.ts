@@ -99,6 +99,11 @@ createServer(async (req, res) => {
   try {
     if ((await stat(file)).isDirectory()) file = join(file, "index.html");
   } catch {
+    // Mirrors netlify.toml: a missing build asset is a plain-text 404 (#208); any other path gets the SPA page.
+    if (url.pathname.startsWith("/assets/")) {
+      res.writeHead(404, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" }).end("Not found\n");
+      return;
+    }
     file = join(DIST, "index.html"); // SPA fallback
   }
   try {

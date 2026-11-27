@@ -4,8 +4,9 @@ import type { Case, Question } from "../../shared/case";
 import { ApiError, getDebrief, getProgress, revealAnswer, revealHint, setupDone, submitAnswer } from "../lib/api";
 import { recordVisit } from "../lib/recent";
 import { playErrorText, recoverFromWrite } from "../lib/errors";
+import { handleAuthLoss, onAuthLoss } from "../lib/auth-loss";
 import { followProgress, type ProgressFollower } from "../lib/progress-bus";
-import { cachedAccount, isGuest, loadAccount, setAccount, signOut } from "../lib/session";
+import { cachedAccount, isGuest, signOut } from "../lib/session";
 import { TGu } from "../i18n/strings-guest";
 import { confirmGuestSignOut } from "../shell/frame";
 import { TG } from "../i18n/strings-game";
@@ -134,6 +135,7 @@ export function renderCase(root: HTMLElement, c: Case): void {
   stopCaseTimers();
   document.title = `${c.title} · IncidentLab`;
   ensureAnnouncer();
+  onAuthLoss(() => renderCase(root, c)); // a 401 mid-play re-runs the gate; the answer drafts survive it
   withApprovedAccount(root, c.title, () => loadProgress(root, c), { onAdmin: () => renderInstructorPreview(root, c), allowGuest: true });
 }
 
@@ -143,11 +145,7 @@ function loadProgress(root: HTMLElement, c: Case): void {
     .then((progress) => renderStaged(root, c, progress))
     .catch((err: unknown) => {
       // Session expired or approval revoked since the page loaded: re-run the gate with fresh state.
-      if (err instanceof ApiError && (err.isUnauthorized || err.isNotApproved || err.needsGate)) {
-        if (err.isUnauthorized) setAccount(null);
-        void loadAccount(true).finally(() => renderCase(root, c));
-        return;
-      }
+      if (handleAuthLoss(err)) return;
       setChildren(
         root,
         h(
@@ -477,6 +475,7 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
         update(p);
       })
       .catch((err: unknown) => {
+        if (handleAuthLoss(err)) return;
         const server = recoverFromWrite(err);
         if (server !== null) return update(server);
         errorEl.textContent = errorMessage(err);
@@ -812,6 +811,7 @@ function renderQuestionStage(
       })
       .catch((err: unknown) => {
         done();
+        if (handleAuthLoss(err)) return; // the draft is kept: the stage re-renders with it after the gate
         // Stale or unconfirmed (#202, #203): show what the server has; the draft stays for the player to resend.
         const server = recoverFromWrite(err);
         if (server !== null) return update(server, id);
@@ -867,6 +867,7 @@ function renderQuestionStage(
         update(next, id, { kind: "hint", index: s.hintsRevealed });
       })
       .catch((err: unknown) => {
+        if (handleAuthLoss(err)) return;
         const server = recoverFromWrite(err);
         if (server !== null) return update(server, id);
         hintError.textContent = errorMessage(err);
@@ -895,6 +896,7 @@ function renderQuestionStage(
         update(next, id, { kind: "result" });
       })
       .catch((err: unknown) => {
+        if (handleAuthLoss(err)) return;
         const server = recoverFromWrite(err);
         if (server !== null) return update(server, id);
         revealError.textContent = errorMessage(err);

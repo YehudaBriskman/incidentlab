@@ -34,6 +34,7 @@ import {
 } from "../lib/class-api";
 import { isClassAdmin, isOwnerLike, type ClassCaller } from "../lib/class-permissions";
 import { copyButton, h, setChildren } from "../lib/dom";
+import { loadErrorText } from "../lib/errors";
 import { serverNow } from "../lib/event";
 import { banner, closeMenu, toast } from "../lib/overlay";
 import { cachedAccount, isGuest, loadAccount } from "../lib/session";
@@ -146,6 +147,8 @@ function renderManage(root: HTMLElement, side: HTMLElement, id: string): void {
     narrow: narrowMq.matches,
     banner: null as string | null,
     liveLoading: false,
+    /** Why the last live-progress fetch failed (shown in the Live panel with Retry), or null. */
+    liveError: null as string | null,
   };
 
   const caller = (): ClassCaller => ({ membership: state.cls?.membership ?? null, accountId: cachedAccount()?.id ?? null });
@@ -343,10 +346,13 @@ function renderManage(root: HTMLElement, side: HTMLElement, id: string): void {
     caseId: () => state.liveCaseId,
     cases: () => ({ released: classCases(), todayId: todayCaseId() }),
     progress: () => state.progress,
+    loadError: () => state.liveError,
+    onRetry: () => void loadLive(),
     onSelectCase: (caseId) => {
       if (caseId === state.liveCaseId) return;
       state.liveCaseId = caseId;
       state.progress = null;
+      state.liveError = null;
       live.render();
       void loadLive();
     },
@@ -375,13 +381,15 @@ function renderManage(root: HTMLElement, side: HTMLElement, id: string): void {
       const progress = await fetchClassProgress(id, caseId);
       if (disposed) return;
       if (progress.caseId === state.liveCaseId) state.progress = progress;
+      state.liveError = null;
       state.banner = null;
       renderBanner();
       if (state.tab === "live") live.render();
     } catch (err: unknown) {
       if (disposed || handleAuthError(err)) return;
-      state.banner = TC().actionFailed(errText(err));
-      renderBanner();
+      // Scoped to the Live panel (with Retry), never left as its empty "no cases" state.
+      state.liveError = loadErrorText(err);
+      if (state.tab === "live") live.render();
     } finally {
       state.liveLoading = false;
       if (!disposed && state.tab === "live" && !tabHidden()) pollId = window.setTimeout(() => void loadLive(), LIVE_POLL_MS);

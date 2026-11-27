@@ -12,6 +12,7 @@ import { announce, copyButton, ensureAnnouncer, h, html, setChildren, type Child
 import { confirm, tooltip } from "../lib/overlay";
 import "../player.css";
 import { playErrorText, recoverFromWrite } from "../lib/errors";
+import { handleAuthLoss, onAuthLoss } from "../lib/auth-loss";
 import { followProgress, type ProgressFollower } from "../lib/progress-bus";
 import { md } from "../lib/markdown";
 import { isAdmin, loadAccount } from "../lib/session";
@@ -195,6 +196,7 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
             });
           })
           .catch((err: unknown) => {
+            if (handleAuthLoss(err)) return;
             const server = recoverFromWrite(err);
             if (server !== null) return ctx.onProgress(server);
             errorEl.textContent = playErrorText(err);
@@ -244,6 +246,7 @@ let follower: ProgressFollower | null = null;
 
 export function renderToolbox(root: HTMLElement, c: Case): void {
   document.title = T().allCommandsTitle(c.title);
+  onAuthLoss(() => renderToolbox(root, c)); // a 401 on a command reveal re-runs the gate
   const hash = window.location.hash;
   const stillHere = (): boolean => window.location.hash === hash;
   follower?.stop();
