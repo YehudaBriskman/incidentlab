@@ -151,14 +151,14 @@ const main = async (): Promise<void> => {
       for (const name of plan.idleGuests.slice(0, 20)) console.log(`[data]   ${name}`);
       if (plan.idleGuests.length > 20) console.log(`[data]   … and ${plan.idleGuests.length - 20} more`);
       console.log(`[data] expired sessions: ${plan.expiredSessions}, stale rate limits: ${plan.staleRateLimits}`);
-      console.log(`[data] audit entries older than ${AUDIT_RETENTION_DAYS} days: ${plan.oldAudit}, expired trash entries: ${plan.expiredTrash}`);
+      console.log(`[data] audit entries older than ${AUDIT_RETENTION_DAYS} days: ${plan.oldAudit}, expired trash entries: ${plan.expiredTrash}, expired reset requests: ${plan.expiredResetRequests}`);
       if (!flag("--apply")) {
         console.log("[data] dry run: nothing changed. Re-run with --apply (takes a backup first; guests go to the trash, restorable for 7 days).");
         return;
       }
       await backupToDisk("pre-gc-accounts");
       const done = await hygiene.run({ apply: true });
-      console.log(`[data] trashed ${done.idleGuests.length} guests (${done.guestProgress} progress records); deleted ${done.expiredSessions} sessions, ${done.staleRateLimits} rate limits, ${done.oldAudit} audit entries, ${done.expiredTrash} trash entries.`);
+      console.log(`[data] trashed ${done.idleGuests.length} guests (${done.guestProgress} progress records); deleted ${done.expiredSessions} sessions, ${done.staleRateLimits} rate limits, ${done.oldAudit} audit entries, ${done.expiredTrash} trash entries, ${done.expiredResetRequests} reset requests.`);
       return;
     }
     case "migrate": {

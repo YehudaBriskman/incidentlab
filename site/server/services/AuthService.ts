@@ -92,6 +92,12 @@ export const issueRecoveryCode = async (): Promise<{ code: string; hash: string 
   return { code, hash: await hashRecoveryCode(code) };
 };
 
+/**
+ * A session waiting on a forced password change (#254, an owner reset) may only change the password, read
+ * GET /api/me and /api/session, and sign out. Every other signed-in route answers this 403.
+ */
+export const passwordChangeRequired = (): AppError => new AppError(403, "set a new password first", { code: "password-change-required" });
+
 export const adminKeyFingerprint = (adminKey: string): string => sha256Hex(adminKey).slice(0, 16);
 
 export class AuthService {
@@ -269,6 +275,8 @@ export class AuthService {
     if (principal.kind === "admin") throw new AppError(403, "the admin account has no recovery code", { code: "admin" });
     const found = await this.repos.accounts.get(principal.account.id);
     if (!found) throw new AppError(401, "session expired, sign in again", { code: "signed-out" });
+    // A forced change comes first (#254): it issues the new code itself.
+    if (found.data.mustChangePassword) throw passwordChangeRequired();
     // Password guesses from a stolen session count against the same per-username budget as sign-in.
     await this.limiter.assertAllowed(LOGIN_USER_LIMIT, found.data.usernameKey);
     if (!(await verifyPassword(input.currentPassword, found.data.passwordHash))) {
@@ -344,7 +352,7 @@ export class AuthService {
     const account = principal.account;
     if (account.status === "pending") throw new AppError(403, "this account is waiting for approval", { code: "pending" });
     if (account.status === "rejected") throw new AppError(403, "this account was not approved", { code: "rejected" });
-    if (account.mustChangePassword) throw new AppError(403, "set a new password first", { code: "password-change-required" });
+    if (account.mustChangePassword) throw passwordChangeRequired();
     return principal;
   }
 
@@ -358,12 +366,16 @@ export class AuthService {
     const account = principal.account;
     if (account.role !== "author") throw new AppError(403, "only authors and the instructor can manage cases", { code: "not-author" });
     if (account.status !== "approved") throw new AppError(403, "this account is not approved", { code: account.status });
-    if (account.mustChangePassword) throw new AppError(403, "set a new password first", { code: "password-change-required" });
+    if (account.mustChangePassword) throw passwordChangeRequired();
     return principal;
   }
 
-  /** A player changes their own password. Other sessions of the account are signed out; this one stays. */
-  async changePassword(token: string | null, input: { currentPassword: string; newPassword: string }): Promise<AuthResult> {
+  /**
+   * A player changes their own password. Other sessions of the account are signed out; this one stays. After an
+   * owner reset (`mustChangePassword`, #254) the player has lost their recovery code too, so the change also issues
+   * a new one, returned once like at sign-up.
+   */
+  async changePassword(token: string | null, input: { currentPassword: string; newPassword: string }): Promise<SignInResult> {
     const { principal } = await this.authenticate(token);
     if (principal.kind === "admin") throw new AppError(403, "the admin password is the ADMIN_KEY", { code: "admin" });
     const found = await this.repos.accounts.get(principal.account.id);
@@ -371,15 +383,17 @@ export class AuthService {
     if (!(await verifyPassword(input.currentPassword, found.data.passwordHash))) {
       throw new AppError(400, "your current password is wrong", { code: "bad-credentials" });
     }
+    const recovery = found.data.mustChangePassword ? await issueRecoveryCode() : null;
     const account: AccountRecord = {
       ...found.data,
       passwordHash: await hashPassword(input.newPassword),
       mustChangePassword: false,
       sessionEpoch: found.data.sessionEpoch + 1,
+      ...(recovery === null ? {} : { recoveryCodeHash: recovery.hash }),
     };
     if (!(await this.repos.accounts.saveIfMatch(account, found.etag))) throw new AppError(409, "concurrent update, please retry");
     if (token) await this.repos.sessions.delete(sha256Hex(token));
-    return { account: toAccountView(account), session: await this.createSession({ role: "player", account }) };
+    return { account: toAccountView(account), session: await this.createSession({ role: "player", account }), recoveryCode: recovery?.code ?? null };
   }
 
   private async adminLogin(input: CredentialsInput, key: string): Promise<AuthResult> {
