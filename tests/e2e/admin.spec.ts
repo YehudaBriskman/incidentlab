@@ -59,6 +59,9 @@ async function playingPlayer(
   const reg = await session.post("/api/auth/register", { data: { username, password: PASSWORD } });
   expect(reg.status(), await reg.text()).toBe(201);
   await approveAccount(request, username);
+  // The public board lists only players who opted in (#175).
+  const board = await session.put("/api/me/board", { data: { show: true } });
+  expect(board.status(), await board.text()).toBe(200);
   const c = (path: string): string => `/api/cases/${CASE_ID}${path}`;
   expect((await session.get(c("/progress"))).status()).toBe(200);
   expect((await session.post(c("/setup-done"), { data: {} })).status()).toBe(200);
