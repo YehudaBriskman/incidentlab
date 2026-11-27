@@ -159,10 +159,11 @@ function loadFailed(err: unknown): void {
 // Back online with the card up: try again without waiting for a click.
 window.addEventListener("online", () => failedRetry?.());
 
-// Vite's preload helper fires this when a chunk's dependency or CSS fails. Reloading now covers every dynamic
-// import, not only the router's; once the one reload is spent, the import rejects and its caller decides.
-window.addEventListener("vite:preloadError", (ev) => {
-  if (navigator.onLine && reloadForUpdate()) ev.preventDefault();
+// Vite's preload helper fires this when a dynamic import, its dependencies or its CSS fail. Reloading here covers
+// every dynamic import, not only the router's. No preventDefault: that would make the import resolve to
+// undefined, and the caller would take a missing module for a loaded one. The import still rejects.
+window.addEventListener("vite:preloadError", () => {
+  if (navigator.onLine) reloadForUpdate();
 });
 
 function loadingView(): void {
@@ -178,12 +179,12 @@ function lazyView(load: () => Promise<View>): void {
   const token = routeToken;
   load()
     .then((view) => {
-      clearReloadGuard(sessionStore()); // this route's code loaded: a later deploy may reload once again
       if (token === routeToken) mount(view());
+      clearReloadGuard(sessionStore()); // this route's code loaded and ran: a later deploy may reload once again
     })
     .catch((err: unknown) => {
       console.error(err);
-      if (token !== routeToken) return;
+      if (reloading || token !== routeToken) return;
       if (navigator.onLine && isChunkLoadError(err) && reloadForUpdate()) return;
       loadFailed(err);
     });
