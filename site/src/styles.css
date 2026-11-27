@@ -1663,10 +1663,27 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
 .pw-form > .error-summary { max-width: 100%; }
 .btn[aria-disabled="true"] { opacity: 0.6; cursor: not-allowed; }
 .btn-primary[aria-disabled="true"]:hover { filter: none; }
-.auth-forgot { margin-top: var(--space-1); }
+.auth-forgot { margin-top: var(--space-1); align-self: flex-start; }
 
 /* Sign-up honeypot (#173): out of sight and out of the accessibility tree (aria-hidden + tabindex -1). */
 .hp-field { position: absolute; inset-inline-start: -10000px; inline-size: 1px; block-size: 1px; overflow: hidden; }
+
+/* --- recovery code (#174) --- */
+.recovery-code-warning {
+  margin: 0; padding: var(--space-3); border-radius: var(--radius-md);
+  color: var(--warning-fg); background: var(--warning-bg); border: 1px solid var(--warning-line);
+}
+.recovery-code { display: flex; flex-direction: column; gap: var(--space-2); }
+.recovery-code-label { margin: 0; font-weight: 600; }
+.recovery-code-value {
+  margin: 0; padding: var(--space-3); border-radius: var(--radius-md);
+  background: var(--surface-2); border: 1px solid var(--border-strong);
+  font-size: var(--step-1); text-align: center; user-select: all; overflow-wrap: anywhere;
+}
+.recovery-code-value > code { font-family: var(--font-mono); letter-spacing: 0.05em; }
+.recovery-code-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.recovery-section-body { display: flex; flex-direction: column; gap: var(--space-3); }
+.recovery-section-body > p { margin: 0; }
 
 /* --- pending / rejected --- */
 .pending-icon { font-size: var(--step-3); line-height: 1; }

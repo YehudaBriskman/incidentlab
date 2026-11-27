@@ -4,6 +4,8 @@
 import type { z } from "zod";
 import {
   AccountResponseSchema,
+  AuthResponseSchema,
+  RecoveryCodeResponseSchema,
   SessionResponseSchema,
   AnswerResponseSchema,
   DebriefResponseSchema,
@@ -186,14 +188,29 @@ async function requestNoContent(path: string, body: unknown): Promise<void> {
 type Credentials = { username: string; password: string };
 /** Sign-up also sends the bot checks (#173): the hidden `website` field and how long the form was open. */
 type Registration = Credentials & { inviteCode?: string; website?: string; elapsedMs?: number };
+/** The account, plus a recovery code when the server just issued one (#174): show it once, never store it. */
+export type SignedIn = { account: AccountView; recoveryCode: string | null };
 
-/** Creates the account (approved at once since #173). */
-export async function register(registration: Registration): Promise<AccountView> {
-  return (await request("POST", "/api/auth/register", AccountResponseSchema, registration)).account;
+/** Creates the account (approved at once) and returns its first recovery code. */
+export async function register(registration: Registration): Promise<SignedIn> {
+  const body = await request("POST", "/api/auth/register", AuthResponseSchema, registration);
+  return { account: body.account, recoveryCode: body.recoveryCode ?? null };
 }
 
-export async function login(credentials: Credentials): Promise<AccountView> {
-  return (await request("POST", "/api/auth/login", AccountResponseSchema, credentials)).account;
+/** Signs in. Accounts without a recovery code get their first one here. */
+export async function login(credentials: Credentials): Promise<SignedIn> {
+  const body = await request("POST", "/api/auth/login", AuthResponseSchema, credentials);
+  return { account: body.account, recoveryCode: body.recoveryCode ?? null };
+}
+
+/** Forgotten password: the recovery code sets a new password and comes back replaced. Doesn't sign in. */
+export async function recoverAccount(input: { username: string; recoveryCode: string; newPassword: string }): Promise<string> {
+  return (await request("POST", "/api/auth/recover", RecoveryCodeResponseSchema, input)).recoveryCode;
+}
+
+/** Replaces the signed-in player's recovery code (needs the current password). */
+export async function regenerateRecoveryCode(input: { currentPassword: string }): Promise<string> {
+  return (await request("POST", "/api/me/recovery-code", RecoveryCodeResponseSchema, input)).recoveryCode;
 }
 
 export async function logout(): Promise<void> {

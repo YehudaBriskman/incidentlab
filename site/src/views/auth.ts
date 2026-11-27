@@ -1,9 +1,11 @@
-// Sign in / sign up, the "waiting for approval" screen and the forced password change.
+// Sign in / sign up, password recovery with a recovery code, the "waiting for approval" screen (kept for accounts
+// from before open sign-up) and the forced password change.
 // `withApprovedAccount` is the single gate every playable view goes through.
 import { formField, type FormField } from "../components/formLayout";
 import { MIN_SIGNUP_FORM_MS, PasswordSchema, UsernameSchema, type AccountView } from "../../shared/contract";
-import { ApiError, changePassword, login, register } from "../lib/api";
+import { ApiError, changePassword, login, recoverAccount, regenerateRecoveryCode, register, type SignedIn } from "../lib/api";
 import { h, setChildren } from "../lib/dom";
+import { toast } from "../lib/overlay";
 import "../player.css";
 import { getLang, isRelabel } from "../i18n/i18n";
 import { isAdmin, loadAccount, setAccount, signOut } from "../lib/session";
@@ -26,6 +28,16 @@ let doneTimer: number | null = null;
  */
 let carriedTempPassword: string | null = null;
 
+/**
+ * A recovery code the server just issued (#174), kept in memory only until the player says it is saved. The gate
+ * shows it before anything else, so a language switch or a re-render can't lose it. `signedIn` is false after a
+ * recovery (no session yet): the gate then continues to the sign-in form with the username filled in.
+ */
+type ShownCode = { code: string; username: string; lead: () => string; signedIn: boolean };
+let shownCode: ShownCode | null = null;
+/** After a recovery: the sign-in form opens with this username and says the password changed. */
+let afterRecovery: { username: string } | null = null;
+
 export function stopAuthTimers(): void {
   if (pendingTimer !== null) window.clearInterval(pendingTimer);
   pendingTimer = null;
@@ -37,7 +49,8 @@ export function stopAuthTimers(): void {
   doneTimer = null;
 }
 
-type Mode = "sign-in" | "sign-up";
+type Mode = "sign-in" | "sign-up" | "recover";
+const isMode = (value: string | undefined): value is Mode => value === "sign-in" || value === "sign-up" || value === "recover";
 
 /**
  * What the player had typed into a gate form, captured when the language switch re-renders the route, so
@@ -56,7 +69,7 @@ function captureDraft(root: HTMLElement): Draft | null {
   return {
     values,
     focusId: active instanceof HTMLInputElement && form.contains(active) ? active.id : null,
-    mode: mode === "sign-in" || mode === "sign-up" ? mode : null,
+    mode: isMode(mode) ? mode : null,
   };
 }
 
@@ -117,11 +130,21 @@ export function withApprovedAccount(
   setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted" }, T().loading)));
   loadAccount()
     .then((account) => {
+      // A fresh recovery code comes first: it is shown once and only lives in memory until it is saved.
+      if (shownCode !== null && shownCode.signedIn && account === null) shownCode = null; // signed out elsewhere
+      if (shownCode !== null) {
+        const shown = shownCode;
+        renderRecoveryCodeScreen(root, context, shown, () => {
+          shownCode = null;
+          again();
+        });
+        return;
+      }
       if (account === null) {
         carriedTempPassword = null;
         renderAuthForm(root, {
           context,
-          mode: draft?.mode ?? options.signedOutMode ?? "sign-in",
+          mode: draft?.mode ?? (afterRecovery !== null ? "sign-in" : (options.signedOutMode ?? "sign-in")),
           onSignedIn: again,
           inviteCode: options.inviteCode,
           titled: options.titled,
@@ -160,6 +183,8 @@ function errorText(err: unknown): string {
   if (err.code === "bad-credentials") return TA().badCredentials;
   if (err.code === "rejected") return TA().rejectedLogin;
   if (err.code === "signup-refused") return TA().signupRefused;
+  if (err.code === "bad-recovery-code") return TA().badRecoveryCode;
+  if (err.isRateLimited) return TO().rateLimited(err.retryAfterSeconds ?? 60);
   return err.message;
 }
 
@@ -297,9 +322,15 @@ export function renderAuthForm(
   opts: { context: string; mode: Mode; onSignedIn: () => void; inviteCode?: string; titled?: boolean; signInTitle?: string },
 ): void {
   stopAuthTimers();
+  if (opts.mode === "recover") {
+    renderRecoverForm(root, opts);
+    return;
+  }
   const isSignUp = opts.mode === "sign-up";
   /** When the form appeared: a sign-up sent faster than MIN_SIGNUP_FORM_MS is a bot to the server (#173). */
   const shownAt = Date.now();
+  const recovered = !isSignUp ? afterRecovery : null;
+  afterRecovery = null;
   const titleText = (): string => pageTitle(isSignUp ? TA().signUpBtn : TA().signIn);
   if (opts.titled) document.title = titleText();
   const baseTitle = (): string => (opts.titled ? titleText() : document.title.replace(TO().errorTitlePrefix, ""));
@@ -346,6 +377,7 @@ export function renderAuthForm(
     : null;
   const prefilled = invite !== null && opts.inviteCode !== undefined && opts.inviteCode.length > 0;
   if (invite !== null && prefilled) invite.input.value = opts.inviteCode ?? "";
+  if (recovered !== null) user.input.value = recovered.username;
   const fields: Field[] = [user, pw, ...(invite ? [invite] : [])];
   // The honeypot (#173): off-screen and hidden from assistive tech, out of the tab order and never autofilled.
   // People leave it empty; form-filling bots don't.
@@ -363,6 +395,26 @@ export function renderAuthForm(
     },
     isSignUp ? TA().toSignIn : TA().toSignUp,
   );
+  const forgot = isSignUp
+    ? null
+    : h(
+        "button",
+        {
+          type: "button",
+          class: "link-btn auth-forgot",
+          onclick: () => {
+            afterRecovery = null;
+            renderAuthForm(root, { ...opts, mode: "recover" });
+            const typed = user.input.value.trim();
+            const recoverUser = root.querySelector<HTMLInputElement>("#recover-username");
+            if (recoverUser !== null && typed.length > 0) {
+              recoverUser.value = typed;
+              root.querySelector<HTMLInputElement>("#recover-code")?.focus();
+            }
+          },
+        },
+        TA().forgotLink,
+      );
 
   const form = h(
     "form",
@@ -371,6 +423,7 @@ export function renderAuthForm(
     h("p", { class: "eyebrow" }, opts.context),
     h("h1", {}, isSignUp ? TA().authTitleSignUp : (opts.signInTitle ?? TA().authTitleSignIn)),
     h("p", { class: "muted" }, isSignUp ? TA().authHelpSignUp : TA().authHelpSignIn),
+    recovered !== null ? h("p", { class: "form-ok", role: "status" }, TA().recoveredNotice) : null,
     // A class link (`?code=`) leads with the prefilled code: it says which class this sign-up joins.
     prefilled && invite ? invite.nodes : null,
     user.nodes,
@@ -378,6 +431,7 @@ export function renderAuthForm(
     invite && !prefilled ? invite.nodes : null,
     trap,
     submit,
+    forgot,
     switchMode,
   );
 
@@ -437,7 +491,7 @@ export function renderAuthForm(
     busy = true;
     setBusy(submit, true, isSignUp ? TA().signingUp : TA().signingIn);
     const inviteCode = invite?.input.value.trim() ?? "";
-    const send = (): Promise<AccountView> => {
+    const send = (): Promise<SignedIn> => {
       if (!isSignUp) return login(credentials);
       // A person who fills the form in under the minimum (autofill, a password manager) waits out the rest here
       // instead of being refused by the server's bot check.
@@ -447,9 +501,12 @@ export function renderAuthForm(
       return new Promise<void>((resolve) => window.setTimeout(resolve, wait)).then(() => register({ ...registration, elapsedMs: Date.now() - shownAt }));
     };
     send()
-      .then((account) => {
+      .then(({ account, recoveryCode }) => {
         carriedTempPassword = !isSignUp && account.mustChangePassword ? credentials.password : null;
         summary.clear();
+        if (recoveryCode !== null && !isAdmin(account)) {
+          shownCode = { code: recoveryCode, username: account.username, lead: isSignUp ? () => TA().codeLeadSignUp : () => TA().codeLeadFirst, signedIn: true };
+        }
         setAccount(account);
         if (isAdmin(account)) goToAdmin();
         else opts.onSignedIn();
@@ -490,6 +547,240 @@ export function renderAuthForm(
 
   setChildren(root, form);
   if (!restoreDraft(form)) user.input.focus();
+}
+
+/* ================= recovery codes (#174) ================= */
+
+type AuthFormOptions = Parameters<typeof renderAuthForm>[1];
+
+/**
+ * "Forgot password?": username + recovery code + new password. On success the new code is shown once (through the
+ * gate, so it survives a re-render), then the sign-in form opens with the username filled in.
+ */
+function renderRecoverForm(root: HTMLElement, opts: AuthFormOptions): void {
+  const titleText = (): string => pageTitle(TA().recoverTitle);
+  if (opts.titled) document.title = titleText();
+  const baseTitle = (): string => (opts.titled ? titleText() : document.title.replace(TO().errorTitlePrefix, ""));
+  const user = makeField({
+    label: TA().username,
+    input: h("input", {
+      id: "recover-username",
+      class: "input input-lg",
+      type: "text",
+      name: "username",
+      autocomplete: "username",
+      autocapitalize: "none",
+      spellcheck: "false",
+      maxlength: "24",
+      required: true,
+      dir: "auto",
+      enterkeyhint: "next",
+    }),
+  });
+  const code = makeField({
+    label: TA().recoveryCodeLabel,
+    help: TA().recoveryCodeHelp,
+    input: h("input", {
+      id: "recover-code",
+      class: "input input-lg mono",
+      type: "text",
+      name: "recovery-code",
+      autocomplete: "off",
+      autocapitalize: "characters",
+      spellcheck: "false",
+      maxlength: "64",
+      required: true,
+      dir: "ltr",
+      enterkeyhint: "next",
+    }),
+  });
+  const next = passwordField({ id: "recover-new", name: "new-password", label: TG().newPw, autocomplete: "new-password", help: TG().pwHelp });
+  const fields: Field[] = [user, code, next];
+  const summary = errorSummary(baseTitle);
+  const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg btn-block" }, TA().recoverBtn);
+  const back = h("button", { type: "button", class: "link-btn", onclick: () => renderAuthForm(root, { ...opts, mode: "sign-in" }) }, TO().backToSignIn);
+  const form = h(
+    "form",
+    { class: "center-card gate", novalidate: true, "data-mode": "recover" },
+    summary.el,
+    h("p", { class: "eyebrow" }, opts.context),
+    h("h1", {}, TA().recoverTitle),
+    h("p", { class: "muted" }, TA().recoverHelp),
+    user.nodes,
+    code.nodes,
+    next.nodes,
+    submit,
+    back,
+    h("p", { class: "muted small" }, TA().recoverNoCode),
+  );
+
+  const check = (f: Field): string | null => {
+    const value = f.input.value.trim();
+    if (f === user) return value.length === 0 ? TO().enterUsername : null;
+    if (f === code) return value.length === 0 ? TA().enterRecoveryCode : null;
+    return PasswordSchema.safeParse(f.input.value).success ? null : TA().passwordInvalid;
+  };
+  for (const f of fields) {
+    f.input.addEventListener("input", () => {
+      if (f.hasError() && check(f) === null) f.setError(null);
+    });
+  }
+
+  let busy = false;
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    if (busy) return;
+    if (reportProblems(collectProblems(fields, check), fields, summary)) return;
+    const username = user.input.value.trim();
+    busy = true;
+    setBusy(submit, true, TA().recovering);
+    recoverAccount({ username, recoveryCode: code.input.value.trim(), newPassword: next.input.value })
+      .then((recoveryCode) => {
+        summary.clear();
+        shownCode = { code: recoveryCode, username, lead: () => TA().codeLeadRecovered, signedIn: false };
+        afterRecovery = { username };
+        setAccount(null); // every session of the account just ended, this browser's too
+        opts.onSignedIn(); // the gate shows the new code, then the sign-in form
+      })
+      .catch((err: unknown) => {
+        busy = false;
+        setBusy(submit, false, TA().recoverBtn);
+        for (const f of fields) f.setError(null);
+        if (err instanceof ApiError && err.code === "bad-recovery-code") {
+          summary.show([{ field: code, message: TA().badRecoveryCode }]).focus();
+          for (const f of [user, code]) {
+            f.input.setAttribute("aria-invalid", "true");
+            f.input.setAttribute("aria-describedby", "error-summary-item-0");
+          }
+          return;
+        }
+        summary.show([{ field: null, message: errorText(err) }]).focus();
+      });
+  });
+
+  setChildren(root, form);
+  if (!restoreDraft(form)) user.input.focus();
+}
+
+/**
+ * The code itself with Copy and Download (.txt). Shared by the gate's "save your recovery code" screen and the
+ * regenerate section on #/me. The code is text in the page (selectable), never stored by the browser.
+ */
+export function recoveryCodePanel(code: string, username: string): HTMLElement {
+  const copy = h("button", { type: "button", class: "btn" }, TA().codeCopy);
+  copy.addEventListener("click", () => {
+    const write = navigator.clipboard?.writeText(code) ?? Promise.reject(new Error("no clipboard"));
+    write.then(
+      () => void toast({ text: TA().codeCopied, tone: "success" }),
+      () => void toast({ text: TA().codeCopyFailed, tone: "error" }),
+    );
+  });
+  const download = h("button", { type: "button", class: "btn" }, TA().codeDownload);
+  download.addEventListener("click", () => {
+    const url = URL.createObjectURL(new Blob([TA().codeFileText(username, code)], { type: "text/plain;charset=utf-8" }));
+    const link = h("a", { href: url, download: TA().codeFileName, hidden: true });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+  return h(
+    "div",
+    { class: "recovery-code" },
+    h("p", { class: "recovery-code-label" }, TA().codeLabel),
+    h("p", { class: "recovery-code-value", "data-testid": "recovery-code" }, h("code", { dir: "ltr" }, code)),
+    h("div", { class: "recovery-code-actions" }, copy, download),
+  );
+}
+
+/** The gate's one-time screen: save the new recovery code, then continue. */
+function renderRecoveryCodeScreen(root: HTMLElement, context: string, shown: ShownCode, onContinue: () => void): void {
+  stopAuthTimers();
+  document.title = pageTitle(TA().codeTitle);
+  const title = h("h1", { tabindex: "-1" }, TA().codeTitle);
+  setChildren(
+    root,
+    h(
+      "section",
+      { class: "center-card gate" },
+      h("p", { class: "eyebrow" }, context),
+      title,
+      h("p", { class: "recovery-code-warning" }, shown.lead()),
+      recoveryCodePanel(shown.code, shown.username),
+      h("button", { type: "button", class: "btn btn-primary btn-lg btn-block", onclick: onContinue }, shown.signedIn ? TA().codeContinue : TA().codeContinueSignIn),
+    ),
+  );
+  title.focus();
+}
+
+/** A code made on #/me, kept in memory until "Done" so a language switch re-shows it instead of losing it. */
+let regeneratedCode: { code: string; username: string } | null = null;
+
+/** #/me: replace the recovery code (needs the current password). Shows the new code once, with Copy and Download. */
+export function recoveryCodeSection(username: string): HTMLElement {
+  if (regeneratedCode !== null && regeneratedCode.username !== username) regeneratedCode = null; // another account
+  const body = h("div", { class: "recovery-section-body" });
+  const section = h("details", { class: "pw-section recovery-section" }, h("summary", { class: "section-title" }, TA().recoverySection), body);
+
+  const showForm = (): void => {
+    const current = passwordField({ id: "me-recovery-current", name: "current-password", label: TG().currentPw, autocomplete: "current-password" });
+    const formError = h("p", { class: "form-error", role: "alert" });
+    const submit = h("button", { type: "submit", class: "btn btn-primary" }, TA().recoveryNew);
+    const form = h("form", { class: "pw-form", novalidate: true }, current.nodes, formError, h("div", {}, submit));
+    current.input.addEventListener("input", () => {
+      if (current.hasError() && current.input.value.length > 0) current.setError(null);
+    });
+    let busy = false;
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      if (busy) return;
+      formError.textContent = "";
+      if (current.input.value.length === 0) {
+        current.setError(TO().enterCurrentPassword);
+        current.input.focus();
+        return;
+      }
+      busy = true;
+      setBusy(submit, true, TA().recoveryMaking);
+      regenerateRecoveryCode({ currentPassword: current.input.value })
+        .then((code) => {
+          regeneratedCode = { code, username };
+          showCode();
+        })
+        .catch((err: unknown) => {
+          busy = false;
+          setBusy(submit, false, TA().recoveryNew);
+          if (err instanceof ApiError && err.code === "bad-credentials") {
+            current.setError(TG().pwWrongCurrent);
+            current.input.focus();
+            return;
+          }
+          formError.textContent = errorText(err);
+          submit.focus();
+        });
+    });
+    setChildren(body, h("p", { class: "muted" }, TA().recoverySectionHelp), form);
+  };
+
+  const showCode = (): void => {
+    const shown = regeneratedCode;
+    if (shown === null) return showForm();
+    const lead = h("p", { class: "recovery-code-warning", tabindex: "-1" }, TA().codeLeadRegenerated);
+    const done = h("button", { type: "button", class: "btn btn-primary" }, TA().codeDone);
+    done.addEventListener("click", () => {
+      regeneratedCode = null;
+      showForm();
+      body.querySelector<HTMLInputElement>("input")?.focus();
+    });
+    setChildren(body, lead, recoveryCodePanel(shown.code, shown.username), h("div", {}, done));
+    if (section.open) lead.focus();
+  };
+
+  if (regeneratedCode !== null) {
+    section.open = true;
+    showCode();
+  } else showForm();
+  return section;
 }
 
 /* ================= password change ================= */
