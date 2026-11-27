@@ -10,7 +10,6 @@ import {
   type AdminProgress,
   type AuditEntry,
   type CaseSummary,
-  type LeaderboardResponse,
   type LiveEvent,
   type QuestionId,
   type Schedule,
@@ -20,7 +19,7 @@ import {
   type UserStats,
 } from "../../shared/contract";
 import { cachedCase } from "../content/load";
-import { cachedEvent, eventPhase, formatCountdown, serverNow as publicServerNow } from "../lib/event";
+import { cachedEvent, serverNow as publicServerNow } from "../lib/event";
 import { dataTable } from "../components/dataTable";
 import { formActions, formField } from "../components/formLayout";
 import { copyButton, h, setChildren, type Child } from "../lib/dom";
@@ -29,7 +28,7 @@ import { clickClosedDrawer, navSubLink, refreshNav, showSubNav } from "../shell/
 import { setPageCrumb } from "../shell/topbar";
 import { scrollerOf } from "../shell/scroll";
 import type { NavSection, ViewResult } from "../shell/types";
-import { banner, closeMenu, showDialog, toast, tooltip, type DialogHandle } from "../lib/overlay";
+import { banner, closeMenu, toast, tooltip } from "../lib/overlay";
 import {
   AdminApiError,
   approveAll,
@@ -86,13 +85,12 @@ import { createMembersPanel } from "./manage/members";
 import { createLivePanel } from "./manage/live";
 import { createSchedulePanel } from "./manage/schedule";
 import { createEventPanel } from "./manage/event";
+import { createBoardPanel } from "./manage/board";
 import { NARROW_QUERY, createManageHost } from "./manage/host";
 
 const POLL_MS = 5000;
 /** The dashboard poll refetches /api/today at most this often (see load()). */
 const TODAY_REFRESH_MS = 60_000;
-/** Rows on the projector board; the rest are summed up as "+N more". */
-const BOARD_ROWS = 10;
 const MAX_BACKOFF_MS = 60000;
 const TAB_STORAGE = "il.adminTab";
 
@@ -290,13 +288,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     queued: false,
     banner: null as string | null,
     failures: 0,
-    leaderboard: false,
-    /** projector board: public leaderboard (honours the freeze); null scope = overall */
-    board: {
-      scope: null as string | null,
-      data: null as LeaderboardResponse | null,
-      error: null as string | null,
-    },
     // recently deleted (Accounts tab)
     trash: {
       entries: null as TrashEntry[] | null,
@@ -353,7 +344,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     document.removeEventListener("focusin", onFocusIn);
     document.removeEventListener("click", onDocClick, { capture: true });
     document.documentElement.classList.remove("admin-savebar-open");
-    boardDialog?.close(null);
+    board.close();
     narrowMq.removeEventListener("change", onNarrowChange);
     if (activeCleanup === dispose) activeCleanup = null;
     if (activeInstance?.container === container) activeInstance = null;
@@ -577,9 +568,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   // Connection problems and failed actions: one dismissible banner under the tabs (lib/overlay.ts).
   const statusBanner = banner({ tone: "warning", text: "", dismissible: true, className: "admin-banner", onDismiss: () => void (state.banner = null) });
   statusBanner.hide();
-  // The projector board: a full-screen modal dialog (lib/overlay.ts) whose content re-renders in place.
-  const leaderboardEl = h("div", { class: "admin-board-content" });
-  let boardDialog: DialogHandle<string> | null = null;
 
   pauseBtn.addEventListener("click", () => {
     state.paused = !state.paused;
@@ -594,11 +582,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     }
   });
   refreshBtn.addEventListener("click", () => void load());
-  boardBtn.addEventListener("click", () => {
-    state.leaderboard = true;
-    renderLeaderboard();
-    void loadBoard();
-  });
+  boardBtn.addEventListener("click", () => board.open());
   logoutBtn.addEventListener("click", () => {
     const wasSession = state.auth === "session";
     clearAdminKey();
@@ -1564,174 +1548,19 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   let statsSig = "";
 
   // =====================================================================================
-  // Projector leaderboard: the PUBLIC board (GET /api/leaderboard), so a freeze hides the live standings
-  // from the room exactly as it does for players. Never ranked from the admin's live account data.
+  // Projector board (views/manage/board.ts): the public board, with the admin's event clock when it has one
   // =====================================================================================
 
-  let boardSeq = 0;
-  async function loadBoard(): Promise<void> {
-    const b = state.board;
-    const scope = b.scope;
-    const seq = ++boardSeq;
-    try {
-      const data = await fetchPublicLeaderboard(scope);
-      if (disposed || seq !== boardSeq) return;
-      b.data = data;
-      b.error = null;
-    } catch (err: unknown) {
-      if (disposed || seq !== boardSeq) return;
-      b.error = errMessage(err);
-    }
-    if (state.leaderboard) renderLeaderboard();
-  }
-
-  const boardScopeSelect = h("select", { class: "admin-input admin-board-scope", id: "admin-board-scope" });
-  boardScopeSelect.addEventListener("change", () => {
-    const v = boardScopeSelect.value;
-    const scope = v === "" ? null : v;
-    if (scope === state.board.scope) return;
-    state.board.scope = scope;
-    state.board.data = null;
-    state.board.error = null;
-    renderLeaderboard();
-    void loadBoard();
+  const board = createBoardPanel({
+    host,
+    api: { load: fetchPublicLeaderboard },
+    cases: () => state.today?.releasedCaseIds ?? [],
+    // The event as the room sees it: the admin's copy once the Event section loaded it, else the public poll's.
+    eventClock: () => {
+      const saved = eventForm.server();
+      return saved ? { event: saved, now: eventForm.serverNow() } : { event: cachedEvent(), now: publicServerNow() };
+    },
   });
-
-  // Event line and freeze state in the board header: kept across re-renders and ticked once a second.
-  const boardEventEl = h("p", { class: "admin-board-event", "aria-live": "off" });
-  const boardStateEl = h("p", { class: "admin-board-state" });
-
-  /** The event as the room sees it: the admin's copy once the Event section loaded it, else the public poll's. */
-  function boardEvent(): { event: LiveEvent | null; now: number } {
-    const saved = eventForm.server();
-    return saved ? { event: saved, now: eventForm.serverNow() } : { event: cachedEvent(), now: publicServerNow() };
-  }
-
-  function renderBoardClock(): void {
-    const { event, now } = boardEvent();
-    const name = event?.name.trim() ?? "";
-    const phase = eventPhase(event, now);
-    const when =
-      phase.kind === "before"
-        ? T().admBoardStartsIn(formatCountdown(phase.msLeft))
-        : phase.kind === "running"
-          ? phase.msLeft === null
-            ? ""
-            : T().admBoardEndsIn(formatCountdown(phase.msLeft))
-          : phase.kind === "over"
-            ? T().admBoardEventOver
-            : "";
-    setChildren(boardEventEl, name ? h("strong", { dir: "auto" }, name) : null, name && when ? " · " : "", when ? h("span", { class: "board-clock" }, when) : null);
-    boardEventEl.hidden = !name && !when;
-
-    const data = state.board.data && state.board.data.caseId === state.board.scope ? state.board.data : null;
-    if (!data) {
-      boardStateEl.hidden = true;
-      return;
-    }
-    boardStateEl.hidden = false;
-    const freezeAt = ms(event?.freezeAt ?? null);
-    const detail = data.frozen
-      ? data.frozenAt
-        ? T().admBoardFrozenAt(formatDateTime(data.frozenAt))
-        : ""
-      : freezeAt !== null && freezeAt > now
-        ? T().admBoardFreezesIn(formatCountdown(freezeAt - now))
-        : "";
-    boardStateEl.classList.toggle("is-frozen", data.frozen);
-    setChildren(
-      boardStateEl,
-      data.frozen ? h("span", { class: "board-frozen-chip" }, "❄ ", T().admBoardFrozen) : h("span", { class: "board-live-chip" }, T().admBoardLive),
-      detail ? h("span", { class: "board-frozen-at" }, detail) : null,
-    );
-  }
-
-  function renderLeaderboard(): void {
-    if (!state.leaderboard) {
-      boardDialog?.close(null); // focus goes back to the button (or the "More" menu) that opened it
-      return;
-    }
-    const opening = boardDialog === null;
-    if (opening) {
-      const handle = showDialog<string>({ size: "full", title: T().admLeaderboard, header: false, closeButton: false, body: leaderboardEl, className: "admin-board" });
-      boardDialog = handle;
-      void handle.result.then(() => {
-        if (boardDialog === handle) boardDialog = null;
-        state.leaderboard = false;
-        leaderboardEl.replaceChildren();
-      });
-    }
-    const b = state.board;
-    // Scope options: overall + released cases (rebuilt each time; keeps the selection).
-    const released = state.today?.releasedCaseIds ?? [];
-    setChildren(
-      boardScopeSelect,
-      h("option", { value: "", selected: b.scope === null }, T().admBoardOverall),
-      released.map((id) => h("option", { value: id, selected: id === b.scope }, caseTitle(id))),
-    );
-    const data = b.data && b.data.caseId === b.scope ? b.data : null;
-    const top = data ? data.entries.slice(0, BOARD_ROWS) : [];
-    const close = h(
-      "button",
-      {
-        type: "button",
-        class: "btn btn-ghost admin-board-close",
-        onclick: () => boardDialog?.close(null),
-      },
-      T().admClose,
-    );
-    renderBoardClock();
-    const more = data ? Math.max(0, data.entries.length - BOARD_ROWS) : 0;
-    let body: HTMLElement;
-    if (b.error && !data) body = h("p", { class: "admin-error admin-board-empty", role: "alert" }, T().admBoardFailed(b.error));
-    else if (!data) body = h("p", { class: "muted admin-board-empty" }, T().admLoading);
-    else if (top.length === 0) body = h("p", { class: "muted admin-board-empty" }, T().admNoPlayersBoard);
-    else {
-      const overall = data.caseId === null;
-      body = h(
-        "ol",
-        { class: "admin-board-list" },
-        top.map((e) =>
-          h(
-            "li",
-            { class: `admin-board-row rank-${e.rank}` },
-            h("span", { class: "board-rank" }, fmtInt(e.rank)),
-            h("span", { class: "board-name", dir: "auto" }, e.username),
-            h("span", { class: "board-time muted" }, overall ? T().admCasesDone(e.casesCompleted) : T().admStagesSolved(e.stagesSolved)),
-            h("span", { class: "board-score" }, fmtInt(e.score)),
-          ),
-        ),
-      );
-    }
-    const focusedScope = document.activeElement === boardScopeSelect;
-    const focusInside = opening || leaderboardEl.contains(document.activeElement);
-    setChildren(
-      leaderboardEl,
-      h(
-        "div",
-        { class: "admin-board-inner" },
-        // The header answers what the room asks: which event, how long is left, and are the standings frozen.
-        h(
-          "div",
-          { class: "admin-board-head" },
-          h("h2", { class: "admin-board-title" }, T().admLeaderboard),
-          h(
-            "div",
-            { class: "admin-board-tools" },
-            h("label", { class: "admin-label", for: "admin-board-scope" }, T().admBoardScope),
-            boardScopeSelect,
-            close,
-          ),
-          h("div", { class: "admin-board-meta" }, boardEventEl, boardStateEl),
-        ),
-        body,
-        more > 0 ? h("p", { class: "admin-board-more" }, T().admBoardMore(more, fmtInt(more))) : null,
-      ),
-    );
-    // Re-appending moves focus out of the dialog: put it back (Close on first open).
-    if (focusedScope) boardScopeSelect.focus();
-    else if (focusInside || document.activeElement === boardDialog?.el) close.focus();
-  }
 
   // ---- render dispatch ------------------------------------------------------------------
 
@@ -1812,7 +1641,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     const settingsRev = state.settings.rev;
     const eventRev = eventForm.rev();
     // The projector board refreshes with the dashboard (public endpoint; its errors stay on the board).
-    if (state.leaderboard) void loadBoard();
+    board.refresh();
     // Recently deleted is optional: a server without it (404) or a failure must not break the poll.
     const trashReq: Promise<TrashEntry[] | AdminApiError | Error> | null =
       tab === "accounts" ? fetchTrash().catch((err: unknown) => (err instanceof Error ? err : new Error(T().admUnknownError))) : null;
@@ -1918,7 +1747,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       if (!container.isConnected) return dispose();
       renderUpdated();
       if (state.tab === "event") eventForm.renderStatus();
-      if (state.leaderboard && boardDialog !== null) renderBoardClock();
+      board.tick();
     }, 1000);
   }
 
