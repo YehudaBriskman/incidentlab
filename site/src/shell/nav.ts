@@ -13,7 +13,6 @@ import { TG } from "../i18n/strings-game";
 import { TS } from "../i18n/strings-shell";
 import { TC } from "../i18n/strings-classes";
 import { ICONS, type IconName } from "./icons";
-import { createLangToggle } from "./lang";
 import { loadSettings, onSettingsChange, updateSettings } from "./settings";
 import { cachedToday, onTodayChange } from "./today";
 import type { NavKey, NavSection } from "./types";
@@ -183,7 +182,7 @@ export function mountNav(el: HTMLElement): void {
     el,
     h("div", { class: "nav-head" }, h("a", { class: "logo", href: "#/", "aria-label": TS().logoHome }, h("span", { class: "logo-mark", "aria-hidden": "true" }, "▲"), h("span", { class: "logo-word mono" }, "incident", h("span", { class: "accent" }, "lab")))),
     h("div", { class: "nav-scroll" }, h("ul", { class: "nav-list" }, listItems)),
-    h("div", { class: "nav-foot" }, h("div", { class: "nav-foot-lang" }, createLangToggle()), a11y, collapseBtn),
+    h("div", { class: "nav-foot" }, a11y, collapseBtn),
   );
   // A click on a link (or a [data-nav-close] control) inside the drawer closes it first, in the capture phase,
   // so a handler that moves focus (a stage button focuses its heading) keeps the last word.

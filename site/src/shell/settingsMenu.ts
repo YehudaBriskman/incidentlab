@@ -1,14 +1,11 @@
-// The ⚙ display settings menu: a button and a non-modal panel with one radio group per setting.
-// The popover plumbing (top layer, placement, light dismiss, focus return) is popover() in lib/overlay.ts.
-import { h, html, setChildren } from "../lib/dom";
-import { popover } from "../lib/overlay";
-import { locale } from "../i18n/i18n";
+// The display settings as radio groups, drawn by the account menu (language and theme, shell/accountMenu.ts) and
+// by #/settings/display (all of them, views/settings.ts). Both read and write the one stored state in
+// shell/settings.ts (loadSettings / updateSettings / onSettingsChange), so they always agree.
+import { h } from "../lib/dom";
+import { getLang, locale } from "../i18n/i18n";
 import { TS } from "../i18n/strings-shell";
-import { loadSettings, MOTIONS, onSettingsChange, SPACINGS, TEXT_SCALES, THEMES, updateSettings, type Settings } from "./settings";
-
-const PANEL_ID = "settings-panel";
-const GEAR_SVG =
-  '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+import { switchLang } from "./lang";
+import { MOTIONS, SPACINGS, TEXT_SCALES, THEMES, updateSettings, type Settings } from "./settings";
 
 /** One radio of a display setting; `lang` marks an option written in another language (the language picker). */
 export type SettingOption = { value: string; label: string; lang?: string };
@@ -19,7 +16,7 @@ function percent(scale: number): string {
   return new Intl.NumberFormat(locale(), { style: "percent", maximumFractionDigits: 1 }).format(scale / 100);
 }
 
-/** The display settings as radio groups, in on-screen order. The ⚙ panel and #/settings/display both draw these. */
+/** The display settings as radio groups, in on-screen order (#/settings/display draws them all). */
 export function displayGroups(s: Settings): SettingGroup[] {
   const t = TS();
   const themeLabel: Record<Settings["theme"], string> = { system: t.themeSystem, light: t.themeLight, dark: t.themeDark };
@@ -81,7 +78,7 @@ export function displayGroups(s: Settings): SettingGroup[] {
 
 /**
  * One setting as a fieldset of native radios styled as a segmented control. `namePrefix` keeps two copies on one
- * page (the ⚙ panel and the settings page) in separate radio groups.
+ * page (the account menu and the settings page) in separate radio groups.
  */
 export function renderSettingGroup(g: SettingGroup, namePrefix = "set"): HTMLFieldSetElement {
   return h(
@@ -111,38 +108,28 @@ export function renderSettingGroup(g: SettingGroup, namePrefix = "set"): HTMLFie
   );
 }
 
-/** Builds the ⚙ button and its panel; returns them in DOM order (the panel follows the button for Tab). */
-export function createSettingsMenu(): HTMLElement[] {
-  // An inline SVG gear (currentColor), not the ⚙ character: many systems draw that as a colour emoji.
-  const icon = html("span", { class: "icon", "aria-hidden": "true" }, GEAR_SVG);
-  const button = h("button", { type: "button", class: "settings-btn" }, icon);
-  const panel = h("div", { id: PANEL_ID, class: "settings-panel", role: "dialog", "aria-labelledby": `${PANEL_ID}-title` });
-
-  const draw = (): void => {
-    const focused = document.activeElement;
-    const focusName = focused instanceof HTMLInputElement && panel.contains(focused) ? focused.name : null;
-    button.setAttribute("aria-label", TS().settingsButton);
-    button.title = TS().settingsButton;
-    setChildren(
-      panel,
-      h("h2", { id: `${PANEL_ID}-title`, class: "settings-title" }, TS().settingsTitle),
-      displayGroups(loadSettings()).map((g) => renderSettingGroup(g)),
-      h("a", { class: "settings-link", href: "/accessibility.html" }, TS().a11yStatement),
-    );
-    if (focusName !== null) panel.querySelector<HTMLInputElement>(`input[name="${focusName}"]:checked`)?.focus();
+/**
+ * The language as a radio group of native names (each option carries its own `lang`). `onSwitch` runs before the
+ * switch, so a caller can note that it should take focus back after the re-render (the settings page does).
+ */
+export function languageGroup(legend: string, onSwitch: (lang: "en" | "he") => void = () => undefined): SettingGroup {
+  return {
+    name: "lang",
+    legend,
+    options: [
+      { value: "en", label: "English", lang: "en" },
+      { value: "he", label: "עברית", lang: "he" },
+    ],
+    current: getLang(),
+    apply: (v) => {
+      if (v !== "en" && v !== "he") return;
+      onSwitch(v);
+      switchLang(v, null);
+    },
   };
+}
 
-  // Anchored under the button, its inline-end edge on the button's (it grows away from the screen edge).
-  // Focus starts on the checked option of the first group; Escape, an outside click or Tabbing out closes it.
-  popover(button, panel, {
-    align: "end",
-    onOpen: () => panel.querySelector<HTMLInputElement>("input:checked")?.focus(),
-  });
-  window.addEventListener("hashchange", draw); // re-label on language change
-  onSettingsChange(() => {
-    // the radios already show the change; only resync if something else changed the settings
-    if (!panel.contains(document.activeElement)) draw();
-  });
-  draw();
-  return [button, panel];
+/** The theme on its own: the one display choice the account menu offers inline (the rest are on #/settings/display). */
+export function themeGroup(s: Settings): SettingGroup | undefined {
+  return displayGroups(s).find((g) => g.name === "theme");
 }

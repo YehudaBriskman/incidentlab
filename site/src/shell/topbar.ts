@@ -1,9 +1,8 @@
 // The slim top bar (one row): the menu button (rail widths and phones), the breadcrumb, a compact live status
-// chip (the event clock, or today's case and the countdown to the next one), the connectivity chip, EN | עב,
-// the ⚙ display settings and the account menu. It replaces the old navbar and the live strip under it.
+// chip (the event clock, or today's case and the countdown to the next one), the connectivity chip and the one
+// account menu (shell/accountMenu.ts: identity, language, theme, display options, sign out; #220).
 import { T } from "../i18n/strings-player";
 import { TA } from "../i18n/strings-account";
-import { TB } from "../i18n/strings-board";
 import { TG } from "../i18n/strings-game";
 import { TS } from "../i18n/strings-shell";
 import { TC } from "../i18n/strings-classes";
@@ -13,16 +12,12 @@ import { cachedClassName } from "../lib/class-api";
 import { onConnectivity } from "../lib/api";
 import { h, html, setChildren } from "../lib/dom";
 import { cachedEvent, formatCountdown, onEventChange, serverNow, startEventPolling } from "../lib/event";
-import { popover } from "../lib/overlay";
-import { cachedAccount, isAdmin, isGuest, loadAccount, onAccountChange, signOut } from "../lib/session";
-import { TGu } from "../i18n/strings-guest";
-import { confirmGuestSignOut, openGuestUpgrade } from "./frame";
+import { cachedAccount, isAdmin, loadAccount, onAccountChange } from "../lib/session";
 import { caseSummary, onCatalogChange } from "../content/load";
 import { eventDisplayPhase, eventLine, eventWhen } from "../views/leaderboard";
 import { ICONS } from "./icons";
-import { createLangToggle } from "./lang";
 import { currentNavKey, openNavDrawer, routeParts } from "./nav";
-import { createSettingsMenu } from "./settingsMenu";
+import { createAccountMenu } from "./accountMenu";
 import { cachedToday, msUntilNextDay, onTodayChange, refreshToday } from "./today";
 
 /* ---------- breadcrumb ---------- */
@@ -196,90 +191,6 @@ function createNetChip(): HTMLElement {
   return chip;
 }
 
-/* ---------- account menu ---------- */
-
-/** Up to two initials from a username ("ada_lovelace" -> "AL", "dana" -> "DA"). */
-export function initials(name: string): string {
-  const words = name.split(/[\s._-]+/).filter((w) => w.length > 0);
-  const letters = words.length >= 2 ? [words[0], words[1]].map((w) => [...(w ?? "")][0] ?? "") : [...(words[0] ?? name)].slice(0, 2);
-  return letters.join("").toUpperCase();
-}
-
-function createAccountMenu(): HTMLElement {
-  const wrap = h("div", { class: "account" });
-  const button = h("button", { type: "button", class: "account-btn" });
-  const panel = h("div", { class: "account-panel", role: "dialog" });
-  popover(button, panel, { align: "end", onOpen: () => panel.querySelector<HTMLElement>("a, button")?.focus() });
-  const signInLink = h("a", { class: "btn btn-sm btn-primary account-signin", href: "#/login" });
-
-  const draw = (): void => {
-    const account = cachedAccount();
-    if (account === null) {
-      signInLink.textContent = TA().signIn;
-      setChildren(wrap, signInLink, panel);
-      return;
-    }
-    const guest = isGuest(account);
-    const name = guest ? TGu().guestName : account.username;
-    button.textContent = "";
-    button.append(h("span", { class: "avatar", "aria-hidden": "true" }, initials(name)));
-    // Label in Name (WCAG 2.5.3): the visible initials start the name, so "click AL" works in speech control.
-    button.setAttribute("aria-label", `${initials(name)}, ${TS().accountButton(name)}`);
-    button.title = name;
-    panel.setAttribute("aria-label", TS().accountPanel);
-    const role = guest ? TGu().guestRole : isAdmin(account) ? TS().roleAdmin : account.role === "author" ? TS().roleAuthor : TS().rolePlayer;
-    const showStats = !isAdmin(account) && account.status === "approved" && !account.mustChangePassword;
-    const out = h("button", { type: "button", class: "account-item is-signout" }, TA().signOut);
-    // finally, not then: offline sign-out still clears the local account, so leave the signed-in page too
-    const leave = (): void => void signOut().catch(() => undefined).finally(() => (window.location.hash = "#/"));
-    // A guest who signs out can never get back in (#176): say so first, and offer the account instead.
-    out.addEventListener("click", () => {
-      if (!guest) return leave();
-      if (panel.matches(":popover-open")) panel.hidePopover();
-      void confirmGuestSignOut().then((yes) => {
-        if (yes) leave();
-      });
-    });
-    setChildren(
-      panel,
-      h(
-        "div",
-        { class: "account-head" },
-        h("span", { class: "avatar is-lg", "aria-hidden": "true" }, initials(name)),
-        h(
-          "span",
-          { class: "account-who" },
-          h("bdi", { class: "account-name" }, name),
-          h("span", { class: "account-role" }, role),
-          // Opt-in board (#175): say so while the player isn't listed publicly.
-          showStats && account.kind === "user" && !account.showOnGlobalBoard ? h("span", { class: "account-role account-board" }, TB().menuHidden) : null,
-        ),
-      ),
-      h(
-        "ul",
-        { class: "account-items" },
-        guest ? h("li", {}, h("button", { type: "button", class: "account-item", onclick: upgradeFromMenu }, TGu().createAccount)) : null,
-        showStats ? h("li", {}, h("a", { class: "account-item", href: "#/me" }, TA().myStats)) : null,
-        h("li", {}, h("a", { class: "account-item", href: settingsHref("account") }, TSe().menuSettings)),
-        h("li", {}, out),
-      ),
-    );
-    setChildren(wrap, button, panel);
-  };
-  const upgradeFromMenu = (): void => {
-    if (panel.matches(":popover-open")) panel.hidePopover();
-    openGuestUpgrade();
-  };
-  // Choosing an item closes the panel (popover light dismiss does not run for a click inside it).
-  panel.addEventListener("click", (ev) => {
-    if (ev.target instanceof Element && ev.target.closest("a[href]") !== null && panel.matches(":popover-open")) panel.hidePopover();
-  });
-  onAccountChange(draw);
-  window.addEventListener("hashchange", draw); // re-label on language change
-  draw();
-  return wrap;
-}
-
 /* ---------- mount ---------- */
 
 /** Fills header.topbar. Call once. */
@@ -299,7 +210,7 @@ export function mountTopbar(bar: HTMLElement): void {
     menuBtn,
     createCrumbs(),
     h("div", { class: "topbar-status" }, createStatusChip(), createNetChip()),
-    h("div", { class: "topbar-tools" }, h("div", { class: "topbar-lang" }, createLangToggle()), ...createSettingsMenu(), createAccountMenu()),
+    h("div", { class: "topbar-tools" }, createAccountMenu()),
   );
   refreshToday();
   loadAccount().catch(() => undefined);

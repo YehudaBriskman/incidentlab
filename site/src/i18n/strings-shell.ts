@@ -116,6 +116,13 @@ export const TS = defineStrings({
     rolePlayer: "Player",
     pageAsideOpen: (label: string): string => `Open ${label}`,
 
+    // the account menu (shell/accountMenu.ts, #220)
+    prefsButton: "Language and display",
+    menuDisplayOptions: "Display options…",
+    classOwnerOf: (n: number): string => (n === 1 ? "Owner of 1 class" : `Owner of ${num(n)} classes`),
+    classAdminOf: (n: number): string => (n === 1 ? "Co-admin of 1 class" : `Co-admin of ${num(n)} classes`),
+    classMemberOf: (n: number): string => (n === 1 ? "Member of 1 class" : `Member of ${num(n)} classes`),
+
     // filterButton() (components/filterPopover.ts)
     filterButton: "Filter",
     filterButtonCount: (n: number): string => `Filter, ${n} active`,
@@ -221,6 +228,12 @@ export const TS = defineStrings({
     roleAuthor: "כותב תיקים",
     rolePlayer: "שחקן",
     pageAsideOpen: (label: string): string => `פתיחת ${label}`,
+
+    prefsButton: "שפה ותצוגה",
+    menuDisplayOptions: "אפשרויות תצוגה…",
+    classOwnerOf: (n: number): string => (n === 1 ? "בעלות על כיתה אחת" : n === 2 ? "בעלות על שתי כיתות" : `בעלות על ${num(n)} כיתות`),
+    classAdminOf: (n: number): string => (n === 1 ? "ניהול משותף של כיתה אחת" : n === 2 ? "ניהול משותף של שתי כיתות" : `ניהול משותף של ${num(n)} כיתות`),
+    classMemberOf: (n: number): string => (n === 1 ? "חברות בכיתה אחת" : n === 2 ? "חברות בשתי כיתות" : `חברות ב־${num(n)} כיתות`),
 
     filterButton: "סינון",
     filterButtonCount: (n: number): string => `סינון, ${n} פעילים`,

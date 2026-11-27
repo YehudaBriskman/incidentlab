@@ -671,7 +671,6 @@ body { min-height: 0; overflow: hidden; }
 .nav-sub .step-locked:hover { background: none; color: var(--text-3); }
 .nav-sub-icon.is-dot::before { content: ""; inline-size: 6px; block-size: 6px; border-radius: var(--radius-full); background: currentColor; }
 .nav-foot { flex: none; display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2) var(--space-3) var(--space-3); }
-.nav-foot-lang { display: none; padding-inline: var(--space-2); }
 .nav-foot-link { display: flex; align-items: center; min-block-size: var(--target-min); padding-inline: var(--space-3); font-size: var(--type-label-size); color: var(--text-2); }
 /* The panel icon points inline-start ("fold away"); mirrored for RTL, flipped again to mean "unfold". */
 .nav-collapse-icon { transform: scaleX(var(--dir)); }
@@ -703,7 +702,6 @@ body { min-height: 0; overflow: hidden; }
 .nav-sheet .ov-body { padding: 0; display: flex; }
 .nav-sheet .app-nav { display: flex; flex: 1; background: none; }
 .nav-sheet .nav-head, .nav-sheet .nav-collapse { display: none; }
-@media (max-width: 640px) { .nav-sheet .nav-foot-lang { display: block; } }
 @media (pointer: coarse) {
   .nav-link, .nav-sub-link { min-block-size: var(--target-min); }
 }
@@ -758,14 +756,9 @@ a.status-chip:hover { background: var(--hover-fill); color: var(--text-1); }
   .net-status.is-down .net-text { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 }
 .topbar-tools { display: flex; align-items: center; gap: var(--space-1); flex: none; }
-.topbar-lang { display: flex; }
-@media (max-width: 640px) { .topbar-lang { display: none; } }
-.lang-toggle { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--fill-inset); font-size: var(--type-label-size); }
-.lang-btn { min-block-size: 28px; min-inline-size: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-weight: 600; cursor: pointer; }
-.lang-btn:hover { color: var(--text-1); }
-.lang-btn[aria-pressed="true"] { background: var(--level-1); color: var(--text-1); box-shadow: var(--shadow-sm); }
 
-/* account: a circular avatar button and a popover with the name, role, My stats and Sign out */
+/* account (#220): the one menu of the top bar. A circular avatar button (signed in) or the preferences button
+   (signed out, an icon beside Sign in) opens a popover; on phones the same content is a bottom Sheet. */
 .account { display: flex; align-items: center; }
 .account-btn {
   display: inline-flex; align-items: center; justify-content: center; flex: none;
@@ -778,18 +771,48 @@ a.status-chip:hover { background: var(--hover-fill); color: var(--text-1); }
 }
 .avatar.is-lg { inline-size: 40px; block-size: 40px; font-size: var(--type-small-size); }
 .account-btn:hover .avatar { background: var(--hover-fill); }
-.account-panel { min-inline-size: 15rem; max-inline-size: min(20rem, calc(100vw - 2 * var(--gutter))); padding: var(--space-2); border-radius: var(--radius-lg); }
-.account-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-2) var(--space-3); }
-.account-who { display: flex; flex-direction: column; min-inline-size: 0; }
+.account { gap: var(--space-2); }
+.account-btn.is-prefs { border-radius: var(--radius-md); color: var(--text-2); }
+.account-btn.is-prefs:hover { background: var(--hover-fill); color: var(--text-1); }
+.account-btn .icon { display: inline-flex; }
+.ov-popover.account-panel {
+  inline-size: min(20rem, calc(100vw - 2 * var(--gutter))); max-block-size: calc(100dvh - var(--space-8)); overflow: auto;
+  padding: var(--space-2); border-radius: var(--radius-surface);
+}
+.account-head {
+  display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2); border-radius: var(--radius-md);
+  color: var(--text-1); text-decoration: none;
+}
+.account-head:hover { background: var(--hover-fill); }
+.account-who { display: flex; flex-direction: column; flex: 1; min-inline-size: 0; }
 .account-name { font-weight: 600; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-role { font-size: var(--type-label-size); color: var(--text-2); }
-.account-items { list-style: none; margin: 0; padding: var(--space-1) 0 0; display: flex; flex-direction: column; gap: 2px; }
+.account-head-chevron { display: inline-flex; flex: none; color: var(--text-3); transform: scaleX(var(--dir)); }
+.account-row { padding: var(--space-1) var(--space-2) var(--space-2); }
+.account-upgrade { inline-size: 100%; }
+.account-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.account-group { padding-block: var(--space-1); border-block-start: var(--edge-width) solid var(--edge-subtle); }
 .account-item {
-  display: flex; align-items: center; inline-size: 100%; min-block-size: var(--control-sm); padding: 0 var(--space-2);
+  display: flex; align-items: center; gap: var(--space-3); inline-size: 100%; min-block-size: var(--control-sm); padding: 0 var(--space-2);
   border: 0; border-radius: var(--radius-md); background: none; color: var(--text-1); font: inherit; font-size: var(--type-small-size); text-align: start; text-decoration: none; cursor: pointer;
 }
 .account-item:hover { background: var(--hover-fill); }
+.account-item-icon { display: inline-flex; flex: none; color: var(--text-2); }
+.account-item-icon.is-mirrored { transform: scaleX(var(--dir)); }
+.account-prefs { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3) var(--space-2) var(--space-1); border-block-start: var(--edge-width) solid var(--edge-subtle); }
+.account-prefs .settings-group { margin: 0; }
+.account-prefs .account-items { margin-inline: calc(-1 * var(--space-2)); }
+.account-panel > .account-prefs:first-child { border-block-start: 0; }
+.account-foot {
+  display: flex; align-items: center; min-block-size: var(--target-min); padding-inline: var(--space-2);
+  border-block-start: var(--edge-width) solid var(--edge-subtle); font-size: var(--type-label-size); color: var(--text-2);
+}
 .account-signin { white-space: nowrap; }
+/* phones: the same rows in a bottom Sheet, 44px each (--control-md) whatever the pointer */
+.account-sheet .ov-body { padding-block-start: 0; }
+.account-sheet-body > .account-prefs:first-child { border-block-start: 0; }
+.account-sheet :is(.account-item, .account-head, .account-foot, .settings-option) { min-block-size: var(--control-md); }
+@media (pointer: coarse) { .account-item, .account-head { min-block-size: var(--target-min); } }
 
 /* ---- content area: the page scroller ---- */
 main.app-content {
@@ -860,15 +883,9 @@ main.app-content {
 .filter-option input { margin: 0; inline-size: 16px; block-size: 16px; accent-color: var(--accent); }
 @media (pointer: coarse) { .filter-option { min-block-size: var(--target-min); } }
 
-/* ⚙ display settings: an .ov-popover panel (lib/overlay.ts popover()) anchored under the button.
-   Soft UI card: 24px padding, each setting a full-width segmented control (muted track, the chosen
-   option a lifted pill). Native radios stay in place, visually hidden, so arrow keys and forms work.
-   `.ov-popover.settings-panel` outranks the generic `.ov-popover { padding: 0 }` that follows. */
-.ov-popover.settings-panel {
-  inline-size: min(20rem, calc(100vw - 2 * var(--gutter))); max-block-size: calc(100dvh - var(--space-8)); overflow: auto;
-  padding: var(--space-5); border-radius: var(--radius-surface);
-}
-.settings-title { font-size: var(--type-body-size); font-weight: 600; line-height: var(--type-body-lh); margin: 0 0 var(--space-4); letter-spacing: 0; }
+/* display settings as segmented radios (shell/settingsMenu.ts), in the account menu and on #/settings/display.
+   Each setting a full-width segmented control (muted track, the chosen option a lifted pill). Native radios stay
+   in place, visually hidden, so arrow keys and forms work. */
 .settings-group { border: 0; margin: 0 0 var(--space-4); padding: 0; min-inline-size: 0; }
 .settings-legend { padding: 0; margin-block-end: var(--space-2); font-size: var(--type-small-size); font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-1); }
 .settings-options {
@@ -885,10 +902,6 @@ main.app-content {
 .settings-option:has(input:checked) { background: var(--segment-thumb); color: var(--text-1); font-weight: 600; box-shadow: var(--surface-lift); }
 .settings-option:has(input:focus-visible) { outline: var(--focus-width) solid var(--focus-ring); outline-offset: 1px; }
 .settings-option input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
-.settings-link {
-  display: flex; align-items: center; min-block-size: var(--target-min); margin: var(--space-1) calc(-1 * var(--space-5)) calc(-1 * var(--space-5));
-  padding: var(--space-2) var(--space-5); border-block-start: 1px solid var(--edge-subtle); font-size: var(--type-small-size); color: var(--text-2);
-}
 @media (pointer: coarse) { .settings-option { min-block-size: var(--target-min); } }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success-fg); display: inline-block; }
 

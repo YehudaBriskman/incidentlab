@@ -1,10 +1,10 @@
 // The settings page (#219): #/settings/{account,security,privacy,display}. One h1 ("Settings"), the section list in
 // the page panel (an inline segmented list up to 1024px, where the panel would be a Sheet), and one section on
 // screen. Password, recovery code and the global-board switch moved here from My stats; Display draws the same
-// radio groups as the ⚙ panel (shell/settingsMenu.ts) over the same stored settings (shell/settings.ts), so the
-// two stay in step. Display works signed out; the other sections run the account gate.
+// radio groups as the account menu (shell/settingsMenu.ts) over the same stored settings (shell/settings.ts), so
+// the two stay in step. Display works signed out; the other sections run the account gate.
 import type { AccountView, ClassSummary } from "../../shared/contract";
-import { getLang, locale } from "../i18n/i18n";
+import { locale } from "../i18n/i18n";
 import { TA } from "../i18n/strings-account";
 import { TB } from "../i18n/strings-board";
 import { TC } from "../i18n/strings-challenges";
@@ -21,16 +21,15 @@ import { toast } from "../lib/overlay";
 import { cachedAccount, isAdmin, isGuest, loadAccount, setAccount, signOut } from "../lib/session";
 import { SETTINGS_SECTIONS, settingsHref, type SettingsSection } from "../lib/settings-route";
 import { confirmGuestSignOut } from "../shell/frame";
-import { switchLang } from "../shell/lang";
 import { loadSettings, onSettingsChange } from "../shell/settings";
-import { displayGroups, renderSettingGroup, type SettingGroup } from "../shell/settingsMenu";
+import { displayGroups, languageGroup, renderSettingGroup, type SettingGroup } from "../shell/settingsMenu";
 import type { ViewResult } from "../shell/types";
 import { passwordChangeForm, recoveryCodeSection, withApprovedAccount } from "./auth";
 import { openUpgradeDialog } from "./guest";
 import "../player.css";
 import "../settings.css";
 
-/** The radios on this page are named `page-set-*`, apart from the ⚙ panel's `set-*` (both can be in the DOM). */
+/** The radios on this page are named `page-set-*`, apart from the account menu's `menu-set-*` (both can be in the DOM). */
 const NAME_PREFIX = "page-set";
 
 const sectionLabel = settingsSectionLabel;
@@ -228,33 +227,21 @@ function privacySection(account: AccountView): Child[] {
 
 /** Set when the language radio switched the language: the re-rendered page puts focus back on it. */
 let refocusLang = false;
-/** Redraws the Display section on screen when the ⚙ panel changes a setting (one listener for the page's lifetime). */
+/** Redraws the Display section on screen when the account menu changes a setting (one listener for the page's lifetime). */
 let redrawDisplay: (() => void) | null = null;
 onSettingsChange(() => redrawDisplay?.());
 
-function languageGroup(): SettingGroup {
-  return {
-    name: "lang",
-    legend: TSe().language,
-    options: [
-      { value: "en", label: "English", lang: "en" },
-      { value: "he", label: "עברית", lang: "he" },
-    ],
-    current: getLang(),
-    apply: (v) => {
-      if (v !== "en" && v !== "he") return;
-      refocusLang = true;
-      switchLang(v, null);
-    },
-  };
-}
+const languageRadios = (): SettingGroup =>
+  languageGroup(TSe().language, () => {
+    refocusLang = true;
+  });
 
 function displaySection(): HTMLElement {
   const groups = h("div", { class: "settings-groups" });
   const draw = (): void => {
     const focused = document.activeElement;
     const focusName = focused instanceof HTMLInputElement && groups.contains(focused) ? focused.name : null;
-    setChildren(groups, [languageGroup(), ...displayGroups(loadSettings())].map((g) => renderSettingGroup(g, NAME_PREFIX)));
+    setChildren(groups, [languageRadios(), ...displayGroups(loadSettings())].map((g) => renderSettingGroup(g, NAME_PREFIX)));
     if (focusName !== null) groups.querySelector<HTMLInputElement>(`input[name="${CSS.escape(focusName)}"]:checked`)?.focus();
   };
   draw();
@@ -263,7 +250,7 @@ function displaySection(): HTMLElement {
       redrawDisplay = null;
       return;
     }
-    // the radios already show a change made here; only resync when the ⚙ panel made it
+    // the radios already show a change made here; only resync when the account menu made it
     if (!groups.contains(document.activeElement)) draw();
   };
   if (refocusLang) {
