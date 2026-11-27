@@ -4,6 +4,7 @@ import type { Case, Question } from "../../shared/case";
 import { ApiError, getDebrief, getProgress, revealAnswer, revealHint, setupDone, submitAnswer } from "../lib/api";
 import { recordVisit } from "../lib/recent";
 import { playErrorText, recoverFromWrite } from "../lib/errors";
+import { followProgress, type ProgressFollower } from "../lib/progress-bus";
 import { cachedAccount, isGuest, loadAccount, setAccount, signOut } from "../lib/session";
 import { TGu } from "../i18n/strings-guest";
 import { confirmGuestSignOut } from "../shell/frame";
@@ -46,7 +47,18 @@ let lastView: { caseId: string; stage: StageKey } | null = null;
 /** Observers of the stage on screen (the sticky answer bar): disconnected with the timers on every redraw. */
 const cleanups = new Set<() => void>();
 
+/** Keeps the case on screen in step with the player's other tabs and the server (#203): one per case page. */
+let follower: ProgressFollower | null = null;
+
+/** Leaving the case page (main.ts) or rendering it again: the stage's timers and the progress follower stop. */
 export function stopCaseTimers(): void {
+  stopStageTimers();
+  follower?.stop();
+  follower = null;
+}
+
+/** Every redraw of the stage: its timers and observers only. */
+function stopStageTimers(): void {
   for (const t of timers) window.clearInterval(t);
   timers.clear();
   for (const stop of cleanups) stop();
@@ -194,13 +206,25 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
   let justSolved: QuestionId | null = null;
   let focusNext: FocusTarget | null = null;
 
-  const update = (next: ProgressView, view?: StageKey, focus: FocusTarget = { kind: "heading" }): void => {
+  /** `focus: null` (a sync from another tab): focus stays where it was, or on the same field once redrawn. */
+  const update = (next: ProgressView, view?: StageKey, focus: FocusTarget | null = { kind: "heading" }): void => {
     player = next;
     // A stage the server's progress says is locked (after a reset seen in a stale-write reply) is never shown.
     viewing = view !== undefined && stepState(player, view) !== "locked" ? view : currentStage(player);
     focusNext = focus;
+    const typing = focus === null && document.activeElement instanceof HTMLElement && root.contains(document.activeElement) ? document.activeElement.id : "";
     draw();
+    if (typing !== "") document.getElementById(typing)?.focus({ preventScroll: true });
   };
+
+  // Progress bought or answered in another tab, or changed while this one was hidden (#203). The player keeps
+  // the stage they were reading unless it was the current one and has moved on.
+  follower = followProgress({
+    initial: player,
+    load: () => getProgress(c.id),
+    alive: () => root.isConnected,
+    apply: (next) => update(next, viewing === currentStage(player) ? undefined : viewing, null),
+  });
 
   const applyFocus = (): void => {
     const target = focusNext;
@@ -318,7 +342,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
   };
 
   const draw = (): void => {
-    stopCaseTimers();
+    stopStageTimers();
     lastView = { caseId: c.id, stage: viewing };
     navStages();
     const header = h(

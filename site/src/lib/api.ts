@@ -29,6 +29,7 @@ import {
 import type { CatalogEntry } from "../../shared/catalog";
 import { getLang } from "../i18n/i18n";
 import { isCacheHit, type ClockSample } from "./clock";
+import { shareProgress } from "./progress-bus";
 
 const rawBase: unknown = import.meta.env["VITE_API_BASE"];
 const API_BASE = typeof rawBase === "string" ? rawBase.replace(/\/$/, "") : "";
@@ -317,15 +318,21 @@ export async function getProgress(caseId: string): Promise<ProgressView> {
 }
 
 /**
- * One play write, sent once. When no response came back, or a 5xx, the write may still have landed: the progress
- * is re-read and the error carries it (code "unconfirmed"), so the view shows the server's state and the player
- * decides what to do next.
+ * One play write, sent once. Its progress (or the one a stale refusal carries) goes to the other tabs. When no
+ * response came back, or a 5xx, the write may still have landed: the progress is re-read and the error carries
+ * it (code "unconfirmed"), so the view shows the server's state and the player decides what to do next.
  */
-async function caseWrite<T>(caseId: string, write: () => Promise<T>): Promise<T> {
+async function caseWrite<T>(caseId: string, write: () => Promise<T>, progressOf: (result: T) => ProgressView): Promise<T> {
   try {
-    return await write();
+    const result = await write();
+    shareProgress(progressOf(result));
+    return result;
   } catch (err) {
-    if (!(err instanceof ApiError) || err.progress !== null) throw err;
+    if (!(err instanceof ApiError)) throw err;
+    if (err.progress !== null) {
+      shareProgress(err.progress);
+      throw err;
+    }
     if (err.status !== 0 && err.status < 500) throw err;
     let progress: ProgressView;
     try {
@@ -333,6 +340,7 @@ async function caseWrite<T>(caseId: string, write: () => Promise<T>): Promise<T>
     } catch {
       throw err;
     }
+    shareProgress(progress);
     throw new ApiError(err.status, err.message, { code: "unconfirmed", progress });
   }
 }
@@ -340,21 +348,21 @@ async function caseWrite<T>(caseId: string, write: () => Promise<T>): Promise<T>
 const progressOnly = (body: { progress: ProgressView }): ProgressView => body.progress;
 
 export async function setupDone(caseId: string): Promise<ProgressView> {
-  return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "setup-done"), ProgressResponseSchema, {})));
+  return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "setup-done"), ProgressResponseSchema, {}), progressOnly));
 }
 
 export async function submitAnswer(caseId: string, questionId: QuestionId, answer: string): Promise<{ correct: boolean; progress: ProgressView }> {
-  return caseWrite(caseId, () => request("POST", casePath(caseId, "answer"), AnswerResponseSchema, { questionId, answer }));
+  return caseWrite(caseId, () => request("POST", casePath(caseId, "answer"), AnswerResponseSchema, { questionId, answer }), progressOnly);
 }
 
 /** Buys hint `expectedHint` (0-based: the number already shown). The server refuses any other one as stale. */
 export async function revealHint(caseId: string, questionId: QuestionId, expectedHint: number): Promise<ProgressView> {
   const body = { questionId, expectedHint };
-  return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "hint"), ProgressResponseSchema, body)));
+  return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "hint"), ProgressResponseSchema, body), progressOnly));
 }
 
 export async function revealAnswer(caseId: string, questionId: QuestionId): Promise<ProgressView> {
-  return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "reveal"), ProgressResponseSchema, { questionId })));
+  return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "reveal"), ProgressResponseSchema, { questionId }), progressOnly));
 }
 
 /**
@@ -363,7 +371,7 @@ export async function revealAnswer(caseId: string, questionId: QuestionId): Prom
  */
 export async function revealCommand(caseId: string, toolId: string, expectedStage: QuestionId): Promise<ProgressView> {
   const body = { toolId, expectedStage };
-  return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "reveal-command"), ProgressResponseSchema, body)));
+  return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "reveal-command"), ProgressResponseSchema, body), progressOnly));
 }
 
 export async function getDebrief(caseId: string): Promise<string> {

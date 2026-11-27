@@ -12,6 +12,7 @@ import { announce, copyButton, ensureAnnouncer, h, html, setChildren, type Child
 import { confirm, tooltip } from "../lib/overlay";
 import "../player.css";
 import { playErrorText, recoverFromWrite } from "../lib/errors";
+import { followProgress, type ProgressFollower } from "../lib/progress-bus";
 import { md } from "../lib/markdown";
 import { isAdmin, loadAccount } from "../lib/session";
 import { caseVersion } from "../content/load";
@@ -238,10 +239,27 @@ export function toolboxView(c: Case): ViewResult {
   return { main, nav: createCaseNav(c, "toolbox").section, aside: { label: TS().tbSide, trigger: TS().tbSideTrigger, content: side }, start };
 }
 
+/** Keeps the toolbox page's progress in step with the case in other tabs (#203), so its prices stay right. */
+let follower: ProgressFollower | null = null;
+
 export function renderToolbox(root: HTMLElement, c: Case): void {
   document.title = T().allCommandsTitle(c.title);
   const hash = window.location.hash;
   const stillHere = (): boolean => window.location.hash === hash;
+  follower?.stop();
+  follower = null;
+  const follow = (progress: ProgressView): void => {
+    follower = followProgress({
+      initial: progress,
+      load: () => getProgress(c.id),
+      alive: () => root.isConnected && stillHere(),
+      apply: (next) => {
+        const y = contentScrollTop();
+        drawToolbox(root, c, { kind: "player", progress: next });
+        scrollContentTo(y);
+      },
+    });
+  };
   setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted" }, T().loading)));
   loadAccount()
     .then((account) => {
@@ -252,7 +270,9 @@ export function renderToolbox(root: HTMLElement, c: Case): void {
         withApprovedAccount(root, c.title, () => {
           getProgress(c.id)
             .then((progress) => {
-              if (stillHere()) drawToolbox(root, c, { kind: "player", progress });
+              if (!stillHere()) return;
+              drawToolbox(root, c, { kind: "player", progress });
+              follow(progress);
             })
             .catch((err: unknown) => {
               if (stillHere()) drawToolbox(root, c, { kind: "error", message: playErrorText(err) });
