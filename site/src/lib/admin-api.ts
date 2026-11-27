@@ -5,7 +5,11 @@ import type { z } from "zod";
 import {
   AccountResponseSchema,
   SessionResponseSchema,
+  AccountClassLimitResponseSchema,
   AdminAccountsResponseSchema,
+  AdminClassesResponseSchema,
+  AdminUsersResponseSchema,
+  ClassResponseSchema,
   AdminProgressResponseSchema,
   AdminResetRequestSchema,
   AdminStatsResponseSchema,
@@ -25,6 +29,9 @@ import {
   TrashRestoreResponseSchema,
   type AccountRecordRole,
   type AccountView,
+  type AdminClass,
+  type AdminUsersQuery,
+  type AdminUsersResponse,
   type AuditEntry,
   type LeaderboardResponse,
   type LiveEvent,
@@ -33,6 +40,7 @@ import {
   type TodayResponse,
   type TrashEntry,
 } from "../../shared/contract";
+import { ReviewsResponseSchema } from "../../shared/author-contract";
 
 const ADMIN_KEY_STORAGE = "il.adminKey";
 const FETCH_TIMEOUT_MS = 8000;
@@ -165,6 +173,26 @@ export async function fetchAccounts(): Promise<AdminAccountsResult> {
   return parseJson(await adminFetch(path), AdminAccountsResponseSchema, path);
 }
 
+/**
+ * One page of the console's users list (#185), filtered and sorted on the server. Fetched on demand (opening the
+ * section, a search, a filter, a page, a manual refresh): never on the dashboard's timer.
+ */
+export async function fetchUsers(query: Partial<AdminUsersQuery> = {}): Promise<AdminUsersResponse> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== null && value !== undefined && value !== "") params.set(key, String(value));
+  }
+  const qs = params.toString();
+  const path = `/api/admin/users${qs === "" ? "" : `?${qs}`}`;
+  return parseJson(await adminFetch(path), AdminUsersResponseSchema, "/api/admin/users");
+}
+
+/** How many active classes the account may own; null puts it back to the site default (#179). */
+export async function setAccountClassLimit(id: string, classLimit: number | null): Promise<number | null> {
+  const path = `/api/admin/accounts/${seg(id)}/class-limit`;
+  return (await parseJson(await adminFetch(path, jsonInit("PUT", { classLimit })), AccountClassLimitResponseSchema, "/api/admin/accounts/:id/class-limit")).classLimit;
+}
+
 export async function setAccountStatus(id: string, action: "approve" | "reject"): Promise<AccountView> {
   const path = `/api/admin/accounts/${seg(id)}/${action}`;
   const body = await parseJson(await adminFetch(path, jsonInit("POST", {})), AccountResponseSchema, path);
@@ -216,6 +244,30 @@ export async function resetAccountPassword(id: string): Promise<string> {
 
 export async function deleteAccount(id: string): Promise<void> {
   await adminFetch(`/api/admin/accounts/${seg(id)}`, { method: "DELETE" });
+}
+
+// ---- classes and reviews (the owner console, #185) ---------------------------------
+
+export async function fetchAdminClasses(): Promise<AdminClass[]> {
+  const path = "/api/admin/classes";
+  return (await parseJson(await adminFetch(path), AdminClassesResponseSchema, path)).classes;
+}
+
+export async function setClassMemberLimit(id: string, memberLimit: number): Promise<void> {
+  const path = `/api/admin/classes/${seg(id)}/limits`;
+  await parseJson(await adminFetch(path, jsonInit("PUT", { memberLimit })), ClassResponseSchema, "/api/admin/classes/:id/limits");
+}
+
+/** Archives (stops joins and edits, keeps every record) or restores a class, as the site owner. */
+export async function setClassArchived(id: string, archived: boolean): Promise<void> {
+  const path = `/api/classes/${seg(id)}/${archived ? "archive" : "restore"}`;
+  await parseJson(await adminFetch(path, jsonInit("POST", {})), ClassResponseSchema, "/api/classes/:id/archive");
+}
+
+/** How many cases wait for the owner's review (#184): the console's badge on the Reviews link. */
+export async function fetchReviewCount(): Promise<number> {
+  const path = "/api/admin/reviews";
+  return (await parseJson(await adminFetch(path), ReviewsResponseSchema, path)).reviews.length;
 }
 
 // ---- live progress -----------------------------------------------------------
@@ -301,9 +353,12 @@ export async function fetchCaseStats(): Promise<AdminStatsResult> {
   return parseJson(await adminFetch(path), AdminStatsResponseSchema, path);
 }
 
-export async function fetchAudit(limit = 100): Promise<AuditEntry[]> {
+export type AdminAuditResult = { entries: AuditEntry[]; names: Readonly<Record<string, string>> };
+
+/** The newest audit entries, with the usernames and class names behind their actor and target ids (#185). */
+export async function fetchAudit(limit = 100): Promise<AdminAuditResult> {
   const path = `/api/admin/audit?limit=${limit}`;
-  return (await parseJson(await adminFetch(path), AuditResponseSchema, "/api/admin/audit")).entries;
+  return parseJson(await adminFetch(path), AuditResponseSchema, "/api/admin/audit");
 }
 
 /** Downloads the results CSV with the same auth as every other admin call. */

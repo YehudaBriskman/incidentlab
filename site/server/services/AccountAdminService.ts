@@ -44,6 +44,7 @@ export class AccountAdminService {
   private readonly trashRepo: TrashRepository;
   private readonly scores: ScoreService | null;
   private readonly now: () => Date;
+  private readonly onBoardChange: () => void;
 
   constructor(deps: {
     repos: Repositories;
@@ -55,7 +56,10 @@ export class AccountAdminService {
     /** the board's score summaries follow progress resets and account deletes (#175) */
     scores?: ScoreService;
     now: () => Date;
+    /** a ban or unban changes who is on the board: the board's shared read is dropped (#185) */
+    onBoardChange?: () => void;
   }) {
+    this.onBoardChange = deps.onBoardChange ?? (() => undefined);
     this.repos = deps.repos;
     this.firstBlood = deps.firstBlood;
     this.game = deps.game;
@@ -74,6 +78,7 @@ export class AccountAdminService {
     // sign-out. Every case route already refuses rejected accounts, and they can't sign in again.
     const account = { ...found.data, status, decidedAt: this.now().toISOString() };
     if (!(await this.repos.accounts.saveIfMatch(account, found.etag))) throw new AppError(409, "concurrent update, please retry");
+    this.onBoardChange();
     return toAccountView(account);
   }
 
@@ -149,11 +154,12 @@ export class AccountAdminService {
 
   async liveProgress(caseId: string): Promise<{ generatedAt: string; caseId: string; players: AdminProgress[] }> {
     this.game.caseSecrets(caseId); // 404 for unknown cases
-    const [records, accounts] = await Promise.all([this.repos.progress.list(caseId), this.repos.accounts.list()]);
-    const byId = new Map(accounts.map((a) => [a.id, a]));
+    // Only the accounts on this case (#185): the Live section polls this, so it never reads every account.
+    const records = await this.repos.progress.list(caseId);
+    const accounts = await mapWithConcurrency(records, async (record) => (await this.repos.accounts.get(record.accountId))?.data ?? null);
     const players = records
-      .flatMap((record) => {
-        const account = byId.get(record.accountId);
+      .flatMap((record, i) => {
+        const account = accounts[i];
         return account ? [this.game.toAdminView(record, account)] : [];
       })
       .sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));

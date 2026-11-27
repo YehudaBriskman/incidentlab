@@ -11,6 +11,11 @@ export function statusPill(status: AccountStatus): HTMLElement {
   return h("span", { class: `status-pill is-${status}` }, T().admAcctStatus(status));
 }
 
+/** Guests (#176) get a pill beside the status; full accounts get none. */
+export function kindPill(a: UserStats): Child {
+  return a.kind === "guest" ? [" ", h("span", { class: "status-pill is-guest" }, T().admGuestPill)] : null;
+}
+
 /** The author pill sits beside the status; players get none. */
 export function rolePill(a: UserStats): Child {
   return a.role === "author" ? [" ", h("span", { class: "status-pill is-author" }, T().admAuthorPill)] : null;

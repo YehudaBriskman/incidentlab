@@ -83,6 +83,40 @@ credit-based pricing**: it charges credits per production deploy and per GB, and
   private cases, at most one `memberof:` listing otherwise. Only when it is true does the browser call
   `GET /api/me/cases` (`no-store`), once per page load or sign-in. Private content is `no-store` too: a call per
   case open, for the few players who can see one. Public content stays CDN-cached.
+- **Scale check (#185).** `tests/load/seed-scale.ts` fills an in-memory store with a public-site-sized data set:
+  2,000 accounts (200 guests, 563 opted in to the global board), 20 cases with 9,369 progress records and a
+  `score:` summary per account, and 100 classes of 10 to 60 members (3,490 memberships). `tests/load/scale-check.ts`
+  then calls the app directly, as a CDN miss would, and counts the store operations per call:
+
+  | Call | Who, how often | Store gets | Listings | Time (in-memory) |
+  |---|---|---:|---:|---:|
+  | `GET /api/leaderboard` | public, CDN-cached 10 s | 1,129 | 1 | 42 ms |
+  | `GET /api/leaderboard?caseId=` (same instance, within 10 s) | public, CDN-cached | 1 | 0 | 2 ms |
+  | `GET /api/classboard/<token>` (a full class of 60) | public, CDN-cached 10 s per URL | 181 | 1 | 9 ms |
+  | `GET /api/me/stats` (first call on an instance) | player, `no-store`, per home or stats view | 1,152 | 1 | 26 ms |
+  | `GET /api/me/stats` (same instance, within 10 s) | player, `no-store` | 24 | 0 | 3 ms |
+  | `GET /api/classes` (member of 4 classes) | player, `no-store`, Classes page | 14 | 1 | 3 ms |
+  | `GET /api/admin/users?limit=50` | owner, `no-store`, on demand | 4,477 | 2 | 113 ms |
+  | `GET /api/admin/users?q=` (same instance, within 2 s) | owner, on demand | 351 | 1 | 22 ms |
+  | `GET /api/admin/accounts` (what the console polled every 5 s before #185) | scripts only now | 11,370 | 2 | 388 ms |
+  | `GET /api/admin/classes` | owner, `no-store`, on demand | 200 | 101 | 56 ms |
+  | `GET /api/admin/progress?caseId=` (650 players on the case) | owner, Live polls it every 5 s | 1,300 | 1 | 21 ms |
+
+  Reads are the measure, not time: the in-memory store answers in microseconds, while each Blobs read is a
+  request inside the function's runtime (tens of milliseconds, 10 at a time), so 1,000 reads is about 2 s of a
+  call. What #185 changed:
+  - the console no longer polls the users list. Before, an open console tab cost one function call and 11,370
+    reads every 5 s (about 720 calls an hour, whatever section was on screen). Now only Live and the site
+    announcement poll; Users, Classes, Stats and Audit load when opened, searched or refreshed. The users list
+    reads accounts and summaries (2 s cache) and only the shown page's progress;
+  - Live's progress reads only the accounts on the case (was every account on every 5 s poll);
+  - the opted-in players behind the leaderboard and every player's rank are shared for 10 s per instance
+    (`BoardCache`), cleared by any write on that instance that changes the board. A warm instance answers
+    `/api/me/stats` in 24 reads instead of 1,152, and the leaderboard's `?caseId=` variants share one read. The
+    first call on a cold instance still reads the opted-in set: it grows with opt-ins, not with all accounts.
+  `site/server/test/scale.test.ts` runs the check in CI with a read budget per call (`READ_BUDGET` in
+  `tests/load/scale-check.ts`), so a change that brings back a full scan on one of these paths fails the build.
+  Print the table with `node --experimental-strip-types tests/load/scale-check.ts`.
 - **Check monthly:** `node --experimental-strip-types scripts/data.ts usage`. It prints bandwidth with a 70%
   warning. The API doesn't report function counts on this plan, so check those in the Netlify UI (Team → Usage).
 - **Triggers to move public evidence to GitHub (#145):** Netlify bandwidth over about 50 GB a month, or total
@@ -187,6 +221,12 @@ Migration 003 backfills `score:` for every account. Accounts that have no summar
 - `status`: since #173 sign-ups are `approved` at once (`decidedAt` = `createdAt`). `pending` remains for
   accounts from before it (migration 003 approves them); `rejected` blocks sign-in and recovery.
 - A recovery bumps `sessionEpoch` (every session ends), clears `mustChangePassword` and replaces the code.
+
+### Audit (`audit:<isoTimestamp>:<random>`)
+
+`AuditEntrySchema` in `site/shared/contract.ts`: `{at, action, target, detail, via}` plus `actor` (#185, additive,
+default null): `"admin"` for the site owner (key or session) or the acting account's id. Entries written before
+#185 parse with `actor: null`. The weekly hygiene job deletes entries older than 90 days.
 
 ### Classes (`class:`, `classcode:`, `classmember:`, `memberof:`, since #179)
 

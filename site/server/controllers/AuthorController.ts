@@ -16,7 +16,7 @@ import { CaseIdSchema } from "../../shared/contract.ts";
 import { Sha256Schema } from "../../shared/case-records.ts";
 import { AppError } from "../domain/types.ts";
 import type { AuditService } from "../services/AuditService.ts";
-import { actorLabel } from "../services/AuthorAuthService.ts";
+import { actorLabel, ownerId } from "../services/AuthorAuthService.ts";
 import type { Actor, AuthorAuthService } from "../services/AuthorAuthService.ts";
 import type { CaseAuthoringService } from "../services/CaseAuthoringService.ts";
 import type { CaseUploadService } from "../services/CaseUploadService.ts";
@@ -58,7 +58,7 @@ export class AuthorController {
   }
 
   private record(actor: Actor, action: string, target: string, detail: string): Promise<void> {
-    return this.audit.record({ action, target, detail: `${detail} (by ${actorLabel(actor)})`, via: actor.via });
+    return this.audit.record({ action, target, detail: `${detail} (by ${actorLabel(actor)})`, via: actor.via, actor: ownerId(actor) });
   }
 
   /** POST /api/author/uploads */

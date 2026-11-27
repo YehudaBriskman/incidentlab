@@ -1,6 +1,6 @@
 // Shared helpers for the e2e specs: admin API calls and the plaintext answer key.
 import { readFileSync } from "node:fs";
-import { expect, type APIRequestContext } from "@playwright/test";
+import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
 export const ADMIN_KEY = process.env.ADMIN_KEY ?? "local-admin-key-0123456789";
 export const ADMIN_USERNAME = "admin";
@@ -37,6 +37,18 @@ export async function scheduleToday(request: APIRequestContext, caseId: string):
     data: { timezone, defaultCaseId: null, days: { [date]: caseId }, lockToToday: false },
   });
   expect(res.status(), await res.text()).toBe(200);
+}
+
+/**
+ * Searches the console's users list (#185) and waits until the server's answer is on screen: the list is
+ * searched on the server, so the unfiltered first page shows until then, and a row menu opened from it would be
+ * re-rendered under the pointer. Rows on desktop, cards on phones.
+ */
+export async function searchUsers(page: Page, username: string): Promise<void> {
+  await page.locator("input.admin-search").first().fill(username);
+  const shown = page.locator("tr.acct-row:visible, li.acct-card:visible");
+  await expect(shown).toHaveCount(1);
+  await expect(shown.first()).toContainText(username);
 }
 
 /** Approves the pending account named `username` through the admin API. */

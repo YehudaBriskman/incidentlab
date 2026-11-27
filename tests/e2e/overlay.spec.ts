@@ -1,7 +1,7 @@
 // Overlay system (#61): the shared confirm, menu and toast primitives in site/src/lib/overlay.ts, driven
 // through the admin dashboard by keyboard. Every test runs in English at 1280px and in Hebrew (RTL) at 390px.
 import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
-import { ADMIN_KEY, ADMIN_USERNAME, adminHeaders, approveAccount, randomUsername } from "./support";
+import { ADMIN_KEY, ADMIN_USERNAME, adminHeaders, approveAccount, randomUsername, searchUsers } from "./support";
 
 const PASSWORD = "e2e-password-123";
 
@@ -51,7 +51,7 @@ async function openAdminAccounts(page: Page, lang: string, username: string): Pr
   await ui.signInSubmit(page).click();
   await page.waitForURL((url) => !url.hash.startsWith("#/login"));
   await page.goto("/#/admin?tab=accounts");
-  await ui.search(page).fill(username);
+  await searchUsers(page, username);
   await expect(ui.actionsFor(page, username)).toBeVisible();
 }
 

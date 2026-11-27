@@ -223,12 +223,23 @@ test("/api/me/stats reads no other account's progress and lists neither accounts
   assert.ok(!kv.lists.some((prefix) => prefix === "" || "progress:".startsWith(prefix) || "account:".startsWith(prefix)), kv.lists.join(","));
   assert.ok(kv.reads.includes(`score:${bob.id}`), "the rank comes from the opted-in players' summaries");
 
-  // The public board reads the same small set.
+  // The public board reads the same small set, and within a few seconds shares the read the stats just made (#185).
   kv.reads.length = 0;
   kv.lists.length = 0;
   await board(bob.player);
   assert.ok(!kv.reads.some((key) => key.startsWith("progress:")));
+  assert.deepEqual(kv.lists, []);
+  assert.deepEqual(kv.reads.filter((key) => !key.startsWith("config:")), []); // only the event (the freeze)
+
+  // A solve clears the shared read: Bob's next point moves him up at once, on this instance.
+  await expectStatus(answer(bob.player, "alpha", 2), 200);
+  kv.lists.length = 0;
+  const after = await board(ada.player);
   assert.deepEqual(kv.lists, ["globalboard:"]);
+  assert.equal(after.entries[0]?.username, "Bob");
+  // Ada's rank reads her own summary fresh, and the others from the new shared read.
+  const adaStats = await ada.player.json(await ada.player.call("/me/stats"), UserStatsResponseSchema);
+  assert.equal(adaStats.stats.rank, 2);
 });
 
 test("a toggle purges the leaderboard CDN tag; the board stays CDN-cacheable", async () => {

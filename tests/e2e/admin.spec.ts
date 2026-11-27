@@ -3,7 +3,7 @@
 // delete, the one-time password guard, and the Recently deleted table at 390px in Hebrew.
 import { readFile } from "node:fs/promises";
 import { expect, test, type APIRequestContext, type Page, type PlaywrightWorkerArgs } from "@playwright/test";
-import { ADMIN_KEY, ADMIN_USERNAME, adminHeaders, answerFor, approveAccount, randomUsername } from "./support";
+import { ADMIN_KEY, ADMIN_USERNAME, adminHeaders, answerFor, approveAccount, randomUsername, searchUsers } from "./support";
 
 const PASSWORD = "e2e-password-123";
 /** Every test makes its own data (CI starts an empty server): players on this case, scored by solving stages. */
@@ -147,7 +147,7 @@ test("live and audit: Export CSV downloads the rows on screen", async ({ page, p
   await expect(page.locator("table.audit-table")).toBeVisible();
   const [audit] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: /^export csv$/i }).click()]);
   const auditCsv = await readFile(await audit.path(), "utf8");
-  expect(auditCsv.replace(/^﻿/, "").split(/\r\n/)[0]).toBe("Time,Action,Target / detail,Via");
+  expect(auditCsv.replace(/^﻿/, "").split(/\r\n/)[0]).toBe("Time,Action,By,Target / detail,Via");
 });
 
 test("row menu: author role, password reset guard, delete with undo", async ({ page, request }) => {
@@ -155,7 +155,7 @@ test("row menu: author role, password reset guard, delete with undo", async ({ p
   await approveAccount(request, username);
   await signInAdmin(page);
   await page.goto("/#/admin?tab=accounts");
-  await ui.search(page).fill(username);
+  await searchUsers(page, username);
 
   await test.step("the menu lists the actions, Delete last", async () => {
     await ui.actionsFor(page, username).click();
@@ -193,19 +193,19 @@ test("row menu: author role, password reset guard, delete with undo", async ({ p
   });
 });
 
-test("row menu: Revoke asks first, and Cancel changes nothing (#128)", async ({ page, request }) => {
+test("row menu: Ban asks first, and Cancel changes nothing (#128, #185)", async ({ page, request }) => {
   const username = await register(request, "e2erevoke");
   await approveAccount(request, username);
   await signInAdmin(page);
   await page.goto("/#/admin?tab=accounts");
-  await ui.search(page).fill(username);
+  await searchUsers(page, username);
   // The account menu in the top bar carries Sign out; the page header no longer repeats it.
   await expect(page.locator(".admin-head").getByRole("button", { name: /^sign out$/i })).toHaveCount(0);
   await expect(page.locator(".admin-head")).not.toContainText(/signed in as admin/i);
 
   await test.step("Cancel keeps the account approved", async () => {
     await ui.actionsFor(page, username).click();
-    await ui.menuItems(page).filter({ hasText: /^revoke$/i }).click();
+    await ui.menuItems(page).filter({ hasText: /^ban$/i }).click();
     await expect(ui.confirm(page)).toContainText(username);
     await ui.confirm(page).getByRole("button", { name: /^cancel$/i }).click();
     await expect(ui.confirm(page)).toHaveCount(0);
@@ -213,10 +213,10 @@ test("row menu: Revoke asks first, and Cancel changes nothing (#128)", async ({ 
     expect(await accountStatus(request, username)).toBe("approved");
   });
 
-  await test.step("confirming revokes it", async () => {
+  await test.step("confirming bans it", async () => {
     await ui.actionsFor(page, username).click();
-    await ui.menuItems(page).filter({ hasText: /^revoke$/i }).click();
-    await ui.confirm(page).getByRole("button", { name: /^revoke access$/i }).click();
+    await ui.menuItems(page).filter({ hasText: /^ban$/i }).click();
+    await ui.confirm(page).getByRole("button", { name: /^ban$/i }).click();
     await expect.poll(() => accountStatus(request, username)).toBe("rejected");
   });
 });
@@ -284,7 +284,7 @@ test("sections: the sidebar links switch sections, mark the current one, and Bac
   await signInAdmin(page);
   await page.goto("/#/admin?tab=accounts");
   await expect(side.panel(page, "accounts")).toBeVisible();
-  await expect(side.link(page, /^Accounts/)).toHaveAttribute("aria-current", "page");
+  await expect(side.link(page, /^Users/)).toHaveAttribute("aria-current", "page");
   // Admin is the ancestor of the section; the quick actions sit in the page header; Authoring is a nav item.
   await expect(side.main(page).getByRole("link", { name: "Admin", exact: true })).toHaveAttribute("aria-current", "true");
   await expect(side.head(page).getByRole("button", { name: "Projector board" })).toBeVisible();
@@ -295,7 +295,7 @@ test("sections: the sidebar links switch sections, mark the current one, and Bac
   await expect(side.panel(page, "stats")).toBeVisible();
   await expect(side.panel(page, "accounts")).toBeHidden();
   await expect(side.link(page, /^Stats$/)).toHaveAttribute("aria-current", "page");
-  await expect(side.link(page, /^Accounts/)).not.toHaveAttribute("aria-current", /.*/);
+  await expect(side.link(page, /^Users/)).not.toHaveAttribute("aria-current", /.*/);
 
   await side.link(page, /^Audit log$/).click();
   await expect(side.panel(page, "audit")).toBeVisible();
@@ -321,7 +321,7 @@ test("sections: a deep link opens its section (and the Live case) on a fresh loa
   await expect(page.locator("#admin-live-case")).toHaveValue(CASE_ID);
   await page.goto("/#/admin?tab=schedule");
   await expect(side.panel(page, "schedule")).toBeVisible();
-  await expect(side.link(page, /^Schedule$/)).toHaveAttribute("aria-current", "page");
+  await expect(side.link(page, /^Global daily case$/)).toHaveAttribute("aria-current", "page");
 });
 
 test("sections: leaving unsaved Schedule edits through the sidebar asks first", async ({ page }) => {
@@ -339,7 +339,7 @@ test("sections: leaving unsaved Schedule edits through the sidebar asks first", 
   await ui.confirm(page).getByRole("button", { name: /keep editing/i }).click();
   await expect(side.panel(page, "schedule")).toBeVisible();
   await expect(page).toHaveURL(/tab=schedule/);
-  await expect(side.link(page, /^Schedule$/)).toHaveAttribute("aria-current", "page");
+  await expect(side.link(page, /^Global daily case$/)).toHaveAttribute("aria-current", "page");
   await expect(page.locator("#sched-save")).toBeEnabled();
 
   // The Authoring nav item leaves #/admin: the same guard.
@@ -361,10 +361,10 @@ test.describe("tablet rail", () => {
     await page.goto("/#/admin?tab=accounts");
     const rail = side.nav(page);
     await expect(rail).toBeVisible();
-    await expect(rail.getByRole("link")).toHaveCount(6);
+    await expect(rail.getByRole("link")).toHaveCount(8);
     await expect.poll(async () => (await side.main(page).boundingBox())?.width).toBe(64);
-    const event = rail.getByRole("link", { name: "Event" });
-    await expect(event).toHaveAttribute("title", "Event");
+    const event = rail.getByRole("link", { name: "Site announcement" });
+    await expect(event).toHaveAttribute("title", "Site announcement");
     await event.click();
     await expect(side.panel(page, "event")).toBeVisible();
     await expect(event).toHaveAttribute("aria-current", "page");

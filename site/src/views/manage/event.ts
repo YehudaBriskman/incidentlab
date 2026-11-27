@@ -34,6 +34,11 @@ export type EventOptions = {
   carried?: LiveEvent | null;
   /** A save went through: the dashboard hides the "saved" note after a moment. */
   onSaved?: () => void;
+  /**
+   * Who sees the announcement: "site" (the admin dashboard, every player, as a banner) or "class" (a class
+   * dashboard: only the class's members, on the class page). Defaults to "site".
+   */
+  audience?: "site" | "class";
 };
 
 export type EventPanel = {
@@ -507,7 +512,7 @@ export function createEventPanel(opts: EventOptions): EventPanel {
         "section",
         { class: "panel admin-panel" },
         h("h2", { class: "admin-h2" }, T().admAnnouncement),
-        h("p", { class: "muted small admin-hint", id: "ev-ann-help" }, T().admAnnouncementHelp),
+        h("p", { class: "muted small admin-hint", id: "ev-ann-help" }, opts.audience === "class" ? T().admAnnouncementHelpClass : T().admAnnouncementHelp),
         h(
           "div",
           { class: "adm-ev-ann" },

@@ -36,7 +36,8 @@ export type PendingOptions = {
 export type PendingPanel = {
   /** The "Waiting for approval" section (built on each call; its content elements are kept). */
   section(): HTMLElement;
-  render(list: readonly UserStats[]): void;
+  /** `total`: every pending sign-up on the server, when `list` holds only the oldest of them (#185). */
+  render(list: readonly UserStats[], total?: number): void;
 };
 
 export function createPendingPanel(opts: PendingOptions): PendingPanel {
@@ -47,6 +48,9 @@ export function createPendingPanel(opts: PendingOptions): PendingPanel {
   const pendingStatusEl = h("p", { class: "muted small pending-status", role: "status" });
   const pendingCountEl = h("span", { class: "count-badge" });
   let pendingSig = "";
+  /** Sign-ups are approved at once since #173: the section shows only while legacy pending accounts remain. */
+  let sectionEl: HTMLElement | null = null;
+  let lastCount = 0;
   /** pending sign-ups ticked for a bulk approve/reject */
   const pendingSelected = new Set<string>();
   let approvedMsg: string | null = null;
@@ -182,15 +186,17 @@ export function createPendingPanel(opts: PendingOptions): PendingPanel {
     );
   }
 
-  function render(list: readonly UserStats[]): void {
+  function render(list: readonly UserStats[], total?: number): void {
     const pending = list.filter((a) => a.status === "pending");
-    pendingCountEl.textContent = fmtInt(pending.length);
-    pendingCountEl.classList.toggle("is-zero", pending.length === 0);
-    opts.onPendingCount?.(pending.length);
+    const n = Math.max(total ?? pending.length, pending.length);
+    pendingCountEl.textContent = fmtInt(n);
+    lastCount = n;
+    if (sectionEl) sectionEl.hidden = n === 0 && approvedMsg === null;
+    pendingCountEl.classList.toggle("is-zero", n === 0);
+    opts.onPendingCount?.(n);
     pendingStatusEl.textContent = approvedMsg ?? "";
     pendingStatusEl.hidden = approvedMsg === null;
     pendingStatusEl.tabIndex = -1;
-    const n = pending.length;
     const sig = JSON.stringify([getLang(), n]);
     if (sig !== pendingSig) {
       pendingSig = sig;
@@ -226,7 +232,7 @@ export function createPendingPanel(opts: PendingOptions): PendingPanel {
             ),
       );
     }
-    if (n === 0) {
+    if (pending.length === 0) {
       setChildren(pendingEl, h("p", { class: "muted admin-empty-small" }, T().admNoPending));
     } else {
       pendingNow = Date.now();
@@ -237,7 +243,7 @@ export function createPendingPanel(opts: PendingOptions): PendingPanel {
   }
 
   function section(): HTMLElement {
-    return h(
+    sectionEl = h(
       "section",
       { class: "panel admin-panel pending-panel", "aria-labelledby": "admin-pending-title" },
       h("div", { class: "admin-table-head" }, h("h2", { class: "admin-h2", id: "admin-pending-title" }, T().admPendingTitle, " ", pendingCountEl), approveAllEl),
@@ -245,6 +251,8 @@ export function createPendingPanel(opts: PendingOptions): PendingPanel {
       pendingBulkEl,
       pendingEl,
     );
+    sectionEl.hidden = lastCount === 0;
+    return sectionEl;
   }
 
   return { section, render };
