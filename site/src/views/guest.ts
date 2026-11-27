@@ -7,9 +7,10 @@ import { TG } from "../i18n/strings-game";
 import { TGu } from "../i18n/strings-guest";
 import { TO } from "../i18n/strings-onboard";
 import { ApiError, startGuest, upgradeGuest } from "../lib/api";
-import { h } from "../lib/dom";
+import { h, setChildren } from "../lib/dom";
 import { showDialog, toast } from "../lib/overlay";
 import { setAccount } from "../lib/session";
+import { recoveryCodePanel } from "./auth";
 import "../player.css";
 
 /**
@@ -155,11 +156,22 @@ export function openUpgradeDialog(): void {
     submit.setAttribute("aria-disabled", "true");
     submit.textContent = TGu().upgrading;
     upgradeGuest({ username: user.input.value.trim(), password: pw.input.value })
-      .then((account) => {
-        // TODO(#174): show the one-time recovery code from the upgrade response before closing.
+      .then(({ account, recoveryCode }) => {
         setAccount(account);
-        handle.close(null);
-        toast({ tone: "success", text: TGu().upgraded });
+        if (recoveryCode === null) {
+          handle.close(null);
+          toast({ tone: "success", text: TGu().upgraded });
+          return;
+        }
+        // Show the new account's one-time recovery code (#174) before the dialog closes, as sign-up does.
+        const lead = h("p", { class: "recovery-code-warning", tabindex: "-1" }, TA().codeLeadSignUp);
+        const done = h("button", { type: "button", class: "btn btn-primary" }, TA().codeDone);
+        done.addEventListener("click", () => {
+          handle.close(null);
+          toast({ tone: "success", text: TGu().upgraded });
+        });
+        setChildren(form, lead, recoveryCodePanel(recoveryCode, account.username), formActions(done));
+        lead.focus();
       })
       .catch((err: unknown) => {
         busy = false;

@@ -5,6 +5,7 @@ import {
   AccountResponseSchema,
   AdminAccountsResponseSchema,
   AnswerResponseSchema,
+  AuthResponseSchema,
   LeaderboardResponseSchema,
   ProgressResponseSchema,
   UserStatsResponseSchema,
@@ -103,7 +104,13 @@ test("upgrade keeps the id and progress, claims the name and signs in with it", 
   const res = await guest.call("/auth/upgrade", { body: { username: "Noa", password: "correct-horse" } });
   assert.equal(res.status, 200, await res.clone().text());
   assert.equal(res.headers.get("cache-control"), "no-store");
-  const upgraded = (await guest.json(res, AccountResponseSchema)).account;
+  const body = await guest.json(res, AuthResponseSchema);
+  const upgraded = body.account;
+  // the new account gets its one-time recovery code (#174), and only its hash is stored
+  assert.match(body.recoveryCode ?? "", /^[2-9A-HJ-NP-Z]{5}(-[2-9A-HJ-NP-Z]{5}){3}$/);
+  const hash = AccountRecordSchema.parse((await store.get(`account:${account.id}`))?.data).recoveryCodeHash;
+  assert.ok(hash !== null);
+  assert.equal(JSON.stringify(body).includes(hash), false);
   assert.equal(upgraded.id, account.id);
   assert.equal(upgraded.kind, "user");
   assert.equal(upgraded.username, "Noa");
@@ -184,7 +191,9 @@ test("guests never appear on a leaderboard, and can't opt in to the global board
   await expectStatus(guest.call("/me/board", { method: "PUT", body: { show: true } }), 403, "guest");
   // the instructor's account list still shows the guest: it is a real account
   const list = await guest.json(await harness.admin("/admin/accounts"), AdminAccountsResponseSchema);
-  assert.ok(list.accounts.some((a) => a.accountId === account.id));
+  const row = list.accounts.find((a) => a.accountId === account.id);
+  assert.ok(row);
+  assert.equal(row.rank, null, "guests are listed but never ranked");
   // and its own stats never claim a public rank
   assert.equal((await guest.json(await guest.call("/me/stats"), UserStatsResponseSchema)).stats.rank, null);
 });

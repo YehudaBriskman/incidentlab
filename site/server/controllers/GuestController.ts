@@ -22,7 +22,7 @@ export class GuestController {
 
   async upgrade(req: Request, ip: string): Promise<Response> {
     const body = await parseBody(req, UpgradeRequestSchema);
-    const { account, session } = await this.guests.upgrade(sessionToken(req), { ...body, ip });
-    return withCookie(json(200, { account }), sessionCookie(req, session));
+    const { account, session, recoveryCode } = await this.guests.upgrade(sessionToken(req), { ...body, ip });
+    return withCookie(json(200, { account, ...(recoveryCode === null ? {} : { recoveryCode }) }), sessionCookie(req, session));
   }
 }

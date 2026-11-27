@@ -10,8 +10,8 @@ import type { AccountView } from "../../shared/contract.ts";
 import { ACCOUNT_SCHEMA_VERSION, AppError } from "../domain/types.ts";
 import type { AccountRecord, SessionRecord } from "../domain/types.ts";
 import type { Repositories } from "../repositories/repositories.ts";
-import { REGISTER_LIMIT, SESSION_TTL_SECONDS, toAccountView } from "./AuthService.ts";
-import type { AuthResult, AuthService, Session } from "./AuthService.ts";
+import { REGISTER_LIMIT, SESSION_TTL_SECONDS, issueRecoveryCode, toAccountView } from "./AuthService.ts";
+import type { AuthService, Session, SignInResult } from "./AuthService.ts";
 import { generateAccountId, generateSessionToken, hashPassword, isWellFormedSessionToken, sha256Hex } from "./crypto.ts";
 import type { RateLimitRule, RateLimiter } from "./RateLimiter.ts";
 
@@ -76,7 +76,7 @@ export class GuestService {
    * write (race-free, like register); the account is then saved with its etag, and the claim is released if
    * that save loses a race. Other sessions of the guest end (the epoch moves); this one is replaced.
    */
-  async upgrade(token: string | null, input: UpgradeInput): Promise<AuthResult> {
+  async upgrade(token: string | null, input: UpgradeInput): Promise<SignInResult> {
     const { principal } = await this.auth.authenticate(token);
     if (principal.kind === "admin") throw new AppError(403, "the admin account can't be upgraded", { code: "admin" });
     if (principal.account.kind !== "guest") throw new AppError(409, "this account already has a username", { code: "not-guest" });
@@ -89,6 +89,7 @@ export class GuestService {
     const hashedKey = sha256Hex(key);
     if (await this.repos.usernames.lookup(hashedKey)) throw new AppError(409, "that username is taken", { code: "username-taken" });
     const passwordHash = await hashPassword(input.password);
+    const recovery = await issueRecoveryCode(); // the new account's one-time code (#174), as on sign-up
 
     if (!(await this.repos.usernames.claim(hashedKey, principal.account.id))) throw new AppError(409, "that username is taken", { code: "username-taken" });
     const found = await this.repos.accounts.get(principal.account.id);
@@ -102,6 +103,7 @@ export class GuestService {
       username: input.username.trim(),
       usernameKey: key,
       passwordHash,
+      recoveryCodeHash: recovery.hash,
       kind: "user",
       sessionEpoch: found.data.sessionEpoch + 1,
       lastSeenAt: nowIso,
@@ -113,9 +115,7 @@ export class GuestService {
     }
     await this.limiter.hit(REGISTER_LIMIT, input.ip);
     if (token !== null && isWellFormedSessionToken(token)) await this.repos.sessions.delete(sha256Hex(token));
-    // TODO(#174): issue the one-time recovery code here and return it with the account, the same way
-    // AuthService.register does once lane A's recovery-code helper lands.
-    return { account: toAccountView(account), session: await this.issueSession(account) };
+    return { account: toAccountView(account), session: await this.issueSession(account), recoveryCode: recovery.code };
   }
 
   /** The live session behind the cookie, or null when there is none (missing, expired, revoked). */

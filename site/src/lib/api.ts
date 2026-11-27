@@ -219,8 +219,10 @@ export async function startGuest(): Promise<AccountView> {
 }
 
 /** Turns the signed-in guest into a full account with the same id (its progress stays). */
-export async function upgradeGuest(credentials: Credentials): Promise<AccountView> {
-  return (await request("POST", "/api/auth/upgrade", AccountResponseSchema, credentials)).account;
+/** Turns the signed-in guest into an account (same id, progress kept) and returns its first recovery code. */
+export async function upgradeGuest(credentials: Credentials): Promise<SignedIn> {
+  const body = await request("POST", "/api/auth/upgrade", AuthResponseSchema, credentials);
+  return { account: body.account, recoveryCode: body.recoveryCode ?? null };
 }
 
 export async function logout(): Promise<void> {
