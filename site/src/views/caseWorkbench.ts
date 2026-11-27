@@ -98,7 +98,7 @@ export function workbench(parts: WorkbenchParts): Workbench {
     { role: "tablist", class: "wb-tabs", "aria-label": TW().wbLabel, "aria-describedby": keysNote?.id ?? null },
     [...tabs.values()],
   );
-  const keysHint = shortcuts ? h("span", { class: "wb-keys", "aria-hidden": "true", dir: "ltr" }, TW().paneKeysShort) : null;
+  const keysHint = shortcuts ? h("span", { class: "wb-keys", "aria-hidden": "true" }, TW().paneKeysShort) : null;
   const tabRow = h("div", { class: "wb-tabrow" }, tablist, keysHint);
   tablist.addEventListener("keydown", (ev) => {
     const offered = visiblePanes();
