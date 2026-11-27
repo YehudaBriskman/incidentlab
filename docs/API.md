@@ -272,7 +272,7 @@ may reclaim unreferenced ones). CLI: `scripts/data.ts upload` (see `docs/CASE_CO
 
 ### Classes (#179)
 
-Classes are server-side only for now (the class UI is #182). **Gameplay never blocks on a class** (#180): a class's
+The class UI (#182) is `#/classes`, `#/join/<code>`, `#/class/<id>`, `#/class/<id>/manage` and `#/classboard/<token>` (`src/views/classes.ts`, `classPage.ts`, `classManage.ts`; client calls in `src/lib/class-api.ts`). Member pages poll only the class board (10 s, visible tabs); Manage polls live progress at most every 15 s while that section is on screen. **Gameplay never blocks on a class** (#180): a class's
 case list, event window and freeze decide what counts on that class's board, never whether anyone may play. Every
 class response is personalised (`no-store`), except the public class board (below). Contract: the "classes" section of `site/shared/contract.ts`. Implementation:
 `ClassController` → `ClassService` → `ClassRepository`.
