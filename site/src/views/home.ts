@@ -218,6 +218,35 @@ function continuePlaces(state: HomeState): ContinuePlaces {
   return { progress, visits, droppedToday };
 }
 
+/** The Continue card shows this many rows before it would leave empty space. */
+const CONTINUE_ROWS = 3;
+
+/**
+ * Not-started cases to fill the Continue card when it lists fewer than CONTINUE_ROWS places, so the card
+ * suggests where to go next instead of showing empty space. Easiest and shortest first; never today's case
+ * (the Today card has it) or a case already listed.
+ */
+function upNextPlaces(state: HomeState, listed: readonly Place[]): Place[] {
+  const room = CONTINUE_ROWS - listed.length;
+  if (room <= 0) return [];
+  const today = todayCaseId(state);
+  const released = state.today?.releasedCaseIds;
+  const taken = new Set(listed.map((p) => p.href));
+  return caseSummaries()
+    .filter((c) => c.id !== today && (released === undefined || released.includes(c.id)))
+    .filter((c) => statusOf(state.stats.get(c.id)) === "not-started" && !taken.has(`#/case/${c.id}`))
+    .sort((a, b) => DIFF_RANK[a.difficulty] - DIFF_RANK[b.difficulty] || a.estMinutes - b.estMinutes || a.title.localeCompare(b.title))
+    .slice(0, room)
+    .map((c): Place => ({
+      key: `n:${c.id}`,
+      href: `#/case/${c.id}`,
+      kind: TH().upNextKind,
+      name: titleNode(c.title),
+      meta: h("span", { class: "home-row-num" }, TO().difficulty(c.difficulty), h("span", { class: "home-row-sep" }, " · "), h("bdi", {}, TO().minutes(c.estMinutes))),
+      title: `${c.title} · ${TO().difficulty(c.difficulty)} · ${TO().minutes(c.estMinutes)}`,
+    }));
+}
+
 /**
  * One card instead of two (#125): signed in, loaded, and the only thing Continue would list is today's case.
  * The Today card then takes the whole row (at the start edge, where Continue was).
@@ -244,14 +273,18 @@ function continueCard(state: HomeState, signedIn: boolean): HTMLElement {
       );
     }
     const { progress, visits } = continuePlaces(state);
+    const upNext = state.statsFailed ? [] : upNextPlaces(state, [...progress, ...visits]);
     return [
       state.statsFailed ? h("p", { class: "home-card-note", role: "alert" }, TH().statsError) : null,
       progress.length > 0 ? h("ul", { class: "home-rows", "aria-label": TH().inProgress }, progress.map(placeRow)) : null,
       visits.length > 0
         ? [h("h3", { class: "home-rows-h", id: "home-recent-h" }, TH().recent), h("ul", { class: "home-rows", "aria-labelledby": "home-recent-h" }, visits.map(placeRow))]
-        : progress.length === 0
+        : progress.length === 0 && upNext.length === 0
           ? h("p", { class: "home-card-empty" }, TH().recentNone)
           : null,
+      upNext.length > 0
+        ? [h("h3", { class: "home-rows-h", id: "home-next-h" }, TH().upNext), h("ul", { class: "home-rows", "aria-labelledby": "home-next-h" }, upNext.map(placeRow))]
+        : null,
     ];
   })();
   return h(
