@@ -21,10 +21,8 @@ import {
 } from "../../shared/contract";
 import { cachedCase } from "../content/load";
 import { cachedEvent, eventPhase, formatCountdown, serverNow as publicServerNow } from "../lib/event";
-import { dataTable, type Column } from "../components/dataTable";
-import { statGrid } from "../components/statGrid";
+import { dataTable } from "../components/dataTable";
 import { formActions, formField } from "../components/formLayout";
-import type { SortState } from "../components/table-core";
 import { copyButton, h, setChildren, type Child } from "../lib/dom";
 import { TS } from "../i18n/strings-shell";
 import { clickClosedDrawer, navSubLink, refreshNav, showSubNav } from "../shell/nav";
@@ -67,7 +65,7 @@ import {
   type AdminProgressResult,
   type AdminStatsResult,
 } from "../lib/admin-api";
-import { caseMaxScore, caseQuestionIds, caseStages, caseTitle, questionTitle, type StageKey } from "./manage/caseInfo";
+import { caseMaxScore, caseQuestionIds, caseTitle, questionTitle } from "./manage/caseInfo";
 import {
   errMessage,
   fmtDec1,
@@ -78,45 +76,20 @@ import {
   formatDateTimeZone,
   formatDuration,
   formatFinish,
-  formatMinutes,
   formatPct,
-  formatSeconds,
   isoDay,
   locale,
   median,
   ms,
   pad2,
-  readPref,
   relativeAgo,
   relativeIn,
-  writePref,
 } from "./manage/format";
-import {
-  HELP_PREVIEW,
-  STUCK_WARN_MIN,
-  WRONG_ALERT_MIN,
-  WRONG_HELP_MIN,
-  commandsUsed,
-  finishDurationMs,
-  helpEntries,
-  isDone,
-  isFinishedStatus,
-  isIdle,
-  minutesSince,
-  progressCount,
-  signed,
-  sortPlayers,
-  stageLabel,
-  stageLongLabel,
-  stageStatus,
-  stageTooltip,
-  stuckLevel,
-  type HelpEntry,
-  type LiveSortKey,
-} from "./manage/progressMetrics";
-import { headWithHint, th, tile, tipped } from "./manage/ui";
+import { finishDurationMs } from "./manage/progressMetrics";
+import { headWithHint, tipped } from "./manage/ui";
 import { createMembersPanel } from "./manage/members";
-import { NARROW_QUERY, createManageHost, setTilesSummary, syncSortSelect } from "./manage/host";
+import { createLivePanel } from "./manage/live";
+import { NARROW_QUERY, createManageHost } from "./manage/host";
 
 const POLL_MS = 5000;
 /** The dashboard poll refetches /api/today at most this often (see load()). */
@@ -124,7 +97,6 @@ const TODAY_REFRESH_MS = 60_000;
 /** Rows on the projector board; the rest are summed up as "+N more". */
 const BOARD_ROWS = 10;
 const MAX_BACKOFF_MS = 60000;
-const DENSITY_STORAGE = "il.adminDensity";
 const TAB_STORAGE = "il.adminTab";
 const DEFAULT_TIMEZONE = "Asia/Jerusalem";
 
@@ -399,17 +371,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       busy: new Set<string>(),
       msg: null as { text: string; ok: boolean } | null,
     },
-    // live tab
-    liveSort: "score" as LiveSortKey,
-    liveFilter: "",
-    liveActiveOnly: false,
-    /** the Needs help list shows the most urgent HELP_PREVIEW players until "Show all" */
-    helpShowAll: false,
-    liveDensity: (readPref(DENSITY_STORAGE) === "compact" ? "compact" : "comfortable") as "compact" | "comfortable",
     /** phone/tablet layout (cards instead of grids, compact chrome) */
     narrow: window.matchMedia(NARROW_QUERY).matches,
-    // live tab: players whose score breakdown is open
-    liveExpanded: new Set<string>(),
     // schedule tab
     schedule: {
       server: null as Schedule | null,
@@ -458,7 +421,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     },
     syncSaveBar: () => syncSaveBarClass(),
   });
-  const { askConfirm, menuButton, menuTriggerEl, foldableTiles, withFocusKept } = host;
+  const { askConfirm, withFocusKept } = host;
 
   const stopTimers = (): void => {
     if (pollId !== null) window.clearTimeout(pollId);
@@ -897,7 +860,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     gateShown = false;
     syncShellSidebar();
     buildAccountsPanel();
-    buildLivePanel();
+    live.mount(tabPanels.get("live") ?? container);
     buildStatsPanel();
     buildAuditPanel();
     pauseBtn.textContent = state.paused ? T().admResume : T().admPause;
@@ -1235,13 +1198,24 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   }
 
   // =====================================================================================
-  // Live tab
+  // Live tab: the live panel (views/manage/live.ts) on the admin API
   // =====================================================================================
 
-  const liveCaseSelect = h("select", { class: "admin-input", id: "admin-live-case" });
-  liveCaseSelect.addEventListener("change", () => {
-    const v = liveCaseSelect.value;
-    if (v) selectLiveCase(v, true);
+  const live = createLivePanel({
+    host,
+    caseId: () => state.liveCaseId,
+    cases: () => ({ released: state.today?.releasedCaseIds ?? [], todayId: state.today?.caseId ?? null }),
+    progress: () => state.progress,
+    onSelectCase: (caseId) => selectLiveCase(caseId, true),
+    api: { resetCase: (caseId) => resetProgress(caseId), restartPlayer: restartPlayerCase },
+    onCaseReset: async (caseId, title) => {
+      const entry = await newestTrash((e) => e.kind === "progress" && e.label.startsWith(`progress of ${caseId} (`));
+      undoToast(T().admCaseReset(title), entry);
+    },
+    onRestarted: async (player) => {
+      const entry = await newestTrash((e) => e.kind === "progress" && e.label === `progress of ${player.caseId} for one player`);
+      undoToast(T().admRestartedToast(player.username), entry);
+    },
   });
 
   /** Switches the Live tab to another case; the case goes into the URL (replacing the entry: not a new Back step). */
@@ -1251,695 +1225,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     state.progress = null;
     if (updateUrl && state.tab === "live") setUrl(adminHash("live", caseId), "replace");
     if (state.accounts) {
-      renderLive();
+      live.render();
       void load();
     }
-  }
-  let liveCaseOptionsSig = "";
-  const liveTodayTag = h("span", { class: "today-tag" }, T().admTodayTag);
-  const liveTilesEl = statGrid([], "admin-tiles");
-  liveTilesEl.id = "admin-live-tiles";
-  const liveTiles = foldableTiles(liveTilesEl);
-  const funnelEl = h("div", { class: "admin-funnel" });
-  const helpEl = h("section", { class: "help-panel", "aria-labelledby": "admin-help-title" });
-  const liveTableEl = h("div", { class: "admin-table-wrap live-table-wrap" });
-  const liveBodyEl = h("div", { class: "admin-live-body" });
-  const playersCountEl = h("span", { class: "muted small" });
-
-  const liveSearchInput = h("input", {
-    type: "search",
-    class: "admin-input admin-search",
-    placeholder: T().admSearchPlaceholder,
-    "aria-label": T().admSearchLabel,
-    enterkeyhint: "search",
-    dir: "auto",
-  });
-  liveSearchInput.addEventListener("input", () => {
-    state.liveFilter = liveSearchInput.value;
-    renderLiveTable();
-  });
-  const liveSortSelect = h(
-    "select",
-    { class: "admin-input admin-sort", "aria-label": T().admSortLabel },
-    h("option", { value: "score" }, T().admSortScore),
-    h("option", { value: "progress" }, T().admSortProgress),
-    h("option", { value: "stuck" }, T().admSortStuck),
-    h("option", { value: "name" }, T().admSortName),
-    h("option", { value: "custom", hidden: true, disabled: true }, T().admSortCustom),
-  );
-  liveSortSelect.addEventListener("change", () => {
-    const v = liveSortSelect.value;
-    if (v === "score" || v === "progress" || v === "name" || v === "stuck") {
-      state.liveSort = v;
-      liveTable.setSort(LIVE_SORTS[v]);
-    }
-  });
-
-  // "Active only": hides finished and idle players (the ones the instructor can't help right now).
-  const activeOnlyInput = h("input", { type: "checkbox", id: "admin-live-active" });
-  activeOnlyInput.addEventListener("change", () => {
-    state.liveActiveOnly = activeOnlyInput.checked;
-    renderLiveTable();
-  });
-  const activeOnlyLabel = h("label", { class: "admin-check", for: "admin-live-active" }, activeOnlyInput, h("span", {}, T().admActiveOnly));
-
-  // Density: a segmented control (two toggle buttons) that changes how the same rows are drawn. Remembered.
-  const densityBtns = (["comfortable", "compact"] as const).map((d) => {
-    const btn = h("button", { type: "button", class: "seg-btn", "data-density": d }, d === "compact" ? T().admDensityCompact : T().admDensityComfortable);
-    btn.addEventListener("click", () => {
-      state.liveDensity = d;
-      writePref(DENSITY_STORAGE, d);
-      syncDensity();
-    });
-    return btn;
-  });
-  const densityGroup = h("div", { class: "seg", role: "group", "aria-label": T().admDensityLabel }, densityBtns);
-  function syncDensity(): void {
-    for (const btn of densityBtns) btn.setAttribute("aria-pressed", String(btn.dataset.density === state.liveDensity));
-    liveTableEl.classList.toggle("is-compact", state.liveDensity === "compact");
-  }
-
-  // Reset this case: a danger confirm that needs the case id typed in.
-  const resetBtn = h("button", { type: "button", class: "btn btn-danger btn-sm" }, T().admResetCase);
-  const resetTextEl = h("p", { class: "muted small" });
-  resetBtn.addEventListener("click", () => {
-    const caseId = state.liveCaseId;
-    if (!caseId) return;
-    const title = caseTitle(caseId);
-    void askConfirm({
-      title: T().admResetCaseTitle(title),
-      body: T().admResetCaseText(title),
-      confirmLabel: T().admResetCase,
-      busyLabel: T().admResetting,
-      tone: "danger",
-      typedName: caseId,
-      run: () => resetProgress(caseId),
-      returnFocus: () => resetBtn,
-    }).then(async (ok) => {
-      if (!ok) return;
-      void load();
-      const entry = await newestTrash((e) => e.kind === "progress" && e.label.startsWith(`progress of ${caseId} (`));
-      undoToast(T().admCaseReset(title), entry);
-    });
-  });
-
-  // The players grid (components/dataTable.ts): per-stage cells, score, stage, time on it, last seen and the row
-  // menu. Headers sort (the Sort select drives the same sort and is the only one on cards). Keyed rows keep focus
-  // across the 5 s poll; the breakdown opens as a detail row. Cards on phones and tablets.
-  let liveNow = Date.now();
-  let liveStages: StageKey[] = [];
-  const prog = (p: AdminProgress): number => progressCount(p, liveStages);
-  const stuckKey = (p: AdminProgress): number => (isDone(p) ? -1 : p.stuckMinutes);
-  const liveColumns: Column<AdminProgress>[] = [
-    {
-      id: "name",
-      header: T().admColName,
-      rowHeader: true,
-      className: "col-name",
-      cell: (p) => liveToggle(p, `live-detail-${p.accountId}`, T().admShowBreakdown),
-      sortValue: (p) => p.username,
-      csv: (p) => p.username,
-    },
-    {
-      id: "progress",
-      header: T().admColProgress,
-      cell: (p) => progressCells(p, liveStages, liveNow),
-      sortCompare: (a, b) => prog(a) - prog(b) || a.score - b.score,
-      sortFirst: "desc",
-      csv: (p) => prog(p),
-    },
-    {
-      id: "score",
-      header: T().admColScore,
-      numeric: true,
-      className: "col-score",
-      cell: (p) => h("span", { title: T().admScoreParTip(p.maxScore) }, fmtInt(p.score)),
-      sortCompare: (a, b) => a.score - b.score || prog(a) - prog(b),
-      sortFirst: "desc",
-      csv: (p) => p.score,
-    },
-    {
-      id: "stage",
-      header: T().admColStage,
-      className: "col-stage",
-      cell: (p) => {
-        const stage = stageLongLabel(p.caseId, p.currentStage);
-        return h("span", { class: `stage-text${isDone(p) ? " stage-done" : ""}`, title: stage }, stage);
-      },
-      csv: (p) => stageLongLabel(p.caseId, p.currentStage),
-    },
-    {
-      id: "onstage",
-      header: T().admColOnStage,
-      numeric: true,
-      className: "col-onstage",
-      cell: (p) => onStage(p, liveNow),
-      sortCompare: (a, b) => stuckKey(a) - stuckKey(b),
-      sortFirst: "desc",
-      csv: (p) => (isDone(p) ? null : Math.floor(p.stuckMinutes)),
-    },
-    {
-      id: "seen",
-      header: T().admColSeen,
-      className: "col-seen muted",
-      cell: (p) => tipped(h("span", {}, relativeAgo(p.lastSeenAt, liveNow)), formatDateTime(p.lastSeenAt)),
-      sortValue: (p) => ms(p.lastSeenAt),
-      sortFirst: "desc",
-      csv: (p) => p.lastSeenAt,
-    },
-    { id: "actions", header: T().admColActions, headerHidden: true, className: "col-actions", cell: (p) => liveMenu(p) },
-  ];
-  const LIVE_SORTS: Record<LiveSortKey, SortState> = {
-    score: { id: "score", dir: "desc" },
-    progress: { id: "progress", dir: "desc" },
-    stuck: { id: "onstage", dir: "desc" },
-    name: { id: "name", dir: "asc" },
-  };
-  const liveTable = dataTable<AdminProgress>({
-    columns: liveColumns,
-    rows: [],
-    rowKey: (p) => p.accountId,
-    rowSig: (p) => liveSignature(p, liveStages, liveNow),
-    rowAttrs: (p) => ({ class: `acct-row is-${stuckLevel(p)}${state.liveExpanded.has(p.accountId) ? " is-expanded" : ""}`, "data-id": p.accountId }),
-    detail: (p) =>
-      state.liveExpanded.has(p.accountId)
-        ? {
-            attrs: { class: "acct-detail", id: `live-detail-${p.accountId}` },
-            content: h("div", { class: "acct-detail-inner" }, h("p", { class: "admin-label" }, T().admBreakdownTitle(p.username)), breakdownTable(p)),
-          }
-        : null,
-    labelledBy: "admin-players-title",
-    className: "admin-table live-table",
-    wrapClass: "admin-dt",
-    initialSort: LIVE_SORTS[state.liveSort],
-    virtualize: { rowHeight: 52 },
-    cards: { query: NARROW_QUERY, build: (p) => buildLiveCard(p, liveStages, liveNow), className: "player-cards", labelledBy: "admin-players-title" },
-    onSortChange: (s) => syncSortSelect(liveSortSelect, LIVE_SORTS, s),
-  });
-  const liveExportBtn = h(
-    "button",
-    {
-      type: "button",
-      class: "btn btn-ghost btn-sm",
-      title: T().admExportViewHint,
-      onclick: () => liveTable.downloadCsv(`incidentlab-live-${state.liveCaseId ?? "case"}-${new Date().toISOString().slice(0, 10)}.csv`),
-    },
-    T().admExportView,
-  );
-
-  function buildLivePanel(): void {
-    setChildren(
-      tabPanels.get("live") ?? container,
-      h(
-        "div",
-        { class: "admin-toolbar" },
-        h("label", { class: "admin-label", for: "admin-live-case" }, T().admCasePicker),
-        liveCaseSelect,
-        liveTodayTag,
-      ),
-      liveBodyEl,
-    );
-    syncDensity();
-  }
-
-  function liveBodySkeleton(): HTMLElement[] {
-    return [
-      // The first question on this tab is "who needs me right now?": answered before anything else.
-      helpEl,
-      liveTiles,
-      h(
-        "section",
-        { class: "panel admin-panel", "aria-labelledby": "admin-players-title" },
-        h(
-          "div",
-          { class: "admin-table-head" },
-          h("h2", { class: "admin-h2", id: "admin-players-title" }, T().admPlayers, " ", playersCountEl),
-          h("div", { class: "admin-controls" }, liveSearchInput, liveSortSelect, activeOnlyLabel, densityGroup, liveExportBtn),
-        ),
-        h(
-          "div",
-          { class: "admin-legend", "aria-hidden": "true" },
-          h("span", { class: "cell is-solved" }), T().admStatus("solved"),
-          h("span", { class: "cell is-revealed" }), T().admStatus("revealed"),
-          h("span", { class: "cell is-active" }), T().admStatus("active"),
-          h("span", { class: "cell is-locked" }), T().admStatus("locked"),
-        ),
-        liveTableEl,
-      ),
-      h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, T().admStageFunnel), funnelEl),
-      h(
-        "section",
-        { class: "panel admin-panel admin-danger" },
-        h("h2", { class: "admin-h2" }, T().admDangerZone),
-        resetTextEl,
-        h("div", { class: "admin-reset" }, resetBtn),
-      ),
-    ];
-  }
-
-  function syncLiveCaseOptions(): void {
-    const released = state.today?.releasedCaseIds ?? [];
-    const ids = [...released];
-    if (state.liveCaseId && !ids.includes(state.liveCaseId)) ids.push(state.liveCaseId);
-    const todayId = state.today?.caseId ?? null;
-    const sig = JSON.stringify([getLang(), ids, todayId]);
-    if (sig !== liveCaseOptionsSig) {
-      liveCaseOptionsSig = sig;
-      setChildren(
-        liveCaseSelect,
-        ids.map((id) => h("option", { value: id }, id === todayId ? `${caseTitle(id)} · ${T().admTodayTag}` : caseTitle(id))),
-      );
-    }
-    if (state.liveCaseId) liveCaseSelect.value = state.liveCaseId;
-    liveCaseSelect.disabled = ids.length === 0;
-    liveTodayTag.hidden = !state.liveCaseId || state.liveCaseId !== todayId;
-  }
-
-  function renderLiveTiles(players: readonly AdminProgress[], caseId: string, help: readonly HelpEntry[]): void {
-    const finished = players.filter(isDone);
-    const avg = players.length ? Math.round(players.reduce((s, p) => s + p.score, 0) / players.length) : null;
-    const maxScore = players[0]?.maxScore ?? caseMaxScore(caseId);
-    const med = median(finished.map(finishDurationMs).filter((v): v is number => v !== null));
-    const needing = help.filter((e) => e.level !== "idle").length;
-    setChildren(
-      liveTilesEl,
-      tile(T().admPlayers, fmtInt(players.length), T().admStuckCount(needing)),
-      tile(T().admFinished, fmtInt(finished.length), players.length ? formatPct(finished.length / players.length) : undefined),
-      // Averaged over every player on the case (Stats averages finishers only): the label says which.
-      tile(
-        T().admAvgScoreAll,
-        avg === null ? "—" : fmtInt(avg),
-        [maxScore ? T().admPar(fmtInt(maxScore)) : null, T().admSample(players.length, fmtInt(players.length))].filter((x) => x !== null).join(" · "),
-      ),
-      tile(T().admMedianTime, med === null ? "—" : formatFinish(med), T().admFinishedSample(finished.length, fmtInt(finished.length))),
-    );
-    setTilesSummary(liveTiles, T().admLiveSummary(fmtInt(players.length), fmtInt(finished.length), fmtInt(needing)));
-  }
-
-  function renderFunnel(players: readonly AdminProgress[], caseId: string): void {
-    const total = players.length;
-    const rows = caseStages(caseId).map((stage) => {
-      const reached = players.filter((p) => stageStatus(p, stage) !== "locked").length;
-      const done = players.filter((p) => isFinishedStatus(stageStatus(p, stage))).length;
-      const pct = (n: number): string => (total ? `${(n / total) * 100}%` : "0%");
-      const title = stage === "setup" ? T().admSetup : questionTitle(caseId, stage);
-      return h(
-        "div",
-        { class: "funnel-row", title: T().admFunnelTip(`${stageLabel(stage)} ${title}`, reached, done) },
-        h("span", { class: "funnel-label" }, stageLabel(stage)),
-        h(
-          "div",
-          { class: "funnel-track" },
-          h("div", { class: "funnel-reached", style: `width:${pct(reached)}` }),
-          h("div", { class: "funnel-done", style: `width:${pct(done)}` }),
-        ),
-        h("span", { class: "funnel-count" }, `${fmtInt(done)}/${fmtInt(reached)}`),
-      );
-    });
-    setChildren(
-      funnelEl,
-      h(
-        "p",
-        { class: "muted small funnel-key" },
-        h("span", { class: "key-done" }), `${T().admKeyFinished} `,
-        h("span", { class: "key-reached" }), T().admKeyReached,
-      ),
-      rows,
-    );
-  }
-
-  function stuckBadge(p: AdminProgress): HTMLElement | null {
-    const level = stuckLevel(p);
-    if (level === "none") return null;
-    return h(
-      "span",
-      { class: `stuck-badge is-${level}`, title: T().admStuckTip(Math.floor(p.stuckMinutes)) },
-      T().admStuckBadge(formatMinutes(p.stuckMinutes)),
-    );
-  }
-
-  /** The reasons a player is on the "Needs help" list, as text chips (never colour alone). */
-  function helpReasons(e: HelpEntry): HTMLElement[] {
-    const out: HTMLElement[] = [];
-    if (e.stuck) out.push(stuckBadge(e.p) ?? h("span", {}));
-    if (e.wrong >= WRONG_HELP_MIN) {
-      out.push(h("span", { class: `help-chip is-${e.wrong >= WRONG_ALERT_MIN ? "alert" : "warn"}` }, T().admWrongChip(fmtInt(e.wrong))));
-    }
-    if (e.idleMin !== null) out.push(h("span", { class: "help-chip is-idle" }, T().admIdleChip(formatMinutes(e.idleMin))));
-    return out;
-  }
-
-  let helpSig = "";
-  function renderHelp(help: readonly HelpEntry[] | null, caseId: string): void {
-    const sig = JSON.stringify([getLang(), caseId, state.helpShowAll, help === null ? null : help.map((e) => [e.p.accountId, e.p.username, e.level, e.p.currentStage, Math.floor(e.p.stuckMinutes), e.wrong, e.idleMin === null ? null : Math.floor(e.idleMin)])]);
-    if (sig === helpSig) return;
-    helpSig = sig;
-    if (help === null) {
-      helpEl.className = "help-panel is-empty";
-      setChildren(helpEl, h("h2", { class: "visually-hidden", id: "admin-help-title" }, T().admNeedsHelp), h("p", { class: "help-ok muted" }, T().admLoading));
-      return;
-    }
-    if (help.length === 0) {
-      // Nobody needs help: one quiet line, not an empty card.
-      helpEl.className = "help-panel is-empty";
-      setChildren(
-        helpEl,
-        h("h2", { class: "visually-hidden", id: "admin-help-title" }, T().admNeedsHelp),
-        h(
-          "p",
-          { class: "help-ok" },
-          h("span", { class: "help-ok-mark", "aria-hidden": "true" }, "✓"),
-          h("strong", {}, T().admEveryoneMoving),
-          h("span", { class: "muted small" }, T().admHelpThresholds(formatMinutes(STUCK_WARN_MIN), fmtInt(WRONG_HELP_MIN))),
-        ),
-      );
-      return;
-    }
-    helpEl.className = "help-panel panel admin-panel";
-    setChildren(
-      helpEl,
-      h(
-        "div",
-        { class: "help-head" },
-        h("h2", { class: "admin-h2", id: "admin-help-title" }, T().admNeedsHelp, " ", h("span", { class: "count-badge is-warn" }, fmtInt(help.length))),
-        h("span", { class: "muted small" }, T().admHelpThresholds(formatMinutes(STUCK_WARN_MIN), fmtInt(WRONG_HELP_MIN))),
-      ),
-      h(
-        "ol",
-        { class: "help-list", id: "admin-help-list" },
-        (state.helpShowAll ? help : help.slice(0, HELP_PREVIEW)).map((e) => {
-          const p = e.p;
-          const stage = stageLongLabel(caseId, p.currentStage);
-          return h(
-            "li",
-            { class: `help-item is-${e.level}`, "data-help": p.accountId },
-            h("span", { class: "help-name", dir: "auto", title: p.username }, p.username),
-            h("span", { class: "help-stage", title: stage }, stage),
-            h("span", { class: "help-reasons" }, helpReasons(e)),
-            h(
-              "button",
-              { type: "button", class: "btn btn-ghost btn-sm help-jump", "aria-label": T().admJumpLabel(p.username), onclick: () => jumpToPlayer(p.accountId) },
-              T().admJump,
-            ),
-          );
-        }),
-      ),
-      help.length > HELP_PREVIEW
-        ? h(
-            "button",
-            {
-              type: "button",
-              class: "btn btn-ghost btn-sm help-more",
-              "aria-expanded": String(state.helpShowAll),
-              "aria-controls": "admin-help-list",
-              onclick: () => {
-                state.helpShowAll = !state.helpShowAll;
-                renderLive();
-                helpEl.querySelector<HTMLButtonElement>(".help-more")?.focus();
-              },
-            },
-            state.helpShowAll ? T().admHelpFewer : T().admHelpAll(fmtInt(help.length)),
-          )
-        : null,
-    );
-  }
-
-  /** "Jump" from Needs help: make sure the player is listed (clear filters that hide them), then scroll, focus and flash. */
-  function jumpToPlayer(id: string): void {
-    const p = state.progress?.players.find((x) => x.accountId === id);
-    if (!p) return;
-    const q = state.liveFilter.trim().toLowerCase();
-    if (q && !p.username.toLowerCase().includes(q)) {
-      state.liveFilter = "";
-      liveSearchInput.value = "";
-    }
-    if (state.liveActiveOnly && !isLiveActive(p, Date.now())) {
-      state.liveActiveOnly = false;
-      activeOnlyInput.checked = false;
-    }
-    renderLiveTable();
-    const target = liveTableEl.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"]`);
-    if (!target) return;
-    target.scrollIntoView({ block: "center", behavior: "auto" });
-    target.querySelector<HTMLElement>(".acct-toggle")?.focus({ preventScroll: true });
-    target.classList.remove("is-flash");
-    void target.offsetWidth; // restart the highlight
-    target.classList.add("is-flash");
-    window.setTimeout(() => target.classList.remove("is-flash"), 2000);
-  }
-
-  const isLiveActive = (p: AdminProgress, now: number): boolean => !isDone(p) && !isIdle(p, now);
-
-  function progressCells(p: AdminProgress, stages: readonly StageKey[], now: number): HTMLElement {
-    return h(
-      "div",
-      { class: "progress-cells", role: "list", "aria-label": T().admProgressLabel(progressCount(p, stages), stages.length) },
-      stages.map((stage) => {
-        const status = stageStatus(p, stage);
-        const tip = stageTooltip(p, stage, now);
-        return h("span", { class: `cell is-${status}`, role: "listitem", title: tip, "aria-label": tip });
-      }),
-    );
-  }
-
-  function liveSignature(p: AdminProgress, stages: readonly StageKey[], now: number): string {
-    const st = stages
-      .map((s) => {
-        const sp = s === "setup" ? undefined : p.stages[s];
-        return `${stageStatus(p, s)}:${sp?.wrongAttempts ?? 0}:${sp?.hintsRevealed ?? 0}`;
-      })
-      .join(",");
-    const id = p.accountId;
-    return [
-      getLang(),
-      p.caseId,
-      p.username,
-      p.score,
-      p.currentStage,
-      Math.floor(p.stuckMinutes),
-      st,
-      relativeAgo(p.lastSeenAt, now),
-      isIdle(p, now),
-      commandsUsed(p),
-      state.liveExpanded.has(id) ? JSON.stringify(p.stages) : "",
-    ].join("|");
-  }
-
-  /** Per-stage scoring for one player (the same numbers as the cell tooltips, reachable by keyboard and touch). */
-  function breakdownTable(p: AdminProgress): HTMLElement {
-    const num = (n: number | undefined): string => (n === undefined ? "—" : signed(n));
-    return h(
-      "table",
-      { class: "admin-table admin-subtable" },
-      h(
-        "thead",
-        {},
-        h(
-          "tr",
-          {},
-          th(T().admColStageShort),
-          th(T().admColStatus),
-          th(T().admBdBase, "num"),
-          th(T().admBdHints, "num"),
-          th(T().admBdCommands, "num"),
-          th(T().admBdWrong, "num"),
-          th(T().admBdTime, "num"),
-          th(T().admBdClean, "num"),
-          th(T().admBdFirstBlood, "num"),
-          th(T().admBdTotal, "num"),
-          th(T().admColSolveTime, "num"),
-        ),
-      ),
-      h(
-        "tbody",
-        {},
-        caseQuestionIds(p.caseId).map((q) => {
-          const sp = p.stages[q];
-          const b = sp?.status === "solved" ? sp.breakdown : null;
-          return h(
-            "tr",
-            {},
-            h("td", {}, h("span", { class: "q-id" }, q.toUpperCase()), " ", questionTitle(p.caseId, q)),
-            h("td", {}, h("span", { class: `case-status is-${sp?.status ?? "locked"}` }, T().admStatus(sp?.status ?? "locked"))),
-            h("td", { class: "num" }, b ? fmtInt(b.base) : "—"),
-            h("td", { class: "num" }, num(b?.hints)),
-            h("td", { class: "num", title: T().admCommandsUsed(sp?.commandsRevealed ?? 0) }, num(b?.commands)),
-            h("td", { class: "num" }, num(b?.wrong)),
-            h("td", { class: "num" }, num(b?.time)),
-            h("td", { class: "num" }, num(b?.clean)),
-            h("td", { class: "num" }, num(b?.firstBlood)),
-            h("td", { class: "num col-score" }, b ? fmtInt(b.total) : sp?.status === "solved" ? fmtInt(sp.points) : "—"),
-            h("td", { class: "num col-seen" }, b ? T().admSolveVsTarget(formatSeconds(b.solveSeconds), formatSeconds(b.targetSeconds)) : "—"),
-          );
-        }),
-      ),
-    );
-  }
-
-  function liveToggle(p: AdminProgress, detailId: string, title: string): HTMLButtonElement {
-    const expanded = state.liveExpanded.has(p.accountId);
-    return h(
-      "button",
-      {
-        type: "button",
-        class: "acct-toggle",
-        "aria-expanded": String(expanded),
-        "aria-controls": detailId,
-        title,
-        onclick: () => {
-          if (state.liveExpanded.has(p.accountId)) state.liveExpanded.delete(p.accountId);
-          else state.liveExpanded.add(p.accountId);
-          renderLiveTable();
-          container.querySelector<HTMLButtonElement>(`[aria-controls="${CSS.escape(detailId)}"]`)?.focus();
-        },
-      },
-      h("span", { class: "acct-caret", "aria-hidden": "true" }, "▸"),
-      h("span", { class: "player-name", dir: "auto" }, p.username),
-    );
-  }
-
-  /** Restart lives in the row's actions menu: a destructive per-player action, not a button on every row. */
-  function liveMenu(p: AdminProgress): HTMLButtonElement {
-    const caseId = p.caseId;
-    const key = `live:${p.accountId}`;
-    return menuButton(T().admActionsFor(p.username), key, () => [
-      {
-        label: T().admRestartItem,
-        tone: "danger",
-        run: () => {
-          const solved = caseQuestionIds(caseId).filter((q) => isFinishedStatus(p.stages[q]?.status ?? "locked")).length;
-          void askConfirm({
-            title: T().admRestartTitle(p.username, caseTitle(caseId)),
-            body: T().admRestartBody(solved, p.score),
-            confirmLabel: T().admRestartLabel(p.username),
-            cancelLabel: T().admKeepProgress,
-            busyLabel: T().admRestarting,
-            tone: "danger",
-            run: async () => {
-              await restartPlayerCase(p.accountId, caseId);
-              void load();
-            },
-            returnFocus: () => menuTriggerEl(key),
-          }).then(async (ok) => {
-            if (!ok) return;
-            const entry = await newestTrash((e) => e.kind === "progress" && e.label === `progress of ${caseId} for one player`);
-            undoToast(T().admRestartedToast(p.username), entry);
-          });
-        },
-      },
-    ]);
-  }
-
-  /** "12 min" on the current stage (nothing for finished players), toned like the stuck badge. */
-  function onStage(p: AdminProgress, now: number): HTMLElement {
-    if (isDone(p)) return h("span", { class: "muted" }, state.narrow ? "" : "—");
-    if (isIdle(p, now)) return h("span", { class: "help-chip is-idle" }, T().admIdleChip(formatMinutes(minutesSince(p.lastSeenAt, now) ?? 0)));
-    const level = stuckLevel(p);
-    return h("span", { class: level === "none" ? "" : `stuck-badge is-${level}`, title: T().admStuckTip(Math.floor(p.stuckMinutes)) }, formatMinutes(p.stuckMinutes));
-  }
-
-  /** Phone/tablet card: name, score, current stage, minutes on it, and an expandable labelled stage strip. */
-  function buildLiveCard(p: AdminProgress, stages: readonly StageKey[], now: number): HTMLLIElement {
-    const expanded = state.liveExpanded.has(p.accountId);
-    const detailId = `live-card-${p.accountId}`;
-    const stage = stageLongLabel(p.caseId, p.currentStage);
-    const strip = expanded
-      ? h(
-          "ol",
-          { class: "stage-strip", id: detailId },
-          stages.map((s) => {
-            const status = stageStatus(p, s);
-            const sp = s === "setup" ? undefined : p.stages[s];
-            const title = s === "setup" ? T().admSetup : questionTitle(p.caseId, s);
-            const extra = sp && status === "solved" ? T().admPointsShort(fmtInt(sp.points)) : sp && sp.wrongAttempts > 0 ? T().admWrongChip(fmtInt(sp.wrongAttempts)) : "";
-            return h(
-              "li",
-              { class: `strip-item is-${status}` },
-              h("span", { class: `cell is-${status}`, "aria-hidden": "true" }),
-              h("span", { class: "strip-label" }, s === "setup" ? T().admSetup : s.toUpperCase(), " ", h("span", { class: "muted" }, s === "setup" ? "" : title)),
-              h("span", { class: "strip-status" }, T().admStatus(status), extra ? ` · ${extra}` : ""),
-            );
-          }),
-        )
-      : null;
-    return h(
-      "li",
-      { class: `player-card is-${stuckLevel(p)}${expanded ? " is-expanded" : ""}`, "data-id": p.accountId },
-      h(
-        "div",
-        { class: "pc-head" },
-        liveToggle(p, detailId, T().admShowStages),
-        h("span", { class: "pc-score", title: T().admScoreParTip(p.maxScore) }, T().admPointsShort(fmtInt(p.score))),
-        liveMenu(p),
-      ),
-      h(
-        "div",
-        { class: "pc-meta" },
-        h("span", { class: `pc-stage${isDone(p) ? " stage-done" : ""}`, title: stage }, stage),
-        onStage(p, now),
-      ),
-      expanded ? null : progressCells(p, stages, now),
-      strip,
-      expanded ? h("p", { class: "muted small pc-seen" }, T().admSeenLine(relativeAgo(p.lastSeenAt, now))) : null,
-    );
-  }
-
-  function renderLiveTable(): void {
-    const caseId = state.liveCaseId;
-    const players = state.progress?.players ?? [];
-    if (!caseId) return;
-    if (players.length === 0) {
-      playersCountEl.textContent = "";
-      const url = location.origin;
-      setChildren(
-        liveTableEl,
-        h(
-          "div",
-          { class: "admin-empty" },
-          h("p", { class: "admin-empty-title" }, state.progress ? T().admNoPlayers : T().admLoading),
-          state.progress ? h("p", { class: "muted" }, T().admShareLink) : null,
-          state.progress
-            ? h("div", { class: "admin-share" }, h("code", { class: "admin-share-url" }, url), copyButton(() => url, T().admCopyLink))
-            : null,
-        ),
-      );
-      return;
-    }
-    const now = Date.now();
-    const q = state.liveFilter.trim().toLowerCase();
-    const filtered = players.filter((p) => (!q || p.username.toLowerCase().includes(q)) && (!state.liveActiveOnly || isLiveActive(p, now)));
-    playersCountEl.textContent = filtered.length === players.length ? `(${fmtInt(players.length)})` : `(${T().admShownOf(fmtInt(filtered.length), fmtInt(players.length))})`;
-    if (filtered.length === 0) {
-      setChildren(liveTableEl, h("p", { class: "muted admin-empty-small" }, state.liveActiveOnly && !q ? T().admNoActive : T().admNoMatch));
-      return;
-    }
-    liveNow = now;
-    liveStages = caseStages(caseId);
-    // Name order first: the table's sort is stable, so ties read alphabetically.
-    liveTable.update(sortPlayers(filtered, "name", liveStages));
-    if (liveTable.element.parentNode !== liveTableEl) setChildren(liveTableEl, liveTable.element);
-  }
-
-  function renderLive(): void {
-    syncLiveCaseOptions();
-    const caseId = state.liveCaseId;
-    if (!caseId) {
-      setChildren(liveBodyEl, h("section", { class: "panel admin-panel admin-empty" }, h("p", { class: "admin-empty-title" }, T().admNoReleased)));
-      return;
-    }
-    if (helpEl.parentNode !== liveBodyEl) {
-      helpSig = "";
-      setChildren(liveBodyEl, liveBodySkeleton());
-    }
-    resetTextEl.textContent = T().admResetCaseText(caseTitle(caseId));
-    // A response for a previously selected case is ignored until the new one arrives.
-    const players = state.progress?.caseId === caseId ? state.progress.players : [];
-    for (const id of state.liveExpanded) if (!players.some((p) => p.accountId === id)) state.liveExpanded.delete(id);
-    const help = state.progress?.caseId === caseId ? helpEntries(players, Date.now()) : null;
-    renderHelp(help, caseId);
-    renderLiveTiles(players, caseId, help ?? []);
-    renderFunnel(players, caseId);
-    renderLiveTable();
   }
 
   // =====================================================================================
@@ -3324,7 +2612,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         renderAccounts();
         break;
       case "live":
-        renderLive();
+        live.render();
         break;
       case "schedule":
         renderSchedule();
