@@ -45,6 +45,8 @@ export const ADMIN_VIEW = (createdAt: string): AccountView => ({
   createdAt,
   role: "admin",
   mustChangePassword: false,
+  kind: "user",
+  showOnGlobalBoard: false,
 });
 
 export const toAccountView = (account: AccountRecord): AccountView => ({
@@ -54,6 +56,8 @@ export const toAccountView = (account: AccountRecord): AccountView => ({
   createdAt: account.createdAt,
   role: account.role,
   mustChangePassword: account.mustChangePassword,
+  kind: account.kind,
+  showOnGlobalBoard: account.showOnGlobalBoard,
 });
 
 export const adminKeyFingerprint = (adminKey: string): string => sha256Hex(adminKey).slice(0, 16);
@@ -102,6 +106,10 @@ export class AuthService {
       lastLoginAt: nowIso,
       mustChangePassword: false,
       role: "player",
+      kind: "user",
+      showOnGlobalBoard: false,
+      recoveryCodeHash: null,
+      classLimit: null,
     };
     // Claim the name first: the conditional write makes uniqueness race-free.
     if (!(await this.repos.usernames.claim(hashedKey, account.id))) throw new AppError(409, "that username is taken", { code: "username-taken" });
