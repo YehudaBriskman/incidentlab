@@ -174,14 +174,17 @@ test("upgrade needs a guest session", async () => {
   await expectStatus(harness.admin("/auth/upgrade", { body: { username: "Nobody", password: "correct-horse" } }), 401, "signed-out");
 });
 
-test("guests never appear on a leaderboard, before or after other players", { todo: "lane B (#175) filters the boards on kind" }, async () => {
+test("guests never appear on a leaderboard, and can't opt in to the global board", async () => {
   const harness = createHarness();
   const { guest, account } = await startGuest(harness);
   await solveStage1(guest);
   const overall = await guest.json(await guest.call("/leaderboard"), LeaderboardResponseSchema);
   const perCase = await guest.json(await guest.call("/leaderboard?caseId=alpha"), LeaderboardResponseSchema);
   for (const board of [overall, perCase]) assert.equal(board.entries.some((e) => e.username === account.username), false);
-  // the admin list still shows the guest (it is a real account), without a rank
+  await expectStatus(guest.call("/me/board", { method: "PUT", body: { show: true } }), 403, "guest");
+  // the instructor's account list still shows the guest: it is a real account
   const list = await guest.json(await harness.admin("/admin/accounts"), AdminAccountsResponseSchema);
-  assert.equal(list.accounts.find((a) => a.accountId === account.id)?.rank ?? null, null);
+  assert.ok(list.accounts.some((a) => a.accountId === account.id));
+  // and its own stats never claim a public rank
+  assert.equal((await guest.json(await guest.call("/me/stats"), UserStatsResponseSchema)).stats.rank, null);
 });
