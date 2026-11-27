@@ -38,6 +38,9 @@ export const TS = defineStrings({
     spacing: "Text spacing",
     spacingNormal: "Normal",
     spacingWide: "Wide",
+    shortcuts: "Shortcut keys",
+    shortcutsOn: "On",
+    shortcutsOff: "Off",
     a11yStatement: "Accessibility statement",
 
     // sidebar chrome (shell/sidebar.ts)
@@ -149,6 +152,9 @@ export const TS = defineStrings({
     spacing: "ריווח טקסט",
     spacingNormal: "רגיל",
     spacingWide: "רחב",
+    shortcuts: "מקשי קיצור",
+    shortcutsOn: "פעילים",
+    shortcutsOff: "כבויים",
     a11yStatement: "הצהרת נגישות",
 
     sidebarCollapse: "כיווץ סרגל הצד",
