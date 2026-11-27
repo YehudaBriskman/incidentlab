@@ -61,7 +61,6 @@ import {
   setAccountsStatus,
   setAdminKey,
   type AdminAccountsResult,
-  type AdminEventResult,
   type AdminProgressResult,
   type AdminStatsResult,
 } from "../lib/admin-api";
@@ -74,13 +73,10 @@ import {
   formatDateTimeSec,
   formatDateTimeSecZone,
   formatDateTimeZone,
-  formatDuration,
   formatFinish,
   formatPct,
-  locale,
   median,
   ms,
-  pad2,
   relativeAgo,
   relativeIn,
 } from "./manage/format";
@@ -89,6 +85,7 @@ import { headWithHint, tipped } from "./manage/ui";
 import { createMembersPanel } from "./manage/members";
 import { createLivePanel } from "./manage/live";
 import { createSchedulePanel } from "./manage/schedule";
+import { createEventPanel } from "./manage/event";
 import { NARROW_QUERY, createManageHost } from "./manage/host";
 
 const POLL_MS = 5000;
@@ -115,7 +112,6 @@ const SECTION_ICONS: Readonly<Record<TabId, string>> = {
   audit: svgIcon('<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 12h7"/><path d="M9 16h7"/>'),
 };
 const AUDIT_LIMIT = 100;
-const EVENT_QUICK_MINUTES = 60;
 const INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O, 1/I/L: easy to read aloud and type
 
 type AuthMode = "key" | "session";
@@ -190,46 +186,6 @@ function hardestQuestion(rows: readonly QuestionFunnel[]): { row: QuestionFunnel
 // ---- schedule ---------------------------------------------------------------------
 
 
-
-// ---- event (datetime-local <-> ISO UTC) -------------------------------------------------
-
-/** ISO instant -> "YYYY-MM-DDTHH:mm" in this browser's local time (what <input type="datetime-local"> expects). */
-function isoToLocalInput(iso: string | null): string {
-  const t = ms(iso);
-  if (t === null) return "";
-  const d = new Date(t);
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-}
-
-/** "YYYY-MM-DDTHH:mm" (local) -> ISO UTC, or null when empty/invalid. */
-function localInputToIso(value: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(value)) return null;
-  const d = new Date(value); // no offset in the string: parsed as local time
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
-}
-
-function browserTimeZone(): { name: string; offset: string } {
-  let name = "local";
-  try {
-    name = Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
-  } catch {
-    // keep "local"
-  }
-  const mins = -new Date().getTimezoneOffset();
-  const sign = mins >= 0 ? "+" : "−";
-  const abs = Math.abs(mins);
-  return { name, offset: `UTC${sign}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}` };
-}
-
-const cloneEvent = (e: LiveEvent): LiveEvent => ({ ...e, announcement: e.announcement ? { ...e.announcement } : null });
-const eventSig = (e: LiveEvent): string =>
-  JSON.stringify([e.name.trim(), e.startsAt, e.endsAt, e.freezeAt, e.enforceWindow, e.announcement?.text.trim() ?? "", e.announcement?.level ?? null]);
-
-/** Turns the form draft into what the server expects: trimmed name, empty announcement -> null. */
-function normalizeEvent(e: LiveEvent): LiveEvent {
-  const text = e.announcement?.text.trim() ?? "";
-  return { ...e, name: e.name.trim(), announcement: text ? { text, level: e.announcement?.level ?? "info" } : null };
-}
 
 function randomInviteCode(): string {
   const bytes = new Uint8Array(8);
@@ -361,18 +317,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       /** bumped by every save: a poll that started earlier must not overwrite the saved value */
       rev: 0,
     },
-    // event tab
-    event: {
-      server: null as LiveEvent | null,
-      draft: null as LiveEvent | null,
-      /** serverTime - Date.now() at the last response */
-      offsetMs: 0,
-      rev: 0,
-      loading: false,
-      saving: false,
-      error: null as string | null,
-      msg: null as string | null,
-    },
     audit: null as AuditEntry[] | null,
   };
 
@@ -433,7 +377,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   function dirtySections(): string {
     const parts: string[] = [];
     if (schedule.dirty()) parts.push(T().admSecSchedule);
-    if (eventDirty()) parts.push(T().admSecEvent);
+    if (eventForm.dirty()) parts.push(T().admSecEvent);
     return parts.join(" + ");
   }
 
@@ -502,7 +446,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       setPageCrumb(tabLabel(state.tab));
       if (lastFocused && lastFocused.isConnected) lastFocused.focus({ preventScroll: true });
     },
-    dirtyDrafts: () => ({ schedule: schedule.dirty() ? schedule.draft() : null, event: eventDirty() ? state.event.draft : null }),
+    dirtyDrafts: () => ({ schedule: schedule.dirty() ? schedule.draft() : null, event: eventForm.dirty() ? eventForm.draft() : null }),
   };
   function onVisibility(): void {
     if (document.visibilityState === "hidden") {
@@ -513,7 +457,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     }
   }
   function onBeforeUnload(e: BeforeUnloadEvent): void {
-    if (schedule.dirty() || eventDirty()) e.preventDefault();
+    if (schedule.dirty() || eventForm.dirty()) e.preventDefault();
   }
   /** A focused field must never sit under the sticky save bar (WCAG 2.4.11). */
   function onFocusIn(e: FocusEvent): void {
@@ -767,13 +711,13 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   function selectTab(tab: TabId, opts: { fromUrl?: boolean } = {}): boolean {
     if (tab === state.tab) return true;
     const leaving = state.tab;
-    const dirty = leaving === "schedule" ? schedule.dirty() : leaving === "event" ? eventDirty() : false;
+    const dirty = leaving === "schedule" ? schedule.dirty() : leaving === "event" ? eventForm.dirty() : false;
     if (dirty) {
       // Ask first; the tab stays until the draft is discarded, then the switch runs again (now clean).
       void confirmLeave(leaving === "schedule" ? T().admSecSchedule : T().admSecEvent).then((ok) => {
         if (!ok || disposed || state.tab !== leaving) return;
         if (leaving === "schedule") schedule.discard();
-        else discardEvent();
+        else eventForm.discard();
         if (selectTab(tab)) tabPanels.get(tab)?.focus({ preventScroll: true });
       });
       return false;
@@ -785,7 +729,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     syncSaveBarClass();
     renderActiveTab();
     if (tab === "schedule" && !schedule.draft()) void schedule.load();
-    if (tab === "event" && !state.event.draft) void loadEvent();
+    if (tab === "event" && !eventForm.draft()) void eventForm.load();
     void load();
     return true;
   }
@@ -793,7 +737,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   /** The sticky save bar is visible on the active tab: leave room for it when the browser scrolls focus into view. */
   function syncSaveBarClass(): void {
     const open =
-      (state.tab === "schedule" && schedule.barVisible()) || (state.tab === "event" && eventBarVisible());
+      (state.tab === "schedule" && schedule.barVisible()) || (state.tab === "event" && eventForm.barVisible());
     document.documentElement.classList.toggle("admin-savebar-open", open);
   }
 
@@ -1228,506 +1172,24 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       savedNoteTimer = null;
       if (disposed) return;
       schedule.clearNote();
-      state.event.msg = null;
+      eventForm.clearNote();
       if (state.tab === "schedule") withFocusKept(schedule.render);
-      if (state.tab === "event") renderEventControls();
+      if (state.tab === "event") eventForm.renderControls();
     }, SAVED_NOTE_MS);
   }
 
   // =====================================================================================
-  // Event tab (window, leaderboard freeze, announcement)
-  // Form controls are built once and synced from the draft, so polling never steals focus.
+  // Event tab: the event form (views/manage/event.ts) on the admin API
   // =====================================================================================
 
-  const serverNow = (): number => Date.now() + state.event.offsetMs;
-  const isoAt = (t: number): string => new Date(Math.floor(t / 1000) * 1000).toISOString();
-
-  function eventDirty(): boolean {
-    const { server, draft } = state.event;
-    return server !== null && draft !== null && eventSig(server) !== eventSig(draft);
-  }
-
-  function eventBarVisible(): boolean {
-    const ev = state.event;
-    return ev.draft !== null && (eventDirty() || ev.error !== null || ev.msg !== null || ev.saving);
-  }
-
-  function discardEvent(): void {
-    const ev = state.event;
-    if (!ev.server) return;
-    ev.draft = cloneEvent(ev.server);
-    ev.msg = null;
-    ev.error = null;
-    if (eventBuilt) syncEventForm();
-  }
-
-  /** Field-level problems the server would reject, shown next to the field (not only in the save bar). */
-  function eventFieldErrors(d: LiveEvent): { end: string | null; freeze: string | null } {
-    const start = ms(d.startsAt);
-    const end = ms(d.endsAt);
-    const freeze = ms(d.freezeAt);
-    return {
-      end: start !== null && end !== null && end <= start ? T().admErrEndBeforeStart : null,
-      freeze: freeze !== null && end !== null && freeze > end ? T().admErrFreezeAfterEnd : null,
-    };
-  }
-
-  const evStatusEl = h("p", { class: "adm-ev-status", "aria-live": "off" });
-  const evClockEl = h("p", { class: "muted small adm-ev-clock" });
-  const evBodyEl = h("div", { class: "admin-tabpanel adm-ev-body" });
-
-  const evName = h("input", { type: "text", id: "ev-name", class: "admin-input", maxlength: 80, placeholder: T().admEventNamePh, autocomplete: "off", dir: "auto" });
-  const timeInput = (id: string): HTMLInputElement =>
-    h("input", { type: "datetime-local", id, class: "admin-input ev-time", step: 60, dir: "ltr", "aria-describedby": `${id}-preview ev-tz` });
-  /** The picker shows the browser's own format (often US): this line repeats the value in the app locale, with the zone. */
-  const timePreview = (id: string): HTMLParagraphElement => h("p", { class: "muted small ev-time-preview", id: `${id}-preview` });
-  const evStart = timeInput("ev-start");
-  const evEnd = timeInput("ev-end");
-  const evFreeze = timeInput("ev-freeze");
-  const evStartPreview = timePreview("ev-start");
-  const evEndPreview = timePreview("ev-end");
-  const evFreezePreview = timePreview("ev-freeze");
-  const evAnnText = h("textarea", { id: "ev-ann", class: "admin-input ev-ann", maxlength: 280, rows: 3, dir: "auto", "aria-describedby": "ev-ann-help ev-ann-count" });
-  const evAnnCount = h("span", { class: "muted small", id: "ev-ann-count" });
-  const evAnnLevel = h(
-    "select",
-    { id: "ev-ann-level", class: "admin-input" },
-    h("option", { value: "info" }, T().admLevel("info")),
-    h("option", { value: "warning" }, T().admLevel("warning")),
-  );
-  const evAnnClear = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admAnnClear);
-  const evStartNow = h("button", { type: "button", class: "btn btn-sm" }, T().admStartNow);
-  const evEndNow = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admEndNow);
-  const evFreezeBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm" }, T().admFreezeNow);
-  const evSave = h("button", { type: "button", class: "btn btn-primary", id: "ev-save" }, T().admSaveEvent);
-  const evDiscard = h("button", { type: "button", class: "btn btn-ghost", id: "ev-discard" }, T().admDiscard);
-  const evStateEl = h("span", { class: "small", role: "status" });
-  const evErrorEl = h("p", { class: "admin-error", role: "alert" });
-  const evBar = h("div", { class: "sched-actions panel admin-panel" }, evSave, evDiscard, evStateEl, evErrorEl);
-
-  function clearTimeBtn(input: HTMLInputElement, label: string, apply: (d: LiveEvent) => void): HTMLButtonElement {
-    return h(
-      "button",
-      {
-        type: "button",
-        class: "btn btn-ghost btn-sm",
-        "aria-label": T().admClearTimeLabel(label),
-        onclick: () => {
-          input.value = "";
-          editEvent(apply);
-        },
-      },
-      T().admClearTime,
-    );
-  }
-
-  // The form's fields (components/formLayout.ts): label, inline error, control; the time fields add the locale
-  // preview and a Clear button, and stay described by the preview and the time-zone note.
-  const evNameField = formField({ input: evName, label: T().admEventName });
-  // A note (the freeze explanation) goes under the control, so the three time inputs line up across columns.
-  const timeField = (input: HTMLInputElement, label: string, preview: HTMLElement, apply: (d: LiveEvent) => void, note?: string) => {
-    const noteId = `${input.id}-note`;
-    return formField({
-      input,
-      label,
-      describedBy: [preview.id, ...(note ? [noteId] : []), "ev-tz"],
-      extra: h(
-        "div",
-        { class: "ev-time-extra" },
-        preview,
-        clearTimeBtn(input, label, apply),
-        note ? h("p", { class: "muted small ev-time-note", id: noteId }, note) : null,
-      ),
-    });
-  };
-  const evStartField = timeField(evStart, T().admStartsAt, evStartPreview, (d) => (d.startsAt = null));
-  const evEndField = timeField(evEnd, T().admEndsAt, evEndPreview, (d) => (d.endsAt = null));
-  const evFreezeField = timeField(evFreeze, T().admFreezeAt, evFreezePreview, (d) => (d.freezeAt = null), T().admFreezeHelp);
-
-  /** Mutates the draft from a control and refreshes the derived bits (no form rebuild). */
-  function editEvent(mutate: (d: LiveEvent) => void): void {
-    const ev = state.event;
-    if (!ev.draft) return;
-    mutate(ev.draft);
-    ev.msg = null;
-    ev.error = null;
-    renderEventControls();
-  }
-
-  evName.addEventListener("input", () => editEvent((d) => (d.name = evName.value)));
-  evStart.addEventListener("change", () => editEvent((d) => (d.startsAt = localInputToIso(evStart.value))));
-  evEnd.addEventListener("change", () => editEvent((d) => (d.endsAt = localInputToIso(evEnd.value))));
-  evFreeze.addEventListener("change", () => editEvent((d) => (d.freezeAt = localInputToIso(evFreeze.value))));
-  const levelOf = (v: string): "info" | "warning" => (v === "warning" ? "warning" : "info");
-  evAnnText.addEventListener("input", () => editEvent((d) => (d.announcement = { text: evAnnText.value, level: levelOf(evAnnLevel.value) })));
-  evAnnLevel.addEventListener("change", () => editEvent((d) => (d.announcement = { text: evAnnText.value, level: levelOf(evAnnLevel.value) })));
-  evAnnClear.addEventListener("click", () => {
-    evAnnText.value = "";
-    editEvent((d) => (d.announcement = null));
-    evAnnText.focus();
+  const eventForm = createEventPanel({
+    host,
+    panel: tabPanels.get("event") ?? container,
+    api: { load: fetchEvent, save: saveEvent },
+    isActive: () => state.tab === "event",
+    carried: carry?.event ?? null,
+    onSaved: () => clearSavedNoteLater(),
   });
-  evSave.addEventListener("click", () => {
-    const d = state.event.draft;
-    if (!d) return;
-    const errs = eventFieldErrors(d);
-    const first = errs.end ? evEnd : errs.freeze ? evFreeze : null;
-    if (first) {
-      state.event.msg = null;
-      renderEventControls();
-      evStateEl.textContent = T().admFixFields;
-      first.focus();
-      return;
-    }
-    void onSaveEvent();
-  });
-  evDiscard.addEventListener("click", () => discardEvent());
-
-  /**
-   * Quick actions change only the timing of the SAVED event (server clock) and save just that; half-edited
-   * fields in the form are neither saved nor lost: they are re-applied on top of the result.
-   */
-  async function quickEvent(mutate: (d: LiveEvent, now: number) => void): Promise<boolean> {
-    const ev = state.event;
-    if (!ev.server || ev.saving) return false;
-    const base = cloneEvent(ev.server);
-    const draftBefore = ev.draft ? cloneEvent(ev.draft) : null;
-    const next = cloneEvent(base);
-    mutate(next, serverNow());
-    ev.rev += 1;
-    ev.saving = true;
-    ev.error = null;
-    ev.msg = null;
-    renderEventControls();
-    try {
-      const res = await saveEvent(normalizeEvent(next));
-      if (disposed) return false;
-      applyEventResult(res, false);
-      const merged = cloneEvent(res.event);
-      if (draftBefore) {
-        // Keep each field the instructor had edited (it differs from the old saved value) and the action didn't touch.
-        const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
-        if (!same(draftBefore.name, base.name)) merged.name = draftBefore.name;
-        if (!same(draftBefore.startsAt, base.startsAt) && same(next.startsAt, base.startsAt)) merged.startsAt = draftBefore.startsAt;
-        if (!same(draftBefore.endsAt, base.endsAt) && same(next.endsAt, base.endsAt)) merged.endsAt = draftBefore.endsAt;
-        if (!same(draftBefore.freezeAt, base.freezeAt) && same(next.freezeAt, base.freezeAt)) merged.freezeAt = draftBefore.freezeAt;
-        if (!same(draftBefore.announcement, base.announcement)) merged.announcement = draftBefore.announcement ? { ...draftBefore.announcement } : null;
-      }
-      ev.draft = merged;
-      ev.msg = T().admEventSaved;
-      clearSavedNoteLater();
-      syncEventForm();
-    } catch (err: unknown) {
-      if (disposed || handleAuthError(err)) return false;
-      ev.error = errMessage(err);
-    } finally {
-      ev.saving = false;
-    }
-    if (state.tab === "event") renderEventControls();
-    return ev.error === null;
-  }
-
-  /** The "(other edits stay unsaved)" note, only when there are other edits. */
-  const draftNote = (): string | undefined => (eventDirty() ? T().admDraftStays : undefined);
-
-  evStartNow.addEventListener("click", () =>
-    void quickEvent((d, now) => {
-      d.startsAt = isoAt(now);
-      d.endsAt = isoAt(now + EVENT_QUICK_MINUTES * 60_000);
-      // A freeze from an earlier run (or past the new end) would freeze the new event at the wrong moment.
-      const f = ms(d.freezeAt);
-      if (f !== null && (f < now || f > now + EVENT_QUICK_MINUTES * 60_000)) d.freezeAt = null;
-    }),
-  );
-  evEndNow.addEventListener("click", () => {
-    const saved = state.event.server;
-    if (!saved) return;
-    const name = saved.name.trim() || T().admTheEvent;
-    void askConfirm({
-      title: T().admEndTitle(name),
-      body: T().admEndBodyOpen,
-      note: draftNote(),
-      confirmLabel: T().admEndNow,
-      tone: "danger",
-      returnFocus: () => evEndNow,
-    }).then((ok) => {
-      if (!ok) return;
-      void quickEvent((d, now) => {
-        d.endsAt = isoAt(now);
-        const s = ms(d.startsAt);
-        if (s !== null && s >= now) d.startsAt = isoAt(now - 60_000);
-        const f = ms(d.freezeAt);
-        if (f !== null && f > now) d.freezeAt = null; // never reached: the standings at the end are final anyway
-      });
-    });
-  });
-  evFreezeBtn.addEventListener("click", () => {
-    const unfreeze = isFrozen();
-    void askConfirm({
-      title: unfreeze ? T().admUnfreezeTitle : T().admFreezeTitle,
-      body: unfreeze ? T().admUnfreezeBody : T().admFreezeBody,
-      note: draftNote(),
-      confirmLabel: unfreeze ? T().admUnfreeze : T().admFreezeNow,
-      tone: unfreeze ? "primary" : "danger",
-      returnFocus: () => evFreezeBtn,
-    }).then(async (ok) => {
-      if (!ok) return;
-      const previous = state.event.server?.freezeAt ?? null;
-      const saved = await quickEvent((d, now) => {
-        if (unfreeze) {
-          d.freezeAt = null;
-          return;
-        }
-        const end = ms(d.endsAt);
-        d.freezeAt = end !== null && end < now ? isoAt(end) : isoAt(now);
-      });
-      if (!saved) return;
-      toast({
-        tone: "success",
-        text: unfreeze ? T().admUnfrozenToast : T().admFrozenToast,
-        action: { label: T().admUndo, run: () => void quickEvent((d) => void (d.freezeAt = previous)) },
-      });
-    });
-  });
-
-  function isFrozen(): boolean {
-    const f = ms(state.event.server?.freezeAt ?? null);
-    return f !== null && f <= serverNow();
-  }
-
-  function applyEventResult(res: AdminEventResult, fromPoll: boolean): void {
-    const ev = state.event;
-    ev.offsetMs = (ms(res.serverTime) ?? Date.now()) - Date.now();
-    const changed = ev.server === null || eventSig(ev.server) !== eventSig(res.event);
-    const keepDraft = fromPoll && ev.draft !== null && eventDirty();
-    ev.server = cloneEvent(res.event);
-    if (!keepDraft && (changed || ev.draft === null)) {
-      ev.draft = cloneEvent(res.event);
-      if (state.tab === "event") syncEventForm();
-    } else if (state.tab === "event") {
-      renderEventControls();
-    }
-  }
-
-  async function loadEvent(): Promise<void> {
-    const ev = state.event;
-    ev.loading = true;
-    ev.error = null;
-    renderEvent();
-    try {
-      const rev = ev.rev;
-      const res = await fetchEvent();
-      if (disposed) return;
-      if (rev === ev.rev) applyEventResult(res, false);
-      // A draft carried over from the previous render (language switch) wins over the fresh copy.
-      if (carry?.event) {
-        ev.draft = cloneEvent(carry.event);
-        carry.event = null;
-      }
-    } catch (err: unknown) {
-      if (disposed || handleAuthError(err)) return;
-      ev.error = errMessage(err);
-    } finally {
-      ev.loading = false;
-    }
-    if (state.tab === "event") renderEvent();
-  }
-
-  async function onSaveEvent(): Promise<void> {
-    const ev = state.event;
-    if (!ev.draft || ev.saving) return;
-    ev.rev += 1;
-    ev.saving = true;
-    ev.error = null;
-    ev.msg = null;
-    renderEventControls();
-    try {
-      const res = await saveEvent(normalizeEvent(ev.draft));
-      if (disposed) return;
-      applyEventResult(res, false);
-      ev.draft = cloneEvent(res.event);
-      ev.msg = T().admEventSaved;
-      clearSavedNoteLater();
-      syncEventForm();
-    } catch (err: unknown) {
-      if (disposed || handleAuthError(err)) return;
-      ev.error = errMessage(err);
-    } finally {
-      ev.saving = false;
-    }
-    if (state.tab === "event") renderEventControls();
-  }
-
-  /** Copies the draft into the controls (after a load, save, discard or quick action). */
-  function syncEventForm(): void {
-    const d = state.event.draft;
-    if (!d) return;
-    evName.value = d.name;
-    evStart.value = isoToLocalInput(d.startsAt);
-    evEnd.value = isoToLocalInput(d.endsAt);
-    evFreeze.value = isoToLocalInput(d.freezeAt);
-    evAnnText.value = d.announcement?.text ?? "";
-    evAnnLevel.value = d.announcement?.level ?? "info";
-    renderEventControls();
-  }
-
-  function renderEventControls(): void {
-    const ev = state.event;
-    const dirty = eventDirty();
-    const busy = ev.saving || ev.draft === null;
-    evSave.disabled = busy || !dirty;
-    evSave.textContent = ev.saving ? T().admSaving : T().admSaveEvent;
-    evDiscard.disabled = busy || !dirty;
-    for (const b of [evStartNow, evEndNow, evFreezeBtn]) b.disabled = busy;
-    evAnnClear.disabled = busy || evAnnText.value === "";
-    evAnnCount.textContent = T().admCharsLeft(280 - evAnnText.value.length);
-    evStateEl.textContent = dirty ? T().admUnsaved : ev.msg ?? "";
-    evStateEl.className = `small ${dirty ? "sched-dirty" : "muted"}`;
-    evErrorEl.textContent = ev.error ? T().admSaveFailed(ev.error) : "";
-    evErrorEl.hidden = ev.error === null;
-    const errs = ev.draft ? eventFieldErrors(ev.draft) : { end: null, freeze: null };
-    evEndField.setError(errs.end);
-    evFreezeField.setError(errs.freeze);
-    if (ev.draft) {
-      const preview = (el: HTMLElement, iso: string | null): void => {
-        el.textContent = iso === null ? T().admTimeNotSet : formatDateTimeZone(iso);
-      };
-      preview(evStartPreview, ev.draft.startsAt);
-      preview(evEndPreview, ev.draft.endsAt);
-      preview(evFreezePreview, ev.draft.freezeAt);
-    }
-    evBar.hidden = !eventBarVisible();
-    syncSaveBarClass();
-    renderEventStatus();
-  }
-
-  /** Status line + countdown from the saved event and the server clock (ticks every second). */
-  function renderEventStatus(): void {
-    const e = state.event.server;
-    evFreezeBtn.textContent = isFrozen() ? T().admUnfreeze : T().admFreezeNow;
-    if (!e) {
-      evStatusEl.textContent = "";
-      evClockEl.textContent = "";
-      return;
-    }
-    const now = serverNow();
-    const start = ms(e.startsAt);
-    const end = ms(e.endsAt);
-    let phase: string;
-    let tone: "live" | "idle" | "soon" | "over";
-    if (start === null && end === null) {
-      phase = T().admStatusNoWindow;
-      tone = "idle";
-    } else if (start !== null && now < start) {
-      phase = T().admStatusStartsIn(formatDuration(start - now));
-      tone = "soon";
-    } else if (end !== null && now >= end) {
-      phase = T().admStatusEnded(formatDuration(now - end));
-      tone = "over";
-    } else if (end === null) {
-      phase = T().admStatusLiveOpen;
-      tone = "live";
-    } else {
-      phase = start === null ? T().admStatusEndsIn(formatDuration(end - now)) : T().admStatusLive(formatDuration(end - now));
-      tone = "live";
-    }
-    const parts = [phase];
-    const f = ms(e.freezeAt);
-    if (f !== null) parts.push(f <= now ? T().admStatusFrozen(formatDateTime(e.freezeAt)) : T().admStatusFreezesIn(formatDuration(f - now)));
-    const label = e.name.trim();
-    // Each part carries its separator at its own end, so a wrapped line never starts with a stray "·" (#129).
-    const segs: Array<{ text: string; strong: boolean }> = [
-      ...(label ? [{ text: label, strong: true }] : []),
-      ...parts.map((text) => ({ text, strong: false })),
-    ];
-    setChildren(
-      evStatusEl,
-      h("span", { class: `adm-ev-dot is-${tone}`, "aria-hidden": "true" }),
-      segs.map((s, i) =>
-        h("span", { class: "adm-ev-part" }, s.strong ? h("strong", {}, s.text) : s.text, i < segs.length - 1 ? " ·" : ""),
-      ),
-    );
-    evClockEl.textContent = T().admServerClock(new Intl.DateTimeFormat(locale(), { timeStyle: "medium" }).format(now));
-  }
-
-  function buildEventPanel(): void {
-    const tz = browserTimeZone();
-    setChildren(
-      evBodyEl,
-      h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, T().admEventTitle), evStatusEl, evClockEl),
-      h(
-        "section",
-        { class: "panel admin-panel" },
-        headWithHint(h("h2", { class: "admin-h2" }, T().admQuickActions), T().admQuickHelp),
-        h("p", { class: "muted small admin-hint is-touch-only" }, T().admQuickHelp),
-        h("div", { class: "adm-ev-quick" }, evStartNow, evEndNow, evFreezeBtn),
-      ),
-      h(
-        "section",
-        { class: "panel admin-panel" },
-        h("h2", { class: "admin-h2" }, T().admScheduleSettings),
-        h(
-          "div",
-          { class: "sched-form adm-ev-form" },
-          evNameField.nodes,
-          evStartField.nodes,
-          evEndField.nodes,
-          evFreezeField.nodes,
-          h("p", { class: "muted small ev-tz", id: "ev-tz" }, T().admTzNote(tz.name, tz.offset)),
-        ),
-      ),
-      h(
-        "section",
-        { class: "panel admin-panel" },
-        h("h2", { class: "admin-h2" }, T().admAnnouncement),
-        h("p", { class: "muted small admin-hint", id: "ev-ann-help" }, T().admAnnouncementHelp),
-        h(
-          "div",
-          { class: "adm-ev-ann" },
-          h("label", { class: "visually-hidden", for: "ev-ann" }, T().admAnnouncement),
-          evAnnText,
-          h(
-            "div",
-            { class: "adm-ev-ann-row" },
-            h("label", { class: "admin-label", for: "ev-ann-level" }, T().admAnnLevel),
-            evAnnLevel,
-            evAnnClear,
-            evAnnCount,
-          ),
-        ),
-      ),
-      evBar,
-    );
-  }
-
-  let eventBuilt = false;
-  function renderEvent(): void {
-    const panel = tabPanels.get("event");
-    if (!panel) return;
-    const ev = state.event;
-    if (!ev.draft) {
-      eventBuilt = false;
-      setChildren(
-        panel,
-        ev.error
-          ? h(
-              "section",
-              { class: "panel admin-panel" },
-              h("p", { class: "admin-error", role: "alert" }, T().admLoadSectionFailed(ev.error)),
-              h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: () => void loadEvent() }, T().admRetry),
-            )
-          : h("p", { class: "muted admin-loading" }, T().admLoading),
-      );
-      return;
-    }
-    if (!eventBuilt) {
-      eventBuilt = true;
-      buildEventPanel();
-      setChildren(panel, evBodyEl);
-      syncEventForm();
-      return;
-    }
-    renderEventControls();
-  }
 
   // =====================================================================================
   // Audit log
@@ -2141,7 +1603,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
 
   /** The event as the room sees it: the admin's copy once the Event section loaded it, else the public poll's. */
   function boardEvent(): { event: LiveEvent | null; now: number } {
-    return state.event.server ? { event: state.event.server, now: serverNow() } : { event: cachedEvent(), now: publicServerNow() };
+    const saved = eventForm.server();
+    return saved ? { event: saved, now: eventForm.serverNow() } : { event: cachedEvent(), now: publicServerNow() };
   }
 
   function renderBoardClock(): void {
@@ -2287,7 +1750,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         renderStats();
         break;
       case "event":
-        renderEvent();
+        eventForm.render();
         break;
       case "audit":
         renderAudit();
@@ -2300,7 +1763,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     if (state.tab !== "accounts") members.renderPending();
     // Keep the schedule and event editors (and focus) intact while polling.
     if (state.tab === "schedule") schedule.renderToday();
-    else if (state.tab === "event") renderEventStatus();
+    else if (state.tab === "event") eventForm.renderStatus();
     else renderActiveTab();
     renderUpdated();
     renderBanner();
@@ -2347,7 +1810,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     const tab = state.tab;
     const liveCase = state.liveCaseId;
     const settingsRev = state.settings.rev;
-    const eventRev = state.event.rev;
+    const eventRev = eventForm.rev();
     // The projector board refreshes with the dashboard (public endpoint; its errors stay on the board).
     if (state.leaderboard) void loadBoard();
     // Recently deleted is optional: a server without it (404) or a failure must not break the poll.
@@ -2363,7 +1826,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         tab === "live" && liveCase ? fetchProgress(liveCase) : Promise.resolve(null),
         tab === "stats" ? fetchCaseStats() : Promise.resolve(null),
         tab === "accounts" ? fetchSettings() : Promise.resolve(null),
-        tab === "event" && !state.event.saving ? fetchEvent() : Promise.resolve(null),
+        tab === "event" && !eventForm.saving() ? fetchEvent() : Promise.resolve(null),
         tab === "audit" ? fetchAudit(AUDIT_LIMIT) : Promise.resolve(null),
       ]);
       if (disposed) return;
@@ -2380,7 +1843,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       }
       if (trashReq) applyTrash(await trashReq);
       if (settings && settingsRev === state.settings.rev && !state.settings.saving) state.settings.server = settings;
-      if (event && eventRev === state.event.rev && !state.event.saving) applyEventResult(event, true);
+      if (event && eventRev === eventForm.rev() && !eventForm.saving()) eventForm.applyPoll(event);
       if (audit) state.audit = audit;
       ensureLiveCase();
       state.lastUpdated = Date.now();
@@ -2447,14 +1910,14 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     renderData();
     renderActiveTab();
     if (state.tab === "schedule") void schedule.load();
-    if (state.tab === "event") void loadEvent();
+    if (state.tab === "event") void eventForm.load();
     // Live, Stats, Audit and Recently deleted (Accounts) need a second request before they have data.
     if (state.tab === "live" || state.tab === "stats" || state.tab === "audit" || state.tab === "accounts") void load();
     else scheduleNext();
     tickId = window.setInterval(() => {
       if (!container.isConnected) return dispose();
       renderUpdated();
-      if (state.tab === "event") renderEventStatus();
+      if (state.tab === "event") eventForm.renderStatus();
       if (state.leaderboard && boardDialog !== null) renderBoardClock();
     }, 1000);
   }
