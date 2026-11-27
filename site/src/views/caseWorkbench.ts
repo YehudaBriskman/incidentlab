@@ -146,8 +146,7 @@ export function workbench(parts: WorkbenchParts): Workbench {
       tab.tabIndex = p === selected ? 0 : -1;
       const pane = panels[p];
       // The question column is a tab panel on narrow screens only; the hints are one on wide screens only.
-      const isPanel = on;
-      if (isPanel) {
+      if (on) {
         pane.setAttribute("role", "tabpanel");
         pane.setAttribute("aria-labelledby", tabId(p));
       } else {
@@ -155,6 +154,8 @@ export function workbench(parts: WorkbenchParts): Workbench {
         pane.removeAttribute("aria-labelledby");
       }
     }
+    // The hints panel has no controls, so it is a tab stop while it is a panel (APG); under the question it isn't.
+    hints.tabIndex = narrow ? -1 : 0;
     // What shows: the selected panel; on wide the question column always, on narrow the hints with the question.
     question.hidden = narrow && selected !== "question";
     hints.hidden = narrow ? selected !== "question" : selected !== "hints";
