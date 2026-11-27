@@ -153,6 +153,25 @@ Migration 003 backfills `score:` for every account. Accounts that have no summar
   accounts from before it (migration 003 approves them); `rejected` blocks sign-in and recovery.
 - A recovery bumps `sessionEpoch` (every session ends), clears `mustChangePassword` and replaces the code.
 
+## Weekly hygiene (#177)
+
+Without a sweep, `session:`, `ratelimit:`, `audit:` and guest accounts grow forever. The scheduled function
+`hygiene-weekly` (`site/netlify/functions/hygiene-weekly.mts`, `@weekly`) runs one pass of
+`AccountHygieneService` (`site/server/services/AccountHygieneService.ts`). `scripts/data.ts gc-accounts` runs the
+same pass by hand: a dry run that only reads and reports, then `--apply`, which takes a local backup first.
+
+| What | Rule | How |
+|---|---|---|
+| Guests (`account:` with `kind: "guest"`) | `lastSeenAt` (or `createdAt`) 30 days ago or more | **Soft delete**, like an admin delete: one `trash:` entry of kind `account` (label `idle guest guest-<id>`) with the account and all its progress, then the records go, with its `score:` summary and any `globalboard:` marker (`ScoreService.remove`, the same path as an admin delete). Restorable from Recently deleted for 7 days; a restore re-derives the summary and doesn't claim a username (guests never hold one). Users are never touched. |
+| `session:` | past `expiresAt` | deleted (authenticate() already refuses them) |
+| `ratelimit:` | newest hit more than 24 h ago (the longest window is 1 h) | deleted |
+| `audit:` | key timestamp older than 90 days | deleted; keys that don't start with a timestamp are left alone |
+| `trash:` | past the 7-day restore window | deleted (Recently deleted drops them too, but only when someone opens it) |
+
+A restored guest still has its old `lastSeenAt`, so the next weekly run trashes it again unless it plays.
+Cost: one listing per prefix plus one read per `account:`, `session:` and `ratelimit:` key, once a week. It
+never runs on a request path, so it doesn't touch the function-call budget.
+
 ## Rules for changing stored records
 
 1. **Additive only.** New fields get a zod `.default(...)`, so every record already stored still parses.
@@ -195,6 +214,11 @@ node --experimental-strip-types scripts/data.ts restore daily/2026-11-25.json --
 node --experimental-strip-types scripts/data.ts gc-evidence
 node --experimental-strip-types scripts/data.ts gc-evidence --apply
 
+# Weekly hygiene by hand (#177): idle guests to the trash, expired sessions and rate limits, old audit and
+# expired trash. Dry run, then apply (pre-gc-accounts backup first). The scheduled function does this weekly.
+node --experimental-strip-types scripts/data.ts gc-accounts
+node --experimental-strip-types scripts/data.ts gc-accounts --apply
+
 # Pending migrations: dry run, then apply (takes a pre-migrate backup first)
 node --experimental-strip-types scripts/data.ts migrate
 node --experimental-strip-types scripts/data.ts migrate --apply
@@ -223,6 +247,8 @@ node --experimental-strip-types scripts/data.ts migrate --apply
 - the backup → wipe → restore round trip (with and without prune);
 - daily rotation;
 - soft delete and restore, including conflict and expiry;
+- the weekly hygiene pass: idle guests trashed and restorable, active guests and users kept, expired sessions,
+  stale rate limits, old audit and expired trash swept, and a dry run that changes nothing (`hygiene.test.ts`);
 - the shared case schemas against the real case files and `secrets.json` (a build artefact; the function never
   imports it, which `handler.test.ts` checks), and answer normalization against the shared vectors.
 

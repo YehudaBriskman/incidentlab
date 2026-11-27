@@ -829,8 +829,8 @@ main.app-content {
   .app-content[data-layout="fit"] #app { flex: 1; min-block-size: 0; display: flex; flex-direction: column; }
 }
 /* the announcement: one compact dismissible notice at the top of the content area */
-.announce { margin-block-end: var(--space-3); }
-.announce .banner-text { padding-block: var(--space-1); }
+.announce, .guest-banner { margin-block-end: var(--space-3); }
+:is(.announce, .guest-banner) .banner-text { padding-block: var(--space-1); }
 .announce[data-tone="warning"] .banner-text { font-weight: 600; }
 
 /* page panel primitive (components/pagePanel.ts) */
@@ -1084,6 +1084,7 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 }
 .banner-text { white-space: pre-line; }
 .banner-close { margin-block: var(--space-1); }
+.banner-action { flex: none; margin-block: var(--space-1); }
 
 @media (prefers-reduced-motion: no-preference) {
   :root:not([data-motion="reduce"]) :is(.ov-dialog, .ov-sheet, .ov-popover, .toast) {

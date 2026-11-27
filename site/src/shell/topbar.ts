@@ -9,8 +9,10 @@ import { TS } from "../i18n/strings-shell";
 import { onConnectivity } from "../lib/api";
 import { h, html, setChildren } from "../lib/dom";
 import { cachedEvent, formatCountdown, onEventChange, serverNow, startEventPolling } from "../lib/event";
-import { popover } from "../lib/overlay";
-import { cachedAccount, isAdmin, loadAccount, onAccountChange, signOut } from "../lib/session";
+import { confirm, popover } from "../lib/overlay";
+import { cachedAccount, isAdmin, isGuest, loadAccount, onAccountChange, signOut } from "../lib/session";
+import { TGu } from "../i18n/strings-guest";
+import { openGuestUpgrade } from "./frame";
 import { caseSummary, onCatalogChange } from "../content/load";
 import { eventDisplayPhase, eventLine, eventWhen } from "../views/leaderboard";
 import { ICONS } from "./icons";
@@ -195,18 +197,27 @@ function createAccountMenu(): HTMLElement {
       setChildren(wrap, signInLink, panel);
       return;
     }
-    const name = account.username;
+    const guest = isGuest(account);
+    const name = guest ? TGu().guestName : account.username;
     button.textContent = "";
     button.append(h("span", { class: "avatar", "aria-hidden": "true" }, initials(name)));
     // Label in Name (WCAG 2.5.3): the visible initials start the name, so "click AL" works in speech control.
     button.setAttribute("aria-label", `${initials(name)}, ${TS().accountButton(name)}`);
     button.title = name;
     panel.setAttribute("aria-label", TS().accountPanel);
-    const role = isAdmin(account) ? TS().roleAdmin : account.role === "author" ? TS().roleAuthor : TS().rolePlayer;
+    const role = guest ? TGu().guestRole : isAdmin(account) ? TS().roleAdmin : account.role === "author" ? TS().roleAuthor : TS().rolePlayer;
     const showStats = !isAdmin(account) && account.status === "approved" && !account.mustChangePassword;
     const out = h("button", { type: "button", class: "account-item is-signout" }, TA().signOut);
     // finally, not then: offline sign-out still clears the local account, so leave the signed-in page too
-    out.addEventListener("click", () => void signOut().catch(() => undefined).finally(() => (window.location.hash = "#/")));
+    const leave = (): void => void signOut().catch(() => undefined).finally(() => (window.location.hash = "#/"));
+    // A guest who signs out can never get back in (#176): say so first, and offer the account instead.
+    out.addEventListener("click", () => {
+      if (!guest) return leave();
+      if (panel.matches(":popover-open")) panel.hidePopover();
+      void confirm({ title: TGu().signOutTitle, body: TGu().signOutBody, confirmLabel: TGu().signOutConfirm, tone: "danger" }).then((yes) => {
+        if (yes) leave();
+      });
+    });
     setChildren(
       panel,
       h(
@@ -225,11 +236,16 @@ function createAccountMenu(): HTMLElement {
       h(
         "ul",
         { class: "account-items" },
+        guest ? h("li", {}, h("button", { type: "button", class: "account-item", onclick: upgradeFromMenu }, TGu().createAccount)) : null,
         showStats ? h("li", {}, h("a", { class: "account-item", href: "#/me" }, TA().myStats)) : null,
         h("li", {}, out),
       ),
     );
     setChildren(wrap, button, panel);
+  };
+  const upgradeFromMenu = (): void => {
+    if (panel.matches(":popover-open")) panel.hidePopover();
+    openGuestUpgrade();
   };
   // Choosing an item closes the panel (popover light dismiss does not run for a click inside it).
   panel.addEventListener("click", (ev) => {

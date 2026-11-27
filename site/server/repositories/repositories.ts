@@ -76,6 +76,10 @@ export class SessionRepository {
   async delete(tokenHash: string): Promise<void> {
     await this.kv.delete(`session:${tokenHash}`);
   }
+  /** Every stored session's token hash (the hygiene sweep reads them to find expired ones). */
+  async listHashes(): Promise<string[]> {
+    return (await this.kv.listKeys("session:")).map((key) => key.slice("session:".length));
+  }
 }
 
 export class ProgressRepository {
@@ -104,6 +108,12 @@ export class ProgressRepository {
   }
   async list(caseId?: string): Promise<ProgressRecord[]> {
     const keys = await this.listKeys(caseId);
+    const rows = await mapWithConcurrency(keys, async (key) => parseVersioned(await this.kv.get(key), ProgressRecordSchema)?.data ?? null);
+    return rows.filter((r): r is ProgressRecord => r !== null);
+  }
+  /** Every progress record of these accounts (one key listing, then reads only for the matching keys). */
+  async listForAccounts(accountIds: ReadonlySet<string>): Promise<ProgressRecord[]> {
+    const keys = (await this.listKeys()).filter((k) => accountIds.has(k.slice(k.lastIndexOf(":") + 1)));
     const rows = await mapWithConcurrency(keys, async (key) => parseVersioned(await this.kv.get(key), ProgressRecordSchema)?.data ?? null);
     return rows.filter((r): r is ProgressRecord => r !== null);
   }
@@ -140,6 +150,13 @@ export class RateLimitRepository {
   }
   async setHits(key: string, hits: number[]): Promise<void> {
     await this.kv.set(`ratelimit:${key}`, hits);
+  }
+  /** Every rate-limit window key (without the prefix). */
+  async listKeys(): Promise<string[]> {
+    return (await this.kv.listKeys("ratelimit:")).map((key) => key.slice("ratelimit:".length));
+  }
+  async delete(key: string): Promise<void> {
+    await this.kv.delete(`ratelimit:${key}`);
   }
 }
 

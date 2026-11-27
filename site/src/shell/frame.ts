@@ -5,12 +5,15 @@
 // - `header`: the page header row above #app;
 // - `layout`: "fit" pins the page to the content area's height so its panels scroll inside themselves.
 // The content area (main.app-content) is the only scroller besides the nav; the frame itself is 100dvh.
-// It also owns the admin's announcement: a compact dismissible notice at the top of the content area.
+// It also owns the admin's announcement: a compact dismissible notice at the top of the content area, and the
+// guest banner (#176): a quiet, persistent "create an account" line while the session is a guest.
 import type { LiveEvent } from "../../shared/contract";
 import { TG } from "../i18n/strings-game";
 import { TS } from "../i18n/strings-shell";
 import { appendChildren, h, html, setChildren, type Child } from "../lib/dom";
 import { cachedEvent, onEventChange } from "../lib/event";
+import { cachedAccount, isGuest, onAccountChange } from "../lib/session";
+import { TGu } from "../i18n/strings-guest";
 import { banner, openSheet, type DialogHandle } from "../lib/overlay";
 import { ICONS } from "./icons";
 import { showSubNav } from "./nav";
@@ -27,7 +30,7 @@ let asideDrawer: { handle: DialogHandle<string>; content: HTMLElement } | null =
 /** Wires the frame's content area. Call once. */
 export function initFrame(p: Parts): void {
   parts = p;
-  p.notice.append(createAnnouncement());
+  p.notice.append(createAnnouncement(), createGuestBanner());
   window.matchMedia(NARROW).addEventListener("change", (ev) => {
     if (!ev.matches) closeAsideDrawer();
   });
@@ -177,5 +180,36 @@ function createAnnouncement(): HTMLElement {
   };
   show(cachedEvent()); // a remembered event draws at first paint (no layout shift); polling then updates it
   onEventChange(show);
+  return notice.el;
+}
+
+/* ---------- the guest banner (#176) ---------- */
+
+/** Opens the upgrade form (loaded on demand: most visitors are never guests). */
+export function openGuestUpgrade(): void {
+  void import("../views/guest").then((m) => m.openUpgradeDialog());
+}
+
+/** Shown on every page while the session is a guest; not dismissible, since the progress is at stake. */
+function createGuestBanner(): HTMLElement {
+  const notice = banner({
+    tone: "info",
+    text: TGu().bannerText,
+    label: TGu().bannerLabel,
+    className: "guest-banner",
+    action: { label: () => TGu().createAccount, run: openGuestUpgrade },
+  });
+  const draw = (): void => {
+    if (!isGuest(cachedAccount())) {
+      notice.hide();
+      return;
+    }
+    notice.el.setAttribute("aria-label", TGu().bannerLabel);
+    notice.update({ text: TGu().bannerText });
+    notice.show();
+  };
+  draw();
+  onAccountChange(draw);
+  window.addEventListener("hashchange", draw); // re-label on language change
   return notice.el;
 }

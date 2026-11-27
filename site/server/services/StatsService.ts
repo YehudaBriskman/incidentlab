@@ -182,10 +182,11 @@ export class StatsService {
     const [accounts, progress, schedule] = await Promise.all([this.repos.accounts.list(), this.repos.progress.list(), this.repos.schedule.get()]);
     const byAccount = new Map<string, ProgressRecord[]>();
     for (const record of progress) byAccount.set(record.accountId, [...(byAccount.get(record.accountId) ?? []), record]);
-    const rows = accounts.map((a) => ({ ...this.userStats(a, byAccount.get(a.id) ?? [], schedule), onGlobalBoard: isBoardEligible(a) }));
-    const scores = rows.filter((r) => r.status === "approved").map((r) => r.totalScore).sort((a, b) => b - a);
+    // Guests (#176) are listed for the instructor but never ranked: only approved user accounts compete.
+    const rows = accounts.map((a) => ({ ...this.userStats(a, byAccount.get(a.id) ?? [], schedule), onGlobalBoard: isBoardEligible(a), ranked: a.status === "approved" && a.kind === "user" }));
+    const scores = rows.filter((r) => r.ranked).map((r) => r.totalScore).sort((a, b) => b - a);
     return rows
-      .map((r): UserStats => ({ ...r, rank: r.status === "approved" ? rankOf(r.totalScore, scores) : null }))
+      .map(({ ranked, ...r }): UserStats => ({ ...r, rank: ranked ? rankOf(r.totalScore, scores) : null }))
       .sort((a, b) => b.totalScore - a.totalScore || a.createdAt.localeCompare(b.createdAt));
   }
 

@@ -10,15 +10,21 @@ import { ADMIN_KEY, ADMIN_USERNAME, approveAccount, randomUsername } from "./sup
 export const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 const CASE = "ghost-in-the-network";
 
-export type Who = "visitor" | "player" | "admin";
+export type Who = "visitor" | "guest" | "player" | "admin";
 export const PAGES: Record<Who, readonly string[]> = {
   visitor: ["/#/", "/#/login", "/#/signup", "/#/leaderboard", `/#/case/${CASE}`, `/#/case/${CASE}/explorer`],
+  // a guest (#176) sees the guest banner on every page, and the account menu says "Guest"
+  guest: ["/#/", `/#/case/${CASE}`, `/#/case/${CASE}/toolbox`, "/#/me"],
   player: ["/#/", `/#/case/${CASE}`, `/#/case/${CASE}/toolbox`, `/#/case/${CASE}/explorer`, "/#/me", "/#/leaderboard"],
   admin: ["/#/admin", "/#/admin?tab=live", "/#/admin?tab=stats", "/#/admin?tab=event", "/#/admin?tab=schedule", "/#/admin?tab=audit", `/#/case/${CASE}`, `/#/case/${CASE}/present`],
 };
 
 export async function signIn(page: Page, who: Who): Promise<void> {
   if (who === "visitor") return;
+  if (who === "guest") {
+    expect((await page.request.post("/api/guest", { data: {} })).status()).toBe(201);
+    return;
+  }
   if (who === "admin") {
     const res = await page.request.post("/api/auth/login", { data: { username: ADMIN_USERNAME, password: ADMIN_KEY } });
     expect(res.ok()).toBe(true);

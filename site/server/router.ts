@@ -5,6 +5,7 @@ import { answerFingerprint } from "../shared/answer-fingerprint.ts";
 import { AuthController } from "./controllers/AuthController.ts";
 import { ContentController } from "./controllers/ContentController.ts";
 import { GameController } from "./controllers/GameController.ts";
+import { GuestController } from "./controllers/GuestController.ts";
 import { errorResponse, toErrorResponse } from "./controllers/http.ts";
 import type { Secrets } from "./domain/types.ts";
 import { AuditRepository, EventRepository, FirstBloodRepository, SettingsRepository } from "./repositories/config-repositories.ts";
@@ -24,6 +25,7 @@ import { EventService } from "./services/EventService.ts";
 import { GameService } from "./services/GameService.ts";
 import { GlobalBoardService } from "./services/GlobalBoardService.ts";
 import { ScoreService } from "./services/ScoreService.ts";
+import { GuestService } from "./services/GuestService.ts";
 import { RateLimiter } from "./services/RateLimiter.ts";
 import { ScheduleService } from "./services/ScheduleService.ts";
 import { StatsService } from "./services/StatsService.ts";
@@ -102,6 +104,7 @@ export const createApp = (deps: AppDeps): App => {
 
   const authController = new AuthController({ auth, schedule, stats, events, board });
   const gameController = new GameController({ auth, game });
+  const guestController = new GuestController({ guests: new GuestService({ repos, auth, limiter, now }) });
   const contentController = new ContentController({ cases });
   const adminGuard = new AdminAuthService({ adminKey: deps.adminKey, auth });
   const adminController = new AdminController({ accounts, schedule, stats, events, audit, trash, guard: adminGuard, now });
@@ -117,6 +120,8 @@ export const createApp = (deps: AppDeps): App => {
       "/api/auth/login": { POST: () => authController.login(req, ip) },
       "/api/auth/recover": { POST: () => authController.recover(req, ip) },
       "/api/auth/logout": { POST: () => authController.logout(req) },
+      "/api/auth/upgrade": { POST: () => guestController.upgrade(req, ip) },
+      "/api/guest": { POST: () => guestController.start(req, ip) },
       "/api/me": { GET: () => authController.me(req) },
       "/api/session": { GET: () => authController.session(req) },
       "/api/me/stats": { GET: () => authController.myStats(req) },

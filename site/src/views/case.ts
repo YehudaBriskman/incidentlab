@@ -122,7 +122,7 @@ export function renderCase(root: HTMLElement, c: Case): void {
   stopCaseTimers();
   document.title = `${c.title} · IncidentLab`;
   ensureAnnouncer();
-  withApprovedAccount(root, c.title, () => loadProgress(root, c), { onAdmin: () => renderInstructorPreview(root, c) });
+  withApprovedAccount(root, c.title, () => loadProgress(root, c), { onAdmin: () => renderInstructorPreview(root, c), allowGuest: true });
 }
 
 function loadProgress(root: HTMLElement, c: Case, refreshToday = false): void {

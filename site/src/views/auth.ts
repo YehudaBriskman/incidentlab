@@ -13,6 +13,7 @@ import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { TO } from "../i18n/strings-onboard";
 import { T } from "../i18n/strings-player";
+import { guestChoice } from "./guest";
 
 const PENDING_POLL_MS = 8_000;
 /** How long "Password changed" stays on screen before the gate moves on. */
@@ -100,6 +101,8 @@ export type GateOptions = {
   titled?: boolean;
   /** Heading of the sign-in form when this gate guards a specific page (e.g. "Sign in to see your stats"). */
   signInTitle?: string;
+  /** Offer "Play as guest" beside the form (#176): playable views only. */
+  allowGuest?: boolean;
 };
 
 const pageTitle = (title: string): string => `${title} · IncidentLab`;
@@ -142,7 +145,10 @@ export function withApprovedAccount(
       }
       if (account === null) {
         carriedTempPassword = null;
-        renderAuthForm(root, {
+        // Guest play (#176): the form renders into its own host, so switching sign-in/sign-up keeps the choice.
+        const formRoot = options.allowGuest ? h("div", { class: "gate-form" }) : root;
+        if (formRoot !== root) setChildren(root, formRoot, guestChoice(() => again()));
+        renderAuthForm(formRoot, {
           context,
           mode: draft?.mode ?? (afterRecovery !== null ? "sign-in" : (options.signedOutMode ?? "sign-in")),
           onSignedIn: again,
