@@ -1,4 +1,5 @@
-// "Incident of the day": which case is featured on a given date, and whether only that case may be started.
+// "Incident of the day": which case is featured on a given date (the daily card and streaks). Since #180 it never
+// decides whether a case may be played; `lockToToday` is stored and returned but no longer enforced.
 import type { Schedule, TodayResponse } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
 import type { ScheduleRepository } from "../repositories/repositories.ts";
@@ -68,17 +69,5 @@ export class ScheduleService {
   /** Seconds until the schedule's next day starts: the most a cached "today" may be served for. */
   secondsUntilNextDay(timezone: string): number {
     return secondsUntilNextDay(this.now(), timezone);
-  }
-
-  async canStart(caseId: string): Promise<boolean> {
-    const today = await this.today();
-    return !today.lockToToday || today.caseId === caseId;
-  }
-
-  /** Throws 403 when the schedule only allows today's case and `caseId` isn't it. */
-  async assertCanStart(caseId: string): Promise<void> {
-    if (!(await this.canStart(caseId))) {
-      throw new AppError(403, "this case isn't open today", { code: "not-today" });
-    }
   }
 }

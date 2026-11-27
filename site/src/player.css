@@ -111,7 +111,6 @@
 .briefing[open] { padding-bottom: var(--pad-card); }
 .path-card { padding: var(--pad-card); }
 .notice { padding: var(--space-4) var(--pad-card); }
-.locked-card { box-shadow: var(--surface-lift), inset 0 0 0 1px var(--accent-line); }
 .notice-ok { box-shadow: none; }
 
 /* debrief */

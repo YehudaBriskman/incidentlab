@@ -147,7 +147,7 @@ test("CSV export has a header and one row per opened case", async () => {
   assert.ok(lines[1]?.startsWith("Plain,approved,"));
 });
 
-test("event window blocks answers outside it; freeze shows standings as of freezeAt", async () => {
+test("the global event never refuses play (#180); its freeze still shows standings as of freezeAt", async () => {
   let now = new Date("2026-11-25T09:00:00Z");
   const harness = createHarness({ now: () => now });
   const ada = await approvedPlayer(harness, "Ada");
@@ -167,7 +167,9 @@ test("event window blocks answers outside it; freeze shows standings as of freez
   const pub = await ada.player.json(await ada.player.call("/event"), EventResponseSchema);
   assert.equal(pub.event.name, "Friday CTF");
 
-  await expectStatus(ada.player.call("/cases/alpha/answer", { body: { questionId: "q1", answer: "alpha-a1" } }), 403, "event-closed");
+  // Before the window, with enforceWindow on: a hint and a wrong answer still go through.
+  await expectStatus(ada.player.call("/cases/alpha/hint", { body: { questionId: "q1" } }), 200);
+  await expectStatus(ada.player.call("/cases/alpha/answer", { body: { questionId: "q1", answer: "nope" } }), 200);
   now = new Date("2026-11-25T10:30:00Z");
   await expectStatus(ada.player.call("/cases/alpha/answer", { body: { questionId: "q1", answer: "alpha-a1" } }), 200);
   now = new Date("2026-11-25T10:50:00Z"); // after freeze
@@ -176,7 +178,14 @@ test("event window blocks answers outside it; freeze shows standings as of freez
   assert.equal(board.frozen, true);
   assert.deepEqual(board.entries.map((e) => e.username), ["Ada"]); // Bob solved after the freeze
   now = new Date("2026-11-25T11:00:01Z");
-  await expectStatus(bob.player.call("/cases/alpha/hint", { body: { questionId: "q2" } }), 403, "event-closed");
+  // After the window: hints, command reveals, answers and reveals all still work.
+  await expectStatus(bob.player.call("/cases/alpha/hint", { body: { questionId: "q2" } }), 200);
+  await expectStatus(bob.player.call("/cases/alpha/reveal-command", { body: { toolId: "grep-5xx" } }), 200);
+  await expectStatus(bob.player.call("/cases/alpha/answer", { body: { questionId: "q2", answer: "a2" } }), 200);
+  await expectStatus(bob.player.call("/cases/alpha/reveal", { body: { questionId: "q3" } }), 200);
+  // A start outside the window works too.
+  const carol = await approvedPlayer(harness, "Carol");
+  await expectStatus(carol.player.call("/cases/beta/setup-done", { body: {} }), 200);
   await expectStatus(ada.player.call("/leaderboard?caseId=../x"), 400);
 });
 

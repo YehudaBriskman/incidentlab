@@ -10,7 +10,7 @@ both the browser and the function import it.
 - Request and response bodies are JSON. POST/PUT bodies must send `content-type: application/json` (otherwise 415) and be at most 4 KB (64 KB for the schedule, 512 KB to start an upload; otherwise 413). The upload chunk and part PUTs are the exception: raw `application/octet-stream` bodies.
 - Every response carries `cache-control: no-store`, except the two public DB-content routes below
   (`GET /api/cases`, `GET /api/cases/:caseId/content`), which carry no account data and are cacheable, and the
-  three public polling routes in "CDN-cached public GETs".
+  public polling routes in "CDN-cached public GETs" (including the class board).
 
 ## CDN-cached public GETs (#140)
 
@@ -24,13 +24,15 @@ plan allows 125,000 function calls a month.
 | `/api/event` | `public, durable, max-age=10, stale-while-revalidate=20` | `event` | `PUT /api/admin/event` |
 | `/api/leaderboard` | `public, durable, max-age=10, stale-while-revalidate=20` | `leaderboard` | `PUT /api/admin/event` (freeze), `PUT /api/me/board` (a player opts in or out) |
 | `/api/today` | `max-age` and `stale-while-revalidate` up to 60 s each, capped at the seconds left until midnight in the schedule's time zone | `today` | `PUT /api/admin/schedule` |
+| `/api/classboard/:boardToken` (#181) | `public, durable, max-age=10, stale-while-revalidate=20` | `class:<classId>` | every class edit: `PATCH`, archive, restore, join-code and board-token rotation, an active join, approve, remove, leave. Solves don't purge it. |
 
 - Browsers get `Cache-Control: public, max-age=0, must-revalidate`, so they always ask the CDN.
 - `Netlify-Vary: query`: the cache key is the URL and its query string, never the cookie.
 - Purges go through `services/CachePurger.ts`. In production that is Netlify's `purgeCache`; tests and the local
   server use a no-op. A failed purge is logged, and the old copy lives until its max-age.
-- Changes nobody purges (answers moving the leaderboard, a case being published) show within 10 s for the
-  leaderboard and 60 s for today.
+- Changes nobody purges (answers moving the leaderboard or a class board, a case being published) show within
+  10 s for the boards and 60 s for today. Solves never purge: a purge per correct answer would add an API call per
+  solve on a class night, while the 10 s window already bounds how stale a board can be.
 - **Clock:** a cached `serverTime` can be up to about 30 s old. The client (`src/lib/clock.ts`) takes the server
   clock from responses the origin answered: their `Date` header, or `/api/event`'s `serverTime` when its
   `Cache-Status` is not a hit. A cached `/api/event` counts only when its `Age` header is present.
@@ -38,7 +40,7 @@ plan allows 125,000 function calls a month.
   starts within an hour, every 2 minutes otherwise. It doesn't poll at all while the tab is hidden, and polls
   once when the tab comes back.
 - Errors are non-2xx with body `{ "error": string, "code"?: string, "retryAfterSeconds"?: number, "details"?: string[] }` (`details` lists every failed check of a rejected upload). Status codes: 400 validation, 401 signed out, 403 forbidden (see codes), 404, 405, 409 conflict (username taken, already finished, no more hints, concurrent update: retry), 413, 415, 429 rate limit (also sends `Retry-After`), 500 `{"error":"internal"}`, 503 admin disabled.
-- Error codes the UI acts on: `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `not-today`, `event-closed`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`, and for classes (#179) `guest`, `not-class-admin`, `not-class-owner`, `class-limit`, `class-full`, `class-archived`, `owner-locked`, `pending-member`.
+- Error codes the UI acts on: `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`, and for classes (#179) `guest`, `not-class-admin`, `not-class-owner`, `class-limit`, `class-full`, `class-archived`, `owner-locked`, `pending-member`.
 
 ## Accounts and sessions
 
@@ -105,7 +107,7 @@ it, and no public or CDN-cached response carries stage records. Constants: `SCOR
 | GET | `/api/session` | optional cookie | | `{account}` or `{account: null}`, always 200. The browser uses this to probe sign-in without logging a 401. |
 | GET | `/api/me/stats` | cookie | | `{stats: UserStats}`. `rank` is the place on the live overall public board, null when not on it; `onGlobalBoard` says whether the player opted in (#175). Reads only the player's own progress plus the opted-in players' score summaries. |
 | PUT | `/api/me/board` | approved | `{show: boolean}` | `{account}` with `showOnGlobalBoard`. Opts in to or out of the public global leaderboard (off by default; your username and score become public). 403 `guest` for guests. Purges the `leaderboard` CDN tag. |
-| GET | `/api/today` | none | | `{date, timezone, caseId, lockToToday, releasedCaseIds}` |
+| GET | `/api/today` | none | | `{date, timezone, caseId, lockToToday, releasedCaseIds}` (`lockToToday` is deprecated: returned, never enforced) |
 | GET | `/api/cases/:caseId/progress` | approved | | `{progress}` (first call creates the record, so the admin sees the player at "setup") |
 | POST | `/api/cases/:caseId/setup-done` | approved | `{}` | `{progress}` (q1 becomes active; idempotent) |
 | POST | `/api/cases/:caseId/answer` | approved | `{questionId, answer}` | `{correct, progress}` |
@@ -222,7 +224,7 @@ may reclaim unreferenced ones). CLI: `scripts/data.ts upload` (see `docs/CASE_CO
 | PUT | `/api/admin/accounts/:id/role` | admin | `{role: "player"\|"author"}` | `{account}`; audited as `account.role`. Authors may manage cases they created (the Author routes above). |
 | POST | `/api/admin/accounts/approve-all` | `{}` | `{approved}` |
 | GET/PUT | `/api/admin/settings` | `{inviteCode}` | `{settings}` |
-| GET/PUT | `/api/admin/event` | `LiveEvent` | `{event, serverTime}` (window, freeze, announcement; `enforceWindow` refuses answers, hints and reveals outside it) |
+| GET/PUT | `/api/admin/event` | `LiveEvent` | `{event, serverTime}`: the site announcement and the global event clock; `freezeAt` freezes the global leaderboard. `enforceWindow` is deprecated: stored, never enforced (#180). |
 | GET | `/api/admin/export.csv` | | CSV, one row per account per opened case |
 | GET | `/api/admin/audit?limit=` | | `{entries}` newest first (every admin mutation is recorded) |
 | GET | `/api/admin/trash` | | `{entries}` soft-deleted accounts, cases and progress resets, newest first (expire after 7 days) |
@@ -230,9 +232,9 @@ may reclaim unreferenced ones). CLI: `scripts/data.ts upload` (see `docs/CASE_CO
 
 ### Classes (#179)
 
-Classes are server-side only for now: the class UI is #182, gameplay gating by class is #180 and the class board
-is #181. The site schedule, event and class code (`config:*`) still gate play as before. Every class response is
-personalised (`no-store`). Contract: the "classes" section of `site/shared/contract.ts`. Implementation:
+Classes are server-side only for now (the class UI is #182). **Gameplay never blocks on a class** (#180): a class's
+case list, event window and freeze decide what counts on that class's board, never whether anyone may play. Every
+class response is personalised (`no-store`), except the public class board (below). Contract: the "classes" section of `site/shared/contract.ts`. Implementation:
 `ClassController` → `ClassService` → `ClassRepository`.
 
 - **Who may call:** an approved full account (pending, rejected and forced-password-change accounts get the
@@ -251,7 +253,29 @@ personalised (`no-store`). Contract: the "classes" section of `site/shared/contr
   NAT can all join. Joining again is a no-op (200 with the current membership). In `joinMode: "code"` a joiner is
   `active` at once; in `"approval"` they are `pending` until a class admin approves.
 - **Board token:** `<classId>.<32 base64url chars>`, unguessable, and rotatable by class admins. Only active
-  members and admins get it. The board route that reads it is #181.
+  members and admins get it. It is a capability: whoever has the URL sees the class board, with no cookie.
+- **Class board** (`GET /api/classboard/:boardToken[?caseId=]`, #181): public and CDN-cached (above). The server
+  reads the class id from the token, loads the class and compares the whole token in constant time; a malformed,
+  unknown or rotated token, or an archived class, is a generic `404 {error: "not found"}` (no-store). The body is
+  the `/api/leaderboard` shape (`caseId, frozen, frozenAt, generatedAt, entries`) plus `classId, className, event,
+  caseIds`, so the leaderboard view renders it. It lists the class's **active** members (never pending or removed
+  ones, and never guests) who have a counted solve, whether or not they opted in to the global board: members see
+  each other on their class board by design, and stay off the global board unless they opt in. It reads one
+  listing of `classmember:<classId>:` (at most `memberLimit` records) and each active member's account (username
+  only) and `score:` summary: no progress record, no scan.
+  - **What counts** (`server/domain/class-board.ts`): a solve of case C at time T counts when C is in `caseIds`
+    (or `caseIds` is empty and C is published); when the class event has both `startsAt` and `endsAt`, when
+    `startsAt <= T < endsAt`; and once now has reached `freezeAt`, when `T <= freezeAt` (then `frozen` is true).
+    A completion bonus counts by `completedAt` under the same rules. The class's first solver of each case and
+    question (the earliest counted solve; ties go to the lower account id) gets the first-blood bonus instead of
+    the site-wide first solver, and `firstBloods` counts class first solves.
+  - **Rotating the token** makes the old URL 404 at once at the origin and purges the CDN copy; if the purge
+    fails, the old URL can still be served for at most the cache window: 10 s plus 20 s stale-while-revalidate.
+- **Live progress** (`GET /api/classes/:id/progress?caseId=`, class admins and the site admin, no-store): each
+  active member's progress on that case, the same view as the admin Live tab (`AdminProgress`: stage statuses,
+  points, hints, wrong attempts; never the player's own answers or paid content). It reads only the members'
+  `progress:<caseId>:<member>` records (at most `memberLimit`). Members who haven't opened the case are left out.
+  400 without `caseId`, 404 `unknown-case` for an unknown one.
 - **No class admin may reset a password** or see anything of an account beyond its username and (later) its class
   progress: a reset by a class admin would allow account takeover. Only the site admin resets passwords.
 - **Archiving is the soft delete:** nothing is removed. An archived class takes no joins and no edits (409
@@ -270,6 +294,8 @@ personalised (`no-store`). Contract: the "classes" section of `site/shared/contr
 | POST | `/api/classes/:id/join-code/rotate` | `{}` | class admin | `{class}`; the old code stops working at once |
 | POST | `/api/classes/:id/board-token/rotate` | `{}` | class admin | `{class}`; old board links stop working |
 | GET | `/api/classes/:id/members` | | class admin | `{members: [{accountId, username, role, status, isOwner, joinedAt, decidedAt}]}` |
+| GET | `/api/classes/:id/progress?caseId=` | | class admin | `{generatedAt, caseId, players: AdminProgress[]}` (active members only) |
+| GET | `/api/classboard/:boardToken?caseId=` | | anyone with the token | `ClassBoardResponse` (public, CDN-cached; 404 when unknown, rotated or archived) |
 | POST | `/api/classes/:id/members/:accountId/approve` | `{}` | class admin | `{member}` (idempotent) |
 | POST | `/api/classes/:id/members/:accountId/remove` | `{}` | see the matrix | 204 (a removed account can join again with the code: rotate it to stop that) |
 | POST | `/api/classes/:id/members/:accountId/role` | `{role: "member"\|"admin"}` | owner | `{member}`; active members only (409 `pending-member`) |
@@ -296,9 +322,14 @@ for viewing and leaving.
 ## Schedule ("incident of the day")
 
 `Schedule = { timezone, defaultCaseId, days: {"YYYY-MM-DD": caseId}, lockToToday }`. "Today" is the
-date in `timezone` (default `Asia/Jerusalem`). Today's case is `days[today] ?? defaultCaseId`. With
-`lockToToday`, only today's case can be **started**; a case the player already opened stays playable,
-so nobody is cut off at midnight.
+date in `timezone` (default `Asia/Jerusalem`). Today's case is `days[today] ?? defaultCaseId`: the daily card on
+the home page and the streaks count it.
+
+**Players can always play every published case** (#180). `lockToToday` (schedule) and `enforceWindow` (event)
+are deprecated: they stay in the stored records and the responses, but nothing enforces them, and the admin
+panel no longer shows their checkboxes. The 403 codes `not-today` and `event-closed` are gone. The global event
+(`config:event`) is the site announcement and the global event clock; its `freezeAt` still freezes the global
+leaderboard. Classes count their own windows on their own boards (see Classes).
 
 ## Rules
 

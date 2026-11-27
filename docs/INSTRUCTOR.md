@@ -30,8 +30,8 @@ Session shape: **10 min orientation, 40 min solve (pairs), then debrief and lect
 - [ ] Want to rehearse without touching production? Run a local preview:
       `node --experimental-strip-types tests/local-server.ts` (it loads every case package from `build/packages/`), then (another terminal)
       `node tests/seed-demo.mjs http://localhost:8888` for demo players, a schedule, an event and a class code.
-- [ ] In `#/admin` → **Schedule**, set the session date to the case you're running (or turn on
-      **Lock to today's case** so nobody wanders into another case).
+- [ ] In `#/admin` → **Schedule**, set the session date to the case you're running, so the home page features it.
+      Players can always open any case: there is no lock (#180).
 - [ ] Solve it yourself end to end once with only the toolbox. Time yourself.
 
 **Players' machines** (send this out ahead of time)
@@ -74,16 +74,17 @@ Session shape: **10 min orientation, 40 min solve (pairs), then debrief and lect
 ## Incident of the day
 
 `#/admin` → **Schedule** is a calendar: pick a case per date, plus a default for unscheduled days. The home page
-shows that case as **Incident of the day** (dates are in the schedule's time zone, default Asia/Jerusalem).
-**Lock to today's case** lets players *start* only today's case; anything they already started stays playable,
-so nobody is cut off at midnight.
+shows that case as **Incident of the day** (dates are in the schedule's time zone, default Asia/Jerusalem), and
+streaks count it. It never stops anyone from playing another case: the old "Lock to today's case" switch is gone
+(#180).
 
 ## Live event
 
 The **Event** tab runs a timed session: name, start, end, an optional **leaderboard freeze** (the public board
 stops updating so the final minutes stay suspenseful), and an **announcement** banner every player sees
-("Stage 3 hint is half price", "10 minutes left"). With **Enforce the window**, answers, hints and command
-reveals are refused before the start and after the end. Quick actions: Start now (60 min), Freeze now,
+("Stage 3 hint is half price", "10 minutes left"). The window never refuses answers, hints or reveals (the old
+"Enforce the window" switch is gone, #180); a class's own event window decides what counts on that class's board.
+Quick actions: Start now (60 min), Freeze now,
 End now (End and Freeze ask you to confirm). Put `#/leaderboard?projector=1` on the projector: it honours the
 freeze, so the board stops updating on the projector too.
 

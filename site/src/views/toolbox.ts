@@ -4,7 +4,7 @@
 // bundled content: production builds strip `command` / `powershell` / `lab` from the case JSON.
 // A card has up to three shells: Bash (always), PowerShell and Lab (the lab image, lab/README.md, #149), each
 // shown only when the item has that variant.
-import { QUESTION_ORDER, SCORING, type ProgressView, type StageProgress, type TodayResponse } from "../../shared/contract";
+import { QUESTION_ORDER, SCORING, type ProgressView, type StageProgress } from "../../shared/contract";
 import type { Case } from "../../shared/case";
 import { getProgress, revealCommand } from "../lib/api";
 import { recordVisit } from "../lib/recent";
@@ -13,8 +13,8 @@ import { confirm, tooltip } from "../lib/overlay";
 import "../player.css";
 import { playErrorText } from "../lib/errors";
 import { md } from "../lib/markdown";
-import { isAdmin, loadAccount, loadToday } from "../lib/session";
-import { caseSummary, caseVersion } from "../content/load";
+import { isAdmin, loadAccount } from "../lib/session";
+import { caseVersion } from "../content/load";
 import { labRunCommand, labTemplate } from "../lib/labs";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
@@ -38,8 +38,6 @@ export type CommandContext = {
   readonly caseId: string;
   readonly progress: ProgressView | null;
   readonly onProgress: (next: ProgressView) => void;
-  /** The case can't be started today: no reveal actions (they would fail), the page explains why. */
-  readonly locked?: boolean;
 };
 
 function readShell(): Shell {
@@ -72,18 +70,6 @@ export function activeStageNumber(progress: ProgressView | null): number | null 
 /** True while a stage still qualifies for the clean bonus: no hint, command or wrong answer yet. */
 export function isCleanSoFar(s: StageProgress): boolean {
   return s.hintsRevealed === 0 && s.commandsRevealed === 0 && s.wrongAttempts === 0;
-}
-
-/** Today's case when `c` can't be started today (lock-to-today, not today's case, never started), else null. */
-export type LockedToday = { todayCaseId: string | null };
-
-/**
- * The server returns a view-only progress (`startedAt: null`, nothing stored) for a case that can't be
- * started today; `/api/today` says why. Both must agree, so a stale schedule never locks a playable case.
- */
-export function lockedToday(progress: ProgressView, today: TodayResponse | null, caseId: string): LockedToday | null {
-  if (progress.startedAt !== null || today === null || !today.lockToToday || today.caseId === caseId) return null;
-  return { todayCaseId: today.caseId };
 }
 
 const PLACEHOLDER = /(<[\p{L}\p{N}_][\p{L}\p{N}_ .,:/|=+-]*>)/u;
@@ -177,7 +163,7 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
   const errorEl = h("p", { class: "form-error", role: "alert" });
   let action: Child = null;
   // Signed out / not started: the page notice says it once; cards don't repeat it.
-  if (!full && toolId !== undefined && ctx.locked !== true && progress !== null && progress.setupDoneAt !== null) {
+  if (!full && toolId !== undefined && progress !== null && progress.setupDoneAt !== null) {
     const stageNo = activeStageNumber(progress);
     const active = stageNo !== null ? progress.stages[QUESTION_ORDER[stageNo - 1] ?? "q1"] : undefined;
     if (stageNo !== null && active !== undefined) {
@@ -230,7 +216,7 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
 type PageState =
   | { kind: "signed-out" }
   | { kind: "admin" }
-  | { kind: "player"; progress: ProgressView; locked: LockedToday | null }
+  | { kind: "player"; progress: ProgressView }
   | { kind: "error"; message: string };
 
 /** The toolbox page's panel content (contents, shell switch, filter), set by toolboxView. */
@@ -260,11 +246,9 @@ export function renderToolbox(root: HTMLElement, c: Case): void {
       else if (isAdmin(account)) drawToolbox(root, c, { kind: "admin" });
       else
         withApprovedAccount(root, c.title, () => {
-          const today = loadToday().catch(() => null);
           getProgress(c.id)
-            .then(async (progress) => {
-              const locked = lockedToday(progress, await today, c.id);
-              if (stillHere()) drawToolbox(root, c, { kind: "player", progress, locked });
+            .then((progress) => {
+              if (stillHere()) drawToolbox(root, c, { kind: "player", progress });
             })
             .catch((err: unknown) => {
               if (stillHere()) drawToolbox(root, c, { kind: "error", message: playErrorText(err) });
@@ -302,16 +286,6 @@ function toolboxNote(c: Case, root: HTMLElement, state: PageState): HTMLElement 
     );
   }
   const p = state.progress;
-  if (state.locked !== null) {
-    const todayCase = state.locked.todayCaseId !== null ? caseSummary(state.locked.todayCaseId) : undefined;
-    return h(
-      "div",
-      { class: "notice", role: "status" },
-      h("p", { class: "notice-title" }, TA().lockedTitle(c.title)),
-      h("p", { class: "muted" }, TA().lockedToolbox),
-      todayCase ? h("a", { class: "btn btn-primary btn-sm", href: `#/case/${todayCase.id}` }, TA().lockedGoToday) : null,
-    );
-  }
   if (p.completedAt !== null) return h("p", { class: "notice notice-ok" }, TG().toolboxCompleted);
   if (p.setupDoneAt === null) return h("p", { class: "notice muted" }, TG().toolboxNotStarted);
   const stageNo = activeStageNumber(p);
@@ -328,10 +302,9 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
   const ctx: CommandContext = {
     caseId: c.id,
     progress: state.kind === "player" ? state.progress : null,
-    locked: state.kind === "player" && state.locked !== null,
     onProgress: (next) => {
       const y = contentScrollTop();
-      drawToolbox(root, c, { kind: "player", progress: next, locked: null });
+      drawToolbox(root, c, { kind: "player", progress: next });
       scrollContentTo(y);
     },
   };

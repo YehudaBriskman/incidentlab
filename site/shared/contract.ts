@@ -226,7 +226,7 @@ export const ScheduleSchema = z.object({
   defaultCaseId: CaseIdSchema.nullable(),
   /** YYYY-MM-DD -> case id */
   days: z.record(IsoDateSchema, CaseIdSchema),
-  /** true: only today's case can be started (cases already started stay playable) */
+  /** Deprecated (#180): stored and returned, but no longer enforced. Every published case can always be played. */
   lockToToday: z.boolean(),
 });
 export type Schedule = z.infer<typeof ScheduleSchema>;
@@ -241,7 +241,7 @@ export const EventSchema = z.object({
   endsAt: z.string().datetime().nullable(),
   /** after this moment the public leaderboard shows the standings as of freezeAt */
   freezeAt: z.string().datetime().nullable(),
-  /** true: answers, hints and command reveals are refused outside [startsAt, endsAt] */
+  /** Deprecated (#180): stored, but no longer enforced. Gameplay never blocks on an event window. */
   enforceWindow: z.boolean(),
   announcement: AnnouncementSchema.nullable(),
 });
@@ -394,6 +394,7 @@ export const TodayResponseSchema = z.object({
   date: IsoDateSchema,
   timezone: z.string(),
   caseId: z.string().nullable(),
+  /** deprecated (#180): the stored flag, no longer enforced */
   lockToToday: z.boolean(),
   /** case ids with a server-side answer key (playable) */
   releasedCaseIds: z.array(z.string()),
@@ -402,7 +403,7 @@ export type TodayResponse = z.infer<typeof TodayResponseSchema>;
 
 // Every /api/cases/:caseId/* route needs an APPROVED player account (403 code "pending" / "rejected" /
 // "admin" / "password-change-required" otherwise). Every route accepts ?lang=en|he for `unlocked` content.
-// During an event with enforceWindow, mutations outside the window get 403 code "event-closed".
+// Every published case can always be played (#180): no schedule or event window refuses a start or an action.
 // GET  /api/cases/:caseId/progress           -> {progress}
 // POST /api/cases/:caseId/setup-done  {}     -> {progress}  (q1 becomes active)
 // POST /api/cases/:caseId/answer             -> {correct, progress}
@@ -473,6 +474,10 @@ export const AuditResponseSchema = z.object({ entries: z.array(AuditEntrySchema)
 // GET  /api/classes/:id/members                     -> {members: ClassMember[]}  (class admins)
 // POST /api/classes/:id/members/:accountId/approve {} | /role {role} -> {member}; .../remove {} -> 204  (docs/API.md)
 // POST /api/classes/:id/leave {}                    -> 204  (the owner can't leave: archive instead)
+// GET  /api/classes/:id/progress?caseId=<id>       -> {generatedAt, caseId, players: AdminProgress[]}  (class admins,
+//                                                     #181: the active members' progress on that case, like the Live tab)
+// GET  /api/classboard/:boardToken?caseId=<id>      -> ClassBoardResponse  (#181: public, no cookie, CDN-cached; the
+//                                                     token is the capability. Unknown, rotated or archived: 404)
 // GET  /api/admin/classes                           -> {classes: AdminClass[]}
 // PUT  /api/admin/classes/:id/limits {memberLimit}  -> {class}
 // PUT  /api/admin/accounts/:id/class-limit {classLimit} -> {accountId, classLimit}
@@ -581,6 +586,19 @@ export const ClassMembersResponseSchema = z.object({ members: z.array(ClassMembe
 export const ClassMemberResponseSchema = z.object({ member: ClassMemberSchema });
 export const AdminClassesResponseSchema = z.object({ classes: z.array(AdminClassSchema) });
 export const AccountClassLimitResponseSchema = z.object({ accountId: z.string(), classLimit: z.number().int().min(0).nullable() });
+
+/**
+ * The class board (#181): the leaderboard's shape, so the client reuses the leaderboard view, plus the class's
+ * name, event and assigned cases. Only the class's active members are listed, and only what counts by the
+ * class's window rules (server/domain/class-board.ts). `frozen`/`frozenAt` are the class event's freeze.
+ */
+export const ClassBoardResponseSchema = LeaderboardResponseSchema.extend({
+  classId: z.string(),
+  className: z.string(),
+  event: ClassEventSchema,
+  caseIds: z.array(z.string()),
+});
+export type ClassBoardResponse = z.infer<typeof ClassBoardResponseSchema>;
 
 // Scoring: solved points = max(0, question.points - sum(cost of the first `hintsRevealed` hints)).
 // Rate limit: max 5 wrong answers per account per question per 60s -> 429 with retryAfterSeconds.

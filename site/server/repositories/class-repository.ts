@@ -74,9 +74,11 @@ export class ClassRepository {
   async countMembers(classId: string): Promise<number> {
     return (await this.kv.listKeys(memberPrefix(classId))).length;
   }
-  async listMembers(classId: string): Promise<Array<{ accountId: string; member: ClassMemberRecord }>> {
+  /** Every member and pending request; with `limit`, at most that many records are read (the board and live progress). */
+  async listMembers(classId: string, limit?: number): Promise<Array<{ accountId: string; member: ClassMemberRecord }>> {
     const prefix = memberPrefix(classId);
-    const keys = await this.kv.listKeys(prefix);
+    const all = await this.kv.listKeys(prefix);
+    const keys = limit === undefined ? all : all.slice(0, limit);
     const rows = await mapWithConcurrency(keys, async (key) => {
       const member = parseVersioned(await this.kv.get(key), ClassMemberRecordSchema)?.data ?? null;
       return member ? { accountId: key.slice(prefix.length), member } : null;

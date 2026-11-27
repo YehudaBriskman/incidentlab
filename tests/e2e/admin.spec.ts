@@ -327,7 +327,11 @@ test("sections: a deep link opens its section (and the Live case) on a fresh loa
 test("sections: leaving unsaved Schedule edits through the sidebar asks first", async ({ page }) => {
   await signInAdmin(page);
   await page.goto("/#/admin?tab=schedule");
-  await page.locator("#sched-lock").click();
+  // Any edit makes the form dirty: pick a default case other than the current one (#180 removed the lock checkbox).
+  const defaultCase = page.locator("#sched-default");
+  const current = await defaultCase.inputValue();
+  const other = await defaultCase.locator("option").evaluateAll((opts, cur) => opts.map((o) => (o as HTMLOptionElement).value).find((v) => v !== cur) ?? "", current);
+  await defaultCase.selectOption(other);
   await expect(page.locator("#sched-save")).toBeEnabled();
 
   await side.link(page, /^Live$/).click();

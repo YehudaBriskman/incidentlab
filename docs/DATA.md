@@ -62,6 +62,22 @@ credit-based pricing**: it charges credits per production deploy and per GB, and
   - **Keep it that way:**
     - any new polled endpoint must be public and use `publicJson`, or stay off a timer;
     - personalised routes stay `no-store`.
+- **A class event night (#181)**: 60 players for 2 hours, a projector and every player polling the class board
+  (`/api/classboard/<token>`) every 10 s.
+  - Uncached, the board alone would cost 61 clients × 6 polls a minute × 120 minutes = **43,920 calls**: a third
+    of the month in one night.
+  - CDN-cached (`publicJson`, 10 s plus 20 s stale-while-revalidate, durable), it costs at most one call per
+    10 s window per distinct URL: 7,200 s / 10 s = **720 calls** for the overall board, and 720 more for each
+    `?caseId=` variant in use. Budget **1,440** for two URLs.
+  - The rest of the night: `/api/event` polling (CDN-cached) about **720**; gameplay (`no-store`: sign-in, the
+    case page, setup, about 12 answers, a few hints and command reveals, reloads) about 30 calls a player, so
+    **1,800**; a class admin's live-progress view (`no-store`, the later UI) polled every 15 s, **480**.
+  - **Total about 4,500 calls a night**, so the 125,000 allowance covers roughly **25 class nights a month** with
+    room for daily play. Solves never purge the board (a purge per answer would add a call per solve); class edits
+    do, and they are rare.
+  - Storage reads per uncached board call: one `classmember:` listing plus up to 60 member, 60 account and 60
+    `score:` reads (181). Blobs operations are not one of the allowances above; they cost function runtime
+    (milliseconds each), not calls.
 - **Check monthly:** `node --experimental-strip-types scripts/data.ts usage`. It prints bandwidth with a 70%
   warning. The API doesn't report function counts on this plan, so check those in the Netlify UI (Team → Usage).
 - **Triggers to move public evidence to GitHub (#145):** Netlify bandwidth over about 50 GB a month, or total
@@ -165,6 +181,12 @@ prefixes are new (additive) and every field has a default, so a record from the 
 | `classmember:<classId>:<accountId>` | `{role (member\|admin), status (pending\|active), isOwner, joinedAt, decidedAt}` | **Authoritative.** Permission checks read it; the member cap counts its keys (one listing, at most `memberLimit` keys). Removing a member deletes it. |
 | `memberof:<accountId>:<classId>` | `{role, status, isOwner}` | The reverse index: "my classes" and the owned-class count list this prefix, with no scan. |
 
+**Class boards and scoring windows (#180, #181)** add no keys. The class board reads the class, lists
+`classmember:<classId>:` (at most `memberLimit` records) and reads each active member's `account:` (username only)
+and `score:` summary; the class's first solver per case and question is re-derived from the solve times in those
+summaries. Class live progress reads only the active members' `progress:<caseId>:<member>` records. A class's
+`schedule`, `event` and `caseIds` decide what counts on its board, never whether anyone may play.
+
 **Keeping the two membership indexes consistent.** There are no transactions, so the order is fixed and every
 gap repairs itself:
 - writes (join, approve, role change, restore) go forward first, then reverse; deletes (remove, leave, account
@@ -196,8 +218,10 @@ owned by `admin`):
 - every approved user account becomes an active member, and `memberLimit` is 60 or that count, whichever is
   more.
 
-`config:*` stay as they are and still gate play until #180. The fixed id makes it idempotent: a second run
-changes nothing, and a run that stopped halfway is finished by the next one.
+`config:*` stay as they are. Since #180 they no longer gate play: `config:schedule` is the global case of the day
+(the daily card and streaks), `config:event` the site announcement, global event clock and global-board freeze;
+`lockToToday` and `enforceWindow` are kept in the records (additive) but unused. The fixed id makes the migration
+idempotent: a second run changes nothing, and a run that stopped halfway is finished by the next one.
 
 ## Weekly hygiene (#177)
 

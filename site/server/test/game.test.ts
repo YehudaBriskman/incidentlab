@@ -81,7 +81,7 @@ test("parallel correct answers score once", async () => {
   assert.equal(after.progress.stages.q2.status, "active");
 });
 
-test("schedule: today's case, lock-to-today, validation", async () => {
+test("schedule: today's case and validation; lockToToday is stored but never refuses play (#180)", async () => {
   let now = new Date("2026-11-25T21:30:00Z"); // 23:30 in Jerusalem
   const harness = createHarness({ now: () => now });
   const { player } = await approvedPlayer(harness, "Early");
@@ -100,16 +100,18 @@ test("schedule: today's case, lock-to-today, validation", async () => {
   assert.equal(today.caseId, "beta");
   assert.deepEqual(today.releasedCaseIds, ["alpha", "beta"]);
 
-  // alpha is locked today: viewing works but stores nothing, starting is refused
+  assert.equal(today.lockToToday, true, "the stored flag is still returned (deprecated)");
+
+  // alpha isn't today's case, and the flag is on: it opens, starts and scores anyway
   const view = await player.json(await player.call("/cases/alpha/progress"), ProgressResponseSchema);
-  assert.equal(view.progress.startedAt, null);
-  await expectStatus(player.call("/cases/alpha/setup-done", { body: {} }), 403, "not-today");
+  assert.equal(view.progress.startedAt, now.toISOString(), "opening any case stores its progress");
+  await expectStatus(player.call("/cases/alpha/setup-done", { body: {} }), 200);
+  await expectStatus(player.call("/cases/alpha/answer", { body: { questionId: "q1", answer: "alpha-a1" } }), 200);
 
   now = new Date("2026-11-25T22:30:00Z"); // 00:30 on the 26th in Jerusalem
   const tomorrow = await player.json(await player.call("/today"), TodayResponseSchema);
   assert.equal(tomorrow.caseId, "alpha");
   await expectStatus(player.call("/cases/alpha/setup-done", { body: {} }), 200);
-  // beta was already started, so it stays playable
   await expectStatus(player.call("/cases/beta/answer", { body: { questionId: "q1", answer: "beta-a1" } }), 200);
 });
 
