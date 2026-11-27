@@ -12,6 +12,7 @@ import { announce, copyButton, ensureAnnouncer, h, html, setChildren, type Child
 import { confirm, tooltip } from "../lib/overlay";
 import "../player.css";
 import { playErrorText } from "../lib/errors";
+import { handleAuthLoss, onAuthLoss } from "../lib/auth-loss";
 import { md } from "../lib/markdown";
 import { isAdmin, loadAccount } from "../lib/session";
 import { caseVersion } from "../content/load";
@@ -192,6 +193,7 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
             });
           })
           .catch((err: unknown) => {
+            if (handleAuthLoss(err)) return;
             errorEl.textContent = playErrorText(err);
           });
       });
@@ -236,6 +238,7 @@ export function toolboxView(c: Case): ViewResult {
 
 export function renderToolbox(root: HTMLElement, c: Case): void {
   document.title = T().allCommandsTitle(c.title);
+  onAuthLoss(() => renderToolbox(root, c)); // a 401 on a command reveal re-runs the gate
   const hash = window.location.hash;
   const stillHere = (): boolean => window.location.hash === hash;
   setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted" }, T().loading)));
