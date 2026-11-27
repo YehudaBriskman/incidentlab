@@ -5,45 +5,19 @@
 import { ACHIEVEMENT_IDS, type ClassDetail, type ClassSummary, type TodayResponse, type UserStats } from "../../shared/contract";
 import { caseSummary } from "../content/load";
 import { classToday, fetchClass, fetchMyClasses } from "../lib/class-api";
-import { classEventPhase, homeClasses, isClassBoardFrozen, needsDetail, nextAchievement } from "../lib/challenges";
+import { homeClasses, needsDetail, nextAchievement } from "../lib/challenges";
+import { eventStatus, everySecond } from "../components/classEventStatus";
 import { h, type Child } from "../lib/dom";
-import { formatCountdown, serverNow } from "../lib/event";
+import { serverNow } from "../lib/event";
 import { getLang } from "../i18n/i18n";
 import { TC } from "../i18n/strings-challenges";
-import { TG, achievementInfo } from "../i18n/strings-game";
+import { achievementInfo } from "../i18n/strings-game";
 import { TGu } from "../i18n/strings-guest";
 import { TH } from "../i18n/strings-home";
 import { TO } from "../i18n/strings-onboard";
 
-/* ================= one shared 1 s tick ================= */
-
-const ticks = new Set<() => void>();
-let tickTimer = 0;
-
-/**
- * Runs `draw` now and then every second while `el` is in the document (one interval for the whole page, shared
- * with the Today card's event line). `onStop` runs once `el` has left the page.
- */
-export function everySecond(el: HTMLElement, draw: () => void, onStop?: () => void): void {
-  const fn = (): void => {
-    if (!el.isConnected) {
-      ticks.delete(fn);
-      onStop?.();
-      return;
-    }
-    draw();
-  };
-  ticks.add(fn);
-  draw();
-  if (tickTimer !== 0) return;
-  tickTimer = window.setInterval(() => {
-    for (const f of [...ticks]) f();
-    if (ticks.size === 0) {
-      window.clearInterval(tickTimer);
-      tickTimer = 0;
-    }
-  }, 1000);
-}
+// The shared 1 s tick and the class event status live in components/classEventStatus.ts (the case page uses them too).
+export { everySecond };
 
 /* ================= loading the classes ================= */
 
@@ -85,39 +59,6 @@ function skeleton(n: number): HTMLElement {
 const caseTitle = (id: string): string => caseSummary(id)?.title ?? id;
 
 /* ================= Your classes ================= */
-
-/** "● Spring finals · ends in 12:03 [Board frozen]", redrawn every second from the class's own event window. */
-function eventStatus(event: ClassDetail["event"]): HTMLElement {
-  const dot = h("span", { class: "dot", "aria-hidden": "true" });
-  const name = h("bdi", { class: "home-class-event-name" });
-  const when = h("span", { class: "home-class-when" });
-  const frozen = h("span", { class: "chip pill-info home-class-frozen" }, TC().frozen);
-  const el = h("span", { class: "home-class-event" }, dot, name, when, frozen);
-  everySecond(el, () => {
-    const now = serverNow();
-    const phase = classEventPhase(event, now);
-    const named = (event?.name ?? "").length > 0 ? (event?.name ?? "") : null;
-    el.className = `home-class-event is-${phase.kind}`;
-    dot.hidden = phase.kind !== "live";
-    frozen.hidden = !(phase.kind === "live" || phase.kind === "over") || !isClassBoardFrozen(event, now);
-    if (phase.kind === "none") {
-      name.textContent = named ?? TC().noEvent;
-      when.textContent = "";
-    } else if (phase.kind === "before") {
-      name.textContent = named ?? TC().eventUpcoming;
-      when.textContent = TG().eventStartsIn(formatCountdown(phase.msLeft));
-    } else if (phase.kind === "live") {
-      name.textContent = named ?? TC().eventLive;
-      when.textContent = phase.msLeft === null ? TG().eventLive : TG().eventEndsIn(formatCountdown(phase.msLeft));
-    } else {
-      name.textContent = named ?? TC().eventEnded;
-      when.textContent = named === null ? "" : TG().eventOver;
-    }
-    // a frozen board says so instead of the countdown (the class page keeps the clock): the row stays one line
-    when.hidden = when.textContent === "" || !frozen.hidden;
-  });
-  return el;
-}
 
 function classRow(item: ClassItem): HTMLElement {
   const { summary, detail } = item;

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { boardEntryFor, classEventPhase, classRoleKind, dateInZone, homeClasses, isClassBoardFrozen, nextAchievement } from "./challenges.ts";
+import { boardEntryFor, classEventPhase, classRoleKind, dateInZone, homeClasses, isClassBoardFrozen, nextAchievement, pickClassEvent } from "./challenges.ts";
 
 const NOW = Date.parse("2026-11-27T20:00:00Z");
 const IDS = ["first-blood", "clean-case", "speedrun", "no-hints-5", "all-cases", "streak-3", "streak-7"];
@@ -55,4 +55,21 @@ test("next achievement: the closest measurable one, else the first locked, else 
   const allButFirst = IDS.filter((id) => !["first-blood"].includes(id)).map((id) => ({ id, earnedAt: "x" }));
   assert.deepEqual(nextAchievement({ ...base, achievements: allButFirst }, IDS), { id: "first-blood", have: null, need: null });
   assert.equal(nextAchievement({ ...base, achievements: IDS.map((id) => ({ id, earnedAt: "x" })) }, IDS), null);
+});
+
+test("the class event on a case page: live first (ending soonest), then one starting soon, only for assigned cases", () => {
+  const ev = (startsAt: string | null, endsAt: string | null) => ({ startsAt, endsAt });
+  const cls = (id: string, event: ReturnType<typeof ev> | undefined, caseIds?: string[]) => ({ id, name: `Class ${id}`, event, caseIds });
+  const live1h = ev("2026-11-27T19:00:00Z", "2026-11-27T21:00:00Z");
+  const live30m = ev("2026-11-27T19:00:00Z", "2026-11-27T20:30:00Z");
+  const soon = ev("2026-11-27T22:00:00Z", null);
+  const far = ev("2026-11-29T20:00:00Z", null);
+  const over = ev(null, "2026-11-27T19:00:00Z");
+  assert.equal(pickClassEvent([], "case-a", NOW), null);
+  assert.equal(pickClassEvent([cls("x", undefined), cls("y", over), cls("z", far)], "case-a", NOW), null);
+  assert.equal(pickClassEvent([cls("a", live1h), cls("b", live30m), cls("c", soon)], "case-a", NOW)?.classId, "b");
+  assert.equal(pickClassEvent([cls("c", soon), cls("z", far)], "case-a", NOW)?.className, "Class c");
+  // a class that assigned other cases doesn't count here; no assigned cases means any public case
+  assert.equal(pickClassEvent([cls("a", live30m, ["case-b"]), cls("b", live1h, [])], "case-a", NOW)?.classId, "b");
+  assert.equal(pickClassEvent([cls("a", live30m, ["case-a"])], "case-a", NOW)?.classId, "a");
 });

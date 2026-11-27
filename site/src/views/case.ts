@@ -13,7 +13,8 @@ import { withApprovedAccount } from "./auth";
 import { renderInstructorPreview } from "./present";
 import { announce, copyButton, ensureAnnouncer, h, html, setChildren, type Child } from "../lib/dom";
 import { ICONS, type IconName } from "../shell/icons";
-import { confirm } from "../lib/overlay";
+import { confirm, popover } from "../lib/overlay";
+import { caseClassEvent, eventStatus } from "../components/classEventStatus";
 import { HEBREW, bidiProse, contentText } from "../lib/bidi";
 import { answerForm, clearAnswerDrafts } from "./answerForm";
 import { isNarrow, workbench, writePane } from "./caseWorkbench";
@@ -27,7 +28,6 @@ import { formatNumber, isRelabel } from "../i18n/i18n";
 import { commandCard, commandShellSwitch, isCleanSoFar, type CommandContext } from "./toolbox";
 import { T } from "../i18n/strings-player";
 import { TP } from "../i18n/strings-play";
-import { TS } from "../i18n/strings-shell";
 import type { ViewResult } from "../shell/types";
 import { scrollContentTo } from "../shell/scroll";
 import { createCaseNav, type CaseNav } from "./caseNav";
@@ -262,22 +262,38 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
     });
   };
 
-  const elStats = h("span", { class: "progress-stats" });
+  // The one-line case status (#216): stage, score and par, the case clock, the class event and "Costs so far".
+  const elScore = h("span", { class: "cs-item cs-score" });
+  const elTime = h("span", { class: "cs-item cs-time" });
   const elFill = h("span", { class: "progress-fill" });
   const tick = (): void => {
     const solved = QUESTION_ORDER.filter((id) => isDone(stageProgress(player, id))).length;
-    const score = formatNumber(player.score);
-    const par = formatNumber(player.maxScore);
+    setChildren(
+      elScore,
+      h("bdi", { class: "tnum" }, TW().statusScore(formatNumber(player.score), formatNumber(player.maxScore))),
+    );
     // The clock starts at "I'm ready" (setupDoneAt), not while the player reads the briefing.
     if (player.setupDoneAt === null) {
-      elStats.textContent = TP().progressLineSetup(QUESTION_ORDER.length, score, par);
+      elTime.textContent = TW().statusClock;
     } else {
       const start = Date.parse(player.setupDoneAt);
       const end = player.completedAt !== null ? Date.parse(player.completedAt) : Date.now();
-      elStats.textContent = TP().progressLine(solved, QUESTION_ORDER.length, score, par, formatElapsed(end - start));
+      const clock = formatElapsed(end - start);
+      if (elTime.dataset.clock !== clock) {
+        elTime.dataset.clock = clock;
+        setChildren(elTime, h("span", { "aria-hidden": "true" }, "⏱ "), h("span", { class: "visually-hidden" }, `${TW().statusTimeSr} `), h("bdi", { class: "tnum", dir: "ltr" }, clock));
+      }
     }
     elFill.style.width = `${(solved / QUESTION_ORDER.length) * 100}%`;
   };
+
+  // The class event on this case (live, or starting soon): looked up once per page load, then ticking on its own.
+  const eventSlot = h("span", { class: "cs-item cs-event", hidden: true });
+  void caseClassEvent(c.id).then((picked) => {
+    if (picked === null || !root.isConnected) return;
+    setChildren(eventSlot, h("span", { class: "visually-hidden" }, `${TW().classEventSr}: `), h("bdi", { class: "cs-class" }, picked.className), eventStatus(picked.event));
+    eventSlot.hidden = false;
+  });
 
   const stepName = (key: StageKey): string => (key === "setup" ? T().setup : key === "debrief" ? T().debrief : stageLabel(c, key));
 
@@ -327,12 +343,6 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
     );
   };
 
-  /** Phones hide the step labels: this line keeps the viewed stage's name next to the dots. */
-  const stepNow = (): HTMLElement | null => {
-    if (viewing === "setup" || viewing === "debrief") return h("p", { class: "step-now", "aria-hidden": "true" }, stepName(viewing));
-    return h("p", { class: "step-now", "aria-hidden": "true" }, TP().stepNow(QUESTION_ORDER.indexOf(viewing) + 1, QUESTION_ORDER.length, stepName(viewing)));
-  };
-
   /** The stages under the case in the global nav (false before the frame has the case's nav on screen). */
   const navStages = (): boolean => {
     const nav = caseNav;
@@ -341,6 +351,47 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
     return true;
   };
 
+  /** "Stage 2 of 6: What changed?" for the stage on screen (the number shortens to "2/6" on phones). */
+  const stageItem = (): HTMLElement => {
+    if (viewing === "setup" || viewing === "debrief")
+      return h("span", { class: "cs-item cs-stage" }, h("span", { class: "cs-n" }, viewing === "setup" ? TW().statusSetup : TW().statusDebrief));
+    const n = QUESTION_ORDER.indexOf(viewing) + 1;
+    const total = QUESTION_ORDER.length;
+    return h(
+      "span",
+      { class: "cs-item cs-stage" },
+      h("span", { class: "cs-n cs-n-long" }, `${TW().statusStage(n, total)}:`),
+      h("span", { class: "cs-n cs-n-short", "aria-hidden": "true", dir: "ltr" }, TW().statusStageShort(n, total)),
+      " ",
+      contentText("bdi", { class: "cs-name" }, stepName(viewing)),
+    );
+  };
+
+  /** One sticky line: the case title (the page's only h1), the stage, score and par, time, the class event, costs. */
+  const statusLine = (): HTMLElement => {
+    const costsBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm cs-costs" }, TW().costs);
+    const costsPanel = costsPopover(c, player);
+    popover(costsBtn, costsPanel, { align: "end", onOpen: () => costsPanel.focus() });
+    return h(
+      "header",
+      { class: "case-head case-status", "aria-label": TW().statusLabel },
+      h("div", { class: "cs-line" }, contentText("h1", { class: "cs-title" }, c.title), stageItem(), elScore, elTime, eventSlot, costsBtn, costsPanel),
+      h("span", { class: "cs-progress", "aria-hidden": "true" }, elFill),
+    );
+  };
+
+  /** "Playing as … · not you? switch", under the stage (moved out of the header in #216). */
+  const playerTag = (): HTMLElement =>
+    h(
+      "p",
+      { class: "player-tag" },
+      T().playingAs,
+      // textContent only; a guest's generated name (guest-<id>) means nothing to them, so "Guest" (#206)
+      h("strong", { dir: "auto" }, isGuest(cachedAccount()) ? TGu().guestName : player.username),
+      " · ",
+      h("button", { type: "button", class: "link-btn", onclick: switchPlayer }, T().switchPlayer),
+    );
+
   const draw = (): void => {
     stopStageTimers();
     lastView = { caseId: c.id, stage: viewing };
@@ -348,36 +399,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
     // bought hint shows the Question pane, so focus never goes to a hidden element.
     if (focusNext !== null && focusNext.kind !== "command" && isNarrow()) writePane("question");
     navStages();
-    const header = h(
-      "header",
-      { class: "case-head" },
-      h(
-        "div",
-        { class: "case-head-top" },
-        h("a", { class: "back-link", href: "#/" }, T().navCases),
-        h(
-          "span",
-          { class: "player-tag" },
-          T().playingAs,
-          // textContent only; a guest's generated name (guest-<id>) means nothing to them, so "Guest" (#206)
-          h("strong", { dir: "auto" }, isGuest(cachedAccount()) ? TGu().guestName : player.username),
-          " · ",
-          h("button", { type: "button", class: "link-btn", onclick: switchPlayer }, T().switchPlayer),
-        ),
-      ),
-      h(
-        "div",
-        { class: "case-head-title" },
-        h("h1", {}, c.title),
-        h("a", { class: "btn btn-ghost btn-sm", href: `#/case/${c.id}/toolbox` }, T().allCommands),
-      ),
-      // The nav carries the labelled stages; phones (nav in a drawer) keep the compact row here.
-      stepper("row"),
-      stepNow(),
-      h("div", { class: "progress" }, h("div", { class: "progress-track", "aria-hidden": "true" }, elFill), elStats),
-      hintBudget(c, player),
-    );
-
+    const header = statusLine();
     const main = h("section", { class: "stage-wrap", id: "stage", tabindex: "-1" });
     if (viewing === "setup") main.append(renderSetup(c, player, update));
     else if (viewing === "debrief") main.append(renderDebrief(c, player));
@@ -386,7 +408,8 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
       update(next, viewing, { kind: "result" });
     }, update));
 
-    setChildren(root, header, main);
+    // The nav carries the labelled stages; phones (nav in a drawer) keep the compact dot row under the status line.
+    setChildren(root, header, stepper("row"), main, playerTag());
     applyFocus();
     tick();
     if (player.completedAt === null) every(1000, tick);
@@ -396,34 +419,55 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
   if (!isRelabel()) scrollContentTo(0);
 }
 
-/** Hints (and paid commands) used so far and what the active stage has left: one line in the case header. */
-function hintBudget(c: Case, player: ProgressView): HTMLElement {
+/**
+ * "Costs so far" (#216): every penalty of the case in one popover from the status line, so the meter only shows
+ * the ones the stage on screen has paid. Hints, commands and wrong answers with their points, revealed answers,
+ * and what the active stage has left in hints.
+ */
+function costsPopover(c: Case, player: ProgressView): HTMLElement {
   let used = 0;
   let total = 0;
   let hintPts = 0;
   let commands = 0;
+  let wrong = 0;
+  let wrongPts = 0;
+  let revealed = 0;
   for (const id of QUESTION_ORDER) {
     const q = questionFor(c, id);
+    const s = stageProgress(player, id);
     if (q === undefined) continue;
-    const revealed = stageProgress(player, id)?.hintsRevealed ?? 0;
+    const hints = s?.hintsRevealed ?? 0;
     total += q.hints.length;
-    used += revealed;
-    hintPts += hintPenalty(q, revealed);
-    commands += stageProgress(player, id)?.commandsRevealed ?? 0;
+    used += hints;
+    hintPts += hintPenalty(q, hints);
+    commands += s?.commandsRevealed ?? 0;
+    wrong += s?.wrongAttempts ?? 0;
+    wrongPts += wrongPenalty(s?.wrongAttempts ?? 0);
+    if (s?.status === "revealed") revealed += 1;
   }
+  const commandPts = commands * SCORING.COMMAND_COST;
   const now = currentStage(player);
   const q = now === "setup" || now === "debrief" ? undefined : questionFor(c, now);
   const revealedNow = now === "setup" || now === "debrief" ? 0 : (stageProgress(player, now)?.hintsRevealed ?? 0);
   const next = q?.hints[revealedNow];
+  const spent = hintPts + commandPts + wrongPts;
+  const titleId = `costs-h-${c.id}`;
   return h(
-    "section",
-    { class: "case-budget", "aria-labelledby": "case-budget-h" },
-    h("h2", { class: "case-budget-h", id: "case-budget-h" }, TS().sideBudget),
-    h("span", { class: "case-budget-item" }, TS().sideHintsUsed(used, total, hintPts)),
-    commands > 0 ? h("span", { class: "case-budget-item" }, TS().sideCommandsUsed(commands, commands * SCORING.COMMAND_COST)) : null,
-    q === undefined
-      ? null
-      : h("span", { class: "case-budget-item" }, next !== undefined ? TS().sideStageHints(q.hints.length - revealedNow, next.cost) : TS().sideStageNoHints),
+    "div",
+    { class: "costs-panel", role: "dialog", "aria-labelledby": titleId, tabindex: "-1" },
+    h("h2", { class: "costs-h", id: titleId }, TW().costs),
+    used + commands + wrong + revealed === 0
+      ? h("p", { class: "costs-none" }, TW().costsNone)
+      : h(
+          "ul",
+          { class: "costs-list" },
+          h("li", {}, TW().costsHints(used, total, hintPts)),
+          commands > 0 ? h("li", {}, TW().costsCommands(commands, commandPts)) : null,
+          wrong > 0 ? h("li", {}, TW().costsWrong(wrong, wrongPts)) : null,
+          revealed > 0 ? h("li", {}, TW().costsRevealed(revealed)) : null,
+          spent > 0 ? h("li", { class: "costs-total" }, TW().costsTotal(spent)) : null,
+        ),
+    q === undefined ? null : h("p", { class: "costs-stage" }, next !== undefined ? TW().costsStageHints(q.hints.length - revealedNow, next.cost) : TW().costsStageNoHints),
   );
 }
 
@@ -943,8 +987,8 @@ function breakdownTable(b: ScoreBreakdown): HTMLElement {
 }
 
 /**
- * Live "this stage so far": what the stage can still be worth, base, the time bonus counting down, the
- * clean and first-solver bonuses still on the table (or lost), and the running penalties.
+ * Live "this stage so far": what the stage can still be worth, the time bonus counting down, the clean and
+ * first-solver bonuses still on the table (or lost), and the penalties once there are any.
  */
 function stageMeter(c: Case, q: Question, initial: StageProgress): { el: HTMLElement; tick: () => void; refresh: (s: StageProgress) => void } {
   let stage = initial;
@@ -987,6 +1031,10 @@ function stageMeter(c: Case, q: Question, initial: StageProgress): { el: HTMLEle
     hints.classList.toggle("is-minus", hp > 0);
     commands.classList.toggle("is-minus", cp > 0);
     wrong.classList.toggle("is-minus", wp > 0);
+    // Penalties show only once they cost something; all of them are in the status line's "Costs so far" (#216).
+    hints.hidden = hp === 0;
+    commands.hidden = cp === 0;
+    wrong.hidden = wp === 0;
     const cleanOpen = isCleanSoFar(stage);
     clean.textContent = cleanOpen ? TP().meterClean(SCORING.CLEAN_BONUS) : TP().meterCleanLost(SCORING.CLEAN_BONUS);
     clean.classList.toggle("is-lost", !cleanOpen);
@@ -996,7 +1044,6 @@ function stageMeter(c: Case, q: Question, initial: StageProgress): { el: HTMLEle
     "div",
     { class: "stage-meter", role: "group", "aria-label": TG().meterLabel },
     upTo,
-    h("span", { class: "meter-item meter-base" }, `${TG().bdBase} ${q.points}`),
     h(
       "span",
       { class: "meter-item meter-time" },
