@@ -38,17 +38,17 @@ export const TO = defineStrings({
 
     // pending / rejected
     pendingHi: "Hi ",
-    pendingBody: "Your instructor approves new accounts from their dashboard. This page updates by itself, so you can leave it open.",
+    pendingBody: "This account is waiting for approval. This page updates by itself, so you can leave it open.",
     pendingLastChecked: (time: string): string => `Last checked ${time}`,
     pendingApproved: "You're approved. Opening your cases…",
     pendingRejected: "This account wasn't approved.",
-    rejectedLead: "Your instructor didn't approve the account ",
-    rejectedTail: ". If that's a mistake, ask them. You can also create a new account.",
+    rejectedLead: "The account ",
+    rejectedTail: " wasn't approved, so it can't be used. You can create a new account.",
     createNewAccount: "Create a new account",
     backToSignIn: "Back to sign in",
 
     // forced password change
-    pwHelpForcedCarried: "Your instructor reset your password. Choose a new one that only you know.",
+    pwHelpForcedCarried: "Your password was reset. Choose a new one that only you know.",
     pwChangedContinue: "Password changed. Opening your cases…",
 
     // 404
@@ -61,7 +61,7 @@ export const TO = defineStrings({
     heroSub: "Hands-on incident puzzles for engineers and student cohorts: logs, metrics, chat and a git repo, one question at a time.",
     ctaCreate: "Create account",
     ctaSignIn: "Sign in",
-    ctaNote: "Free to play. Your instructor approves new accounts; a class code starts you right away.",
+    ctaNote: "Free to play. Create an account and start your first case right away.",
     proofLine: (players: number, stages: number): string =>
       `${formatNumber(players)} ${players === 1 ? "investigator" : "investigators"} on the leaderboard · ${formatNumber(stages)} ${stages === 1 ? "stage" : "stages"} solved`,
     learnTitle: "What you'll practise",
@@ -147,16 +147,16 @@ export const TO = defineStrings({
       `${days === 1 ? "יום 1" : `${formatNumber(days)} ימים`} ${formatNumber(hours)} שע' ${formatNumber(minutes)} דק'`,
 
     pendingHi: "היי ",
-    pendingBody: "המדריכים מאשרים חשבונות חדשים מלוח הבקרה שלהם. הדף מתעדכן לבד, אפשר להשאיר אותו פתוח.",
+    pendingBody: "החשבון הזה ממתין לאישור. הדף מתעדכן לבד, אפשר להשאיר אותו פתוח.",
     pendingLastChecked: (time: string): string => `בדיקה אחרונה: ${time}`,
     pendingApproved: "החשבון אושר. פותחים את התיקים…",
     pendingRejected: "החשבון הזה לא אושר.",
-    rejectedLead: "המדריכים לא אישרו את החשבון ",
-    rejectedTail: ". אם זו טעות, פנו אליהם. אפשר גם לפתוח חשבון חדש.",
+    rejectedLead: "החשבון ",
+    rejectedTail: " לא אושר, ולכן אי אפשר להשתמש בו. אפשר לפתוח חשבון חדש.",
     createNewAccount: "פתיחת חשבון חדש",
     backToSignIn: "חזרה לכניסה",
 
-    pwHelpForcedCarried: "המדריכים איפסו את הסיסמה שלכם. בחרו סיסמה חדשה שרק אתם יודעים.",
+    pwHelpForcedCarried: "הסיסמה שלכם אופסה. בחרו סיסמה חדשה שרק אתם יודעים.",
     pwChangedContinue: "הסיסמה שונתה. פותחים את התיקים…",
 
     notOnRunbook: "הדף הזה לא מופיע בספר הנהלים.",
@@ -167,7 +167,7 @@ export const TO = defineStrings({
     heroSub: "חידות תקלה מעשיות למהנדסים ולכיתות: לוגים, מטריקות, צ'אט ומאגר git, שאלה אחר שאלה.",
     ctaCreate: "פתיחת חשבון",
     ctaSignIn: "כניסה",
-    ctaNote: "בחינם. המדריכים מאשרים חשבונות חדשים, ועם קוד כיתה מתחילים מיד.",
+    ctaNote: "בחינם. פותחים חשבון ומתחילים את התיק הראשון מיד.",
     proofLine: (players: number, stages: number): string =>
       `${players === 1 ? "חוקר/ת אחד/ת" : `${formatNumber(players)} חוקרים`} בטבלת המובילים · ${stages === 1 ? "שלב אחד נפתר" : `${formatNumber(stages)} שלבים נפתרו`}`,
     learnTitle: "מה תתרגלו",

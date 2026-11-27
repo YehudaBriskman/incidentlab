@@ -1665,6 +1665,9 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
 .btn-primary[aria-disabled="true"]:hover { filter: none; }
 .auth-forgot { margin-top: var(--space-1); }
 
+/* Sign-up honeypot (#173): out of sight and out of the accessibility tree (aria-hidden + tabindex -1). */
+.hp-field { position: absolute; inset-inline-start: -10000px; inline-size: 1px; block-size: 1px; overflow: hidden; }
+
 /* --- pending / rejected --- */
 .pending-icon { font-size: var(--step-3); line-height: 1; }
 .pending-status { font-weight: 600; color: var(--success-fg); }

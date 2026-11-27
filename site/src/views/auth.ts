@@ -1,7 +1,7 @@
 // Sign in / sign up, the "waiting for approval" screen and the forced password change.
 // `withApprovedAccount` is the single gate every playable view goes through.
 import { formField, type FormField } from "../components/formLayout";
-import { PasswordSchema, UsernameSchema, type AccountView } from "../../shared/contract";
+import { MIN_SIGNUP_FORM_MS, PasswordSchema, UsernameSchema, type AccountView } from "../../shared/contract";
 import { ApiError, changePassword, login, register } from "../lib/api";
 import { h, setChildren } from "../lib/dom";
 import "../player.css";
@@ -159,6 +159,7 @@ function errorText(err: unknown): string {
   if (err.code === "bad-invite-code") return TG().badInvite;
   if (err.code === "bad-credentials") return TA().badCredentials;
   if (err.code === "rejected") return TA().rejectedLogin;
+  if (err.code === "signup-refused") return TA().signupRefused;
   return err.message;
 }
 
@@ -297,6 +298,8 @@ export function renderAuthForm(
 ): void {
   stopAuthTimers();
   const isSignUp = opts.mode === "sign-up";
+  /** When the form appeared: a sign-up sent faster than MIN_SIGNUP_FORM_MS is a bot to the server (#173). */
+  const shownAt = Date.now();
   const titleText = (): string => pageTitle(isSignUp ? TA().signUpBtn : TA().signIn);
   if (opts.titled) document.title = titleText();
   const baseTitle = (): string => (opts.titled ? titleText() : document.title.replace(TO().errorTitlePrefix, ""));
@@ -344,6 +347,10 @@ export function renderAuthForm(
   const prefilled = invite !== null && opts.inviteCode !== undefined && opts.inviteCode.length > 0;
   if (invite !== null && prefilled) invite.input.value = opts.inviteCode ?? "";
   const fields: Field[] = [user, pw, ...(invite ? [invite] : [])];
+  // The honeypot (#173): off-screen and hidden from assistive tech, out of the tab order and never autofilled.
+  // People leave it empty; form-filling bots don't.
+  const honeypot = h("input", { id: "auth-website", type: "text", name: "website", class: "input", tabindex: "-1", autocomplete: "off", maxlength: "200" });
+  const trap = isSignUp ? h("div", { class: "hp-field", "aria-hidden": "true" }, h("label", { for: "auth-website" }, "Website"), honeypot) : null;
   const summary = errorSummary(baseTitle);
   const submitLabel = isSignUp ? TA().signUpBtn : TA().signInBtn;
   const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg btn-block" }, submitLabel);
@@ -364,14 +371,14 @@ export function renderAuthForm(
     h("p", { class: "eyebrow" }, opts.context),
     h("h1", {}, isSignUp ? TA().authTitleSignUp : (opts.signInTitle ?? TA().authTitleSignIn)),
     h("p", { class: "muted" }, isSignUp ? TA().authHelpSignUp : TA().authHelpSignIn),
-    // A class link (`?code=`) leads with the prefilled code: it is why this student skips the approval wait.
+    // A class link (`?code=`) leads with the prefilled code: it says which class this sign-up joins.
     prefilled && invite ? invite.nodes : null,
     user.nodes,
     pw.nodes,
     invite && !prefilled ? invite.nodes : null,
+    trap,
     submit,
     switchMode,
-    isSignUp ? null : h("p", { class: "muted small auth-forgot" }, TG().forgotPassword),
   );
 
   /** Client checks for one field: sign-up checks the format, sign-in only that it isn't empty. */
@@ -430,7 +437,16 @@ export function renderAuthForm(
     busy = true;
     setBusy(submit, true, isSignUp ? TA().signingUp : TA().signingIn);
     const inviteCode = invite?.input.value.trim() ?? "";
-    (isSignUp ? register(inviteCode.length > 0 ? { ...credentials, inviteCode } : credentials) : login(credentials))
+    const send = (): Promise<AccountView> => {
+      if (!isSignUp) return login(credentials);
+      // A person who fills the form in under the minimum (autofill, a password manager) waits out the rest here
+      // instead of being refused by the server's bot check.
+      const elapsedMs = Date.now() - shownAt;
+      const wait = Math.max(0, MIN_SIGNUP_FORM_MS + 100 - elapsedMs);
+      const registration = { ...credentials, ...(inviteCode.length > 0 ? { inviteCode } : {}), website: honeypot.value };
+      return new Promise<void>((resolve) => window.setTimeout(resolve, wait)).then(() => register({ ...registration, elapsedMs: Date.now() - shownAt }));
+    };
+    send()
       .then((account) => {
         carriedTempPassword = !isSignUp && account.mustChangePassword ? credentials.password : null;
         summary.clear();

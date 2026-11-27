@@ -184,9 +184,10 @@ async function requestNoContent(path: string, body: unknown): Promise<void> {
 // ---- account / session ------------------------------------------------------
 
 type Credentials = { username: string; password: string };
-type Registration = Credentials & { inviteCode?: string };
+/** Sign-up also sends the bot checks (#173): the hidden `website` field and how long the form was open. */
+type Registration = Credentials & { inviteCode?: string; website?: string; elapsedMs?: number };
 
-/** Creates the account. With a valid class code it comes back already "approved". */
+/** Creates the account (approved at once since #173). */
 export async function register(registration: Registration): Promise<AccountView> {
   return (await request("POST", "/api/auth/register", AccountResponseSchema, registration)).account;
 }
