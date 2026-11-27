@@ -91,3 +91,14 @@ test("a guest's sign-out warns that the progress will be lost", async ({ page })
   await prompt.getByRole("button", { name: /cancel/i }).click();
   await expect(page.getByRole("region", { name: /guest mode/i })).toBeVisible();
 });
+
+test("a guest's #/me offers the upgrade, not password or recovery-code forms (#207)", async ({ page }) => {
+  await page.request.post("/api/guest", { data: {} });
+  await page.goto("/#/me");
+  const upgrade = page.locator(".stats-upgrade");
+  await expect(upgrade.getByRole("heading", { name: "Keep your progress" })).toBeVisible();
+  await expect(upgrade.getByRole("button", { name: /create account/i })).toBeVisible();
+  await expect(page.locator(".pw-section")).toHaveCount(0);
+  await expect(page.locator("#me-pw-current, #me-recovery-current")).toHaveCount(0);
+  await expect(page.getByText("Change password")).toHaveCount(0);
+});
