@@ -157,6 +157,7 @@ export const createApp = (deps: AppDeps): App => {
       "/api/classes/join": { POST: () => classController.join(req, ip) },
       "/api/admin/classes": { GET: () => classController.adminList(req) },
       "/api/admin/accounts": { GET: () => adminController.listAccounts(req) },
+      "/api/admin/users": { GET: () => adminController.listUsers(req) },
       "/api/admin/accounts/approve-all": { POST: () => adminController.approveAll(req) },
       "/api/admin/progress": { GET: () => adminController.progress(req) },
       "/api/admin/reset": { POST: () => adminController.reset(req) },

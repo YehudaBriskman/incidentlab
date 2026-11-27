@@ -248,11 +248,12 @@ may reclaim unreferenced ones). CLI: `scripts/data.ts upload` (see `docs/CASE_CO
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| GET | `/api/admin/accounts` | | `{generatedAt, accounts: UserStats[]}` (every account with stats and rank; cached 2 s) |
+| GET | `/api/admin/accounts` | | `{generatedAt, accounts: UserStats[]}` (every account with stats and rank; cached 2 s). A full scan of accounts and progress: scripts and tests only, the console uses `/api/admin/users`. |
+| GET | `/api/admin/users?q=&kind=&role=&status=&sort=&offset=&limit=` | | `AdminUsersResponse` (#185): `{generatedAt, total, matched, offset, limit, counts, accounts, pending}`. `q` matches part of the username (case-insensitive); `kind` `user`/`guest`, `role` `player`/`author`, `status` `pending`/`approved`/`rejected` (empty = any); `sort` `rank` (default), `newest`, `seen`, `name`; `limit` 1–200 (default 50). `counts` (users, guests, authors, pending, approved, rejected, active24h) cover every account; `pending` is the 50 oldest pending sign-ups. Reads every `account:` and `score:` record (cached 2 s, dropped by any admin write) and only the page's progress records. `UserStats` gains `kind` and `classLimit`. The console fetches it on demand, never on a timer. |
 | POST | `/api/admin/accounts/:id/approve` | `{}` | `{account}` |
 | POST | `/api/admin/accounts/:id/reject` | `{}` | `{account}` (the player sees the "not approved" screen; can't sign in again) |
 | DELETE | `/api/admin/accounts/:id` | | 204 (soft delete: account + progress go to the trash for 7 days; sessions end; username freed) |
-| GET | `/api/admin/progress?caseId=` | | `{generatedAt, caseId, players: AdminProgress[]}` |
+| GET | `/api/admin/progress?caseId=` | | `{generatedAt, caseId, players: AdminProgress[]}` (reads the case's progress and only those players' accounts, #185: the Live section polls it) |
 | DELETE | `/api/admin/progress/:accountId/:caseId` | | 204 (restart one player's case) |
 | POST | `/api/admin/reset` | `{confirm:"RESET", caseId?}` | 204 (wipe progress for one case or all; accounts stay) |
 | GET | `/api/admin/schedule` | | `{schedule}` |
@@ -340,7 +341,7 @@ class response is personalised (`no-store`), except the public class board (belo
 | POST | `/api/classes/:id/members/:accountId/remove` | `{}` | see the matrix | 204 (a removed account can join again with the code: rotate it to stop that) |
 | POST | `/api/classes/:id/members/:accountId/role` | `{role: "member"\|"admin"}` | owner | `{member}`; active members only (409 `pending-member`) |
 | POST | `/api/classes/:id/leave` | `{}` | member | 204; the owner can't leave (409 `owner-locked`): they archive instead |
-| GET | `/api/admin/classes` | | site admin | `{classes: [{id, name, status, ownerId, joinMode, memberLimit, members, createdAt}]}` (newest first) |
+| GET | `/api/admin/classes` | | site admin | `{classes: [{id, name, status, ownerId, joinMode, memberLimit, members, createdAt, ownerName, event}]}` (newest first; `ownerName` and `event` added by #185: the owner's username, null for `admin` or a deleted account, and the class event). One class listing, one read and one member listing per class, one read per distinct owner. The console fetches it on demand. |
 | PUT | `/api/admin/classes/:id/limits` | `{memberLimit}` (1–1000) | site admin | `{class}` |
 | PUT | `/api/admin/accounts/:id/class-limit` | `{classLimit}` (0–100, or null for the default 3) | site admin | `{accountId, classLimit}` |
 

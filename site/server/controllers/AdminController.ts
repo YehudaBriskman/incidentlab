@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AUDIT_ADMIN_ACTOR, AccountClassLimitRequestSchema, AdminResetRequestSchema, CaseIdSchema, EventSchema, ScheduleSchema, SetAccountRoleRequestSchema, SettingsSchema } from "../../shared/contract.ts";
+import { AUDIT_ADMIN_ACTOR, AccountClassLimitRequestSchema, AdminResetRequestSchema, AdminUsersQuerySchema, CaseIdSchema, EventSchema, ScheduleSchema, SetAccountRoleRequestSchema, SettingsSchema } from "../../shared/contract.ts";
 import type { AuditEntry } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
 import type { AccountAdminService } from "../services/AccountAdminService.ts";
@@ -7,7 +7,7 @@ import type { AdminAuthService } from "../services/AdminAuthService.ts";
 import type { AuditService } from "../services/AuditService.ts";
 import type { EventService } from "../services/EventService.ts";
 import type { ScheduleService } from "../services/ScheduleService.ts";
-import type { StatsService } from "../services/StatsService.ts";
+import type { AccountDirectory, StatsService } from "../services/StatsService.ts";
 import type { TrashService } from "../services/TrashService.ts";
 import { json, noContent, parseBody, sessionToken } from "./http.ts";
 
@@ -29,6 +29,8 @@ export class AdminController {
   private readonly deps: AdminControllerDeps;
   // Several instructor tabs polling every few seconds share one store scan.
   private accountsCache: { at: number; result: Promise<unknown> } | null = null;
+  // The console's searches and pages within a moment share one directory read (#185); writes drop it.
+  private directoryCache: { at: number; result: Promise<AccountDirectory> } | null = null;
 
   constructor(deps: AdminControllerDeps) {
     this.deps = deps;
@@ -43,6 +45,7 @@ export class AdminController {
     const via = await this.assertAdmin(req);
     const result = await run();
     this.accountsCache = null;
+    this.directoryCache = null;
     await this.deps.audit.record({ ...audit, via, actor: AUDIT_ADMIN_ACTOR });
     return result;
   }
@@ -56,6 +59,23 @@ export class AdminController {
       this.accountsCache = { at: nowMs, result };
     }
     return json(200, await this.accountsCache.result);
+  }
+
+  /** GET /api/admin/users (#185): one filtered, sorted page of accounts; the console fetches it on demand. */
+  async listUsers(req: Request): Promise<Response> {
+    await this.assertAdmin(req);
+    const params = new URL(req.url).searchParams;
+    // Empty parameters mean "no filter" (the console sends every field).
+    const raw = Object.fromEntries([...params.entries()].filter(([, v]) => v !== ""));
+    const parsed = AdminUsersQuerySchema.safeParse(raw);
+    if (!parsed.success) throw new AppError(400, parsed.error.issues[0]?.message ?? "invalid query");
+    const nowMs = this.deps.now().getTime();
+    if (!this.directoryCache || nowMs - this.directoryCache.at >= ADMIN_CACHE_MS) {
+      const result = this.deps.stats.directory();
+      result.catch(() => (this.directoryCache = null));
+      this.directoryCache = { at: nowMs, result };
+    }
+    return json(200, await this.deps.stats.userPage(await this.directoryCache.result, parsed.data));
   }
 
   async approve(req: Request, accountId: string): Promise<Response> {

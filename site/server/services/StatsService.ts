@@ -1,8 +1,18 @@
 // Per-account and per-case statistics, achievements and streaks, computed from progress records, and the
 // global leaderboard, computed from the opted-in players' score summaries only (#175): the board and a
 // player's rank never read another account's progress.
-import { QUESTION_ORDER } from "../../shared/contract.ts";
-import type { CaseStats, CaseSummary, LeaderboardResponse, QuestionId, Schedule, StageProgress, UserStats } from "../../shared/contract.ts";
+import { ADMIN_USERS_PAGE, QUESTION_ORDER } from "../../shared/contract.ts";
+import type {
+  AdminUsersQuery,
+  AdminUsersResponse,
+  CaseStats,
+  CaseSummary,
+  LeaderboardResponse,
+  QuestionId,
+  Schedule,
+  StageProgress,
+  UserStats,
+} from "../../shared/contract.ts";
 import type { AccountRecord, ProgressRecord, Secrets } from "../domain/types.ts";
 import { boardTotals } from "../domain/score.ts";
 import type { BoardTotals, ScoreRecord } from "../domain/score.ts";
@@ -32,6 +42,19 @@ const rankOf = (score: number, sortedScores: readonly number[]): number => sorte
 export const isBoardEligible = (account: AccountRecord): boolean => account.status === "approved" && account.kind === "user" && account.showOnGlobalBoard;
 
 type BoardPlayer = { readonly account: AccountRecord; readonly score: ScoreRecord };
+
+/**
+ * Every account with its score total (from the `score:` summaries), for the console's users list (#185). One
+ * listing and one read per account and per summary; no progress record is read. Admin only, fetched on demand.
+ */
+export type AccountDirectory = {
+  readonly accounts: readonly AccountRecord[];
+  /** score totals by account id (0 when the account has no summary yet) */
+  readonly totals: ReadonlyMap<string, number>;
+};
+
+/** Ranked on the console: approved full accounts. Guests and banned or pending accounts get no rank. */
+const isRanked = (a: AccountRecord): boolean => a.status === "approved" && a.kind === "user";
 type BoardRow = BoardTotals & { readonly accountId: string; readonly username: string };
 type RankedRow = BoardRow & { readonly rank: number };
 
@@ -168,6 +191,8 @@ export class StatsService {
       username: account.username,
       status: account.status,
       role: account.role,
+      kind: account.kind,
+      classLimit: account.classLimit,
       createdAt: account.createdAt,
       lastSeenAt: account.lastSeenAt,
       totalScore: sum((c) => c.score),
@@ -196,6 +221,82 @@ export class StatsService {
     return rows
       .map(({ ranked, ...r }): UserStats => ({ ...r, rank: ranked ? rankOf(r.totalScore, scores) : null }))
       .sort((a, b) => b.totalScore - a.totalScore || a.createdAt.localeCompare(b.createdAt));
+  }
+
+  /** The console's account directory (#185): every account and its summary total, no progress. */
+  async directory(): Promise<AccountDirectory> {
+    const accounts = await this.repos.accounts.list();
+    const scores = await mapWithConcurrency(accounts, async (a) => [a.id, (await this.repos.scores.get(a.id))?.data.total ?? 0] as const);
+    return { accounts, totals: new Map(scores) };
+  }
+
+  /**
+   * One page of the console's users list (#185): filtered and sorted over the directory, then full stats for
+   * the page and the pending sign-ups only (their progress through one key listing, never every record).
+   */
+  async userPage(directory: AccountDirectory, query: AdminUsersQuery): Promise<AdminUsersResponse> {
+    const { accounts, totals } = directory;
+    const total = (a: AccountRecord): number => totals.get(a.id) ?? 0;
+    const rankedScores = accounts.filter(isRanked).map(total).sort((a, b) => b - a);
+    const rankOfAccount = (a: AccountRecord): number | null => (isRanked(a) ? rankOf(total(a), rankedScores) : null);
+    const nowMs = this.now().getTime();
+    const seenMs = (a: AccountRecord): number => (a.lastSeenAt === null ? 0 : Date.parse(a.lastSeenAt));
+
+    const q = query.q.toLowerCase();
+    const matching = accounts.filter(
+      (a) =>
+        (q === "" || a.username.toLowerCase().includes(q)) &&
+        (query.kind === null || a.kind === query.kind) &&
+        (query.role === null || a.role === query.role) &&
+        (query.status === null || a.status === query.status),
+    );
+    const byName = (a: AccountRecord, b: AccountRecord): number => a.username.localeCompare(b.username);
+    const sorted = [...matching].sort((a, b) => {
+      switch (query.sort) {
+        case "rank":
+          return (rankOfAccount(a) ?? Number.MAX_SAFE_INTEGER) - (rankOfAccount(b) ?? Number.MAX_SAFE_INTEGER) || total(b) - total(a) || byName(a, b);
+        case "newest":
+          return b.createdAt.localeCompare(a.createdAt) || byName(a, b);
+        case "seen":
+          return seenMs(b) - seenMs(a) || byName(a, b);
+        case "name":
+          return byName(a, b);
+      }
+    });
+    const page = sorted.slice(query.offset, query.offset + query.limit);
+    const pending = accounts
+      .filter((a) => a.status === "pending")
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .slice(0, ADMIN_USERS_PAGE.PENDING_LIMIT);
+
+    const ids = new Set([...page, ...pending].map((a) => a.id));
+    const [progress, schedule] = await Promise.all([ids.size === 0 ? Promise.resolve([]) : this.repos.progress.listForAccounts(ids), this.repos.schedule.get()]);
+    const byAccount = new Map<string, ProgressRecord[]>();
+    for (const record of progress) byAccount.set(record.accountId, [...(byAccount.get(record.accountId) ?? []), record]);
+    const view = (a: AccountRecord): UserStats => ({
+      ...this.userStats(a, byAccount.get(a.id) ?? [], schedule),
+      rank: rankOfAccount(a),
+      onGlobalBoard: isBoardEligible(a),
+    });
+    const count = (pick: (a: AccountRecord) => boolean): number => accounts.reduce((n, a) => n + (pick(a) ? 1 : 0), 0);
+    return {
+      generatedAt: this.now().toISOString(),
+      total: accounts.length,
+      matched: matching.length,
+      offset: query.offset,
+      limit: query.limit,
+      counts: {
+        users: count((a) => a.kind === "user"),
+        guests: count((a) => a.kind === "guest"),
+        authors: count((a) => a.role === "author"),
+        pending: count((a) => a.status === "pending"),
+        approved: count((a) => a.status === "approved"),
+        rejected: count((a) => a.status === "rejected"),
+        active24h: count((a) => a.lastSeenAt !== null && nowMs - seenMs(a) < DAY_MS),
+      },
+      accounts: page.map(view),
+      pending: pending.map(view),
+    };
   }
 
   /**

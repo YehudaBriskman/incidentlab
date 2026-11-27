@@ -362,9 +362,19 @@ export class ClassService {
     return rows.filter((r) => r.entry?.status === "active").map((r) => r.classId);
   }
 
-  async adminList(): Promise<Array<{ record: ClassRecord; members: number }>> {
+  /**
+   * Every class for the site owner's console, newest first, with its member count and its owner's username (#185):
+   * one class listing, then per class one read and one member-key listing, plus one read per distinct owner.
+   */
+  async adminList(): Promise<Array<{ record: ClassRecord; members: number; ownerName: string | null }>> {
     const records = await this.classes.list();
-    const rows = await mapWithConcurrency(records, async (record) => ({ record, members: await this.classes.countMembers(record.id) }));
+    const ownerIds = [...new Set(records.map((r) => r.ownerId).filter((id) => id !== SITE_OWNER_ID))];
+    const [counts, owners] = await Promise.all([
+      mapWithConcurrency(records, (record) => this.classes.countMembers(record.id)),
+      mapWithConcurrency(ownerIds, async (id) => [id, (await this.repos.accounts.get(id))?.data.username ?? null] as const),
+    ]);
+    const names = new Map(owners);
+    const rows = records.map((record, i) => ({ record, members: counts[i] ?? 0, ownerName: names.get(record.ownerId) ?? null }));
     return rows.sort((a, b) => b.record.createdAt.localeCompare(a.record.createdAt));
   }
 

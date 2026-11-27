@@ -183,9 +183,9 @@ export class ClassController {
 
   async adminList(req: Request): Promise<Response> {
     await this.siteAdmin(req);
-    const classes: AdminClass[] = (await this.classes.adminList()).map(({ record, members }) => ({
+    const classes: AdminClass[] = (await this.classes.adminList()).map(({ record, members, ownerName }) => ({
       id: record.id, name: record.name, status: record.status, ownerId: record.ownerId, joinMode: record.joinMode,
-      memberLimit: record.memberLimit, members, createdAt: record.createdAt,
+      memberLimit: record.memberLimit, members, createdAt: record.createdAt, ownerName, event: record.event,
     }));
     return json(200, { classes });
   }

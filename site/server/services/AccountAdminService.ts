@@ -149,11 +149,12 @@ export class AccountAdminService {
 
   async liveProgress(caseId: string): Promise<{ generatedAt: string; caseId: string; players: AdminProgress[] }> {
     this.game.caseSecrets(caseId); // 404 for unknown cases
-    const [records, accounts] = await Promise.all([this.repos.progress.list(caseId), this.repos.accounts.list()]);
-    const byId = new Map(accounts.map((a) => [a.id, a]));
+    // Only the accounts on this case (#185): the Live section polls this, so it never reads every account.
+    const records = await this.repos.progress.list(caseId);
+    const accounts = await mapWithConcurrency(records, async (record) => (await this.repos.accounts.get(record.accountId))?.data ?? null);
     const players = records
-      .flatMap((record) => {
-        const account = byId.get(record.accountId);
+      .flatMap((record, i) => {
+        const account = accounts[i];
         return account ? [this.game.toAdminView(record, account)] : [];
       })
       .sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));

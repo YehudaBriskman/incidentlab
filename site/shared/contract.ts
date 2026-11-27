@@ -191,6 +191,9 @@ export const UserStatsSchema = z.object({
   rank: z.number().int().min(1).nullable(),
   /** additive (#175): the account opted in to the public global leaderboard (and may be listed there) */
   onGlobalBoard: z.boolean().default(false),
+  /** additive (#185): a full account or a guest, and the account's own class limit (null = the site default) */
+  kind: AccountKindSchema.default("user"),
+  classLimit: z.number().int().min(0).nullable().default(null),
   commandsRevealed: z.number().int().min(0),
   achievements: z.array(z.object({ id: z.string(), earnedAt: z.string() })),
   /** consecutive incident-of-the-day dates completed on that date */
@@ -441,7 +444,10 @@ export const UserStatsResponseSchema = z.object({ stats: UserStatsSchema });
 export const BoardVisibilityRequestSchema = z.object({ show: z.boolean() }).strict();
 
 // ---- admin ----------------------------------------------------------------
-// GET    /api/admin/accounts                    -> {accounts: UserStats[]}   (every account, with stats)
+// GET    /api/admin/accounts                    -> {accounts: UserStats[]}   (every account, with stats: a full scan
+//                                                  of accounts and progress; scripts only, the console pages below)
+// GET    /api/admin/users?q=&kind=&role=&status=&sort=&offset=&limit=  -> AdminUsersResponse  (#185: one page of the
+//                                                  filtered accounts, on demand; see AdminUsersQuerySchema)
 // PUT    /api/admin/accounts/:id/role {role: "player"|"author"} -> {account}   (audited as account.role)
 export const SetAccountRoleRequestSchema = z.object({ role: AccountRecordRoleSchema });
 // POST   /api/admin/accounts/:id/approve  {}    -> {account}
@@ -464,6 +470,45 @@ export const SetAccountRoleRequestSchema = z.object({ role: AccountRecordRoleSch
 //                                                  target ids -> username or class name)
 // Admin auth: header X-Admin-Key, OR the session cookie of `admin` signed in with the ADMIN_KEY.
 export const AdminAccountsResponseSchema = z.object({ generatedAt: z.string(), accounts: z.array(UserStatsSchema) });
+
+/** The console's users list (#185): filtered and sorted on the server, then one page of it. */
+export const ADMIN_USERS_PAGE = { DEFAULT_LIMIT: 50, MAX_LIMIT: 200, PENDING_LIMIT: 50 } as const;
+export const AdminUserSortSchema = z.enum(["rank", "newest", "seen", "name"]);
+export type AdminUserSort = z.infer<typeof AdminUserSortSchema>;
+export const AdminUsersQuerySchema = z.object({
+  /** a case-insensitive part of the username; empty = everyone */
+  q: z.string().trim().max(64).default(""),
+  kind: AccountKindSchema.nullable().default(null),
+  role: AccountRecordRoleSchema.nullable().default(null),
+  status: AccountStatusSchema.nullable().default(null),
+  sort: AdminUserSortSchema.default("rank"),
+  offset: z.coerce.number().int().min(0).default(0),
+  limit: z.coerce.number().int().min(1).max(ADMIN_USERS_PAGE.MAX_LIMIT).default(ADMIN_USERS_PAGE.DEFAULT_LIMIT),
+});
+export type AdminUsersQuery = z.infer<typeof AdminUsersQuerySchema>;
+export const AdminUsersResponseSchema = z.object({
+  generatedAt: z.string(),
+  /** every account in the store, and how many match the filters */
+  total: z.number().int().min(0),
+  matched: z.number().int().min(0),
+  offset: z.number().int().min(0),
+  limit: z.number().int().min(1),
+  /** over every account (not just the page): the console's tiles and the pending badge */
+  counts: z.object({
+    users: z.number().int().min(0),
+    guests: z.number().int().min(0),
+    authors: z.number().int().min(0),
+    pending: z.number().int().min(0),
+    approved: z.number().int().min(0),
+    rejected: z.number().int().min(0),
+    active24h: z.number().int().min(0),
+  }),
+  /** this page of the matching accounts, in `sort` order */
+  accounts: z.array(UserStatsSchema),
+  /** the oldest pending sign-ups (at most PENDING_LIMIT), whatever the filters: "Waiting for approval" */
+  pending: z.array(UserStatsSchema),
+});
+export type AdminUsersResponse = z.infer<typeof AdminUsersResponseSchema>;
 export const AdminProgressResponseSchema = z.object({ generatedAt: z.string(), caseId: z.string(), players: z.array(AdminProgressSchema) });
 export const AdminResetRequestSchema = z.object({ confirm: z.literal("RESET"), caseId: CaseIdSchema.optional() });
 export const ScheduleResponseSchema = z.object({ schedule: ScheduleSchema });
@@ -596,6 +641,10 @@ export const AdminClassSchema = z.object({
   memberLimit: z.number().int().min(1),
   members: z.number().int().min(0),
   createdAt: z.string(),
+  /** additive (#185): the owner's username (null when the owner is `admin` or the account is gone) */
+  ownerName: z.string().nullable().default(null),
+  /** additive (#185): the class's event night (window, freeze, announcement) */
+  event: ClassEventSchema.nullable().default(null),
 });
 export type AdminClass = z.infer<typeof AdminClassSchema>;
 
