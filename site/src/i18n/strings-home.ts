@@ -26,7 +26,6 @@ export const TH = defineStrings({
     todayError: "Couldn't load today's case.",
     start: "Start",
     resume: "Resume",
-    signInToPlay: "Sign in to play",
 
     // cases table
     casesTitle: "Cases",
@@ -76,7 +75,6 @@ export const TH = defineStrings({
     todayError: "לא הצלחנו לטעון את התיק של היום.",
     start: "להתחיל",
     resume: "להמשיך",
-    signInToPlay: "כניסה כדי לשחק",
 
     casesTitle: "תיקים",
     search: "חיפוש תיקים",

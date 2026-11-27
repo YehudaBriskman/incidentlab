@@ -2,16 +2,18 @@
 // "Today's case" at the end edge; RTL mirrors them; only the Today card, full width, when Continue would just repeat
 // today's case, #125), then the cases table, which scrolls inside its own panel so
 // the page itself fits the viewport on desktop. Signed out, a compact intro above the cards carries the value
-// statement and the sign-up call to action. Filters, search and sort live in the URL query (#/?difficulty=hard).
+// statement and the sign-up and guest actions. Signed in, a challenge row sits between the cards and the table
+// (views/homeChallenges.ts, #183): your classes (or a call to action, or the upgrade card for a guest) and your
+// streak. Filters, search and sort live in the URL query (#/?difficulty=hard).
 import "../home.css";
-import type { CaseStats, TodayResponse } from "../../shared/contract";
+import type { AccountView, CaseStats, TodayResponse, UserStats } from "../../shared/contract";
 import { caseSummaries, caseSummary, catalogFailed, catalogReady, reloadCatalog } from "../content/load";
 import type { CaseSummary } from "../content/catalog-schema";
 import { dataTable, type Column, type DataTable } from "../components/dataTable";
 import type { SortState } from "../components/table-core";
 import { fetchMyStats } from "../lib/api";
 import { h, setChildren, type Child } from "../lib/dom";
-import { isAccountKnown, likelySignedIn, loadAccount, loadToday } from "../lib/session";
+import { cachedAccount, isAccountKnown, likelySignedIn, loadAccount, loadToday, onAccountChange } from "../lib/session";
 import { cachedEvent, isEventActive, onEventChange } from "../lib/event";
 import { tooltip } from "../lib/overlay";
 import { filterButton, type FilterButtonHandle, type FilterValue } from "../components/filterPopover";
@@ -29,13 +31,16 @@ import {
 } from "../lib/caseFilters";
 import { getLang } from "../i18n/i18n";
 import { TA } from "../i18n/strings-account";
+import { TC } from "../i18n/strings-challenges";
 import { TG } from "../i18n/strings-game";
+import { TGu } from "../i18n/strings-guest";
 import { TH } from "../i18n/strings-home";
 import { TO } from "../i18n/strings-onboard";
 import { T } from "../i18n/strings-player";
 import { TS } from "../i18n/strings-shell";
 import type { ViewResult } from "../shell/types";
 import { eventDisplayPhase, eventWhen } from "./leaderboard";
+import { classesCard, everySecond, guestCard, loadHomeClasses, streakCard, type ClassesState, type StreakState } from "./homeChallenges";
 
 type HomeState = {
   /** true until /api/today and the player's stats have both answered */
@@ -46,6 +51,10 @@ type HomeState = {
   statsFailed: boolean;
   /** an approved player whose stats we asked for: status and score columns apply */
   isPlayer: boolean;
+  /** the player's full stats (streak and achievements for the challenge row); null until loaded or when failed */
+  me: UserStats | null;
+  /** the classes card (#183): loaded on its own, so slow class calls never hold back the table */
+  classes: ClassesState;
 };
 
 type Row = { readonly c: CaseSummary; readonly stats: CaseStats | undefined; readonly isToday: boolean };
@@ -273,20 +282,13 @@ function eventLine(): HTMLElement {
     text.textContent = phase === "over" ? "" : eventWhen();
   };
   const unsubscribe = onEventChange(draw);
-  const timer = window.setInterval(() => {
-    if (!el.isConnected) {
-      window.clearInterval(timer);
-      unsubscribe();
-      return;
-    }
-    draw();
-  }, 1000);
-  draw();
+  everySecond(el, draw, unsubscribe);
   return el;
 }
 
 function todayAction(c: CaseSummary, state: HomeState, signedIn: boolean): HTMLElement {
-  if (!signedIn) return h("a", { class: "btn btn-sm", href: `#/login` }, TH().signInToPlay);
+  // Signed out: the case page's gate offers sign-in and guest play (nothing is locked to an account or a time).
+  if (!signedIn) return h("a", { class: "btn btn-sm", href: `#/case/${c.id}` }, TC().play);
   const st = statusOf(state.stats.get(c.id));
   const label = st === "completed" ? TO().reviewDebrief : st === "in-progress" ? TH().resume : TH().start;
   return h("a", { class: "btn btn-primary btn-sm", href: `#/case/${c.id}` }, label);
@@ -438,10 +440,13 @@ export function renderHome(root: HTMLElement): void {
   const token = Symbol("home");
   activeRender = token;
   let filters: CaseFilters = parseFilters(queryOfHash());
-  let state: HomeState = { loading: true, today: null, todayFailed: false, stats: new Map(), statsFailed: false, isPlayer: false };
+  let state: HomeState = { loading: true, today: null, todayFailed: false, stats: new Map(), statsFailed: false, isPlayer: false, me: null, classes: { kind: "loading" } };
+  /** the account the current answers were loaded for (`id:kind`): a change to another account reloads */
+  let loadedFor: string | null = null;
 
   const intro = h("div", { class: "home-intro-slot" });
   const top = h("div", { class: "home-top" });
+  const chal = h("div", { class: "home-chal" });
   const search = h("input", { type: "search", class: "input home-search", "aria-label": TH().search, placeholder: TH().searchPlaceholder, autocomplete: "off", enterkeyhint: "search", value: filters.q });
   const shown = h("p", { class: "home-shown", role: "status" });
   const sortSelect = h("select", { class: "input home-sort", "aria-label": TH().sort });
@@ -453,7 +458,7 @@ export function renderHome(root: HTMLElement): void {
     h("header", { class: "home-cases-head" }, h("h2", { id: "home-cases-h", class: "home-card-title" }, TH().casesTitle), toolbar),
     tableSlot,
   );
-  const dash = h("div", { class: "home-dash" }, h("h1", { class: "visually-hidden" }, TH().pageHeading), intro, top, cases);
+  const dash = h("div", { class: "home-dash" }, h("h1", { class: "visually-hidden" }, TH().pageHeading), intro, top, chal, cases);
   setChildren(root, dash);
 
   let table: DataTable<Row> | null = null;
@@ -609,6 +614,7 @@ export function renderHome(root: HTMLElement): void {
     top.classList.toggle("is-single", single);
     if (single) setChildren(top, todayCard(state, signedIn, reload));
     else setChildren(top, continueCard(state, signedIn), todayCard(state, signedIn, reload));
+    drawChallenges();
     if (state.loading) {
       // Keep rows already shown (a retry): only the first load draws skeleton rows.
       if (table === null) buildTable().setState({ kind: "loading", label: TH().loadingCases, rows: Math.min(6, Math.max(3, caseSummaries().length)) });
@@ -622,17 +628,48 @@ export function renderHome(root: HTMLElement): void {
     fit();
   };
 
+  /** The challenge row: who it is for comes from the account (a guess until /api/session answers). */
+  function drawChallenges(): void {
+    if (!onHome()) return;
+    const mode = challengeMode(likelySignedIn(), isAccountKnown() ? cachedAccount() : undefined);
+    chal.hidden = mode === "none";
+    if (mode === "none") {
+      setChildren(chal);
+      return;
+    }
+    const streak: StreakState = state.loading ? { kind: "loading" } : state.me === null ? { kind: "failed" } : { kind: "ready", stats: state.me, today: state.today };
+    setChildren(chal, mode === "guest" ? guestCard() : classesCard(state.classes, reloadClasses), streakCard(streak));
+    fit();
+  }
+  function reloadClasses(): void {
+    state = { ...state, classes: { kind: "loading" } };
+    drawChallenges();
+    loadClasses(Promise.resolve(cachedAccount()));
+  }
+  /** One GET /api/classes, then one detail per class shown: only for a full account (guests can't join). */
+  function loadClasses(account: Promise<AccountView | null>): void {
+    void account
+      .then((acc) => (acc !== null && isClassPlayer(acc) ? loadHomeClasses() : null), () => null)
+      .then((classes) => {
+        if (!onHome() || classes === null) return;
+        state = { ...state, classes };
+        drawChallenges();
+      });
+  }
+
   // Fit the dashboard to the viewport on desktop: the table panel scrolls inside, the page doesn't.
   const fit = (): void => {
     if (activeRender !== token || !dash.isConnected) return;
     dash.style.maxBlockSize = "";
     if (window.matchMedia("(max-width: 640px)").matches) return;
-    const doc = document.documentElement;
-    if (doc.scrollHeight <= window.innerHeight) return;
+    // Measure against the content area that scrolls (main.app-content): the room from the dashboard's top, unscrolled,
+    // to the viewport's bottom, less the area's bottom padding. (The document itself only scrolls once that overflows.)
+    const scroller = dash.closest<HTMLElement>("main");
+    const pad = scroller === null ? 0 : Number.parseFloat(getComputedStyle(scroller).paddingBlockEnd) || 0;
     const rect = dash.getBoundingClientRect();
-    const topDoc = rect.top + window.scrollY;
-    const below = doc.scrollHeight - (topDoc + rect.height);
-    const avail = window.innerHeight - topDoc - below;
+    const top = rect.top + (scroller?.scrollTop ?? 0) + window.scrollY;
+    const avail = window.innerHeight - top - pad;
+    if (rect.height <= avail) return;
     dash.style.maxBlockSize = `${Math.max(MIN_DASH_PX, Math.floor(avail))}px`;
   };
   let fitFrame = 0;
@@ -664,16 +701,24 @@ export function renderHome(root: HTMLElement): void {
     );
     const account = loadAccount();
     if (!isAccountKnown()) void account.then(draw, () => undefined);
+    void account.then(
+      (acc) => {
+        loadedFor = accountKey(acc);
+      },
+      () => undefined,
+    );
+    type Loaded = { me: UserStats | null; failed: boolean; player: boolean };
     const stats = account.then(
-      (acc) =>
+      (acc): Promise<Loaded> | Loaded =>
         acc?.status === "approved" && acc.role !== "admin"
           ? fetchMyStats().then(
-              (s) => ({ cases: s.cases, failed: false, player: true }),
-              () => ({ cases: [], failed: true, player: true }),
+              (s): Loaded => ({ me: s, failed: false, player: true }),
+              (): Loaded => ({ me: null, failed: true, player: true }),
             )
-          : { cases: [], failed: false, player: false },
-      () => ({ cases: [], failed: false, player: false }),
+          : { me: null, failed: false, player: false },
+      (): Loaded => ({ me: null, failed: false, player: false }),
     );
+    loadClasses(account);
     // The case list (GET /api/cases) arrives with the other two; a failed fetch is retried by reload().
     const catalog = catalogFailed() ? reloadCatalog() : catalogReady;
     void Promise.all([today, stats, catalog]).then(([t, s]) => {
@@ -682,18 +727,25 @@ export function renderHome(root: HTMLElement): void {
         loading: false,
         today: t.value,
         todayFailed: t.failed,
-        stats: new Map(s.cases.map((c) => [c.caseId, c])),
+        stats: new Map((s.me?.cases ?? []).map((c) => [c.caseId, c])),
         statsFailed: s.failed,
         isPlayer: s.player,
+        me: s.me,
+        classes: state.classes,
       };
       draw();
     });
   }
   function reload(): void {
-    state = { ...state, loading: true };
+    state = { ...state, loading: true, classes: { kind: "loading" } };
     draw();
     load();
   }
+  // Starting a guest session, upgrading it or signing out elsewhere changes who home is for: load again for them.
+  accountChanged = (): void => {
+    if (!onHome() || state.loading) return;
+    if (accountKey(cachedAccount()) !== loadedFor) reload();
+  };
 
   draw();
   load();
@@ -712,9 +764,44 @@ function introStrip(): HTMLElement {
       "div",
       { class: "home-intro-actions" },
       h("a", { class: "btn btn-primary btn-sm", href: "#/signup" }, TO().ctaCreate),
+      guestButton(),
       h("a", { class: "btn btn-ghost btn-sm", href: "#/login" }, TO().ctaSignIn),
     ),
   );
 }
 
+/** "Play as guest" (#176): starts a guest session; the account change then reloads home for the guest. */
+function guestButton(): HTMLElement {
+  const button = h("button", { type: "button", class: "btn btn-sm" }, TGu().playAsGuest);
+  let busy = false;
+  button.addEventListener("click", () => {
+    if (busy) return;
+    busy = true;
+    button.setAttribute("aria-disabled", "true");
+    void import("./guest")
+      .then((m) => m.playAsGuest())
+      .finally(() => {
+        busy = false;
+        button.removeAttribute("aria-disabled");
+      });
+  });
+  return button;
+}
+
+type ChallengeMode = "none" | "guest" | "player";
+
+/** Full accounts that may be in classes (guests can't join; the site admin has no memberships). */
+const isClassPlayer = (acc: AccountView): boolean => acc.kind === "user" && acc.status === "approved" && acc.role !== "admin";
+
+/** Who the challenge row is for. `account` is undefined while /api/session hasn't answered (then: the hint). */
+function challengeMode(likely: boolean, account: AccountView | null | undefined): ChallengeMode {
+  if (account === undefined) return likely ? "player" : "none";
+  if (account === null || account.role === "admin" || account.status !== "approved") return "none";
+  return account.kind === "guest" ? "guest" : "player";
+}
+
+const accountKey = (acc: AccountView | null): string => (acc === null ? "" : `${acc.id}:${acc.kind}`);
+
 let activeRender: symbol | null = null;
+let accountChanged: (() => void) | null = null;
+onAccountChange(() => accountChanged?.());

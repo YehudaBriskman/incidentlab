@@ -1,0 +1,31 @@
+/* ============ My stats (views/stats.ts), #183 ============
+   The global-board switch and the Classes section share one row of two soft cards (no dead space beside the
+   switch); a guest's upgrade card sits above the tiles. Roles and aliases only. */
+
+.stats-pair { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--gap-stack); align-items: stretch; margin-block-end: var(--gap-section); }
+.stats-card { display: flex; flex-direction: column; gap: var(--gap-related); min-inline-size: 0; padding: var(--space-4) var(--pad-card); background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift); }
+.stats-pair .board-pref { margin-block-end: 0; }
+.stats-card .section-title { margin: 0; }
+.stats-card-foot { margin-block-start: auto; align-self: flex-start; }
+.stats-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--gap-related); }
+.stats-classes-body { display: flex; flex-direction: column; align-items: flex-start; gap: var(--gap-related); min-inline-size: 0; }
+.stats-classes-body > p { margin: 0; }
+.stats-classes-wrap { inline-size: 100%; border: 0; box-shadow: none; border-radius: 0; }
+.stats-classes-error { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-related); color: var(--danger-fg); }
+.stats-classes-error p { margin: 0; }
+
+.stats-upgrade {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--gap-related) var(--gap-stack);
+  margin-block-start: var(--gap-stack); padding: var(--space-3) var(--pad-card);
+  background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift);
+}
+.stats-upgrade-text { flex: 1 1 24rem; min-inline-size: 0; }
+.stats-upgrade-title { margin: 0; font-size: var(--type-body-size); line-height: var(--type-body-lh); font-weight: 600; }
+.stats-upgrade-text p { margin: 0; }
+
+@media (max-width: 900px) {
+  .stats-pair { grid-template-columns: minmax(0, 1fr); }
+}
+@media (forced-colors: active) {
+  .stats-card, .stats-upgrade { border: 1px solid CanvasText; }
+}
