@@ -11,13 +11,51 @@ export const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 const CASE = "ghost-in-the-network";
 
 export type Who = "visitor" | "guest" | "player" | "admin";
+// The class pages (#182): `:class` and `:board` become the id and board token of a class the signed-in player (or
+// the site admin) creates before the scan.
 export const PAGES: Record<Who, readonly string[]> = {
-  visitor: ["/#/", "/#/login", "/#/signup", "/#/leaderboard", `/#/case/${CASE}`, `/#/case/${CASE}/explorer`],
+  visitor: ["/#/", "/#/login", "/#/signup", "/#/leaderboard", `/#/case/${CASE}`, `/#/case/${CASE}/explorer`, "/#/classes", "/#/join/ABCDE-FGHJK"],
   // a guest (#176) sees the guest banner on every page, and the account menu says "Guest"
-  guest: ["/#/", `/#/case/${CASE}`, `/#/case/${CASE}/toolbox`, "/#/me"],
-  player: ["/#/", `/#/case/${CASE}`, `/#/case/${CASE}/toolbox`, `/#/case/${CASE}/explorer`, "/#/me", "/#/leaderboard"],
-  admin: ["/#/admin", "/#/author", "/#/author/reviews", "/#/admin?tab=live", "/#/admin?tab=stats", "/#/admin?tab=event", "/#/admin?tab=schedule", "/#/admin?tab=audit", `/#/case/${CASE}`, `/#/case/${CASE}/present`],
+  guest: ["/#/", `/#/case/${CASE}`, `/#/case/${CASE}/toolbox`, "/#/me", "/#/classes"],
+  player: [
+    "/#/",
+    `/#/case/${CASE}`,
+    `/#/case/${CASE}/toolbox`,
+    `/#/case/${CASE}/explorer`,
+    "/#/me",
+    "/#/leaderboard",
+    "/#/classes",
+    "/#/class/:class",
+    "/#/class/:class/manage?tab=members",
+    "/#/class/:class/manage?tab=live",
+    "/#/class/:class/manage?tab=settings",
+    "/#/classboard/:board?projector=1",
+  ],
+  admin: [
+    "/#/admin",
+    "/#/author",
+    "/#/author/reviews",
+    "/#/admin?tab=live",
+    "/#/admin?tab=stats",
+    "/#/admin?tab=event",
+    "/#/admin?tab=schedule",
+    "/#/admin?tab=audit",
+    `/#/case/${CASE}`,
+    `/#/case/${CASE}/present`,
+    "/#/classes",
+    "/#/class/:class/manage?tab=cases",
+    "/#/class/:class/manage?tab=schedule",
+    "/#/class/:class/manage?tab=event",
+  ],
 };
+
+/** Creates a class for the signed-in player or admin (the class pages need one). */
+async function classFor(page: Page): Promise<{ id: string; board: string }> {
+  const res = await page.request.post("/api/classes", { data: { name: "A11y class" } });
+  expect(res.status(), await res.text()).toBe(201);
+  const body = (await res.json()) as { class: { id: string; boardToken?: string } };
+  return { id: body.class.id, board: body.class.boardToken ?? "" };
+}
 
 export async function signIn(page: Page, who: Who): Promise<void> {
   if (who === "visitor") return;
@@ -53,8 +91,11 @@ export function axeScan(who: Who, lang: "en" | "he", scheme: "light" | "dark") {
     const context = await browser.newContext({ colorScheme: scheme, viewport: { width: 1280, height: 900 } });
     const page = await context.newPage();
     await signIn(page, who);
+    const needsClass = PAGES[who].some((p) => p.includes(":class") || p.includes(":board"));
+    const cls = needsClass ? await classFor(page) : null;
     const serious: string[] = [];
-    for (const [i, path] of PAGES[who].entries()) {
+    for (const [i, template] of PAGES[who].entries()) {
+      const path = cls === null ? template : template.replace(":class", cls.id).replace(":board", encodeURIComponent(cls.board));
       await page.goto(path);
       if (i === 0 && lang === "he") await toHebrew(page);
       await page.waitForLoadState("networkidle");
