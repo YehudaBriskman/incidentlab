@@ -174,12 +174,12 @@ input[type="checkbox"].switch:checked::before { transform: none; background: var
 /* ---- auth: the form card at padding 24 with 40px fields ---- */
 .center-card { padding: var(--pad-card-lg); border: 0; }
 .center-card.gate { padding: var(--pad-card); gap: var(--gap-stack); }
-.center-card.gate .input { min-block-size: 40px; }
+.center-card.gate .input { min-block-size: var(--control-base); }
 /* guest play (#176): the quieter second card under the sign-in form, and the upgrade dialog's form */
 .center-card.guest-choice { margin-block-start: var(--space-4); }
 .guest-choice h2 { margin: 0; font-size: var(--step-1); }
 .upgrade-form { display: flex; flex-direction: column; gap: var(--gap-stack); }
-.upgrade-form .input { min-block-size: 40px; }
+.upgrade-form .input { min-block-size: var(--control-base); }
 .field-label { font-size: var(--type-small-size); font-weight: 600; }
 .error-summary {
   border: 0; border-radius: var(--radius-card); background: var(--danger-bg);
@@ -191,7 +191,7 @@ input[type="checkbox"].switch:checked::before { transform: none; background: var
 .form-section { padding: var(--pad-card); border: 0; border-radius: var(--radius-card); box-shadow: var(--surface-lift); background: var(--surface); }
 /* a borderless fieldset: the legend sits inside the card as its title */
 .form-section-legend { float: inline-start; inline-size: 100%; padding: 0; margin: 0; font-size: var(--type-title-size); font-weight: 600; }
-.form-section :is(.input, select) { min-block-size: 40px; }
+.form-section :is(.input, select) { min-block-size: var(--control-base); }
 .author-diff { padding: var(--pad-card); }
 .check-row input { inline-size: 16px; block-size: 16px; }
 

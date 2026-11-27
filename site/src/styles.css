@@ -146,6 +146,7 @@
   --target-min: 24px;
   --control-xs: 28px;
   --control-sm: 36px;
+  --control-base: 40px;   /* the Soft UI default button and input (#247) */
   --control-md: 44px;
   --control-lg: 52px;
 
@@ -235,6 +236,7 @@
     --target-min: 44px;
     --control-xs: 44px;
     --control-sm: 44px;
+    --control-base: 44px;
   }
 }
 
@@ -588,7 +590,7 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 .small { font-size: var(--type-small-size); line-height: var(--type-small-lh); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 /* off screen by its own height (not a fixed offset), so it stays hidden at any text size */
-.skip-link { position: absolute; inset-inline-start: var(--space-2); top: 0; transform: translateY(-100%); z-index: calc(var(--z-toast) + 1); background: var(--accent); color: var(--on-accent); font-weight: 600; text-decoration: none; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); }
+.skip-link { position: absolute; inset-inline-start: var(--space-2); top: 0; transform: translateY(-100%); min-block-size: var(--target-min); display: inline-flex; align-items: center; z-index: calc(var(--z-toast) + 1); background: var(--accent); color: var(--on-accent); font-weight: 600; text-decoration: none; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); }
 .skip-link:focus { top: var(--space-2); transform: none; }
 [hidden] { display: none !important; }
 
@@ -687,7 +689,7 @@ body { min-height: 0; overflow: hidden; }
 :root[data-nav="collapsed"] .app-frame > .app-nav :is(.nav-link, .nav-sub-link, .nav-collapse) { justify-content: center; padding-inline: 0; position: relative; }
 :root[data-nav="collapsed"] .app-frame > .app-nav .nav-head { justify-content: center; padding-inline: 0; }
 :root[data-nav="collapsed"] .app-frame > .app-nav .nav-sub { padding-inline-start: 0; }
-:root[data-nav="collapsed"] .app-frame > .app-nav :is(.nav-sub-badge, .nav-sub .tab-badge) { position: absolute; inset-block-start: 2px; inset-inline-end: 2px; min-inline-size: 16px; font-size: 10px; line-height: 16px; padding: 0 3px; }
+:root[data-nav="collapsed"] .app-frame > .app-nav :is(.nav-sub-badge, .nav-sub .tab-badge) { position: absolute; inset-block-start: 0; inset-inline-end: 0; min-inline-size: var(--space-4); font-size: var(--type-label-size); line-height: var(--space-4); padding: 0 var(--space-1); }
 @media (max-width: 1024px) {
   .app-frame > .app-nav .nav-scroll { padding-inline: var(--space-2); }
   .app-frame > .app-nav :is(.nav-label, .logo-word, .nav-sub-title, .nav-foot-link),
@@ -697,7 +699,7 @@ body { min-height: 0; overflow: hidden; }
   .app-frame > .app-nav :is(.nav-link, .nav-sub-link) { justify-content: center; padding-inline: 0; position: relative; }
   .app-frame > .app-nav .nav-head { justify-content: center; padding-inline: 0; }
   .app-frame > .app-nav .nav-sub { padding-inline-start: 0; }
-  .app-frame > .app-nav :is(.nav-sub-badge, .nav-sub .tab-badge) { position: absolute; inset-block-start: 2px; inset-inline-end: 2px; min-inline-size: 16px; font-size: 10px; line-height: 16px; padding: 0 3px; }
+  .app-frame > .app-nav :is(.nav-sub-badge, .nav-sub .tab-badge) { position: absolute; inset-block-start: 0; inset-inline-end: 0; min-inline-size: var(--space-4); font-size: var(--type-label-size); line-height: var(--space-4); padding: 0 var(--space-1); }
 }
 /* the drawer: the same <nav> in a start-edge Sheet, always with labels */
 .nav-sheet .ov-body { padding: 0; display: flex; }
@@ -2008,18 +2010,18 @@ html { scrollbar-gutter: stable; }
 
 /* =====================================================================
    Soft UI sweep A (#97): the shared controls and overlay internals, after the Liba recipes (DESIGN.md 3.0.0
-   "Component recipes"). Sizes here are the recipe sizes (40 / 36 / 44 controls); the token block's older
-   --control-* scale stays for the views until their sweeps.
+   "Component recipes"). Sizes are the recipe sizes (40 / 36 / 44 controls), read from the control tokens
+   (--control-base / -sm / -md), so a coarse pointer lifts every one of them to 44px (#247).
    ===================================================================== */
 
-/* ---- buttons: 40 / sm 36 / lg 44; 14px medium; tinted by default ---- */
+/* ---- buttons: 40 / sm 36 / lg 44 (all 44 on touch); 14px medium; tinted by default ---- */
 .btn {
-  --btn-h: 40px;
+  --btn-h: var(--control-base);
   min-height: var(--btn-h); padding: 0 var(--space-4); gap: var(--space-2);
   font-size: var(--type-small-size); font-weight: 500; line-height: 1.25;
 }
 .btn-sm { --btn-h: var(--control-sm); padding-inline: var(--space-3); font-size: var(--type-small-size); }
-.btn-lg { --btn-h: 44px; padding-inline: var(--space-6); font-size: var(--type-small-size); }
+.btn-lg { --btn-h: var(--control-md); padding-inline: var(--space-6); font-size: var(--type-small-size); }
 .btn:disabled, .btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
 .btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .btn:hover:not(:disabled) { background: color-mix(in oklab, var(--fill-track) 80%, var(--fill-inset)); }
@@ -2034,21 +2036,30 @@ html { scrollbar-gutter: stable; }
 .btn-danger { background: var(--danger-fg); color: var(--on-danger); }
 .btn-danger:hover:not(:disabled) { background: color-mix(in oklab, var(--danger-fg) 90%, var(--level-1)); }
 /* icon buttons: a 40px square, 8px corners; on touch the hit area reaches 44px */
-.btn-icon { --btn-h: 40px; inline-size: var(--btn-h); min-inline-size: var(--btn-h); padding: 0; position: relative; }
+.btn-icon { --btn-h: var(--control-base); inline-size: var(--btn-h); min-inline-size: var(--btn-h); padding: 0; position: relative; }
 .btn-icon.btn-sm { --btn-h: var(--control-sm); }
 @media (pointer: coarse) {
-  :is(.btn-icon, .ov-close, .toast-close, .banner-close)::after { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: 44px; block-size: 44px; translate: -50% -50%; }
-  [dir="rtl"] :is(.btn-icon, .ov-close, .toast-close, .banner-close)::after { translate: 50% -50%; }
+  /* a narrow text button (a short "sm" label, an arrow) is still a 44px square on touch */
+  .btn { min-inline-size: var(--target-min); }
+  :is(.btn-icon, .ov-close, .toast-close, .banner-close, .info-dot)::after { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: var(--target-min); block-size: var(--target-min); translate: -50% -50%; }
+  [dir="rtl"] :is(.btn-icon, .ov-close, .toast-close, .banner-close, .info-dot)::after { translate: 50% -50%; }
+  .info-dot { position: relative; }
+  /* Small text links (a card's "All classes", the class page's case links, "Back to authoring"): the hit area
+     grows to 44px tall around the text without moving anything (#247). */
+  :is(.hit-link, .home-card-link, .stats-card-foot, .stats-card-head > a, .home-today-title, .class-today-title) { position: relative; }
+  :is(.hit-link, .home-card-link, .stats-card-foot, .stats-card-head > a, .home-today-title, .class-today-title)::after {
+    content: ""; position: absolute; inset-inline: 0; inset-block: calc(50% - var(--target-min) / 2);
+  }
 }
 
-/* ---- inputs and selects: 40px, 8px corners, the 3:1 control edge, 12px inline padding;
+/* ---- inputs and selects: 40px (44 on touch), 8px corners, the 3:1 control edge, 12px inline padding;
         16px text on phones (no iOS zoom on focus), 14px from 768px ---- */
 .input, select.input {
-  min-height: 40px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-control);
+  min-height: var(--control-base); padding: var(--space-2) var(--space-3); border-radius: var(--radius-control);
   border: 1px solid var(--edge-control); background: var(--level-1); font-size: 1rem; line-height: 1.4;
   transition: border-color var(--motion-settle) var(--ease-standard);
 }
-.input-lg { min-height: 44px; }
+.input-lg { min-height: var(--control-md); }
 @media (min-width: 768px) { .input, select.input { font-size: var(--type-small-size); } }
 .input:disabled { opacity: 0.5; cursor: not-allowed; }
 .input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
@@ -2074,8 +2085,8 @@ input[type="checkbox"]::before {
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / contain no-repeat;
 }
-/* the box is 16px; its hit area reaches the 24px minimum (WCAG 2.5.8) */
-input[type="checkbox"]::after { content: ""; position: absolute; inset: -5px; }
+/* the box is 16px; its hit area reaches the 24px minimum (WCAG 2.5.8), 44px on touch (#247) */
+input[type="checkbox"]::after { content: ""; position: absolute; inset: calc(50% - var(--target-min) / 2); }
 input[type="checkbox"]:checked, input[type="checkbox"]:indeterminate { background: var(--accent); border-color: var(--accent); }
 input[type="checkbox"]:checked::before { transform: scale(1); }
 input[type="checkbox"]:indeterminate::before { transform: scale(1); -webkit-mask: none; mask: none; block-size: 2px; border-radius: 1px; }

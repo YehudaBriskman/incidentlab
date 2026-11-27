@@ -171,7 +171,7 @@ function draw(root: HTMLElement): void {
       { class: "review-page" },
       h("h1", { id: "reviews-h" }, TRv().reviewsTitle),
       h("p", { class: "muted" }, TRv().reviewsLead),
-      h("p", {}, h("a", { href: "#/author" }, TRv().backToAuthoring)),
+      h("p", {}, h("a", { class: "hit-link", href: "#/author" }, TRv().backToAuthoring)),
       table.element,
     ),
   );
