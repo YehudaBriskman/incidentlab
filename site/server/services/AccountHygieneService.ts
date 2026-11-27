@@ -81,8 +81,11 @@ export class AccountHygieneService {
     if (!apply) return progress.length;
     for (const guest of guests) {
       const own = progress.filter((p) => p.accountId === guest.id);
-      await this.trash.put({ kind: "account", label: `idle guest ${guest.username}`, account: guest, progress: own, firstBlood: {} });
+      // Guests can't join classes, but the delete stays the same as an admin delete: memberships go to the trash too.
+      const memberships = await this.repos.classes.membershipsOf(guest.id);
+      await this.trash.put({ kind: "account", label: `idle guest ${guest.username}`, account: guest, progress: own, firstBlood: {}, memberships });
       await this.repos.progress.deleteMany({ accountId: guest.id });
+      await this.repos.classes.removeAccount(guest.id);
       await this.scores.remove(guest.id); // its score summary (and any stray board marker) go too; a restore re-derives them
       await this.repos.accounts.delete(guest.id);
     }

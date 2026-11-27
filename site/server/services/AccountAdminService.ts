@@ -135,10 +135,12 @@ export class AccountAdminService {
     const found = await this.repos.accounts.get(accountId);
     if (!found) throw new AppError(404, "account not found");
     const progress = (await this.repos.progress.list()).filter((r) => r.accountId === accountId);
+    const memberships = await this.repos.classes.membershipsOf(accountId);
     // Trash first: if this write fails, nothing has been deleted yet.
-    await this.trash.put({ kind: "account", label: `account ${found.data.username}`, account: found.data, progress, firstBlood: {} });
+    await this.trash.put({ kind: "account", label: `account ${found.data.username}`, account: found.data, progress, firstBlood: {}, memberships });
     // Sessions die with the account (authenticate() rejects sessions whose account is gone).
     await this.repos.progress.deleteMany({ accountId });
+    await this.repos.classes.removeAccount(accountId); // out of every class, in both indexes (#179)
     await this.scores?.remove(accountId); // off the board at once; a restore rebuilds both from the trash
     await this.repos.accounts.delete(accountId);
     await this.repos.usernames.release(sha256Hex(found.data.usernameKey));
