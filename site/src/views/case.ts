@@ -755,7 +755,11 @@ function renderQuestionStage(
       .catch((err: unknown) => {
         if (handleAuthLoss(err)) return;
         const server = recoverFromWrite(err);
-        if (server !== null) return update(server, id);
+        if (server !== null) {
+          // Already bought (another tab, a lost reply): show the hints, as a purchase would.
+          if (!isNarrow()) writePane("hints");
+          return update(server, id, { kind: "hint", index: s.hintsRevealed });
+        }
         hintError.textContent = errorMessage(err);
       });
   });

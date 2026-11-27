@@ -41,7 +41,9 @@
 .cs-progress { display: block; block-size: 2px; border-radius: var(--radius-pill); background: var(--fill-track); overflow: hidden; }
 .cs-progress .progress-fill { display: block; block-size: 100%; }
 /* "Costs so far" */
-.costs-panel { inline-size: min(22rem, calc(100vw - 2 * var(--gutter))); padding: var(--space-4); display: grid; gap: var(--gap-related); font-size: var(--type-small-size); }
+/* no display here: a closed popover must keep the UA's display: none */
+.costs-panel { inline-size: min(22rem, calc(100vw - 2 * var(--gutter))); padding: var(--space-4); font-size: var(--type-small-size); }
+.costs-panel > * + * { margin-block-start: var(--gap-related); }
 .costs-panel:focus { outline: none; }
 .costs-panel:focus-visible { outline: var(--focus-width) solid var(--focus-ring); }
 .costs-h { margin: 0; font-size: var(--type-small-size); font-weight: 600; }
