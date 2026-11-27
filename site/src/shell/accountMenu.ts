@@ -293,6 +293,9 @@ export function createAccountMenu(): HTMLElement {
   };
   onAccountChange(() => {
     if (classLine !== null && classLine.forAccount !== cachedAccount()?.id) classLine = null;
+    // A closed (or closing, after Sign out) panel must not keep the previous account's name: it is drawn afresh on
+    // open, and a fading panel then shows nothing stale.
+    if (!control.isOpen()) setChildren(panel);
     draw();
   });
   // Settings changed elsewhere (the settings page): resync the open radios unless the change came from them.
