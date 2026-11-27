@@ -52,8 +52,9 @@ test("revealing a command on the case page keeps focus and scroll at that card",
   expect((await p.page.request.post(`/api/cases/${CASE_ID}/setup-done`, { data: {} })).status()).toBe(200);
   await p.page.goto(`/#/case/${CASE_ID}`);
   const reveal = p.page.locator("#stage .btn-reveal").last();
-  await reveal.scrollIntoViewIfNeeded();
   const card = reveal.locator("xpath=ancestor::*[@data-tool][1]");
+  await card.locator("summary").click(); // the row opens to show Reveal (#214)
+  await reveal.scrollIntoViewIfNeeded();
   const toolId = await card.getAttribute("data-tool");
   expect(toolId).not.toBeNull();
   await reveal.click();
