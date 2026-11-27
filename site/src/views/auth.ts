@@ -682,7 +682,7 @@ function renderRecoverForm(root: HTMLElement, opts: AuthFormOptions): void {
 
 /**
  * The code itself with Copy and Download (.txt). Shared by the gate's "save your recovery code" screen, the
- * regenerate section on #/me and the guest upgrade dialog. The code is text in the page (selectable), never stored
+ * regenerate section on #/settings/security and the guest upgrade dialog. The code is text in the page (selectable), never stored
  * by the browser. `onSaved` runs after a successful copy or a download (#205: closing unsaved asks first).
  */
 export function recoveryCodePanel(code: string, username: string, onSaved?: () => void): HTMLElement {
@@ -745,19 +745,29 @@ export function confirmCodeSaved(saved: boolean): Promise<boolean> {
   return confirm({ title: TA().codeUnsavedTitle, body: TA().codeUnsavedBody, confirmLabel: TA().codeUnsavedClose, cancelLabel: TA().codeUnsavedBack });
 }
 
-/** A code made on #/me, kept in memory until "Done" so a language switch re-shows it instead of losing it. */
+/** A code made on #/settings/security, kept in memory until "Done" so a language switch re-shows it instead of losing it. */
 let regeneratedCode: { code: string; username: string } | null = null;
 
-/** #/me: replace the recovery code (needs the current password). Shows the new code once, with Copy and Download. */
+/**
+ * #/settings/security: replace the recovery code (needs the current password). Shows the new code once, with Copy
+ * and Download. An h3 section under the page's "Security" h2; its buttons are secondary, since the password form
+ * above it holds the section's one primary.
+ */
 export function recoveryCodeSection(username: string): HTMLElement {
   if (regeneratedCode !== null && regeneratedCode.username !== username) regeneratedCode = null; // another account
   const body = h("div", { class: "recovery-section-body" });
-  const section = h("details", { class: "pw-section recovery-section" }, h("summary", { class: "section-title" }, TA().recoverySection), body);
+  const section = h(
+    "section",
+    { class: "recovery-section", "aria-labelledby": "recovery-h" },
+    h("h3", { id: "recovery-h", class: "section-title" }, TA().recoverySection),
+    body,
+  );
+  let initial = true;
 
   const showForm = (): void => {
-    const current = passwordField({ id: "me-recovery-current", name: "current-password", label: TG().currentPw, autocomplete: "current-password" });
+    const current = passwordField({ id: "settings-recovery-current", name: "current-password", label: TG().currentPw, autocomplete: "current-password" });
     const formError = h("p", { class: "form-error", role: "alert" });
-    const submit = h("button", { type: "submit", class: "btn btn-primary" }, TA().recoveryNew);
+    const submit = h("button", { type: "submit", class: "btn" }, TA().recoveryNew);
     const form = h("form", { class: "pw-form", novalidate: true }, current.nodes, formError, h("div", {}, submit));
     current.input.addEventListener("input", () => {
       if (current.hasError() && current.input.value.length > 0) current.setError(null);
@@ -799,20 +809,19 @@ export function recoveryCodeSection(username: string): HTMLElement {
     if (shown === null) return showForm();
     const lead = h("p", { class: "recovery-code-warning", tabindex: "-1" }, TA().codeLeadRegenerated);
     // The label is the acknowledgement (#205): the code is gone once this is pressed.
-    const done = h("button", { type: "button", class: "btn btn-primary" }, TA().codeSaved);
+    const done = h("button", { type: "button", class: "btn" }, TA().codeSaved);
     done.addEventListener("click", () => {
       regeneratedCode = null;
       showForm();
       body.querySelector<HTMLInputElement>("input")?.focus();
     });
     setChildren(body, lead, recoveryCodePanel(shown.code, shown.username), h("div", {}, done));
-    if (section.open) lead.focus();
+    if (!initial) lead.focus(); // a code just made; a re-render (language switch) leaves focus where it is
   };
 
-  if (regeneratedCode !== null) {
-    section.open = true;
-    showCode();
-  } else showForm();
+  if (regeneratedCode !== null) showCode();
+  else showForm();
+  initial = false;
   return section;
 }
 

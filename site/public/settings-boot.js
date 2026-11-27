@@ -5,9 +5,12 @@
 (function () {
   "use strict";
   var root = document.documentElement;
-  // Same route test as asideRoute() in site/src/main.ts: a case's toolbox and its Explorer have a page panel.
+  // Same route test as asideRoute() in site/src/main.ts: a case's toolbox and its Explorer, and the settings
+  // sections (#219, lib/settings-route.ts), have a page panel.
   var path = window.location.hash.replace(/^#\/?/, "").split("?")[0] || "";
-  if (/^case\/[^/]+\/(toolbox|explorer)\/?$/.test(path)) root.setAttribute("data-aside-page", "");
+  if (/^case\/[^/]+\/(toolbox|explorer)\/?$/.test(path) || /^settings\/(account|security|privacy|display)\/?$/.test(path)) {
+    root.setAttribute("data-aside-page", "");
+  }
   var raw = null;
   try {
     raw = window.localStorage.getItem("il.settings");

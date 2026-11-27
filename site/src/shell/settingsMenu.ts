@@ -10,14 +10,17 @@ const PANEL_ID = "settings-panel";
 const GEAR_SVG =
   '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
 
-type Option = { value: string; label: string };
-type Group = { name: string; legend: string; options: Option[]; current: string; apply: (value: string) => void };
+/** One radio of a display setting; `lang` marks an option written in another language (the language picker). */
+export type SettingOption = { value: string; label: string; lang?: string };
+/** One display setting as a radio group. Shared with the settings page's Display section (views/settings.ts). */
+export type SettingGroup = { name: string; legend: string; options: SettingOption[]; current: string; apply: (value: string) => void };
 
 function percent(scale: number): string {
   return new Intl.NumberFormat(locale(), { style: "percent", maximumFractionDigits: 1 }).format(scale / 100);
 }
 
-function groups(s: Settings): Group[] {
+/** The display settings as radio groups, in on-screen order. The ⚙ panel and #/settings/display both draw these. */
+export function displayGroups(s: Settings): SettingGroup[] {
   const t = TS();
   const themeLabel: Record<Settings["theme"], string> = { system: t.themeSystem, light: t.themeLight, dark: t.themeDark };
   const motionLabel: Record<Settings["reducedMotion"], string> = { system: t.motionSystem, reduce: t.motionReduce };
@@ -76,7 +79,11 @@ function groups(s: Settings): Group[] {
   ];
 }
 
-function renderGroup(g: Group): HTMLFieldSetElement {
+/**
+ * One setting as a fieldset of native radios styled as a segmented control. `namePrefix` keeps two copies on one
+ * page (the ⚙ panel and the settings page) in separate radio groups.
+ */
+export function renderSettingGroup(g: SettingGroup, namePrefix = "set"): HTMLFieldSetElement {
   return h(
     "fieldset",
     { class: "settings-group" },
@@ -87,10 +94,10 @@ function renderGroup(g: Group): HTMLFieldSetElement {
       g.options.map((o) =>
         h(
           "label",
-          { class: "settings-option" },
+          { class: "settings-option", lang: o.lang },
           h("input", {
             type: "radio",
-            name: `set-${g.name}`,
+            name: `${namePrefix}-${g.name}`,
             value: o.value,
             checked: o.value === g.current,
             onchange: (ev) => {
@@ -119,7 +126,7 @@ export function createSettingsMenu(): HTMLElement[] {
     setChildren(
       panel,
       h("h2", { id: `${PANEL_ID}-title`, class: "settings-title" }, TS().settingsTitle),
-      groups(loadSettings()).map(renderGroup),
+      displayGroups(loadSettings()).map((g) => renderSettingGroup(g)),
       h("a", { class: "settings-link", href: "/accessibility.html" }, TS().a11yStatement),
     );
     if (focusName !== null) panel.querySelector<HTMLInputElement>(`input[name="${focusName}"]:checked`)?.focus();

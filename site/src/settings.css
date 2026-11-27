@@ -1,0 +1,80 @@
+/* ============ Settings (views/settings.ts), #219 ============
+   One reading column of soft cards beside the section list in the page panel. Up to 1024px the panel folds
+   away and the sections show as one segmented row (.settings-tabs) instead of behind the panel button.
+   The Display radios reuse the ⚙ panel's segmented control (.settings-group, .settings-option in styles.css);
+   on this page they keep a 44px target at every pointer. Roles and logical properties only. */
+
+.settings-page { display: flex; flex-direction: column; gap: var(--gap-stack); max-inline-size: var(--read); }
+.settings-page > h1 { margin: 0; }
+.settings-section { display: flex; flex-direction: column; gap: var(--gap-stack); min-inline-size: 0; }
+.settings-section > h2 { margin: 0; }
+.settings-intro { margin: calc(-1 * var(--gap-related)) 0 0; max-inline-size: var(--measure); }
+
+.settings-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: var(--gap-related); min-inline-size: 0;
+  padding: var(--pad-card); background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift);
+}
+.settings-card > * { max-inline-size: 100%; }
+.settings-card p { margin: 0; }
+.settings-card-title { margin: 0; font-size: var(--type-body-size); line-height: var(--type-body-lh); font-weight: 600; }
+.settings-card .pw-form, .settings-card .recovery-section, .settings-card .settings-groups { inline-size: 100%; }
+.settings-card .recovery-section .section-title { margin: 0 0 var(--gap-related); font-size: var(--type-body-size); color: var(--text-1); }
+.settings-note { max-inline-size: var(--measure); }
+
+.settings-upgrade { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--gap-related) var(--gap-stack); }
+.settings-upgrade-text { flex: 1 1 20rem; min-inline-size: 0; }
+
+/* Account details: label over value, one pair per row */
+.settings-details { display: grid; gap: var(--gap-stack); margin: 0; inline-size: 100%; }
+.settings-pair { display: flex; flex-direction: column; gap: var(--gap-tight); min-inline-size: 0; }
+.settings-pair dt { font-size: var(--type-label-size); color: var(--text-2); }
+.settings-pair dd { margin: 0; display: flex; flex-direction: column; gap: var(--gap-tight); }
+.settings-username { font-weight: 600; overflow-wrap: anywhere; }
+
+.settings-classes-body { display: flex; flex-direction: column; align-items: flex-start; gap: var(--gap-related); inline-size: 100%; }
+.settings-classes { list-style: none; margin: 0; padding: 0; inline-size: 100%; }
+.settings-class {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--gap-tight) var(--gap-stack);
+  min-block-size: var(--target-min); border-block-end: 1px solid var(--edge-subtle);
+}
+.settings-class:last-child { border-block-end: 0; }
+.settings-class a { display: inline-flex; align-items: center; min-block-size: var(--target-min); overflow-wrap: anywhere; }
+
+.settings-switch { display: flex; align-items: center; gap: var(--gap-related); min-block-size: var(--target-min); font-weight: 500; }
+
+/* Display: the ⚙ panel's groups, full width, with 44px options at every pointer */
+.settings-groups { display: flex; flex-direction: column; gap: var(--gap-stack); }
+.settings-groups .settings-group { margin: 0; }
+.settings-groups .settings-option { min-block-size: var(--control-md); }
+
+/* The section list in the page panel */
+.settings-nav { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--gap-tight); }
+.settings-nav-link {
+  display: flex; align-items: center; min-block-size: var(--control-sm); padding-inline: var(--space-3);
+  border-radius: var(--radius-md); color: var(--text-2); text-decoration: none;
+}
+.settings-nav-link:hover { background: var(--hover-fill); color: var(--text-1); }
+.settings-nav-link[aria-current="page"] { background: var(--fill-inset); color: var(--text-1); font-weight: 600; }
+
+/* The same list as a segmented row up to 1024px; the panel and its header button are not used there */
+.settings-tabs { display: none; }
+@media (max-width: 1024px) {
+  .settings-tabs { display: block; }
+  .app-content:has(.settings-page) .aside-trigger { display: none; }
+  .app-content:has(.settings-page) .page-header.has-trigger:not(.has-header) { display: none; }
+}
+.settings-tabs-list {
+  list-style: none; margin: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px;
+  padding: var(--space-1); border-radius: var(--radius-control); background: var(--segment-track);
+}
+.settings-tabs-list .settings-nav-link {
+  justify-content: center; min-block-size: var(--control-md); padding-inline: var(--space-2); border-radius: var(--radius-control);
+  font-size: var(--type-small-size); font-weight: 500; text-align: center;
+}
+.settings-tabs-list .settings-nav-link:hover { background: none; }
+.settings-tabs-list .settings-nav-link[aria-current="page"] { background: var(--segment-thumb); font-weight: 600; box-shadow: var(--surface-lift); }
+
+@media (forced-colors: active) {
+  .settings-card { border: 1px solid CanvasText; }
+  .settings-nav-link[aria-current="page"] { forced-color-adjust: none; background: Highlight; color: HighlightText; box-shadow: none; }
+}

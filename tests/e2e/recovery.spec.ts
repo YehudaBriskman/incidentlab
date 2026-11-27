@@ -1,5 +1,6 @@
 // Recovery codes (#174) in a real browser: sign up, save the one-time code (copy and .txt download), sign out,
-// "Forgot password?" with the code, then sign in with the new password. Also the #/me regenerate section.
+// "Forgot password?" with the code, then sign in with the new password. Also the regenerate section on
+// #/settings/security (#219).
 // The new screens get an axe scan of their own (the shared scans can't reach one-time screens).
 import { readFile } from "node:fs/promises";
 import AxeBuilder from "@axe-core/playwright";
@@ -109,14 +110,14 @@ test("sign up, save the recovery code, then reset a forgotten password with it",
   });
 });
 
-test("#/me: a new recovery code needs the current password", async ({ page }) => {
+test("#/settings/security: a new recovery code needs the current password", async ({ page }) => {
   const username = randomUsername("e2eregen");
   const reg = await page.request.post("/api/auth/register", { data: { username, password: PASSWORD } });
   expect(reg.status(), await reg.text()).toBe(201);
 
-  await page.goto("/#/me");
-  const section = page.locator("details.recovery-section");
-  await section.locator("summary").click();
+  await page.goto("/#/settings/security");
+  const section = page.locator("section.recovery-section");
+  await expect(section.getByRole("heading", { name: "Recovery code" })).toBeVisible();
   await section.getByRole("button", { name: /^make a new code$/i }).click();
   await expect(section.getByText(/enter your current password/i)).toBeVisible();
   await section.getByLabel("Current password", { exact: true }).fill("not-my-password");
