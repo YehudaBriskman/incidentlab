@@ -1,6 +1,6 @@
 // The case stage on phones (#132): at 390px a sticky [input][Check] bar shows while the real answer field is off
-// screen and answers through the same form; command cards fold to title and syntax; the Explorer tip sits right
-// under the question. Every test makes its own data through the API (CI is unseeded).
+// screen and answers through the same form; command rows show title and syntax and open for details (#214); the
+// Explorer tip sits right under the question. Every test makes its own data through the API (CI is unseeded).
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { answerFor, approveAccount, randomUsername, scheduleToday } from "./support";
 
@@ -71,17 +71,18 @@ test.describe("390px", () => {
     expect(errors).toEqual([]);
   });
 
-  test("command cards fold to title and syntax; the Explorer tip sits under the question", async ({ page, request }) => {
+  test("command rows show title and syntax and open for details; the Explorer tip sits under the question", async ({ page, request }) => {
     await onStageOne(page, request);
-    const card = page.locator(".tool-list .cmd").first();
-    await expect(card.locator("h4")).toBeVisible();
-    await expect(card.locator(".code-wrap")).toBeVisible();
-    await expect(card.locator(".cmd-more")).toBeHidden();
-    const toggle = card.getByRole("button", { name: /^Details/ });
-    await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    await expect(card.locator(".cmd-more")).toBeVisible();
+    const row = page.locator(".tool-list .cmd").first();
+    await expect(row.locator(".cmd-title")).toBeVisible();
+    await expect(row.locator(".cmd-line")).toBeVisible();
+    await expect(row.locator(".cmd-body")).toBeHidden();
+    const summary = row.locator("summary");
+    expect((await summary.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44); // a touch-sized row
+    await summary.click();
+    await expect(row).toHaveAttribute("open", "");
+    await expect(row.locator(".cmd-body")).toBeVisible();
+    await expect(row.locator(".btn-reveal")).toBeVisible();
 
     const tip = page.locator(".stage > .tip");
     if ((await tip.count()) > 0) {
@@ -103,10 +104,14 @@ test.describe("390px", () => {
   });
 });
 
-test("desktop: no answer bar and no Details toggles", async ({ page, request }) => {
+test("desktop: no answer bar; command rows are one line each and start closed", async ({ page, request }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await onStageOne(page, request);
   await expect(page.locator(".answer-bar")).toBeHidden();
-  await expect(page.locator(".cmd-more-toggle").first()).toBeHidden();
-  await expect(page.locator(".tool-list .cmd .cmd-more").first()).toBeVisible();
+  const rows = page.locator(".tool-list .cmd");
+  await expect(rows.first().locator(".cmd-body")).toBeHidden();
+  // one shell switch for the stage's list, no per-row tabs
+  await expect(page.locator("#stage").getByRole("tab")).toHaveCount(0);
+  await expect(page.locator("#stage").getByRole("radio", { name: "PowerShell", exact: true })).toHaveCount(1);
+  for (const height of await rows.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height))) expect(height).toBeLessThan(64);
 });

@@ -73,8 +73,9 @@ test("a player in a class: the class event on home, the class rank on My stats",
   await expect(classRow).toContainText("#1 of 1");
   await expect(classRow.getByRole("link", { name: "E2E challenge class" })).toHaveAttribute("href", `#/class/${cls.id}`);
   await expect(page.locator(".stat-tile").filter({ hasText: "Global rank" })).toContainText("Global board, opt-in");
-  // the global-board switch stays
-  await expect(page.getByRole("switch", { name: "Show me on the global leaderboard" })).toBeVisible();
+  // the global-board switch moved to Settings (#219): My stats links there
+  await expect(page.getByRole("switch", { name: "Show me on the global leaderboard" })).toHaveCount(0);
+  await expect(page.locator(".stats-settings-link a")).toHaveAttribute("href", "#/settings/privacy");
 });
 
 test("a player without classes sees the call to action on home and on My stats", async ({ page, request }) => {

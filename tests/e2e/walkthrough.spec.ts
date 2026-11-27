@@ -83,6 +83,7 @@ test("player walkthrough: sign up to first solved stage, then admin sign-in", as
       return;
     }
     const before = await ui.revealCommand(page).count();
+    await reveal.locator("xpath=ancestor::details[1]/summary").click(); // command rows open to show Reveal (#214)
     page.once("dialog", (dialog) => void dialog.accept()); // native confirm()
     await reveal.click();
     const confirm = ui.revealConfirm(page).first();

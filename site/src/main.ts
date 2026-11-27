@@ -17,6 +17,7 @@ import { mountTopbar } from "./shell/topbar";
 import { initFrame, reserveAside, resetContentScroll, showPage } from "./shell/frame";
 import { applySettings, loadSettings } from "./shell/settings";
 import { focusRoute } from "./shell/routeFocus";
+import { parseSettingsRoute } from "./lib/settings-route";
 
 applySettings(loadSettings()); // settings-boot.js already did this before first paint; resync in case it failed
 applyLang();
@@ -239,6 +240,7 @@ function isKnownCase(id: string): boolean {
  */
 function asideRoute(parts: readonly string[]): boolean {
   const [section, id, sub] = parts;
+  if (parseSettingsRoute(parts)?.kind === "section") return true; // the settings sections list (#219)
   return section === "case" && id !== undefined && parts.length === 3 && (sub === "toolbox" || sub === "explorer");
 }
 
@@ -324,6 +326,17 @@ function route(): void {
     }
     if (parts[0] === "me" && parts.length === 1) {
       lazyView(() => Promise.all([import("./views/stats"), loadAuthView(), catalogReady]).then(([m]) => legacy(m.renderStats)));
+      return;
+    }
+    // Settings (#219): #/settings goes to its first section; an unknown section is a 404.
+    const settings = parseSettingsRoute(parts);
+    if (settings?.kind === "redirect") {
+      window.location.replace(settings.to);
+      return;
+    }
+    if (settings?.kind === "section") {
+      const section = settings.section;
+      lazyView(() => Promise.all([import("./views/settings"), loadAuthView()]).then(([m]): View => () => m.settingsView(section)));
       return;
     }
     if (parts[0] === "author" && parts.length === 1) {

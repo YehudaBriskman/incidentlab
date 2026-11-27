@@ -22,6 +22,8 @@ export const SettingsSchema = z.object({
   sidebarCollapsed: z.boolean().catch(false),
   /** The global nav folded to its icon rail (app frame). Added later: stored settings without it read as false. */
   navCollapsed: z.boolean().catch(false),
+  /** Single-key shortcuts such as `/` to search the Toolbox (#214). WCAG 2.1.4: they can be turned off. */
+  keyShortcuts: z.boolean().catch(true),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 export type Theme = Settings["theme"];
