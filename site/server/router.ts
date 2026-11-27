@@ -91,7 +91,7 @@ export const createApp = (deps: AppDeps): App => {
   const game = new GameService({ repository: repos.progress, firstBlood, secrets: secrets.playable, scores, now });
   const stats = new StatsService({ repos, secrets, privateCaseIds: () => secrets.privateCaseIds(), now, boardCache });
   const trashRepo = new TrashRepository(deps.store);
-  const trash = new TrashService({ trash: trashRepo, repos, cases: caseRepo, scores, board, now });
+  const trash = new TrashService({ trash: trashRepo, repos, cases: caseRepo, scores, board, now, purger: deps.cachePurger });
   const accounts = new AccountAdminService({ repos, firstBlood, game, stats, trash, trashRepo, scores, now, onBoardChange: clearBoard });
   const audit = new AuditService({ repository: new AuditRepository(deps.store), repos, now });
 
@@ -119,7 +119,7 @@ export const createApp = (deps: AppDeps): App => {
   // A class code at sign-up joins that class (#204), so auth comes after classes.
   const auth = new AuthService({ repos, settings: settingsRepo, limiter, adminKey: deps.adminKey, now, classes });
   const access = new CaseAccessService({ cases, classes, secrets, auth });
-  const authoring = new CaseAuthoringService({ cases: caseRepo, progress: repos.progress, accounts: repos.accounts, classes, trash, bundledFingerprint, now });
+  const authoring = new CaseAuthoringService({ cases: caseRepo, progress: repos.progress, accounts: repos.accounts, classes, trash, bundledFingerprint, now, purger: deps.cachePurger });
 
   const authController = new AuthController({ auth, schedule, stats, events, board, access });
   const gameController = new GameController({ auth, game, access });

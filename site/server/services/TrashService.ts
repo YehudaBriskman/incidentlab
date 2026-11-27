@@ -10,6 +10,8 @@ import { AppError } from "../domain/types.ts";
 import type { CaseRepository } from "../repositories/case-repository.ts";
 import type { Repositories } from "../repositories/repositories.ts";
 import type { TrashBundle, TrashRepository } from "../repositories/trash-repository.ts";
+import { caseChangeTags, noopCachePurger } from "./CachePurger.ts";
+import type { CachePurger } from "./CachePurger.ts";
 import { sha256Hex } from "./crypto.ts";
 import type { GlobalBoardService } from "./GlobalBoardService.ts";
 import type { ScoreService } from "./ScoreService.ts";
@@ -26,14 +28,20 @@ export class TrashService {
   private readonly scores: ScoreService | null;
   private readonly board: GlobalBoardService | null;
   private readonly now: () => Date;
+  private readonly purger: CachePurger;
 
-  constructor(deps: { trash: TrashRepository; repos: Repositories; cases?: CaseRepository; scores?: ScoreService; board?: GlobalBoardService; now: () => Date }) {
+  constructor(deps: {
+    trash: TrashRepository; repos: Repositories; cases?: CaseRepository; scores?: ScoreService; board?: GlobalBoardService; now: () => Date;
+    /** a restored case is back in the CDN-cached catalog at once (#243) */
+    purger?: CachePurger | undefined;
+  }) {
     this.trash = deps.trash;
     this.repos = deps.repos;
     this.cases = deps.cases ?? null;
     this.scores = deps.scores ?? null;
     this.board = deps.board ?? null;
     this.now = deps.now;
+    this.purger = deps.purger ?? noopCachePurger;
   }
 
   put(bundle: TrashInput): Promise<string> {
@@ -129,5 +137,6 @@ export class TrashService {
     const status = bundle.caseStatus === "draft" || meta.publishedVersion === null ? "draft" : "published";
     const next = composeCaseMeta({ ...meta, status, updatedAt: this.now().toISOString() });
     if (!(await this.cases.saveMeta(next, current.etag))) throw new AppError(409, "the case changed meanwhile, please retry", { code: "conflict" });
+    await this.purger.purge(caseChangeTags(bundle.caseId));
   }
 }

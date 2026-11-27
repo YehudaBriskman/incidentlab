@@ -36,7 +36,7 @@ test("entry point: GET /api/cases is empty until a case is published", async () 
   const res = await handler(new Request("http://localhost/api/cases"), { ip: "10.0.0.1" });
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { cases: [] });
-  assert.equal(res.headers.get("cache-control"), "public, max-age=60, stale-while-revalidate=600");
+  assert.equal(res.headers.get("netlify-cache-tag"), "catalog");
 });
 
 test("no runtime code imports the generated answer keys (generated/secrets.json)", () => {

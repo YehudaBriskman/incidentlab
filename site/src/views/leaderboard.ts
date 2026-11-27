@@ -1,10 +1,12 @@
-// Public leaderboard: overall or per case, polled every 10 s. `?projector=1` = big-screen mode for a class:
+// Public leaderboard: overall or per case. It polls every 10 s during a live event, every 60 s otherwise, and
+// pauses after 15 idle minutes (lib/boardPoll.ts, #242). `?projector=1` = big-screen mode for a class:
 // huge type, top 10, no header chrome, frozen badge. Usernames are rendered only as text nodes.
 // The same view draws a class board (#182) from its capability URL (`board`): #/classboard/<token>, and
 // embedded on the class page. A class board shows the class's own event and every active member (no opt-in).
 import { usernameKey, type ClassBoardResponse, type ClassEvent, type LeaderboardResponse, type LiveEvent } from "../../shared/contract";
 import { caseSummaries, caseSummary } from "../content/load";
 import { ApiError, fetchLeaderboard } from "../lib/api";
+import { boardPollDecision, boardSignature } from "../lib/boardPoll";
 import { fetchClassBoard } from "../lib/class-api";
 import { TC } from "../i18n/strings-classes";
 import { dataTable, type Column } from "../components/dataTable";
@@ -21,7 +23,6 @@ import { T } from "../i18n/strings-player";
 
 type LeaderboardEntry = LeaderboardResponse["entries"][number];
 
-const POLL_MS = 10_000;
 const PROJECTOR_ROWS = 10;
 const MAX_ROWS = 100;
 
@@ -32,7 +33,7 @@ let unsubscribe: (() => void) | null = null;
 let detachers: Array<() => void> = [];
 
 export function stopLeaderboard(): void {
-  if (pollTimer !== null) window.clearInterval(pollTimer);
+  if (pollTimer !== null) window.clearTimeout(pollTimer);
   if (tickTimer !== null) window.clearInterval(tickTimer);
   pollTimer = null;
   tickTimer = null;
@@ -145,6 +146,7 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams, opt
     projectorLink.href = hashFor(caseId, !projector, board);
     titleSub.textContent = scopeTitle();
     lastFrozen = undefined;
+    lastSignature = null;
     void load();
   });
 
@@ -169,6 +171,10 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams, opt
     );
   };
   const subEl = h("p", { class: "muted small lb-sub" });
+  // Shown once the board stops polling after 15 idle minutes; Resume polls at once and starts the clock again.
+  const resumeBtn = h("button", { type: "button", class: "btn btn-sm" }, TB().lbResume);
+  const pausedEl = h("div", { class: "lb-paused", hidden: true }, h("p", { class: "muted small" }, TB().lbIdlePaused), resumeBtn);
+  const pausedRegion = h("div", { role: "status" }, pausedEl);
   const body = h("div", { class: "lb-body", "aria-busy": "true" });
   const projectorLink = h(
     "a",
@@ -202,6 +208,17 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams, opt
   };
   let lastFrozen: string | null | undefined; // undefined = not drawn yet
   let lastData: LeaderboardResponse | null = null;
+  /** boardSignature of the last drawn answer: an unchanged poll draws nothing (null: draw the next one). */
+  let lastSignature: string | null = null;
+  /** The event this board follows: the site event on the global board, the class's own on a class board. */
+  const followedPhase = () => eventPhase(board === null ? cachedEvent() : classEvent);
+  /** Draws an answer unless it shows exactly what is on screen already. */
+  const drawIfChanged = (data: LeaderboardResponse): void => {
+    const signature = boardSignature(data);
+    if (signature === lastSignature) return;
+    lastSignature = signature;
+    drawTable(data);
+  };
 
   const drawEvent = (): void => {
     const line = board === null ? eventLine() : classEventLine(classEvent);
@@ -212,7 +229,7 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams, opt
   const drawState = (data: LeaderboardResponse | null): void => {
     const frozen = data?.frozen === true;
     subEl.hidden = projector;
-    subEl.textContent = document.hidden ? TO().lbSubPaused : frozen ? TO().lbSubFrozen : TO().lbSubLive;
+    subEl.textContent = document.hidden ? TO().lbSubPaused : frozen ? TO().lbSubFrozen : followedPhase().kind === "running" ? TO().lbSubLive : TB().lbSubQuiet;
     if (data === null) return;
     const frozenKey = frozen ? (data.frozenAt ?? "") : null;
     if (frozenKey === lastFrozen) return;
@@ -317,18 +334,18 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams, opt
     try {
       if (board === null) {
         const data = await fetchLeaderboard(wanted);
-        if (wanted === caseId && root.contains(body)) drawTable(data);
+        if (wanted === caseId && root.contains(body)) drawIfChanged(data);
       } else {
         const data = await fetchClassBoard(board, wanted);
         if (!root.contains(body)) return;
         applyClass(data);
-        if (wanted === caseId) drawTable(data);
+        if (wanted === caseId) drawIfChanged(data);
       }
     } catch (err: unknown) {
       if (!root.contains(body)) return;
       // A rotated token or an archived class: the link is dead for good, so stop asking.
       if (board !== null && err instanceof ApiError && err.status === 404) {
-        if (pollTimer !== null) window.clearInterval(pollTimer);
+        if (pollTimer !== null) window.clearTimeout(pollTimer);
         pollTimer = null;
         dead = true;
         body.setAttribute("aria-busy", "false");
@@ -365,21 +382,55 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams, opt
       optInEl,
       frozenRegion,
       body,
+      pausedRegion,
       subEl,
       updatedEl,
       projector ? projectorLink : null,
     ),
   );
 
-  // Poll only while the tab is visible; coming back refreshes at once.
-  const startPolling = (): void => {
-    if (pollTimer !== null) window.clearInterval(pollTimer);
-    pollTimer = document.hidden ? null : window.setInterval(() => void load(), POLL_MS);
+  // The poll (lib/boardPoll.ts): a timeout chain whose next delay follows the event, the tab and the viewer.
+  let lastInputMs = Date.now();
+  const setPaused = (value: boolean): void => {
+    pausedEl.hidden = !value;
   };
+  const schedule = (): void => {
+    if (pollTimer !== null) window.clearTimeout(pollTimer);
+    pollTimer = null;
+    if (dead || !root.contains(body)) return;
+    drawState(lastData); // the cadence line follows the event even when the standings didn't change
+    const phase = followedPhase();
+    const decision = boardPollDecision({
+      hidden: document.hidden,
+      eventLive: phase.kind === "running",
+      msUntilStart: phase.kind === "before" ? phase.msLeft : null,
+      projector,
+      nowMs: Date.now(),
+      lastInputMs,
+    });
+    if (decision.kind === "paused") setPaused(true);
+    if (decision.kind !== "wait") return;
+    pollTimer = window.setTimeout(() => {
+      pollTimer = null;
+      void load().finally(schedule);
+    }, decision.delayMs);
+  };
+  /** Poll now and restart the idle clock: Resume, or the tab coming back into view. */
+  const resume = (): void => {
+    lastInputMs = Date.now();
+    setPaused(false);
+    void load().finally(schedule);
+  };
+  resumeBtn.addEventListener("click", resume);
+  // Any pointer or key input keeps the board live. It doesn't undo a pause by itself: Resume does that.
+  const markInput = (): void => {
+    lastInputMs = Date.now();
+  };
+  for (const type of ["pointerdown", "pointermove", "keydown", "wheel"] as const) listen(type, markInput);
   listen("visibilitychange", () => {
-    startPolling();
     drawState(lastData);
-    if (!document.hidden) void load();
+    if (document.hidden) schedule(); // clears the timer
+    else resume(); // coming back counts as activity, and refreshes at once
   });
   if (projector) {
     // The big screen has no visible controls: Esc (or the small corner link) leaves projector mode.
@@ -404,6 +455,5 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams, opt
   drawState(null);
   if (board === null) unsubscribe = onEventChange(drawEvent);
   tickTimer = window.setInterval(drawEvent, 1000);
-  startPolling();
-  void load();
+  void load().finally(schedule);
 }

@@ -19,6 +19,9 @@ export const TB = defineStrings({
     lbOptInNote: "Only players who chose to appear are listed.",
     lbYouHidden: "You're hidden from this board.",
     lbOptInLink: "Show me on the board",
+    lbSubQuiet: "Standings. Refreshes every minute, and every 10 seconds during a live event.",
+    lbIdlePaused: "Updates paused after 15 minutes without activity.",
+    lbResume: "Resume",
   },
   he: {
     sectionTitle: "טבלת המובילים העולמית",
@@ -35,5 +38,8 @@ export const TB = defineStrings({
     lbOptInNote: "מופיעים כאן רק שחקנים שבחרו להופיע.",
     lbYouHidden: "אתם מוסתרים מהטבלה הזו.",
     lbOptInLink: "הציגו אותי בטבלה",
+    lbSubQuiet: "דירוג. מתעדכן כל דקה, וכל 10 שניות בזמן אירוע חי.",
+    lbIdlePaused: "העדכונים הושהו אחרי 15 דקות ללא פעילות.",
+    lbResume: "המשך",
   },
 });

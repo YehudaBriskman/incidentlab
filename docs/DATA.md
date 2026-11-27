@@ -52,15 +52,30 @@ credit-based pricing**: it charges credits per production deploy and per GB, and
 | Edge function calls | 1,000,000 | evidence requests the CDN hasn't cached yet |
 | Build minutes | 300 | unused: builds are local and deploys use the CLI |
 
-- **Function calls are the binding limit.** Every open tab polls `/api/event`.
+- **Function calls are the binding limit.** Every open tab polls `/api/event`, and an open leaderboard polls
+  `/api/leaderboard` too. A CDN-cached URL costs at most one call per cache window however many tabs poll it,
+  so the cost of a poll is `min(poll rate, 1 / window)` per distinct URL, not per tab.
   - **Before #140:** a 2-hour class of 30 players cost about 11,000 calls (about 10 classes a month), and a
     forgotten tab about 2,900 a day.
-  - **Since #140:**
-    - `/api/event`, `/api/today` and `/api/leaderboard` are CDN-cached (`docs/API.md`);
-    - the poll pauses in hidden tabs and slows to 2 minutes when no event is live;
-    - a class costs about 1,500 calls and idle tabs about 0.
+  - **#140:** `/api/event`, `/api/today` and `/api/leaderboard` became CDN-cached (`docs/API.md`), and the event
+    poll pauses in hidden tabs and slows to 2 minutes when no event is live. Hidden tabs cost 0. Visible idle tabs
+    did not: with a 10 s event window every 2-minute poll was a miss (**about 720 calls a day** for one forgotten
+    tab), and a visible leaderboard or projector polled every 10 s forever (**about 8,640 a day**, the whole
+    monthly allowance in about two weeks).
+  - **Since #242 and #243:**
+    - `/api/event` keeps 10 s (+ 20 s stale) only while the event runs or starts or ends within 15 minutes;
+      otherwise 300 s + 600 s stale (admin edits purge it at once). An idle site's event polls cost one call per
+      about 6 minutes (the first 2-minute poll after the 300 s window), **about 240 a day** for all tabs together;
+    - the leaderboard polls every 10 s only while the event it follows is live (the site event, or the class
+      event on a class board and its projector), every 60 s otherwise, and stops after 15 minutes without
+      pointer or key input until the viewer presses Resume (a projector during a live event keeps polling). A
+      forgotten board costs about **15 calls** before it pauses, instead of 8,640 a day;
+    - the catalog and case content are durable at the CDN for 1 h + 1 day stale, tagged and purged on publish,
+      so they cost about one call per URL per hour of traffic (11 URLs today: the catalog plus five cases in
+      two languages), instead of one per edge miss on every page load.
   - **Keep it that way:**
     - any new polled endpoint must be public and use `publicJson`, or stay off a timer;
+    - a poll stops when nobody is looking: hidden tabs, and idle visible ones;
     - personalised routes stay `no-store`.
 - **A class event night (#181)**: 60 players for 2 hours, a projector and every player polling the class board
   (`/api/classboard/<token>`) every 10 s.
@@ -69,11 +84,13 @@ credit-based pricing**: it charges credits per production deploy and per GB, and
   - CDN-cached (`publicJson`, 10 s plus 20 s stale-while-revalidate, durable), it costs at most one call per
     10 s window per distinct URL: 7,200 s / 10 s = **720 calls** for the overall board, and 720 more for each
     `?caseId=` variant in use. Budget **1,440** for two URLs.
-  - The rest of the night: `/api/event` polling (CDN-cached) about **720**; gameplay (`no-store`: sign-in, the
-    case page, setup, about 12 answers, a few hints and command reveals, reloads) about 30 calls a player, so
-    **1,800**; a class admin's live-progress view (`no-store`, the later UI) polled every 15 s, **480**.
-  - **Total about 4,500 calls a night**, so the 125,000 allowance covers roughly **25 class nights a month** with
-    room for daily play. Solves never purge the board (a purge per answer would add a call per solve); class edits
+  - The rest of the night: `/api/event` polling (CDN-cached) about **720** while a site event runs, but a class
+    night is the class's own event, so the site event is usually quiet: 300 s windows, about **30** (#242);
+    gameplay (`no-store`: sign-in, the case page, setup, about 12 answers, a few hints and command reveals,
+    reloads) about 30 calls a player, so **1,800**; a class admin's live-progress view (`no-store`) polled every
+    15 s, **480**. Catalog and content loads are CDN hits since #243 (a handful of calls a night).
+  - **Total about 3,750 calls a night** (about 4,500 when a site event runs too), so the 125,000 allowance covers
+    roughly **30 class nights a month** with room for daily play. Solves never purge the board (a purge per answer would add a call per solve); class edits
     do, and they are rare.
   - Storage reads per uncached board call: one `classmember:` listing plus up to 60 member, 60 account and 60
     `score:` reads (181). Blobs operations are not one of the allowances above; they cost function runtime

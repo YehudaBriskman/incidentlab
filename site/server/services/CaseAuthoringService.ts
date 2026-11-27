@@ -19,6 +19,8 @@ import { mapWithConcurrency } from "../repositories/KvStore.ts";
 import type { Versioned } from "../repositories/KvStore.ts";
 import type { AccountRepository, ProgressRepository } from "../repositories/repositories.ts";
 import { assertOwner, ownerId } from "./AuthorAuthService.ts";
+import { caseChangeTags, noopCachePurger } from "./CachePurger.ts";
+import type { CachePurger } from "./CachePurger.ts";
 import type { Actor } from "./AuthorAuthService.ts";
 import type { ClassService } from "./ClassService.ts";
 import type { TrashService } from "./TrashService.ts";
@@ -65,6 +67,7 @@ export class CaseAuthoringService {
   private readonly trash: TrashService;
   private readonly bundledFingerprint: (caseId: string) => Promise<string | null>;
   private readonly now: () => Date;
+  private readonly purger: CachePurger;
 
   constructor(deps: {
     cases: CaseRepository;
@@ -77,6 +80,8 @@ export class CaseAuthoringService {
     /** the answer fingerprint of a bundled (pre-DB) case, the drift baseline before a case's first publish */
     bundledFingerprint: (caseId: string) => Promise<string | null>;
     now: () => Date;
+    /** purges the CDN copies of the catalog and the case's content after a change to its live version (#243) */
+    purger?: CachePurger | undefined;
   }) {
     this.cases = deps.cases;
     this.progress = deps.progress;
@@ -85,6 +90,15 @@ export class CaseAuthoringService {
     this.trash = deps.trash;
     this.bundledFingerprint = deps.bundledFingerprint;
     this.now = deps.now;
+    this.purger = deps.purger ?? noopCachePurger;
+  }
+
+  /**
+   * The catalog and the case's content changed. Only writes that change the live version, its status or its
+   * visibility call this; a private case is never cached, so purging one costs only the purge request.
+   */
+  private purgeCase(caseId: string): Promise<void> {
+    return this.purger.purge(caseChangeTags(caseId));
   }
 
   private async owned(actor: Actor, caseId: string): Promise<Versioned<CaseMeta>> {
@@ -177,6 +191,7 @@ export class CaseAuthoringService {
       updatedAt: nowIso,
     });
     await this.save(next, etag);
+    await this.purgeCase(caseId);
     return { caseId, publishedVersion: input.version, previousVersion, rollback: previousVersion !== null && input.version < previousVersion, changed: true, pendingReview: false, visibility };
   }
 
@@ -256,7 +271,7 @@ export class CaseAuthoringService {
       if (!(await this.isComplete(meta, version))) throw new AppError(409, `version ${version} is incomplete`, { code: "incomplete-version" });
       await this.assertNoDrift(meta, version, input.acceptAnswerChanges);
     }
-    return toAuthorCase(await this.save(composeCaseMeta({
+    const approved = await this.save(composeCaseMeta({
       ...meta,
       publishedVersion: version,
       status: "published",
@@ -266,7 +281,9 @@ export class CaseAuthoringService {
       reviewAt: nowIso,
       pendingVersion: null,
       updatedAt: nowIso,
-    }), etag));
+    }), etag);
+    await this.purgeCase(caseId);
+    return toAuthorCase(approved);
   }
 
   /** Soft delete: the case disappears from every public route; restorable for TRASH_RETENTION_DAYS. */
@@ -282,6 +299,7 @@ export class CaseAuthoringService {
       await this.trash.discard(trashId); // nothing was trashed: drop the entry again
       throw conflict();
     }
+    await this.purgeCase(caseId);
     const deletedAt = trashId.slice(0, trashId.lastIndexOf(":"));
     return { caseId, trashId, expiresAt: this.trash.expiresAt(deletedAt) };
   }
