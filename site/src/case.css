@@ -1,0 +1,107 @@
+/* =====================================================================
+   The case workspace (#213): a question column beside a tabbed workbench above 1024px, one segmented tab row
+   at 1024px and below. Imported by views/case.ts after player.css. Role tokens only; logical properties, so
+   Hebrew mirrors without patches. DESIGN.md "Case workspace".
+   ===================================================================== */
+:root {
+  /* component values: the sticky case status line (#216) and the gap under it */
+  --case-status-h: 44px;
+  --case-sticky-top: calc(var(--case-status-h) + var(--space-3));
+}
+
+/* reading text on the stage keeps the reading measure (DESIGN.md Layout: --measure on every paragraph container) */
+.stage :is(.prose, .look-for ul, .tip) { max-inline-size: var(--measure); }
+
+/* ---- the active stage ---- */
+.stage.is-active { gap: 0; }
+.case-work { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap-stack); align-items: start; }
+
+/* the question column: one soft card holding goal, prompt, look-for, the answer, the meter and the paid help */
+.q-col {
+  display: flex; flex-direction: column; gap: var(--gap-stack); min-inline-size: 0;
+  padding: var(--pad-card); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--surface-lift);
+}
+.q-col > * { margin: 0; }
+.q-col .stage-kicker { margin: 0 0 calc(-1 * var(--space-3)); }
+.q-col .stage-goal { font-size: var(--type-title-size, 1.25rem); line-height: 1.3; }
+.q-col .prompt { margin: 0; }
+.q-col .answer-submit { min-inline-size: 0; }
+.q-col .stage-meter { margin: 0; }
+
+/* "Need help?": the hint and the answer reveal directly under the answer (#213), as quiet buttons */
+.need-help { display: grid; gap: var(--gap-related); padding-block-start: var(--space-3); border-block-start: 1px solid var(--edge-subtle); }
+.need-help-label { margin: 0; font-size: var(--type-small-size); font-weight: 600; color: var(--text-2); }
+.need-help-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-related); }
+.need-help-actions > p { margin: 0; }
+.need-help .btn { block-size: auto; min-block-size: var(--control-sm); padding-block: var(--space-2); white-space: normal; text-align: start; line-height: var(--type-small-lh); }
+.need-help .form-error:empty { display: none; }
+
+/* ---- workbench tabs (APG tabs; the panels below) ---- */
+.wb-tabrow { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-inline-size: 0; border-block-end: 1px solid var(--edge-subtle); }
+.wb-tabs { display: flex; gap: var(--space-1); min-inline-size: 0; }
+.wb-tab {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-block-size: var(--control-md); padding: 0 var(--space-3);
+  border: 0; border-radius: var(--radius-control) var(--radius-control) 0 0; background: none; color: var(--text-2);
+  font: inherit; font-size: var(--type-small-size); font-weight: 500; white-space: nowrap; cursor: pointer;
+  box-shadow: inset 0 -3px 0 transparent;
+  transition: background-color var(--motion-settle) var(--ease-standard), color var(--motion-settle) var(--ease-standard);
+}
+.wb-tab:hover { background: var(--hover-fill); color: var(--text-1); }
+.wb-tab[aria-selected="true"] { color: var(--text-1); font-weight: 600; box-shadow: inset 0 -3px 0 var(--accent); }
+.wb-tab:focus-visible { outline-offset: -2px; }
+.wb-tab .tab-badge { font-variant-numeric: tabular-nums; }
+.wb-keys { flex: none; font-size: var(--type-label-size); color: var(--text-2); white-space: nowrap; }
+.wb-pane { display: flex; flex-direction: column; gap: var(--gap-stack); min-inline-size: 0; }
+.wb-pane > * { margin: 0; }
+.wb-pane:focus-visible { outline-offset: var(--focus-offset); }
+.wb-pane .wb-h { margin: 0; }
+.wb-more { margin: 0; }
+
+/* Evidence: the stage's Explorer tip, then each file as a link into the Explorer */
+.ev-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--gap-related); }
+.ev-item { display: grid; gap: 2px; min-inline-size: 0; }
+.ev-item > .small { max-inline-size: var(--measure); }
+.ev-link { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-1); min-block-size: var(--target-min, 24px); align-self: start; overflow-wrap: anywhere; }
+.ev-link code { font-size: var(--type-small-size); }
+.wb-pane-evidence > .btn { align-self: start; }
+
+/* wide: the question column stays in view (sticky, scrolling inside itself when taller than the screen) and the
+   tab row sticks under the case status line */
+@media (min-width: 1025px) {
+  .case-work { grid-template-columns: minmax(340px, 420px) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: var(--gap-stack) var(--space-6); }
+  .case-work > .q-col {
+    grid-column: 1; grid-row: 1 / span 2; position: sticky; inset-block-start: var(--case-sticky-top);
+    max-block-size: calc(100dvh - var(--topbar-size, 52px) - var(--case-sticky-top) - var(--space-4)); overflow-y: auto; overscroll-behavior: contain;
+  }
+  .case-work > .wb-tabrow { grid-column: 2; grid-row: 1; position: sticky; inset-block-start: var(--case-status-h); z-index: 1; background: var(--canvas); }
+  .case-work > .wb-pane { grid-column: 2; grid-row: 2; }
+}
+
+/* narrow: one segmented control over the panes (Question | Commands | Evidence), 44px segments */
+@media (max-width: 1024px) {
+  .wb-tabrow { position: sticky; inset-block-start: var(--case-status-h); z-index: 1; padding-block: var(--space-2); border: 0; background: var(--canvas); }
+  .wb-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); inline-size: 100%; padding: var(--space-1); border-radius: var(--radius-control); background: var(--segment-track); }
+  .wb-tab { min-block-size: 44px; padding-inline: var(--space-2); border-radius: var(--radius-control); box-shadow: none; }
+  .wb-tab[aria-selected="true"] { background: var(--segment-thumb); box-shadow: var(--surface-lift); }
+  .wb-keys { display: none; }
+}
+@media (max-width: 640px) {
+  .q-col { padding: var(--space-4); }
+}
+
+/* ---- setup: "I'm ready" in the top block, beside the download ---- */
+.setup-top { display: grid; gap: var(--gap-related); }
+.setup-top > h3 { margin: 0; }
+.setup-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-related) var(--space-3); }
+.setup-actions .primary-action, .setup-actions .done-note { padding: 0; margin: 0; }
+.setup-top > .form-error:empty { display: none; }
+
+@media (forced-colors: active) {
+  .q-col { border: 1px solid CanvasText; }
+  .wb-tabs { border: 1px solid CanvasText; }
+  .wb-tab[aria-selected="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; box-shadow: none; }
+}
+@media print {
+  .wb-tabrow, .need-help { display: none !important; }
+  .case-work > [hidden] { display: flex !important; }
+}

@@ -16,7 +16,10 @@ import { ICONS, type IconName } from "../shell/icons";
 import { confirm } from "../lib/overlay";
 import { HEBREW, bidiProse, contentText } from "../lib/bidi";
 import { answerForm, clearAnswerDrafts } from "./answerForm";
+import { isNarrow, workbench, writePane } from "./caseWorkbench";
+import { TW } from "../i18n/strings-case";
 import "../player.css";
+import "../case.css";
 import { md, mdInline } from "../lib/markdown";
 import { readingLayout } from "../components/readingLayout";
 import { formatElapsed } from "../lib/time";
@@ -341,6 +344,9 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
   const draw = (): void => {
     stopStageTimers();
     lastView = { caseId: c.id, stage: viewing };
+    // On narrow screens the question is one pane among three: a move that lands on the heading, the result or a
+    // bought hint shows the Question pane, so focus never goes to a hidden element.
+    if (focusNext !== null && focusNext.kind !== "command" && isNarrow()) writePane("question");
     navStages();
     const header = h(
       "header",
@@ -482,17 +488,24 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
       });
   });
 
+  // "I'm ready" sits in the top block beside the download (#213), so starting never needs a long scroll; the
+  // briefing, checklist, paths and scoring follow for whoever wants them first.
   return h(
     "div",
     { class: "stage" },
     h("p", { class: "stage-kicker" }, T().setupKicker),
     h("h2", { class: "stage-goal", tabindex: "-1" }, T().setupGoal),
-    briefing,
     h(
       "div",
-      { class: "block" },
+      { class: "block setup-top" },
       h("h3", {}, T().downloadHead),
-      h("a", { class: "btn btn-lg", href: c.evidenceZip, download: true }, T().downloadBtn),
+      h(
+        "div",
+        { class: "setup-actions" },
+        h("a", { class: "btn btn-lg", href: c.evidenceZip, download: true }, T().downloadBtn),
+        done ? h("p", { class: "done-note" }, T().setupComplete) : h("div", { class: "primary-action" }, ready),
+      ),
+      done ? null : errorEl,
       h(
         "details",
         { class: "quiet-details" },
@@ -504,6 +517,7 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
         ),
       ),
     ),
+    briefing,
     checks.length > 0 ? h("div", { class: "block" }, h("h3", {}, T().checklistHead), h("ul", { class: "checklist" }, checks)) : null,
     h(
       "div",
@@ -528,9 +542,6 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
       ),
     ),
     scoringRules(player),
-    done
-      ? h("p", { class: "done-note" }, T().setupComplete)
-      : h("div", { class: "primary-action" }, ready, errorEl),
   );
 }
 
@@ -566,16 +577,17 @@ function renderQuestionStage(
     );
 
   const goal = contentText("h2", { class: "stage-goal", tabindex: "-1" }, stage?.goal ?? q.title);
+  // A one-line summary until the player opens it (remembered), so the answer field stays near the top (#213).
   const lookFor =
     stage && stage.lookFor.length > 0
       ? h(
           "details",
-          // Open on wide screens; a one-line summary on phones, so the answer field is closer to the top.
-          { class: "look-for", open: window.matchMedia("(min-width: 641px)").matches },
+          { class: "look-for", open: readPref("lookForOpen") === "1" },
           h("summary", {}, T().lookFor),
           h("ul", {}, stage.lookFor.map((l) => inlineMd("li", l))),
         )
       : null;
+  lookFor?.addEventListener("toggle", () => writePref("lookForOpen", lookFor.open ? "1" : "0"));
 
   /* finished stage: read-only */
   if (s.status === "solved" || s.status === "revealed") {
@@ -692,6 +704,8 @@ function renderQuestionStage(
         const next = charged.progress;
         if (!ok || next === null) return;
         announce(TP().hintAnnounce(s.hintsRevealed + 1, nextHint.cost));
+        // Wide screens show the bought hint in the Hints tab; narrow ones under the question, where the player is.
+        if (!isNarrow()) writePane("hints");
         update(next, id, { kind: "hint", index: s.hintsRevealed });
       })
       .catch((err: unknown) => {
@@ -735,45 +749,81 @@ function renderQuestionStage(
   meterRef.current = meter;
   every(1000, () => meter.tick());
 
-  return h(
+  // The question column: what to find, the answer, what it is worth and the paid help, in one place (#213).
+  const helpLabelId = `need-help-${id}`;
+  const questionCol = h(
     "div",
-    { class: "stage" },
+    { class: "q-col" },
     kicker,
     goal,
+    prose("prose prompt", q.prompt),
     lookFor,
+    form,
     meter.el,
-    h("div", { class: "question-box" }, prose("prose prompt", q.prompt), form),
-    // The Explorer tip sits right under the question it helps with (#132), before the commands.
-    stage?.explorerTip
-      ? h(
-          "div",
-          { class: "tip" },
-          h("h3", {}, T().inExplorer),
-          prose("prose", stage.explorerTip),
-          h("a", { class: "stage-link", href: `#/case/${c.id}/explorer` }, T().openExplorer),
-        )
-      : null,
+    h(
+      "div",
+      { class: "need-help", role: "group", "aria-labelledby": helpLabelId },
+      h("p", { class: "need-help-label", id: helpLabelId }, TW().needHelp),
+      h("div", { class: "need-help-actions" }, hintBtn ?? h("p", { class: "muted small" }, T().noMoreHints), reveal),
+      hintError,
+      revealError,
+    ),
+  );
+
+  const commandsPane: Child =
     tools.length > 0
-      ? h(
-          "div",
-          { class: "block" },
-          h("h3", {}, T().usefulCommands),
+      ? [
+          h("h3", { class: "visually-hidden" }, T().usefulCommands),
           h("p", { class: "muted small" }, TG().toolboxCostNote(SCORING.COMMAND_COST, index)),
           commandShellSwitch(tools, player),
           h("div", { class: "tool-list" }, tools.map((tool) => commandCard(tool, commandCtx))),
-        )
-      : h("p", { class: "muted small" }, T().needCommands, h("a", { class: "stage-link", href: `#/case/${c.id}/toolbox` }, T().browseCommands), "."),
+          h("p", { class: "wb-more" }, h("a", { class: "stage-link", href: `#/case/${c.id}/toolbox` }, TW().commandsMore)),
+        ]
+      : h("p", { class: "muted small" }, T().needCommands, h("a", { class: "stage-link", href: `#/case/${c.id}/toolbox` }, T().browseCommands), ".");
+
+  // The Evidence tab is the Explorer's way in: this stage's tip, then every file, each opening in the Explorer.
+  const evidencePane: Child = [
+    stage?.explorerTip
+      ? h("div", { class: "tip" }, h("h3", {}, T().inExplorer), prose("prose", stage.explorerTip), h("a", { class: "stage-link", href: `#/case/${c.id}/explorer` }, T().openExplorer))
+      : h("p", {}, h("a", { class: "stage-link", href: `#/case/${c.id}/explorer` }, T().openExplorer)),
+    h("h3", { class: "wb-h" }, TW().evidenceHead),
     h(
-      "div",
-      { class: "block hints" },
-      h("h3", {}, T().hints),
-      hintList.length > 0 ? h("ol", { class: "hint-list" }, hintList) : null,
-      hintBtn ?? h("p", { class: "muted small" }, T().noMoreHints),
-      hintError,
+      "ul",
+      { class: "ev-list" },
+      c.evidence.map((f) =>
+        h(
+          "li",
+          { class: "ev-item" },
+          h(
+            "a",
+            { class: "ev-link", href: `#/case/${c.id}/explorer?${new URLSearchParams({ f: f.path }).toString()}`, "aria-label": TW().evidenceOpen(f.path) },
+            h("code", { dir: "ltr" }, f.path),
+            h("span", { class: "muted small" }, ` · ${f.format}`),
+          ),
+          bidiProse(html("div", { class: "muted small" }, mdInline(f.description))),
+        ),
+      ),
     ),
-    h("div", { class: "reveal" }, reveal, revealError),
-    bar?.el ?? null,
-  );
+    h("a", { class: "btn btn-sm", href: c.evidenceZip, download: true }, T().downloadBtn),
+  ];
+
+  const hintsPane: Child = [
+    h("h3", { class: "wb-h" }, T().hints),
+    hintList.length > 0 ? h("ol", { class: "hint-list" }, hintList) : h("p", { class: "muted small" }, TW().hintsNone),
+  ];
+
+  const bench = workbench({
+    question: questionCol,
+    commands: commandsPane,
+    commandCount: tools.length,
+    evidence: evidencePane,
+    hints: hintsPane,
+    hintsUsed: s.hintsRevealed,
+    hintsTotal: q.hints.length,
+    onCleanup: (stop) => cleanups.add(stop),
+  });
+
+  return h("div", { class: "stage is-active" }, bench.el, bar?.el ?? null);
 }
 
 /* ================= Debrief ================= */
