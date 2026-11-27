@@ -3,7 +3,7 @@ import { canonicalAnswer, formatKind, matchesFormat, type FormatKind } from "../
 import type { Case, Question } from "../../shared/case";
 import { ApiError, getDebrief, getProgress, revealAnswer, revealHint, setupDone, submitAnswer } from "../lib/api";
 import { recordVisit } from "../lib/recent";
-import { playErrorText } from "../lib/errors";
+import { playErrorText, recoverFromWrite } from "../lib/errors";
 import { cachedAccount, isGuest, loadAccount, setAccount, signOut } from "../lib/session";
 import { TGu } from "../i18n/strings-guest";
 import { confirmGuestSignOut } from "../shell/frame";
@@ -196,7 +196,8 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
 
   const update = (next: ProgressView, view?: StageKey, focus: FocusTarget = { kind: "heading" }): void => {
     player = next;
-    viewing = view ?? currentStage(player);
+    // A stage the server's progress says is locked (after a reset seen in a stale-write reply) is never shown.
+    viewing = view !== undefined && stepState(player, view) !== "locked" ? view : currentStage(player);
     focusNext = focus;
     draw();
   };
@@ -452,6 +453,8 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
         update(p);
       })
       .catch((err: unknown) => {
+        const server = recoverFromWrite(err);
+        if (server !== null) return update(server);
         errorEl.textContent = errorMessage(err);
         ready.disabled = false;
       });
@@ -785,6 +788,9 @@ function renderQuestionStage(
       })
       .catch((err: unknown) => {
         done();
+        // Stale or unconfirmed (#202, #203): show what the server has; the draft stays for the player to resend.
+        const server = recoverFromWrite(err);
+        if (server !== null) return update(server, id);
         if (err instanceof ApiError && err.isRateLimited) {
           startCooldown(Date.now() + (err.retryAfterSeconds ?? 60) * 1000);
           return;
@@ -825,7 +831,9 @@ function renderQuestionStage(
       body: TP().hintPrompt(s.hintsRevealed + 1, nextHint.cost, SCORING.CLEAN_BONUS, cleanOpen),
       confirmLabel: TP().cmdConfirm(nextHint.cost),
       run: async () => {
-        charged.progress = await revealHint(c.id, id);
+        // Names the hint this page shows as next: if another tab (or a lost reply) already bought it, the
+        // server charges nothing and sends the current progress back (#202, #203).
+        charged.progress = await revealHint(c.id, id, s.hintsRevealed);
       },
     })
       .then((ok) => {
@@ -835,6 +843,8 @@ function renderQuestionStage(
         update(next, id, { kind: "hint", index: s.hintsRevealed });
       })
       .catch((err: unknown) => {
+        const server = recoverFromWrite(err);
+        if (server !== null) return update(server, id);
         hintError.textContent = errorMessage(err);
       });
   });
@@ -861,6 +871,8 @@ function renderQuestionStage(
         update(next, id, { kind: "result" });
       })
       .catch((err: unknown) => {
+        const server = recoverFromWrite(err);
+        if (server !== null) return update(server, id);
         revealError.textContent = errorMessage(err);
       });
   });

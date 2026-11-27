@@ -37,12 +37,22 @@ export class ApiError extends Error {
   readonly status: number;
   readonly code: string | null;
   readonly retryAfterSeconds: number | null;
-  constructor(status: number, message: string, options: { code?: string | null; retryAfterSeconds?: number | null } = {}) {
+  /**
+   * The server's progress when a play write was refused as stale (code "stale", 409) or could not be confirmed
+   * (code "unconfirmed": no response, or a 5xx): the view redraws from it instead of re-sending (#202, #203).
+   */
+  readonly progress: ProgressView | null;
+  constructor(
+    status: number,
+    message: string,
+    options: { code?: string | null; retryAfterSeconds?: number | null; progress?: ProgressView | null } = {},
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = options.code ?? null;
     this.retryAfterSeconds = options.retryAfterSeconds ?? null;
+    this.progress = options.progress ?? null;
   }
   get isUnauthorized(): boolean {
     return this.status === 401;
@@ -111,13 +121,15 @@ async function send(method: HttpMethod, path: string, body?: unknown): Promise<R
     body: body === undefined ? undefined : JSON.stringify(body),
   };
 
-  // Retries: GET on network errors and 5xx; POST and PUT only when no response was received at all.
+  // Only GET is retried (network errors and 5xx). A write is sent once: a lost response may hide a write that
+  // landed, and re-sending it charged hints and wrong answers twice (#202). Play writes re-read progress instead.
+  const retries = method === "GET" ? MAX_RETRIES : 0;
   for (let attempt = 0; ; attempt++) {
     try {
       const sentAt = Date.now();
       const res = await fetchOnce(`${API_BASE}${path}`, init);
       reportClock(res, sentAt, Date.now());
-      if (method === "GET" && res.status >= 500 && attempt < MAX_RETRIES) {
+      if (res.status >= 500 && attempt < retries) {
         emitConnectivity("retrying");
         await sleep(600 * 2 ** attempt);
         continue;
@@ -125,7 +137,7 @@ async function send(method: HttpMethod, path: string, body?: unknown): Promise<R
       emitConnectivity("ok");
       return res;
     } catch (err) {
-      if (attempt >= MAX_RETRIES) {
+      if (attempt >= retries) {
         emitConnectivity("unreachable");
         throw err;
       }
@@ -166,6 +178,7 @@ async function requestWithHeaders<S extends z.ZodType>(
     throw new ApiError(res.status, parsed.success ? parsed.data.error : `Request failed (${res.status})`, {
       code: parsed.success ? (parsed.data.code ?? null) : null,
       retryAfterSeconds: retry,
+      progress: parsed.success ? (parsed.data.progress ?? null) : null,
     });
   }
   const parsed = schema.safeParse(json);
@@ -303,25 +316,54 @@ export async function getProgress(caseId: string): Promise<ProgressView> {
   return (await request("GET", casePath(caseId, "progress"), ProgressResponseSchema)).progress;
 }
 
+/**
+ * One play write, sent once. When no response came back, or a 5xx, the write may still have landed: the progress
+ * is re-read and the error carries it (code "unconfirmed"), so the view shows the server's state and the player
+ * decides what to do next.
+ */
+async function caseWrite<T>(caseId: string, write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.progress !== null) throw err;
+    if (err.status !== 0 && err.status < 500) throw err;
+    let progress: ProgressView;
+    try {
+      progress = await getProgress(caseId);
+    } catch {
+      throw err;
+    }
+    throw new ApiError(err.status, err.message, { code: "unconfirmed", progress });
+  }
+}
+
+const progressOnly = (body: { progress: ProgressView }): ProgressView => body.progress;
+
 export async function setupDone(caseId: string): Promise<ProgressView> {
-  return (await request("POST", casePath(caseId, "setup-done"), ProgressResponseSchema, {})).progress;
+  return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "setup-done"), ProgressResponseSchema, {})));
 }
 
 export async function submitAnswer(caseId: string, questionId: QuestionId, answer: string): Promise<{ correct: boolean; progress: ProgressView }> {
-  return request("POST", casePath(caseId, "answer"), AnswerResponseSchema, { questionId, answer });
+  return caseWrite(caseId, () => request("POST", casePath(caseId, "answer"), AnswerResponseSchema, { questionId, answer }));
 }
 
-export async function revealHint(caseId: string, questionId: QuestionId): Promise<ProgressView> {
-  return (await request("POST", casePath(caseId, "hint"), ProgressResponseSchema, { questionId })).progress;
+/** Buys hint `expectedHint` (0-based: the number already shown). The server refuses any other one as stale. */
+export async function revealHint(caseId: string, questionId: QuestionId, expectedHint: number): Promise<ProgressView> {
+  const body = { questionId, expectedHint };
+  return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "hint"), ProgressResponseSchema, body)));
 }
 
 export async function revealAnswer(caseId: string, questionId: QuestionId): Promise<ProgressView> {
-  return (await request("POST", casePath(caseId, "reveal"), ProgressResponseSchema, { questionId })).progress;
+  return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "reveal"), ProgressResponseSchema, { questionId })));
 }
 
-/** Pays COMMAND_COST on the active stage (free when already paid for or the case is completed). */
-export async function revealCommand(caseId: string, toolId: string): Promise<ProgressView> {
-  return (await request("POST", casePath(caseId, "reveal-command"), ProgressResponseSchema, { toolId })).progress;
+/**
+ * Pays COMMAND_COST on the active stage (free when already paid for or the case is completed). `expectedStage`
+ * is the stage the page shows as active: the server refuses the charge as stale when another one is.
+ */
+export async function revealCommand(caseId: string, toolId: string, expectedStage: QuestionId): Promise<ProgressView> {
+  const body = { toolId, expectedStage };
+  return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "reveal-command"), ProgressResponseSchema, body)));
 }
 
 export async function getDebrief(caseId: string): Promise<string> {
