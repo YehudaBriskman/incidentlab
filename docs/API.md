@@ -22,7 +22,7 @@ plan allows 125,000 function calls a month.
 | Route | `Netlify-CDN-Cache-Control` | Tag | Purged by |
 |---|---|---|---|
 | `/api/event` | `public, durable, max-age=10, stale-while-revalidate=20` | `event` | `PUT /api/admin/event` |
-| `/api/leaderboard` | `public, durable, max-age=10, stale-while-revalidate=20` | `leaderboard` | `PUT /api/admin/event` (freeze) |
+| `/api/leaderboard` | `public, durable, max-age=10, stale-while-revalidate=20` | `leaderboard` | `PUT /api/admin/event` (freeze), `PUT /api/me/board` (a player opts in or out) |
 | `/api/today` | `max-age` and `stale-while-revalidate` up to 60 s each, capped at the seconds left until midnight in the schedule's time zone | `today` | `PUT /api/admin/schedule` |
 
 - Browsers get `Cache-Control: public, max-age=0, must-revalidate`, so they always ask the CDN.
@@ -81,7 +81,8 @@ it, and no public or CDN-cached response carries stage records. Constants: `SCOR
 | POST | `/api/auth/logout` | cookie | `{}` | 204, clears the cookie |
 | GET | `/api/me` | cookie | | `{account}` (401 when signed out) |
 | GET | `/api/session` | optional cookie | | `{account}` or `{account: null}`, always 200. The browser uses this to probe sign-in without logging a 401. |
-| GET | `/api/me/stats` | cookie | | `{stats: UserStats}` |
+| GET | `/api/me/stats` | cookie | | `{stats: UserStats}`. `rank` is the place on the live overall public board, null when not on it; `onGlobalBoard` says whether the player opted in (#175). Reads only the player's own progress plus the opted-in players' score summaries. |
+| PUT | `/api/me/board` | approved | `{show: boolean}` | `{account}` with `showOnGlobalBoard`. Opts in to or out of the public global leaderboard (off by default; your username and score become public). 403 `guest` for guests. Purges the `leaderboard` CDN tag. |
 | GET | `/api/today` | none | | `{date, timezone, caseId, lockToToday, releasedCaseIds}` |
 | GET | `/api/cases/:caseId/progress` | approved | | `{progress}` (first call creates the record, so the admin sees the player at "setup") |
 | POST | `/api/cases/:caseId/setup-done` | approved | `{}` | `{progress}` (q1 becomes active; idempotent) |
@@ -92,7 +93,7 @@ it, and no public or CDN-cached response carries stage records. Constants: `SCOR
 | GET | `/api/cases/:caseId/debrief?lang=en\|he` | approved | | `{markdown}`, 403 until every stage is finished |
 | POST | `/api/me/password` | cookie | `{currentPassword, newPassword}` | `{account}` + fresh cookie (other sessions end) |
 | GET | `/api/event` | none | | `{event, serverTime}` |
-| GET | `/api/leaderboard?caseId=` | none | | `{caseId, frozen, frozenAt, generatedAt, entries}` (approved players; overall without caseId) |
+| GET | `/api/leaderboard?caseId=` | none | | `{caseId, frozen, frozenAt, generatedAt, entries}` (overall without caseId). Lists only approved, non-guest players who opted in and solved a stage. Built from the `globalboard:` markers and those players' `score:` summaries, never from every account or progress record. The summaries keep each solve's time, so the frozen board needs no progress record either. |
 
 ### DB-stored case content (#64)
 

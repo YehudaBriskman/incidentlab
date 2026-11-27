@@ -141,6 +141,30 @@
 .ach-desc { font-size: var(--type-small-size); }
 .achievements h2, .stats-page h2 { font-size: var(--type-title-size); }
 
+/* ---- My stats: the global-board opt-in (#175). A checkbox with role="switch", drawn as a pill track ---- */
+.board-pref { margin-block-end: var(--gap-section); }
+.board-pref .board-switch { align-items: center; min-block-size: var(--target-min); font-weight: 500; }
+.board-pref .board-note { margin-block: var(--space-2) 0; max-inline-size: 65ch; }
+input[type="checkbox"].switch {
+  inline-size: 36px; block-size: 20px; margin: 0; padding-inline: 2px; place-content: center start;
+  border-radius: var(--radius-pill);
+}
+input[type="checkbox"].switch::before {
+  inline-size: 14px; block-size: 14px; border-radius: var(--radius-pill); background: var(--text-2);
+  -webkit-mask: none; mask: none; transform: none; box-shadow: var(--elevation-1);
+  transition: translate var(--motion-settle) var(--ease-standard), background-color var(--motion-settle) var(--ease-standard);
+}
+input[type="checkbox"].switch:checked::before { transform: none; background: var(--on-accent); translate: 16px 0; }
+[dir="rtl"] input[type="checkbox"].switch:checked::before { translate: -16px 0; }
+@media (prefers-reduced-motion: reduce) { input[type="checkbox"].switch::before { transition: none; } }
+@media (forced-colors: active) {
+  input[type="checkbox"].switch::before { background: CanvasText; }
+  input[type="checkbox"].switch:checked::before { background: HighlightText; }
+}
+
+/* ---- leaderboard: who is listed (#175) ---- */
+.lb-optin { margin-block: 0 var(--gap-stack); }
+
 /* ---- leaderboard (the projector keeps its own big sizes in vh) ---- */
 .lb-page:not(.is-projector) .lb-head { margin-bottom: var(--gap-stack); }
 .lb-select { min-block-size: var(--control-sm); border-radius: var(--radius-control); }

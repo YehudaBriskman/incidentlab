@@ -97,7 +97,7 @@ async function fetchOnce(url: string, init: RequestInit): Promise<Response> {
   }
 }
 
-async function send(method: "GET" | "POST", path: string, body?: unknown): Promise<Response> {
+async function send(method: "GET" | "POST" | "PUT", path: string, body?: unknown): Promise<Response> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const init: RequestInit = {
@@ -107,7 +107,7 @@ async function send(method: "GET" | "POST", path: string, body?: unknown): Promi
     body: body === undefined ? undefined : JSON.stringify(body),
   };
 
-  // Retries: GET on network errors and 5xx; POST only when no response was received at all.
+  // Retries: GET on network errors and 5xx; POST and PUT only when no response was received at all.
   for (let attempt = 0; ; attempt++) {
     try {
       const sentAt = Date.now();
@@ -140,13 +140,13 @@ async function readJson(res: Response): Promise<unknown> {
   }
 }
 
-async function request<S extends z.ZodType>(method: "GET" | "POST", path: string, schema: S, body?: unknown): Promise<z.infer<S>> {
+async function request<S extends z.ZodType>(method: "GET" | "POST" | "PUT", path: string, schema: S, body?: unknown): Promise<z.infer<S>> {
   return (await requestWithHeaders(method, path, schema, body)).data;
 }
 
 /** `request`, plus the response headers (the event poll reads `Cache-Status` and `Age`). */
 async function requestWithHeaders<S extends z.ZodType>(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PUT",
   path: string,
   schema: S,
   body?: unknown,
@@ -206,6 +206,11 @@ export async function fetchMe(): Promise<AccountView | null> {
 
 export async function fetchMyStats(): Promise<UserStats> {
   return (await request("GET", "/api/me/stats", UserStatsResponseSchema)).stats;
+}
+
+/** Opts in to or out of the public global leaderboard (#175). Returns the updated account. */
+export async function setBoardVisibility(show: boolean): Promise<AccountView> {
+  return (await request("PUT", "/api/me/board", AccountResponseSchema, { show })).account;
 }
 
 /** Sets a new password (also clears the "must change password" flag after an instructor reset). */

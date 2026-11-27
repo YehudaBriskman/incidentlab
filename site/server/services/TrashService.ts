@@ -11,6 +11,8 @@ import type { CaseRepository } from "../repositories/case-repository.ts";
 import type { Repositories } from "../repositories/repositories.ts";
 import type { TrashBundle, TrashRepository } from "../repositories/trash-repository.ts";
 import { sha256Hex } from "./crypto.ts";
+import type { GlobalBoardService } from "./GlobalBoardService.ts";
+import type { ScoreService } from "./ScoreService.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TRASH_ID = /^[0-9TZ:.-]+:[0-9a-f]{8}$/;
@@ -21,12 +23,16 @@ export class TrashService {
   private readonly trash: TrashRepository;
   private readonly repos: Repositories;
   private readonly cases: CaseRepository | null;
+  private readonly scores: ScoreService | null;
+  private readonly board: GlobalBoardService | null;
   private readonly now: () => Date;
 
-  constructor(deps: { trash: TrashRepository; repos: Repositories; cases?: CaseRepository; now: () => Date }) {
+  constructor(deps: { trash: TrashRepository; repos: Repositories; cases?: CaseRepository; scores?: ScoreService; board?: GlobalBoardService; now: () => Date }) {
     this.trash = deps.trash;
     this.repos = deps.repos;
     this.cases = deps.cases ?? null;
+    this.scores = deps.scores ?? null;
+    this.board = deps.board ?? null;
     this.now = deps.now;
   }
 
@@ -92,7 +98,10 @@ export class TrashService {
     for (const record of bundle.progress) {
       if (await this.repos.progress.saveIfMatch(record, null)) restored += 1;
       else skipped += 1; // newer progress exists: keep it
+      // The board's summary follows whatever progress is stored now (restored or newer).
+      await this.scores?.syncCase(record.accountId, record.caseId);
     }
+    if (bundle.account) await this.board?.restoreMarker(bundle.account);
     for (const [key, value] of Object.entries(bundle.firstBlood)) {
       await this.trash.restoreKeyIfAbsent(key, value);
     }

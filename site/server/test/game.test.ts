@@ -119,6 +119,7 @@ test("stats: per user, rank, per case, admin live view and resets", async () => 
   const bob = await approvedPlayer(harness, "Bob");
   const pending = harness.client();
   await pending.call("/auth/register", { body: { username: "Pending", password: "password1" } });
+  for (const p of [ada, bob]) await expectStatus(p.player.call("/me/board", { method: "PUT", body: { show: true } }), 200);
 
   await ada.player.call("/cases/alpha/setup-done", { body: {} });
   await ada.player.call("/cases/alpha/answer", { body: { questionId: "q1", answer: "wrong" } });
@@ -132,8 +133,11 @@ test("stats: per user, rank, per case, admin live view and resets", async () => 
   assert.equal(mine.stats.casesStarted, 1);
   assert.equal(mine.stats.cases.find((c) => c.caseId === "alpha")?.status, "in-progress");
   assert.equal(mine.stats.cases.find((c) => c.caseId === "beta")?.status, "not-started");
+  assert.equal(mine.stats.onGlobalBoard, true);
+  // Bob opted in but has solved nothing yet, so he isn't on the board and has no rank there.
   const bobStats = await bob.player.json(await bob.player.call("/me/stats"), UserStatsResponseSchema);
-  assert.equal(bobStats.stats.rank, 2);
+  assert.equal(bobStats.stats.rank, null);
+  assert.equal(bobStats.stats.onGlobalBoard, true);
 
   const all = await ada.player.json(await harness.admin("/admin/accounts"), AdminAccountsResponseSchema);
   assert.deepEqual(all.accounts.map((a) => [a.username, a.status, a.rank]), [["Ada", "approved", 1], ["Bob", "approved", 2], ["Pending", "pending", null]]);

@@ -8,6 +8,7 @@ import { mapWithConcurrency } from "../repositories/KvStore.ts";
 import { toAccountView } from "./AuthService.ts";
 import { ACCOUNT_ID_PATTERN, hashPassword, sha256Hex } from "./crypto.ts";
 import type { GameService } from "./GameService.ts";
+import type { ScoreService } from "./ScoreService.ts";
 import type { StatsService } from "./StatsService.ts";
 import type { TrashService } from "./TrashService.ts";
 import type { TrashRepository } from "../repositories/trash-repository.ts";
@@ -41,6 +42,7 @@ export class AccountAdminService {
   private readonly stats: StatsService;
   private readonly trash: TrashService;
   private readonly trashRepo: TrashRepository;
+  private readonly scores: ScoreService | null;
   private readonly now: () => Date;
 
   constructor(deps: {
@@ -50,6 +52,8 @@ export class AccountAdminService {
     stats: StatsService;
     trash: TrashService;
     trashRepo: TrashRepository;
+    /** the board's score summaries follow progress resets and account deletes (#175) */
+    scores?: ScoreService;
     now: () => Date;
   }) {
     this.repos = deps.repos;
@@ -58,6 +62,7 @@ export class AccountAdminService {
     this.stats = deps.stats;
     this.trash = deps.trash;
     this.trashRepo = deps.trashRepo;
+    this.scores = deps.scores ?? null;
     this.now = deps.now;
   }
 
@@ -123,6 +128,7 @@ export class AccountAdminService {
     await this.trash.put({ kind: "account", label: `account ${found.data.username}`, account: found.data, progress, firstBlood: {} });
     // Sessions die with the account (authenticate() rejects sessions whose account is gone).
     await this.repos.progress.deleteMany({ accountId });
+    await this.scores?.remove(accountId); // off the board at once; a restore rebuilds both from the trash
     await this.repos.accounts.delete(accountId);
     await this.repos.usernames.release(sha256Hex(found.data.usernameKey));
     return { username: found.data.username };
@@ -157,6 +163,8 @@ export class AccountAdminService {
     await this.trash.put({ kind: "progress", label, account: null, progress: records, firstBlood });
     await this.repos.progress.deleteMany(filter);
     if (isWholeCase) await this.firstBlood.clear(filter.caseId);
+    const scores = this.scores;
+    if (scores) await mapWithConcurrency(records, (r) => scores.syncCase(r.accountId, r.caseId));
   }
 
   /** One row per account per case the account has opened. */

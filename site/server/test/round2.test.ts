@@ -151,6 +151,7 @@ test("event window blocks answers outside it; freeze shows standings as of freez
   const harness = createHarness({ now: () => now });
   const ada = await approvedPlayer(harness, "Ada");
   const bob = await approvedPlayer(harness, "Bob");
+  for (const p of [ada, bob]) await expectStatus(p.player.call("/me/board", { method: "PUT", body: { show: true } }), 200);
   await ada.player.call("/cases/alpha/setup-done", { body: {} });
   await bob.player.call("/cases/alpha/setup-done", { body: {} });
   await expectStatus(harness.admin("/admin/event", { method: "PUT", body: { name: "x", startsAt: "2026-11-25T11:00:00Z", endsAt: "2026-11-25T10:00:00Z", freezeAt: null, enforceWindow: false, announcement: null } }), 400);

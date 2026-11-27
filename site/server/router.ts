@@ -22,6 +22,8 @@ import { CaseService } from "./services/CaseService.ts";
 import { EvidenceService } from "./services/evidenceStream.ts";
 import { EventService } from "./services/EventService.ts";
 import { GameService } from "./services/GameService.ts";
+import { GlobalBoardService } from "./services/GlobalBoardService.ts";
+import { ScoreService } from "./services/ScoreService.ts";
 import { RateLimiter } from "./services/RateLimiter.ts";
 import { ScheduleService } from "./services/ScheduleService.ts";
 import { StatsService } from "./services/StatsService.ts";
@@ -72,11 +74,13 @@ export const createApp = (deps: AppDeps): App => {
   const auth = new AuthService({ repos, settings: settingsRepo, limiter, adminKey: deps.adminKey, now });
   const events = new EventService({ events: new EventRepository(deps.store), settings: settingsRepo, now, purger: deps.cachePurger });
   const schedule = new ScheduleService({ repository: repos.schedule, releasedCaseIds: () => Object.keys(secrets.cases), now, purger: deps.cachePurger });
-  const game = new GameService({ repository: repos.progress, firstBlood, secrets, schedule, events, now });
+  const scores = new ScoreService({ repos, caseIds: () => Object.keys(secrets.cases) });
+  const board = new GlobalBoardService({ repos, scores, purger: deps.cachePurger, now });
+  const game = new GameService({ repository: repos.progress, firstBlood, secrets, schedule, events, scores, now });
   const stats = new StatsService({ repos, secrets, now });
   const trashRepo = new TrashRepository(deps.store);
-  const trash = new TrashService({ trash: trashRepo, repos, cases: caseRepo, now });
-  const accounts = new AccountAdminService({ repos, firstBlood, game, stats, trash, trashRepo, now });
+  const trash = new TrashService({ trash: trashRepo, repos, cases: caseRepo, scores, board, now });
+  const accounts = new AccountAdminService({ repos, firstBlood, game, stats, trash, trashRepo, scores, now });
   const audit = new AuditService({ repository: new AuditRepository(deps.store), now });
 
   // Static (test-fixture) cases: only the admin may upload their ids, and their answer key is the drift
@@ -96,7 +100,7 @@ export const createApp = (deps: AppDeps): App => {
   });
   const authoring = new CaseAuthoringService({ cases: caseRepo, progress: repos.progress, trash, bundledFingerprint, now });
 
-  const authController = new AuthController({ auth, schedule, stats, events });
+  const authController = new AuthController({ auth, schedule, stats, events, board });
   const gameController = new GameController({ auth, game });
   const contentController = new ContentController({ cases });
   const adminGuard = new AdminAuthService({ adminKey: deps.adminKey, auth });
@@ -116,6 +120,7 @@ export const createApp = (deps: AppDeps): App => {
       "/api/session": { GET: () => authController.session(req) },
       "/api/me/stats": { GET: () => authController.myStats(req) },
       "/api/me/password": { POST: () => authController.changePassword(req) },
+      "/api/me/board": { PUT: () => authController.setBoard(req) },
       "/api/today": { GET: () => authController.today() },
       "/api/event": { GET: () => authController.event() },
       "/api/leaderboard": { GET: () => authController.leaderboard(req) },
