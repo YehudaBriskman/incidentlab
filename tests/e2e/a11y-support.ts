@@ -16,7 +16,7 @@ export const PAGES: Record<Who, readonly string[]> = {
   // a guest (#176) sees the guest banner on every page, and the account menu says "Guest"
   guest: ["/#/", `/#/case/${CASE}`, `/#/case/${CASE}/toolbox`, "/#/me"],
   player: ["/#/", `/#/case/${CASE}`, `/#/case/${CASE}/toolbox`, `/#/case/${CASE}/explorer`, "/#/me", "/#/leaderboard"],
-  admin: ["/#/admin", "/#/admin?tab=live", "/#/admin?tab=stats", "/#/admin?tab=event", "/#/admin?tab=schedule", "/#/admin?tab=audit", `/#/case/${CASE}`, `/#/case/${CASE}/present`],
+  admin: ["/#/admin", "/#/author", "/#/author/reviews", "/#/admin?tab=live", "/#/admin?tab=stats", "/#/admin?tab=event", "/#/admin?tab=schedule", "/#/admin?tab=audit", `/#/case/${CASE}`, `/#/case/${CASE}/present`],
 };
 
 export async function signIn(page: Page, who: Who): Promise<void> {
