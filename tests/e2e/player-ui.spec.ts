@@ -23,9 +23,9 @@ test.describe("phone with touch (390x844)", () => {
     await signedInPlayer(page, "touch");
     await page.goto(`/#/case/${CASE_ID}`);
     expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
-    const allCommands = page.locator(".case-head-title a.btn-sm");
-    await expect(allCommands).toBeVisible();
-    const box = await allCommands.boundingBox();
+    const costs = page.locator(".case-status .btn-sm"); // "Costs so far" in the status line (#216)
+    await expect(costs).toBeVisible();
+    const box = await costs.boundingBox();
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
   });
 

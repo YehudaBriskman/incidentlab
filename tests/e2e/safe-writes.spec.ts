@@ -28,7 +28,10 @@ test("a hint bought in another tab shows up in this one", async ({ page, context
   await other.locator(".hint-trigger").click();
   await other.getByRole("alertdialog").getByRole("button", { name: /^yes, spend/i }).click();
   await expect(other.locator('.hint[data-hint="0"]')).toBeVisible();
-  // The first tab follows over the BroadcastChannel, without a reload.
+  // The first tab follows over the BroadcastChannel, without a reload: its Hints tab counts the hint and shows it.
+  const hintsTab = page.getByRole("tab", { name: /^Hints/ });
+  await expect(hintsTab).toContainText("1/3");
+  await hintsTab.click();
   await expect(page.locator('.hint[data-hint="0"]')).toBeVisible();
   await expect(page.locator(".hint-trigger")).toContainText(/hint 2/i);
   expect(await hintsRevealed(page)).toBe(1);

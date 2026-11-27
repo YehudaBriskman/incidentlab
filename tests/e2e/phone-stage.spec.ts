@@ -1,6 +1,7 @@
-// The case stage on phones (#132): at 390px a sticky [input][Check] bar shows while the real answer field is off
-// screen and answers through the same form; command rows show title and syntax and open for details (#214); the
-// Explorer tip sits right under the question. Every test makes its own data through the API (CI is unseeded).
+// The case stage on phones (#132, #213, #218): at 390px a segmented Question | Commands | Evidence control switches
+// panes, and a [input][Check] bar pinned to the bottom edge shows while the real answer field is off screen (another
+// pane), answers through the same form and never covers a focused control; command rows show title and syntax and
+// open for details (#214); Evidence leads into the Explorer. Every test makes its own data through the API.
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { answerFor, approveAccount, randomUsername, scheduleToday } from "./support";
 
@@ -12,6 +13,7 @@ const ui = {
   barInput: (p: Page) => ui.bar(p).getByRole("textbox"),
   barCheck: (p: Page) => ui.bar(p).getByRole("button", { name: "Check" }),
   field: (p: Page) => p.locator(".answer-form input"),
+  tab: (p: Page, name: string) => p.getByRole("tablist", { name: "Workbench" }).getByRole("tab", { name: new RegExp(`^${name}`) }),
 };
 
 /** A signed-in player with Stage 1 active on today's case. */
@@ -29,22 +31,36 @@ async function onStageOne(page: Page, request: APIRequestContext, lang: "en" | "
 }
 
 test.describe("390px", () => {
-  test.use({ viewport: { width: 390, height: 844 } });
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
-  test("the sticky answer bar shows while the field is off screen and answers through the same form", async ({ page, request }) => {
+  test("the pinned answer bar shows on the other panes, answers through the same form and never hides focus", async ({ page, request }) => {
     const errors: string[] = [];
     page.on("pageerror", (err) => errors.push(String(err)));
     await onStageOne(page, request);
 
-    // At the top of the stage the field is below the fold: the bar is on screen, at the bottom of the viewport.
-    await page.locator(".stage-goal").scrollIntoViewIfNeeded();
-    const fieldBox = await ui.field(page).boundingBox();
-    expect(fieldBox === null || fieldBox.y > 844 || fieldBox.y + fieldBox.height < 0, "the field starts off screen at 390px").toBe(true);
+    // The Question pane holds the real field: the bar stays out of the way.
+    await expect(ui.tab(page, "Question")).toHaveAttribute("aria-selected", "true");
+    await expect(ui.field(page)).toBeVisible();
+    await expect(ui.bar(page)).toBeHidden();
+
+    // On Commands the field is in a hidden pane: the bar is pinned to the bottom edge (#218).
+    await ui.tab(page, "Commands").click();
+    await expect(page).toHaveURL(/[?&]pane=commands/);
     await expect(ui.bar(page)).toBeVisible();
     await expect(ui.bar(page)).toBeInViewport();
+    expect(await ui.bar(page).evaluate((el) => getComputedStyle(el).position)).toBe("fixed");
     const barBox = await ui.bar(page).boundingBox();
     expect(barBox).not.toBeNull();
-    if (barBox !== null) expect(barBox.y + barBox.height).toBeGreaterThan(844 - 120);
+    if (barBox !== null) expect(844 - (barBox.y + barBox.height)).toBeLessThanOrEqual(16);
+
+    // A focused control is never under the bar (WCAG 2.4.11): focus the last command row from the top of the page.
+    await page.evaluate(() => document.querySelector(".app-content")?.scrollTo(0, 0));
+    const last = page.locator(".tool-list .cmd-sum").last();
+    await last.focus();
+    await expect(last).toBeFocused();
+    const rowBox = await last.boundingBox();
+    const barNow = await ui.bar(page).boundingBox();
+    expect(rowBox !== null && barNow !== null && rowBox.y + rowBox.height <= barNow.y, `row ${JSON.stringify(rowBox)} vs bar ${JSON.stringify(barNow)}`).toBe(true);
 
     // Typing in the bar fills the real field (the same draft); a malformed answer is caught in the bar, for free.
     await ui.barInput(page).fill("not a time");
@@ -54,15 +70,13 @@ test.describe("390px", () => {
     await expect(ui.bar(page)).toContainText(/nothing was charged/i);
     await expect(ui.barInput(page)).toBeFocused(); // focus stays in the bar, the page doesn't jump
 
-    // Scrolled to the real field, the bar steps aside (once focus leaves it).
-    await ui.field(page).scrollIntoViewIfNeeded();
-    await ui.field(page).focus();
-    await expect(ui.bar(page)).toBeHidden();
+    // Back on the Question pane the real field has the same draft, and the bar steps aside once focus leaves it.
+    await ui.tab(page, "Question").click();
     await expect(ui.field(page)).toHaveValue("not a time");
+    await expect(ui.bar(page)).toBeHidden();
 
-    // Back at the top, the right answer from the bar solves the stage.
-    await page.locator(".stage-goal").scrollIntoViewIfNeeded();
-    await ui.field(page).evaluate((el) => (el as HTMLInputElement).blur());
+    // The right answer from the bar on the Evidence pane solves the stage and shows the result.
+    await ui.tab(page, "Evidence").click();
     await expect(ui.bar(page)).toBeVisible();
     await ui.barInput(page).fill(answerFor(CASE_ID, "q1"));
     await ui.barInput(page).press("Enter");
@@ -71,8 +85,9 @@ test.describe("390px", () => {
     expect(errors).toEqual([]);
   });
 
-  test("command rows show title and syntax and open for details; the Explorer tip sits under the question", async ({ page, request }) => {
+  test("command rows show title and syntax and open for details; Evidence leads into the Explorer", async ({ page, request }) => {
     await onStageOne(page, request);
+    await ui.tab(page, "Commands").click();
     const row = page.locator(".tool-list .cmd").first();
     await expect(row.locator(".cmd-title")).toBeVisible();
     await expect(row.locator(".cmd-line")).toBeVisible();
@@ -84,19 +99,19 @@ test.describe("390px", () => {
     await expect(row.locator(".cmd-body")).toBeVisible();
     await expect(row.locator(".btn-reveal")).toBeVisible();
 
-    const tip = page.locator(".stage > .tip");
-    if ((await tip.count()) > 0) {
-      // the tip comes straight after the question card, before the commands
-      const order = await page.evaluate(() => [...document.querySelectorAll(".stage > *")].map((el) => el.className));
-      const q = order.findIndex((c) => c.includes("question-box"));
-      expect(order[q + 1]).toContain("tip");
-    }
+    // The Evidence pane: the way into the Explorer, and every file as a link that opens it there.
+    await ui.tab(page, "Evidence").click();
+    const evidence = page.getByRole("tabpanel", { name: /^Evidence/ });
+    await expect(evidence.getByRole("link", { name: /Evidence Explorer/ })).toBeVisible();
+    expect(await evidence.locator(`a.ev-link[href^="#/case/${CASE_ID}/explorer?f="]`).count()).toBeGreaterThan(0);
+    // the segments are touch-sized
+    for (const tab of await page.getByRole("tablist", { name: "Workbench" }).getByRole("tab").all()) expect((await tab.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
   });
 
   test("Hebrew: the bar is right-to-left around an LTR answer field, with no horizontal overflow", async ({ page, request }) => {
     await onStageOne(page, request, "he");
     await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
-    await page.locator(".stage-goal").scrollIntoViewIfNeeded();
+    await page.getByRole("tab", { name: /^פקודות/ }).click();
     await expect(page.getByRole("form", { name: "תשובה לשלב" })).toBeVisible();
     await expect(page.getByRole("form", { name: "תשובה לשלב" }).getByRole("textbox")).toHaveCSS("direction", "ltr");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -111,7 +126,7 @@ test("desktop: no answer bar; command rows are one line each and start closed", 
   const rows = page.locator(".tool-list .cmd");
   await expect(rows.first().locator(".cmd-body")).toBeHidden();
   // one shell switch for the stage's list, no per-row tabs
-  await expect(page.locator("#stage").getByRole("tab")).toHaveCount(0);
+  await expect(page.locator(".tool-list").getByRole("tab")).toHaveCount(0);
   await expect(page.locator("#stage").getByRole("radio", { name: "PowerShell", exact: true })).toHaveCount(1);
   for (const height of await rows.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height))) expect(height).toBeLessThan(64);
 });
