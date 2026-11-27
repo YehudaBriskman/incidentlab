@@ -1,7 +1,7 @@
 import { defineStrings, formatNumber as num } from "./i18n";
 
 // Strings for private cases and the owner's review (#184): the visibility column, "Submit for review" and class
-// assignment on #/author, and the owner's queue on #/author/reviews. Case ids and titles are always parameters;
+// assignment on #/author, and the owner's queue on #/admin/reviews. Case ids and titles are always parameters;
 // views wrap them in <bdi>.
 
 type Review = "none" | "submitted" | "approved" | "rejected";
@@ -42,7 +42,7 @@ export const TRv = defineStrings({
     reviewsFailed: "Couldn't load the queue.",
     retry: "Try again",
     notAdmin: "Only the site owner reviews cases.",
-    backToAuthoring: "Back to authoring",
+    backToAuthoring: "Back to the console",
     colCase: "Case",
     colAuthor: "Author",
     colVersion: "Version",
@@ -106,7 +106,7 @@ export const TRv = defineStrings({
     reviewsFailed: "לא הצלחנו לטעון את התור.",
     retry: "לנסות שוב",
     notAdmin: "רק בעלי האתר בודקים תיקים.",
-    backToAuthoring: "חזרה לניהול התיקים",
+    backToAuthoring: "חזרה לקונסולה",
     colCase: "תיק",
     colAuthor: "כותב",
     colVersion: "גרסה",

@@ -1,5 +1,5 @@
-// The global nav (the app frame's start column): Home, Today's case, Cases, Leaderboard, My stats, Authoring and
-// Admin, each an icon and a label, shown by role. A view can hang nested items under one of them (admin sections,
+// The global nav (the app frame's start column): Home, Cases, Leaderboard, Classes, My stats, Authoring and the
+// Platform console, each an icon and a label, shown by role (#221: today's case lives on home and in the status chip). A view can hang nested items under one of them (admin sections,
 // a case's stages): `ViewResult.nav`, mounted by showSubNav().
 // - above 1024px: --nav-size wide, collapsible to the --rail-size icon rail (kept in settings as navCollapsed);
 // - 641–1024px: always the rail; the top bar's menu button opens the full nav in a start-edge Sheet;
@@ -14,13 +14,11 @@ import { TS } from "../i18n/strings-shell";
 import { TC } from "../i18n/strings-classes";
 import { ICONS, type IconName } from "./icons";
 import { loadSettings, onSettingsChange, updateSettings } from "./settings";
-import { cachedToday, onTodayChange } from "./today";
 import type { NavKey, NavSection } from "./types";
 
-const KEYS: readonly NavKey[] = ["home", "today", "cases", "leaderboard", "classes", "stats", "author", "admin"];
+const KEYS: readonly NavKey[] = ["home", "cases", "leaderboard", "classes", "stats", "author", "admin"];
 const ICON_OF: Record<NavKey, IconName> = {
   home: "home",
-  today: "today",
   cases: "cases",
   leaderboard: "leaderboard",
   classes: "classes",
@@ -94,24 +92,21 @@ function isRail(): boolean {
 function draw(): void {
   if (items === null || navEl === null) return;
   const account = cachedAccount();
-  const todayId = cachedToday()?.caseId ?? null;
   const labels: Record<NavKey, string> = {
     home: TS().navHome,
-    today: TS().navTodayCase,
     cases: TS().navCases,
     leaderboard: TG().leaderboard,
     classes: TC().navClasses,
     stats: TA().myStats,
     author: TS().navAuthor,
-    admin: TG().adminLink,
+    admin: TS().navConsole,
   };
   const shown: Record<NavKey, boolean> = {
     home: true,
     cases: true,
-    today: todayId !== null && !isAdmin(account),
     leaderboard: true,
-    // classes (#182): any signed-in account; guests find the "create an account to join" note there
-    classes: account !== null,
+    // classes (#182): everyone; visitors find what classes are and how to sign in or sign up (#221)
+    classes: true,
     // the forced password screen gates every view, so My stats waits for an approved, settled account
     stats: account !== null && !isAdmin(account) && account.status === "approved" && !account.mustChangePassword,
     // authors and the instructor manage cases (#66); approval and password state are enforced by the server
@@ -124,7 +119,6 @@ function draw(): void {
   for (const key of KEYS) {
     const it = items[key];
     if (it.label.textContent !== labels[key]) it.label.textContent = labels[key];
-    if (key === "today" && todayId !== null) it.link.href = `#/case/${encodeURIComponent(todayId)}`;
     const parentOfSub = subSpec !== null && subSpec.under === key;
     if (parentOfSub) it.link.setAttribute("aria-current", "true");
     else if (key === current) it.link.setAttribute("aria-current", "page");
@@ -201,7 +195,6 @@ export function mountNav(el: HTMLElement): void {
   );
 
   onAccountChange(draw);
-  onTodayChange(draw);
   onSettingsChange(draw);
   window.addEventListener("hashchange", () => {
     labelFoot();

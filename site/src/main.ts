@@ -264,9 +264,13 @@ function route(): void {
   }
 
   try {
-    // #/cases is the catalog entry of the nav; until home splits it out it shows the same dashboard.
-    if (parts.length === 0 || (parts[0] === "cases" && parts.length === 1)) {
-      mount(homeView());
+    // #221: Home is the dashboard (continue, today, classes, streak, a few recommended cases); Cases is the catalog.
+    if (parts.length === 0) {
+      mount(homeView("home"));
+      return;
+    }
+    if (parts[0] === "cases" && parts.length === 1) {
+      mount(homeView("cases"));
       return;
     }
     if ((parts[0] === "login" || parts[0] === "signup") && parts.length === 1) {
@@ -339,8 +343,18 @@ function route(): void {
       lazyView(() => import("./views/author").then((m) => legacy(m.renderAuthor)));
       return;
     }
+    // The review queue is part of the platform console (#221); its old address under Authoring still works.
     if (parts[0] === "author" && parts[1] === "reviews" && parts.length === 2) {
-      lazyView(() => import("./views/reviews").then((m) => legacy(m.renderReviews)));
+      window.location.replace("#/admin/reviews");
+      return;
+    }
+    if (parts[0] === "admin" && parts[1] === "reviews" && parts.length === 2) {
+      lazyView(() =>
+        Promise.all([import("./views/reviews"), import("./views/admin")]).then(([reviews, admin]): View => () => {
+          const main = h("div", { class: "view" });
+          return { main, nav: admin.consoleNav("reviews"), start: () => reviews.renderReviews(main) };
+        }),
+      );
       return;
     }
     if (parts[0] === "admin" && parts.length === 1) {

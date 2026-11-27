@@ -66,12 +66,14 @@ function crumbsFor(parts: readonly string[]): Crumb[] {
     }
   }
   if (section === "login" || section === "signup") return [homeCrumb, { label: TS().crumbSignIn }];
+  // #221: the review queue sits inside the platform console
+  if (section === "admin" && id === "reviews") return [homeCrumb, { label: TS().navConsole, href: "#/admin" }, { label: TS().crumbReviews }];
   const labels: Partial<Record<string, string>> = {
     cases: TS().navCases,
     leaderboard: TG().leaderboard,
     stats: TA().myStats,
     author: TS().navAuthor,
-    admin: TG().adminLink,
+    admin: TS().navConsole,
   };
   const label = key === null ? undefined : labels[key];
   if (label === undefined) return [homeCrumb];

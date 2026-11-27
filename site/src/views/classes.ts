@@ -103,7 +103,8 @@ function renderClasses(root: HTMLElement): void {
 
   void loadAccount().then(
     (account) => {
-      if (account === null) return setChildren(body, signedOutCard());
+      // Visitors (#221): what classes are, next to how to sign in or sign up for one.
+      if (account === null) return setChildren(body, h("div", { class: "classes-grid" }, signedOutCard(), h("div", { class: "classes-side" }, aboutCard())));
       if (isGuest(account)) return setChildren(body, guestCard());
       // Pending, rejected and forced-password accounts see the gate's screens; the site admin may manage classes.
       withApprovedAccount(body, TC().classesTitle, (a) => showList(a), { onAdmin: () => showList(account) });

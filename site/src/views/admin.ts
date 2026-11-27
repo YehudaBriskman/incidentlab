@@ -149,6 +149,47 @@ function adminHash(tab: TabId, caseId: string | null): string {
 
 const isAdminHash = (hash: string): boolean => /^#\/?admin(\?|$)/.test(hash);
 
+/** Where the console's review queue lives (#221; #/author/reviews redirects here). */
+export const REVIEWS_HREF = "#/admin/reviews";
+
+function sectionLabelOf(tab: TabId): string {
+  switch (tab) {
+    case "accounts":
+      return T().admTabAccounts;
+    case "classes":
+      return T().admTabClasses;
+    case "live":
+      return T().admTabLive;
+    case "event":
+      return T().admTabEvent;
+    case "schedule":
+      return T().admTabSchedule;
+    case "stats":
+      return T().admTabStats;
+    case "audit":
+      return T().admTabAudit;
+  }
+}
+
+/** "Users · Platform console · IncidentLab": every console page names its section first (#222). */
+const consoleTitle = (section: string): string => `${section} · ${TS().navConsole} · IncidentLab`;
+
+const REVIEWS_ICON = svgIcon('<path d="M4 4h16v12H8l-4 4z"/><path d="M9 10l2 2 4-4"/>');
+
+/**
+ * The console's sections as nested nav items for a page of the console that is not the dashboard itself (the review
+ * queue): plain links back into #/admin?tab=…, with `current` marked.
+ */
+export function consoleNav(current: "reviews"): NavSection {
+  const list = h("ul", { class: "nav-sub-list", "aria-label": T().admTabsLabel });
+  setChildren(
+    list,
+    TABS.map((tab) => h("li", {}, navSubLink(adminHash(tab, null), { label: sectionLabelOf(tab), icon: { svg: SECTION_ICONS[tab] }, className: "admin-side-link" }))),
+    h("li", {}, navSubLink(REVIEWS_HREF, { label: T().admReviewsLink, icon: { svg: REVIEWS_ICON }, current: current === "reviews" ? "page" : null, className: "admin-side-link admin-reviews-link" })),
+  );
+  return { under: "admin", label: TS().adminSections, content: list };
+}
+
 /** Unsaved drafts carried over when the view re-renders in place (the language toggle re-runs the route). */
 let carried: { schedule: Schedule | null; event: LiveEvent | null } | null = null;
 
@@ -526,7 +567,14 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     if (err.status === 401) {
       const wasSession = state.auth === "session";
       clearAdminKey();
-      showLogin(wasSession ? T().admSessionExpired : T().admKeyRejected);
+      if (wasSession) {
+        // The owner's session ended: back to the one sign-in page, never the key form (#221).
+        stopTimers();
+        toast({ tone: "info", text: T().admSessionExpired });
+        window.location.replace("#/login");
+        return true;
+      }
+      showLogin(T().admKeyRejected);
       return true;
     }
     if (err.status === 503) {
@@ -583,24 +631,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       });
   });
 
-  const tabLabel = (tab: TabId): string => {
-    switch (tab) {
-      case "accounts":
-        return T().admTabAccounts;
-      case "classes":
-        return T().admTabClasses;
-      case "live":
-        return T().admTabLive;
-      case "event":
-        return T().admTabEvent;
-      case "schedule":
-        return T().admTabSchedule;
-      case "stats":
-        return T().admTabStats;
-      case "audit":
-        return T().admTabAudit;
-    }
-  };
+  const tabLabel = sectionLabelOf;
 
   // ---- the sections: sidebar navigation (#60) ----------------------------------------------
   // Links, not a tablist: each section has its own URL (#/admin?tab=…), so the browser's Back, "open in a new
@@ -611,9 +642,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   // The review queue (#184) lives on its own page; the console links it with the number waiting.
   const reviewsBadge = h("span", { class: "tab-badge nav-sub-badge" });
   reviewsBadge.hidden = true;
-  const reviewsLink = navSubLink("#/author/reviews", {
+  const reviewsLink = navSubLink(REVIEWS_HREF, {
     label: T().admReviewsLink,
-    icon: { svg: svgIcon('<path d="M4 4h16v12H8l-4 4z"/><path d="M9 10l2 2 4-4"/>') },
+    icon: { svg: REVIEWS_ICON },
     badge: reviewsBadge,
     className: "admin-side-link admin-reviews-link",
   });
@@ -679,6 +710,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
 
   function syncTabs(): void {
     setPageCrumb(tabLabel(state.tab));
+    document.title = consoleTitle(tabLabel(state.tab));
     for (const tab of TABS) {
       const selected = tab === state.tab;
       for (const link of sectionLinks.get(tab) ?? []) {
@@ -1480,12 +1512,15 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
 
   /** The admin session cookie wins (no key gate); otherwise a key typed earlier in this tab; otherwise the gate. */
   async function bootstrap(): Promise<void> {
+    document.title = `${TS().navConsole} · IncidentLab`;
     setChildren(container, h("p", { class: "muted admin-loading" }, T().admLoadingDashboard));
     let sessionAdmin = false;
+    let signedIn = false;
     let sessionError: unknown = null;
     try {
       const me = await fetchMe();
       sessionAdmin = me?.role === "admin";
+      signedIn = me !== null;
     } catch (err: unknown) {
       // network trouble: fall back to the key (if any), whose own request reports the error
       sessionError = err;
@@ -1503,7 +1538,27 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     }
     // The session check itself failed: whoever this is (the owner, likely), the key form is not the answer.
     if (sessionError !== null) return showLoadError(sessionError, () => void bootstrap());
-    showLogin(null);
+    // #221: the admin-key form is never shown to people. Signed out, the one sign-in page (the owner signs in there
+    // as `admin`; tools keep the X-Admin-Key header); signed in as someone else, say whose console this is.
+    if (signedIn) return showNotOwner();
+    window.location.replace("#/login");
+  }
+
+  function showNotOwner(): void {
+    stopTimers();
+    state.ready = false;
+    gateShown = true;
+    syncShellSidebar();
+    setChildren(
+      container,
+      h(
+        "section",
+        { class: "center-card" },
+        h("h1", {}, TS().navConsole),
+        h("p", { class: "muted" }, T().admOwnerOnly),
+        h("div", { class: "row-center" }, h("a", { class: "btn btn-primary", href: "#/" }, TS().navHome)),
+      ),
+    );
   }
 
   void bootstrap();
