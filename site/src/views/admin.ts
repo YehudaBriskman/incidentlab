@@ -31,6 +31,9 @@ import { cachedEvent, serverNow as publicServerNow } from "../lib/event";
 import { dataTable } from "../components/dataTable";
 import { formActions, formField } from "../components/formLayout";
 import { copyButton, h, setChildren, type Child } from "../lib/dom";
+import { loadErrorText } from "../lib/errors";
+import { TE } from "../i18n/strings-errors";
+import { T as TP } from "../i18n/strings-player";
 import { TS } from "../i18n/strings-shell";
 import { clickClosedDrawer, navSubLink, refreshNav, showSubNav } from "../shell/nav";
 import { setPageCrumb } from "../shell/topbar";
@@ -517,6 +520,25 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       ),
     );
     input.focus();
+  }
+
+  /** The console could not load (offline, 5xx): a scoped error with Try again, keeping the session. */
+  function showLoadError(err: unknown, retry: () => void): void {
+    stopTimers();
+    state.ready = false;
+    gateShown = true;
+    syncShellSidebar();
+    const again = h("button", { type: "button", class: "btn btn-primary", onclick: () => retry() }, TP().tryAgain);
+    setChildren(
+      container,
+      h(
+        "section",
+        { class: "center-card load-failed", role: "alert" },
+        h("h1", {}, TE().adminLoadFailedTitle),
+        h("p", { class: "muted" }, loadErrorText(err)),
+        h("div", { class: "row-center" }, again),
+      ),
+    );
   }
 
   /** 401 / 503 send the instructor back to the key gate. Returns true when handled. */
@@ -1583,6 +1605,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     } catch (err: unknown) {
       if (disposed) return;
       if (handleAuthError(err)) return;
+      // Signed in as the owner: a failed load is an outage, not a sign-in problem, so never the key form.
+      if (state.auth === "session") return showLoadError(err, () => void start());
       showLogin(err instanceof Error ? err.message : T().admLoadFailed);
       return;
     }
@@ -1608,11 +1632,13 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   async function bootstrap(): Promise<void> {
     setChildren(container, h("p", { class: "muted admin-loading" }, T().admLoadingDashboard));
     let sessionAdmin = false;
+    let sessionError: unknown = null;
     try {
       const me = await fetchMe();
       sessionAdmin = me?.role === "admin";
-    } catch {
+    } catch (err: unknown) {
       // network trouble: fall back to the key (if any), whose own request reports the error
+      sessionError = err;
     }
     if (disposed) return;
     if (sessionAdmin) {
@@ -1625,6 +1651,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       state.auth = "key";
       return start();
     }
+    // The session check itself failed: whoever this is (the owner, likely), the key form is not the answer.
+    if (sessionError !== null) return showLoadError(sessionError, () => void bootstrap());
     showLogin(null);
   }
 
