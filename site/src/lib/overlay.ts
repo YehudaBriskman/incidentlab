@@ -827,6 +827,8 @@ export interface BannerOptions {
   /** Names the banner as a region ("Announcement"); without it the banner is a plain status line. */
   label?: string;
   className?: string;
+  /** One button after the text (e.g. "Create account"); its label is re-read on every update. */
+  action?: { label: () => string; run: () => void };
 }
 
 export interface BannerHandle {
@@ -851,15 +853,19 @@ export function banner(opts: BannerOptions): BannerHandle {
     opts.dismissible === true
       ? h("button", { type: "button", class: "banner-close", "aria-label": TV().dismiss, title: TV().dismiss }, h("span", { "aria-hidden": "true" }, "×"))
       : null;
+  const action = opts.action === undefined ? null : h("button", { type: "button", class: "btn btn-sm banner-action" });
+  if (action !== null && opts.action !== undefined) action.addEventListener("click", opts.action.run);
   const el = h(
     "div",
     { class: `banner${opts.className ? ` ${opts.className}` : ""}`, role: opts.label !== undefined ? "region" : null, "aria-label": opts.label ?? null },
     icon,
     live,
+    action,
     close,
   );
   const paint = (): void => {
     el.dataset.tone = tone;
+    if (action !== null && opts.action !== undefined) action.textContent = opts.action.label();
     icon.textContent = TONE_ICON[tone];
     toneEl.textContent = `${toneLabel(tone)} `;
     close?.setAttribute("aria-label", TV().dismiss);

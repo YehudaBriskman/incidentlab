@@ -213,6 +213,16 @@ export async function regenerateRecoveryCode(input: { currentPassword: string })
   return (await request("POST", "/api/me/recovery-code", RecoveryCodeResponseSchema, input)).recoveryCode;
 }
 
+/** Starts a guest session (#176), or returns the account of the session the cookie already holds. */
+export async function startGuest(): Promise<AccountView> {
+  return (await request("POST", "/api/guest", AccountResponseSchema, {})).account;
+}
+
+/** Turns the signed-in guest into a full account with the same id (its progress stays). */
+export async function upgradeGuest(credentials: Credentials): Promise<AccountView> {
+  return (await request("POST", "/api/auth/upgrade", AccountResponseSchema, credentials)).account;
+}
+
 export async function logout(): Promise<void> {
   await requestNoContent("/api/auth/logout", {});
 }

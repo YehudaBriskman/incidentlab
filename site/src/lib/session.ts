@@ -59,9 +59,14 @@ export function isAdmin(account: AccountView | null = current): boolean {
   return account?.role === "admin";
 }
 
+/** True for a guest playing without an account (#176): it can play, and upgrade to keep its progress. */
+export function isGuest(account: AccountView | null = current): boolean {
+  return account?.kind === "guest";
+}
+
 function sameAccount(a: AccountView | null, b: AccountView | null): boolean {
   if (a === null || b === null) return a === b;
-  return a.id === b.id && a.status === b.status && a.role === b.role && a.mustChangePassword === b.mustChangePassword;
+  return a.id === b.id && a.status === b.status && a.role === b.role && a.mustChangePassword === b.mustChangePassword && a.kind === b.kind;
 }
 
 /** Asks the server once per page load (or after `refresh`). */

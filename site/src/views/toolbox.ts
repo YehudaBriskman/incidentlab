@@ -25,6 +25,8 @@ import type { ViewResult } from "../shell/types";
 import { contentScrollTop, scrollContentTo } from "../shell/scroll";
 import { createCaseNav } from "./caseNav";
 import { withApprovedAccount } from "./auth";
+import { TGu } from "../i18n/strings-guest";
+import { playAsGuest } from "./guest";
 
 type ToolItem = Case["toolbox"][number]["items"][number];
 type Shell = "bash" | "powershell" | "lab";
@@ -281,7 +283,12 @@ function toolboxNote(c: Case, root: HTMLElement, state: PageState): HTMLElement 
       { class: "notice" },
       h("p", { class: "notice-title" }, TG().toolboxSignedOutTitle),
       h("p", { class: "muted" }, TG().toolboxSignedOutBody),
-      h("button", { type: "button", class: "btn btn-primary btn-sm", onclick: () => withApprovedAccount(root, c.title, () => renderToolbox(root, c)) }, TA().signInBtn),
+      h(
+        "div",
+        { class: "row-actions" },
+        h("button", { type: "button", class: "btn btn-primary btn-sm", onclick: () => withApprovedAccount(root, c.title, () => renderToolbox(root, c)) }, TA().signInBtn),
+        h("button", { type: "button", class: "btn btn-sm", onclick: () => void playAsGuest().then((ok) => ok && renderToolbox(root, c)) }, TGu().playAsGuest),
+      ),
     );
   }
   if (state.kind === "admin") return h("p", { class: "notice muted" }, TG().toolboxAdmin);
