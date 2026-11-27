@@ -1,7 +1,8 @@
 /* =====================================================================
    The case workspace (#213): a question column beside a tabbed workbench above 1024px, one segmented tab row
-   at 1024px and below. Imported by views/case.ts after player.css. Role tokens only; logical properties, so
-   Hebrew mirrors without patches. DESIGN.md "Case workspace".
+   at 1024px and below. Role tokens only; logical properties, so
+   Hebrew mirrors without patches. DESIGN.md "Case workspace". Pulled into player.css with @import, so the case
+   route chunk has no stylesheet of its own (its own CSS made Vite preload the chunk before importing it).
    ===================================================================== */
 :root {
   /* component values: the sticky case status line (#216) and the gap under it */

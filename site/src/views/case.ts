@@ -20,7 +20,6 @@ import { answerForm, clearAnswerDrafts } from "./answerForm";
 import { isNarrow, workbench, writePane } from "./caseWorkbench";
 import { TW } from "../i18n/strings-case";
 import "../player.css";
-import "../case.css";
 import { md, mdInline } from "../lib/markdown";
 import { readingLayout } from "../components/readingLayout";
 import { formatElapsed } from "../lib/time";

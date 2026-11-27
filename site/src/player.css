@@ -1,3 +1,4 @@
+@import "./case.css";
 /* =====================================================================
    Player pages, Soft UI sweep B (DESIGN.md 3.0.0): case, toolbox, My stats, leaderboard and projector,
    auth, authoring. Imported by those views, so it loads after styles.css and wins at equal specificity.
