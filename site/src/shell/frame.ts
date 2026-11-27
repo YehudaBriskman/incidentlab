@@ -14,7 +14,7 @@ import { appendChildren, h, html, setChildren, type Child } from "../lib/dom";
 import { cachedEvent, onEventChange } from "../lib/event";
 import { cachedAccount, isGuest, onAccountChange } from "../lib/session";
 import { TGu } from "../i18n/strings-guest";
-import { banner, openSheet, type DialogHandle } from "../lib/overlay";
+import { banner, openDialog, openSheet, type DialogHandle } from "../lib/overlay";
 import { ICONS } from "./icons";
 import { showSubNav } from "./nav";
 import { scrollContentTo } from "./scroll";
@@ -188,6 +188,28 @@ function createAnnouncement(): HTMLElement {
 /** Opens the upgrade form (loaded on demand: most visitors are never guests). */
 export function openGuestUpgrade(): void {
   void import("../views/guest").then((m) => m.openUpgradeDialog());
+}
+
+/**
+ * A guest who signs out can never get back in (#176), so every sign-out a guest can reach asks first (#206): the
+ * account menu and "not you? switch" on a case. "Create an account first" opens the upgrade form instead.
+ * Resolves true only when the guest chose to sign out and lose the progress.
+ */
+export async function confirmGuestSignOut(): Promise<boolean> {
+  const choice = await openDialog<"cancel" | "upgrade" | "leave">({
+    size: "sm",
+    role: "alertdialog",
+    className: "ov-confirm is-danger",
+    title: TGu().signOutTitle,
+    body: h("p", {}, TGu().signOutBody),
+    actions: [
+      { value: "cancel", label: TGu().cancel, tone: "ghost", autofocus: true },
+      { value: "upgrade", label: TGu().createFirst, tone: "primary" },
+      { value: "leave", label: TGu().signOutConfirm, tone: "danger" },
+    ],
+  });
+  if (choice === "upgrade") openGuestUpgrade();
+  return choice === "leave";
 }
 
 /** Shown on every page while the session is a guest; not dismissible, since the progress is at stake. */

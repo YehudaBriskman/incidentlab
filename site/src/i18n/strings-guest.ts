@@ -25,6 +25,7 @@ export const TGu = defineStrings({
     signOutTitle: "Sign out of guest mode?",
     signOutBody: "A guest can't sign back in: your progress in this session will be lost. Create an account to keep it.",
     signOutConfirm: "Sign out and lose progress",
+    createFirst: "Create an account first",
   },
   he: {
     choiceTitle: "רק רוצים לשחק?",
@@ -48,5 +49,6 @@ export const TGu = defineStrings({
     signOutTitle: "לצאת ממצב אורח?",
     signOutBody: "אורחים לא יכולים להתחבר שוב: ההתקדמות בסשן הזה תאבד. פתחו חשבון כדי לשמור אותה.",
     signOutConfirm: "יציאה ואיבוד ההתקדמות",
+    createFirst: "קודם לפתוח חשבון",
   },
 });

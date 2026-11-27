@@ -4,7 +4,9 @@ import type { Case, Question } from "../../shared/case";
 import { ApiError, getDebrief, getProgress, revealAnswer, revealHint, setupDone, submitAnswer } from "../lib/api";
 import { recordVisit } from "../lib/recent";
 import { playErrorText } from "../lib/errors";
-import { loadAccount, setAccount, signOut } from "../lib/session";
+import { cachedAccount, isGuest, loadAccount, setAccount, signOut } from "../lib/session";
+import { TGu } from "../i18n/strings-guest";
+import { confirmGuestSignOut } from "../shell/frame";
 import { TG } from "../i18n/strings-game";
 import { withApprovedAccount } from "./auth";
 import { renderInstructorPreview } from "./present";
@@ -218,9 +220,13 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
 
   // On a shared lab computer this is the quickest way to hand over, so it stays next to the name, but it asks
   // first: signing out clears the unchecked answer drafts. Then straight to sign-in (the local session clears
-  // even if logout fails).
+  // even if logout fails). A guest can never sign back in, so a guest gets the account menu's warning, with
+  // "Create an account first" (#206), instead of "your progress is saved".
   const switchPlayer = (): void => {
-    void confirm({ title: T().switchTitle, body: T().switchBody, confirmLabel: T().switchConfirm }).then((ok) => {
+    const asked = isGuest(cachedAccount())
+      ? confirmGuestSignOut()
+      : confirm({ title: T().switchTitle, body: T().switchBody, confirmLabel: T().switchConfirm });
+    void asked.then((ok) => {
       if (!ok) return;
       drafts.clear();
       void signOut()
@@ -325,7 +331,8 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
           "span",
           { class: "player-tag" },
           T().playingAs,
-          h("strong", { dir: "auto" }, player.username), // textContent only
+          // textContent only; a guest's generated name (guest-<id>) means nothing to them, so "Guest" (#206)
+          h("strong", { dir: "auto" }, isGuest(cachedAccount()) ? TGu().guestName : player.username),
           " · ",
           h("button", { type: "button", class: "link-btn", onclick: switchPlayer }, T().switchPlayer),
         ),

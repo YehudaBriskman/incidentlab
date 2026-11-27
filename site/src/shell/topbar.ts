@@ -11,10 +11,10 @@ import { cachedClassName } from "../lib/class-api";
 import { onConnectivity } from "../lib/api";
 import { h, html, setChildren } from "../lib/dom";
 import { cachedEvent, formatCountdown, onEventChange, serverNow, startEventPolling } from "../lib/event";
-import { confirm, popover } from "../lib/overlay";
+import { popover } from "../lib/overlay";
 import { cachedAccount, isAdmin, isGuest, loadAccount, onAccountChange, signOut } from "../lib/session";
 import { TGu } from "../i18n/strings-guest";
-import { openGuestUpgrade } from "./frame";
+import { confirmGuestSignOut, openGuestUpgrade } from "./frame";
 import { caseSummary, onCatalogChange } from "../content/load";
 import { eventDisplayPhase, eventLine, eventWhen } from "../views/leaderboard";
 import { ICONS } from "./icons";
@@ -229,7 +229,7 @@ function createAccountMenu(): HTMLElement {
     out.addEventListener("click", () => {
       if (!guest) return leave();
       if (panel.matches(":popover-open")) panel.hidePopover();
-      void confirm({ title: TGu().signOutTitle, body: TGu().signOutBody, confirmLabel: TGu().signOutConfirm, tone: "danger" }).then((yes) => {
+      void confirmGuestSignOut().then((yes) => {
         if (yes) leave();
       });
     });
