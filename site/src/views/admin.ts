@@ -77,7 +77,6 @@ import {
   formatDuration,
   formatFinish,
   formatPct,
-  isoDay,
   locale,
   median,
   ms,
@@ -89,6 +88,7 @@ import { finishDurationMs } from "./manage/progressMetrics";
 import { headWithHint, tipped } from "./manage/ui";
 import { createMembersPanel } from "./manage/members";
 import { createLivePanel } from "./manage/live";
+import { createSchedulePanel } from "./manage/schedule";
 import { NARROW_QUERY, createManageHost } from "./manage/host";
 
 const POLL_MS = 5000;
@@ -98,7 +98,6 @@ const TODAY_REFRESH_MS = 60_000;
 const BOARD_ROWS = 10;
 const MAX_BACKOFF_MS = 60000;
 const TAB_STORAGE = "il.adminTab";
-const DEFAULT_TIMEZONE = "Asia/Jerusalem";
 
 type TabId = "accounts" | "live" | "event" | "schedule" | "stats" | "audit";
 const TABS: readonly TabId[] = ["accounts", "live", "event", "schedule", "stats", "audit"];
@@ -145,23 +144,7 @@ const isAdminHash = (hash: string): boolean => /^#\/?admin(\?|$)/.test(hash);
 /** Unsaved drafts carried over when the view re-renders in place (the language toggle re-runs the route). */
 let carried: { schedule: Schedule | null; event: LiveEvent | null } | null = null;
 
-function isValidTimeZone(tz: string): boolean {
-  if (tz.trim() === "") return false;
-  try {
-    new Intl.DateTimeFormat("en-CA", { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
-function timeZoneList(): string[] {
-  try {
-    return Intl.supportedValuesOf("timeZone");
-  } catch {
-    return [DEFAULT_TIMEZONE, "UTC"];
-  }
-}
 
 /** Overall leaderboard: approved accounts that have played, by server rank. */
 function topPlayers(accounts: readonly UserStats[], n: number): UserStats[] {
@@ -206,12 +189,7 @@ function hardestQuestion(rows: readonly QuestionFunnel[]): { row: QuestionFunnel
 
 // ---- schedule ---------------------------------------------------------------------
 
-const cloneSchedule = (s: Schedule): Schedule => ({ ...s, days: { ...s.days } });
 
-function scheduleSig(s: Schedule): string {
-  const days = Object.entries(s.days).sort(([a], [b]) => a.localeCompare(b));
-  return JSON.stringify([s.timezone, s.defaultCaseId, s.lockToToday, days]);
-}
 
 // ---- event (datetime-local <-> ISO UTC) -------------------------------------------------
 
@@ -373,16 +351,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     },
     /** phone/tablet layout (cards instead of grids, compact chrome) */
     narrow: window.matchMedia(NARROW_QUERY).matches,
-    // schedule tab
-    schedule: {
-      server: null as Schedule | null,
-      draft: null as Schedule | null,
-      loading: false,
-      saving: false,
-      error: null as string | null,
-      msg: null as string | null,
-      month: null as { y: number; m: number } | null,
-    },
     // class invite code (Accounts tab)
     settings: {
       server: null as Settings | null,
@@ -464,7 +432,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   /** Names the editors with unsaved changes ("schedule", "event"), or "" when nothing is dirty. */
   function dirtySections(): string {
     const parts: string[] = [];
-    if (scheduleDirty()) parts.push(T().admSecSchedule);
+    if (schedule.dirty()) parts.push(T().admSecSchedule);
     if (eventDirty()) parts.push(T().admSecEvent);
     return parts.join(" + ");
   }
@@ -534,7 +502,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       setPageCrumb(tabLabel(state.tab));
       if (lastFocused && lastFocused.isConnected) lastFocused.focus({ preventScroll: true });
     },
-    dirtyDrafts: () => ({ schedule: scheduleDirty() ? state.schedule.draft : null, event: eventDirty() ? state.event.draft : null }),
+    dirtyDrafts: () => ({ schedule: schedule.dirty() ? schedule.draft() : null, event: eventDirty() ? state.event.draft : null }),
   };
   function onVisibility(): void {
     if (document.visibilityState === "hidden") {
@@ -545,7 +513,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     }
   }
   function onBeforeUnload(e: BeforeUnloadEvent): void {
-    if (scheduleDirty() || eventDirty()) e.preventDefault();
+    if (schedule.dirty() || eventDirty()) e.preventDefault();
   }
   /** A focused field must never sit under the sticky save bar (WCAG 2.4.11). */
   function onFocusIn(e: FocusEvent): void {
@@ -799,12 +767,12 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   function selectTab(tab: TabId, opts: { fromUrl?: boolean } = {}): boolean {
     if (tab === state.tab) return true;
     const leaving = state.tab;
-    const dirty = leaving === "schedule" ? scheduleDirty() : leaving === "event" ? eventDirty() : false;
+    const dirty = leaving === "schedule" ? schedule.dirty() : leaving === "event" ? eventDirty() : false;
     if (dirty) {
       // Ask first; the tab stays until the draft is discarded, then the switch runs again (now clean).
       void confirmLeave(leaving === "schedule" ? T().admSecSchedule : T().admSecEvent).then((ok) => {
         if (!ok || disposed || state.tab !== leaving) return;
-        if (leaving === "schedule") discardSchedule();
+        if (leaving === "schedule") schedule.discard();
         else discardEvent();
         if (selectTab(tab)) tabPanels.get(tab)?.focus({ preventScroll: true });
       });
@@ -816,7 +784,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     syncTabs();
     syncSaveBarClass();
     renderActiveTab();
-    if (tab === "schedule" && !state.schedule.draft) void loadSchedule();
+    if (tab === "schedule" && !schedule.draft()) void schedule.load();
     if (tab === "event" && !state.event.draft) void loadEvent();
     void load();
     return true;
@@ -825,7 +793,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   /** The sticky save bar is visible on the active tab: leave room for it when the browser scrolls focus into view. */
   function syncSaveBarClass(): void {
     const open =
-      (state.tab === "schedule" && scheduleBarVisible()) || (state.tab === "event" && eventBarVisible());
+      (state.tab === "schedule" && schedule.barVisible()) || (state.tab === "event" && eventBarVisible());
     document.documentElement.classList.toggle("admin-savebar-open", open);
   }
 
@@ -1231,29 +1199,26 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   }
 
   // =====================================================================================
-  // Schedule tab
+  // Schedule tab: the schedule editor (views/manage/schedule.ts) on the admin API
   // =====================================================================================
 
-  const scheduleTodayEl = h("p", { class: "sched-today" });
-
-  function scheduleDirty(): boolean {
-    const { server, draft } = state.schedule;
-    return server !== null && draft !== null && scheduleSig(server) !== scheduleSig(draft);
-  }
-
-  /** The save bar shows only while there is something to say: unsaved edits, an error, or a fresh "saved". */
-  function scheduleBarVisible(): boolean {
-    const sch = state.schedule;
-    return sch.draft !== null && (scheduleDirty() || sch.error !== null || sch.msg !== null);
-  }
-
-  function discardSchedule(): void {
-    const sch = state.schedule;
-    if (!sch.server) return;
-    sch.draft = cloneSchedule(sch.server);
-    sch.msg = null;
-    sch.error = null;
-  }
+  const schedule = createSchedulePanel({
+    host,
+    panel: tabPanels.get("schedule") ?? container,
+    api: { load: fetchSchedule, save: saveSchedule },
+    today: () => state.today,
+    isActive: () => state.tab === "schedule",
+    carried: carry?.schedule ?? null,
+    onSaved: () => clearSavedNoteLater(),
+    afterSave: async () => {
+      try {
+        state.today = await fetchToday();
+      } catch {
+        // the next poll will pick it up
+      }
+      todayFetchedAt = 0; // refetch on the next tick too, in case the CDN purge was still on its way
+    },
+  });
 
   /** Hides a "saved" note after a moment (the bar goes away with it). */
   let savedNoteTimer: number | null = null;
@@ -1262,310 +1227,11 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     savedNoteTimer = window.setTimeout(() => {
       savedNoteTimer = null;
       if (disposed) return;
-      state.schedule.msg = null;
+      schedule.clearNote();
       state.event.msg = null;
-      if (state.tab === "schedule") withFocusKept(renderSchedule);
+      if (state.tab === "schedule") withFocusKept(schedule.render);
       if (state.tab === "event") renderEventControls();
     }, SAVED_NOTE_MS);
-  }
-
-  async function loadSchedule(): Promise<void> {
-    const sch = state.schedule;
-    sch.loading = true;
-    sch.error = null;
-    renderSchedule();
-    try {
-      const s = await fetchSchedule();
-      if (disposed) return;
-      sch.server = cloneSchedule(s);
-      // A draft carried over from the previous render (language switch) wins over the fresh copy.
-      sch.draft = carry?.schedule ? cloneSchedule(carry.schedule) : cloneSchedule(s);
-      if (carry) carry.schedule = null;
-      if (!sch.month) sch.month = monthOf(state.today?.date ?? null);
-    } catch (err: unknown) {
-      if (disposed || handleAuthError(err)) return;
-      sch.error = errMessage(err);
-    } finally {
-      sch.loading = false;
-    }
-    if (state.tab === "schedule") renderSchedule();
-  }
-
-  function monthOf(iso: string | null): { y: number; m: number } {
-    const match = iso ? /^(\d{4})-(\d{2})-/.exec(iso) : null;
-    if (match) return { y: Number(match[1]), m: Number(match[2]) - 1 };
-    const d = new Date();
-    return { y: d.getFullYear(), m: d.getMonth() };
-  }
-
-  function caseOptions(selected: string | null, emptyLabel: string): HTMLOptionElement[] {
-    const released = state.today?.releasedCaseIds ?? [];
-    const opts = [h("option", { value: "", selected: selected === null }, emptyLabel)];
-    for (const id of released) opts.push(h("option", { value: id, selected: id === selected }, caseTitle(id)));
-    if (selected !== null && !released.includes(selected)) {
-      opts.push(h("option", { value: selected, selected: true }, T().admNotReleased(caseTitle(selected))));
-    }
-    return opts;
-  }
-
-  function renderScheduleToday(): void {
-    const today = state.today;
-    if (!today) {
-      scheduleTodayEl.textContent = "";
-      return;
-    }
-    setChildren(
-      scheduleTodayEl,
-      h("strong", {}, T().admTodayIs(today.date, today.timezone)),
-      " ",
-      today.caseId ? caseTitle(today.caseId) : h("span", { class: "muted" }, T().admNoCaseToday),
-    );
-  }
-
-  function updateDraft(mutate: (d: Schedule) => void): void {
-    const sch = state.schedule;
-    if (!sch.draft) return;
-    mutate(sch.draft);
-    sch.msg = null;
-    sch.error = null;
-    withFocusKept(renderSchedule);
-  }
-
-  async function onSaveSchedule(): Promise<void> {
-    const sch = state.schedule;
-    if (!sch.draft) return;
-    if (!isValidTimeZone(sch.draft.timezone)) {
-      document.getElementById("sched-tz")?.focus();
-      return;
-    }
-    sch.saving = true;
-    sch.error = null;
-    sch.msg = null;
-    renderSchedule();
-    try {
-      const saved = await saveSchedule(sch.draft);
-      if (disposed) return;
-      sch.server = cloneSchedule(saved);
-      sch.draft = cloneSchedule(saved);
-      sch.msg = T().admScheduleSaved;
-      clearSavedNoteLater();
-      try {
-        state.today = await fetchToday();
-      } catch {
-        // the next poll will pick it up
-      }
-      todayFetchedAt = 0; // refetch on the next tick too, in case the CDN purge was still on its way
-    } catch (err: unknown) {
-      if (disposed || handleAuthError(err)) return;
-      sch.error = errMessage(err);
-    } finally {
-      sch.saving = false;
-    }
-    if (state.tab === "schedule") renderSchedule();
-  }
-
-  function calendar(draft: Schedule, month: { y: number; m: number }): HTMLElement {
-    const { y, m } = month;
-    const first = new Date(Date.UTC(y, m, 1));
-    const startDow = first.getUTCDay(); // weeks start on Sunday (Israel)
-    const daysInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
-    const todayIso = state.today?.date ?? "";
-    const monthLabel = new Intl.DateTimeFormat(locale(), { month: "long", year: "numeric", timeZone: "UTC" }).format(first);
-    const weekdayFmt = new Intl.DateTimeFormat(locale(), { weekday: "short", timeZone: "UTC" });
-    const dayFmt = new Intl.DateTimeFormat(locale(), { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
-    // Day cells are narrow: a short "Default" label (the full title is in the tooltip and the settings above).
-    const defaultLabel = draft.defaultCaseId ? T().admDefaultShort : T().admNoneOpt;
-    const defaultTip = draft.defaultCaseId ? T().admDefaultOpt(caseTitle(draft.defaultCaseId)) : T().admNoneOpt;
-    const rtl = document.documentElement.dir === "rtl";
-    const shift = (delta: number): void => {
-      const d = new Date(Date.UTC(y, m + delta, 1));
-      state.schedule.month = { y: d.getUTCFullYear(), m: d.getUTCMonth() };
-      withFocusKept(renderSchedule);
-    };
-
-    const cells: HTMLElement[] = [];
-    for (let i = 0; i < 7; i += 1) {
-      cells.push(h("div", { class: "cal-dow", "aria-hidden": "true" }, weekdayFmt.format(Date.UTC(2023, 0, 1 + i))));
-    }
-    for (let i = 0; i < startDow; i += 1) cells.push(h("div", { class: "cal-day is-blank", "aria-hidden": "true" }));
-    for (let d = 1; d <= daysInMonth; d += 1) {
-      const iso = isoDay(y, m, d);
-      const assigned = draft.days[iso] ?? null;
-      const isToday = iso === todayIso;
-      const isPast = todayIso !== "" && iso < todayIso;
-      const select = h(
-        "select",
-        { class: "admin-input cal-select", id: `cal-${iso}`, "aria-label": T().admDayCaseLabel(dayFmt.format(Date.UTC(y, m, d))),
-          title: assigned ? caseTitle(assigned) : defaultTip,
-        },
-        caseOptions(assigned, defaultLabel),
-      );
-      select.addEventListener("change", () => {
-        const v = select.value;
-        updateDraft((dr) => {
-          if (v === "") delete dr.days[iso];
-          else dr.days[iso] = v;
-        });
-      });
-      cells.push(
-        h(
-          "div",
-          { class: `cal-day${isToday ? " is-today" : ""}${assigned ? " is-set" : ""}${isPast ? " is-past" : ""}` },
-          h(
-            "div",
-            { class: "cal-day-head" },
-            // The weekday shows only in the phone list (the grid has a weekday header); the select's label names the day.
-            h("span", { class: "cal-wd", "aria-hidden": "true" }, weekdayFmt.format(Date.UTC(y, m, d))),
-            h("span", { class: "cal-num" }, String(d)),
-            isToday ? h("span", { class: "today-tag" }, T().admTodayTag) : null),
-          select,
-        ),
-      );
-    }
-    return h(
-      "section",
-      { class: "panel admin-panel" },
-      h(
-        "div",
-        { class: "cal-head" },
-        h("button", { type: "button", class: "btn btn-ghost btn-sm", id: "cal-prev", "aria-label": T().admPrevMonth, onclick: () => shift(-1) }, rtl ? "→" : "←"),
-        headWithHint(h("h2", { class: "admin-h2 cal-title", "aria-live": "polite" }, monthLabel), T().admCalendarHint),
-        h("button", { type: "button", class: "btn btn-ghost btn-sm", id: "cal-next", "aria-label": T().admNextMonth, onclick: () => shift(1) }, rtl ? "←" : "→"),
-        h(
-          "button",
-          {
-            type: "button",
-            class: "btn btn-ghost btn-sm",
-            id: "cal-this",
-            onclick: () => {
-              state.schedule.month = monthOf(state.today?.date ?? null);
-              withFocusKept(renderSchedule);
-            },
-          },
-          T().admThisMonth,
-        ),
-      ),
-      h("p", { class: "muted small admin-hint is-touch-only" }, T().admCalendarHint),
-      h("div", { class: "cal-grid" }, cells),
-    );
-  }
-
-  function renderSchedule(): void {
-    const panel = tabPanels.get("schedule");
-    if (!panel) return;
-    const sch = state.schedule;
-    renderScheduleToday();
-    const todayPanel = h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, T().admIncidentOfDay), scheduleTodayEl);
-    if (!sch.draft) {
-      setChildren(
-        panel,
-        todayPanel,
-        sch.error
-          ? h(
-              "section",
-              { class: "panel admin-panel" },
-              h("p", { class: "admin-error", role: "alert" }, T().admScheduleLoadFailed(sch.error)),
-              h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: () => void loadSchedule() }, T().admRetry),
-            )
-          : h("p", { class: "muted admin-loading" }, T().admLoading),
-      );
-      return;
-    }
-    const draft = sch.draft;
-    const month = sch.month ?? monthOf(state.today?.date ?? null);
-    sch.month = month;
-    const dirty = scheduleDirty();
-    const tzValid = isValidTimeZone(draft.timezone);
-
-    const defaultSelect = h("select", { class: "admin-input", id: "sched-default" }, caseOptions(draft.defaultCaseId, T().admNoneOpt));
-    defaultSelect.addEventListener("change", () => {
-      const v = defaultSelect.value;
-      updateDraft((d) => {
-        d.defaultCaseId = v === "" ? null : v;
-      });
-    });
-
-    const tzListId = "sched-tz-list";
-    const tzInput = h("input", {
-      type: "text",
-      class: "admin-input",
-      id: "sched-tz",
-      list: tzListId,
-      value: draft.timezone,
-      placeholder: DEFAULT_TIMEZONE,
-      autocomplete: "off",
-      spellcheck: "false",
-      dir: "ltr",
-    });
-    // Validate while typing (in place: re-rendering would move the caret); the draft updates on change.
-    const tzField = formField({ input: tzInput, label: T().admTimezone, help: T().admTimezoneHelp });
-    tzField.setError(tzValid ? null : T().admTimezoneInvalid);
-    tzInput.addEventListener("input", () => {
-      const v = tzInput.value.trim();
-      const ok = v === "" || isValidTimeZone(v);
-      tzField.setError(ok ? null : T().admTimezoneInvalid);
-      syncSave(ok);
-    });
-    tzInput.addEventListener("change", () => {
-      const v = tzInput.value.trim();
-      updateDraft((d) => {
-        d.timezone = v === "" ? DEFAULT_TIMEZONE : v;
-      });
-    });
-    const tzList = h("datalist", { id: tzListId }, timeZoneList().map((z) => h("option", { value: z })));
-
-    const saveBtn = h(
-      "button",
-      { type: "button", class: "btn btn-primary", id: "sched-save", "aria-describedby": "sched-status" },
-      sch.saving ? T().admSaving : T().admSaveSchedule,
-    );
-    saveBtn.addEventListener("click", () => void onSaveSchedule());
-    const entries = Object.keys(draft.days).length;
-    const statusEl = h("span", { class: "small", id: "sched-status", role: "status" });
-    // An unknown time zone blocks Save, and the save bar says so (the field shows the details).
-    function syncSave(tzOk: boolean): void {
-      saveBtn.disabled = !dirty || sch.saving || !tzOk;
-      const blocked = dirty && !tzOk;
-      statusEl.className = `small ${blocked || dirty ? "sched-dirty" : "muted"}`;
-      statusEl.textContent = blocked ? T().admScheduleFixTz : dirty ? T().admUnsaved : (sch.msg ?? T().admScheduledDays(entries));
-    }
-    syncSave(tzValid);
-    const discardBtn = h(
-      "button",
-      { type: "button", class: "btn btn-ghost", id: "sched-discard", disabled: !dirty || sch.saving },
-      T().admDiscard,
-    );
-    discardBtn.addEventListener("click", () => {
-      discardSchedule();
-      renderSchedule();
-    });
-
-    setChildren(
-      panel,
-      todayPanel,
-      h(
-        "section",
-        { class: "panel admin-panel" },
-        h("h2", { class: "admin-h2" }, T().admScheduleSettings),
-        h(
-          "div",
-          { class: "sched-form" },
-          formField({ input: defaultSelect, label: T().admDefaultCase, help: T().admDefaultCaseHelp }).nodes,
-          tzField.nodes,
-          tzList,
-        ),
-      ),
-      calendar(draft, month),
-      h(
-        "div",
-        { class: "sched-actions panel admin-panel", hidden: !scheduleBarVisible() },
-        saveBtn,
-        discardBtn,
-        statusEl,
-        sch.error ? h("p", { class: "admin-error", role: "alert" }, T().admScheduleSaveFailed(sch.error)) : null,
-      ),
-    );
-    syncSaveBarClass();
   }
 
   // =====================================================================================
@@ -2615,7 +2281,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         live.render();
         break;
       case "schedule":
-        renderSchedule();
+        schedule.render();
         break;
       case "stats":
         renderStats();
@@ -2633,7 +2299,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     // The pending count is visible on the tab from anywhere.
     if (state.tab !== "accounts") members.renderPending();
     // Keep the schedule and event editors (and focus) intact while polling.
-    if (state.tab === "schedule") renderScheduleToday();
+    if (state.tab === "schedule") schedule.renderToday();
     else if (state.tab === "event") renderEventStatus();
     else renderActiveTab();
     renderUpdated();
@@ -2780,7 +2446,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     stopTimers();
     renderData();
     renderActiveTab();
-    if (state.tab === "schedule") void loadSchedule();
+    if (state.tab === "schedule") void schedule.load();
     if (state.tab === "event") void loadEvent();
     // Live, Stats, Audit and Recently deleted (Accounts) need a second request before they have data.
     if (state.tab === "live" || state.tab === "stats" || state.tab === "audit" || state.tab === "accounts") void load();
