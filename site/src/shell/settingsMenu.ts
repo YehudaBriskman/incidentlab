@@ -76,6 +76,16 @@ export function displayGroups(s: Settings): SettingGroup[] {
         if (spacing !== undefined) updateSettings({ spacing });
       },
     },
+    {
+      name: "shortcuts",
+      legend: t.shortcuts,
+      options: [
+        { value: "on", label: t.shortcutsOn },
+        { value: "off", label: t.shortcutsOff },
+      ],
+      current: s.keyShortcuts ? "on" : "off",
+      apply: (v) => void updateSettings({ keyShortcuts: v === "on" }),
+    },
   ];
 }
 

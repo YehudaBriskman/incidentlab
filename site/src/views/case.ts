@@ -20,7 +20,7 @@ import { md, mdInline } from "../lib/markdown";
 import { readingLayout } from "../components/readingLayout";
 import { formatElapsed } from "../lib/time";
 import { formatNumber, isRelabel, locale } from "../i18n/i18n";
-import { commandCard, isCleanSoFar, type CommandContext } from "./toolbox";
+import { commandCard, commandShellSwitch, isCleanSoFar, type CommandContext } from "./toolbox";
 import { T } from "../i18n/strings-player";
 import { TP } from "../i18n/strings-play";
 import { TS } from "../i18n/strings-shell";
@@ -937,7 +937,8 @@ function renderQuestionStage(
           { class: "block" },
           h("h3", {}, T().usefulCommands),
           h("p", { class: "muted small" }, TG().toolboxCostNote(SCORING.COMMAND_COST, index)),
-          h("div", { class: "tool-list" }, tools.map((tool) => collapsibleOnPhone(commandCard(tool, commandCtx), tool.title))),
+          commandShellSwitch(tools, player),
+          h("div", { class: "tool-list" }, tools.map((tool) => commandCard(tool, commandCtx))),
         )
       : h("p", { class: "muted small" }, T().needCommands, h("a", { class: "stage-link", href: `#/case/${c.id}/toolbox` }, T().browseCommands), "."),
     h(
@@ -953,7 +954,7 @@ function renderQuestionStage(
   );
 }
 
-/* ---------- phones (#132): the sticky answer bar and collapsed command cards ---------- */
+/* ---------- phones (#132): the sticky answer bar ---------- */
 
 type AnswerBar = { readonly el: HTMLFormElement; readonly input: HTMLInputElement };
 
@@ -1039,31 +1040,6 @@ function answerBar(index: number, form: HTMLFormElement, input: HTMLInputElement
   }
   sync();
   return { el, input: barInput };
-}
-
-let cmdSeq = 0;
-
-/**
- * Phones (#132): a command card shows its title and syntax; the explanation and the reveal action fold behind a
- * "Details" toggle. Above 640px the toggle is hidden and everything shows, as before.
- */
-function collapsibleOnPhone(card: HTMLElement, title: string): HTMLElement {
-  const more = h("div", { class: "cmd-more", id: `cmd-more-${++cmdSeq}` });
-  for (const part of card.querySelectorAll<HTMLElement>(":scope > .prose, :scope > .cmd-actions")) more.append(part);
-  if (more.childElementCount === 0) return card;
-  const toggle = h(
-    "button",
-    { type: "button", class: "btn btn-ghost btn-sm cmd-more-toggle", "aria-expanded": "false", "aria-controls": more.id, "aria-label": TP().cmdDetailsFor(title) },
-    TP().cmdDetails,
-  );
-  toggle.addEventListener("click", () => {
-    const open = !card.classList.contains("is-open");
-    card.classList.toggle("is-open", open);
-    toggle.setAttribute("aria-expanded", String(open));
-  });
-  card.classList.add("is-collapsible");
-  card.append(toggle, more);
-  return card;
 }
 
 /* ================= Debrief ================= */
