@@ -2,7 +2,8 @@
 // End-to-end API smoke test against a deployed IncidentLab (preview or prod).
 // Usage: node tests/smoke-api.mjs <baseUrl> [adminKeyFile] [caseId=3am-outage]
 // Reads plaintext answers from build/truth/all-answers.json (instructor machine only).
-// Creates two throwaway accounts and deletes them at the end.
+// Creates two throwaway accounts and deletes them at the end. Sign-up is limited to 20 per hour per IP,
+// so one machine can smoke-test about 10 cases an hour; a 429 on "register" means wait, not a bug.
 import { createSession, readAdminKey, readAllAnswers } from "./api-client.mjs";
 
 const base = (process.argv[2] ?? "").replace(/\/$/, "");
@@ -52,9 +53,9 @@ check("register 201 + cookie", reg.status === 201 && player.hasCookie(), String(
 check("cookie is HttpOnly", /HttpOnly/i.test(reg.headers.get("set-cookie") ?? ""));
 const accountId = reg.json?.account?.id;
 check("duplicate username (other case) -> 409", (await createSession(base).call("POST", "/api/auth/register", { body: { username: username.toUpperCase(), password: "password1" } })).status === 409);
-check("pending can't play -> 403", (await player.call("GET", cases("/progress"))).status === 403);
+check("register returns a recovery code", /^[A-Z0-9]{5}(-[A-Z0-9]{5}){3}$/.test(reg.json?.recoveryCode ?? ""), "no code");
+check("new account plays at once (open sign-up)", (await player.call("GET", cases("/progress"))).status === 200);
 check("signed out -> 401", (await createSession(base).call("GET", "/api/me")).status === 401);
-check("admin approve", (await adminCall("POST", `/api/admin/accounts/${accountId}/approve`, {})).status === 200);
 check("logout 204", (await player.call("POST", "/api/auth/logout", { body: {} })).status === 204);
 check("after logout -> 401", (await player.call("GET", "/api/me")).status === 401);
 check("wrong password -> 401", (await player.call("POST", "/api/auth/login", { body: { username, password: "nope-nope" } })).status === 401);
@@ -95,7 +96,6 @@ check("every command free after completion", done && Object.keys(done.unlocked.c
 
 const second = createSession(base);
 const reg2 = await second.call("POST", "/api/auth/register", { body: { username: `smoke2_${suffix}`, password: "password1" } });
-await adminCall("POST", `/api/admin/accounts/${reg2.json?.account?.id}/approve`, {});
 await second.call("POST", cases("/setup-done"), { body: {} });
 const anyTool = Object.keys(done?.unlocked?.commands ?? {})[0];
 const paid = await second.call("POST", cases("/reveal-command"), { body: { toolId: anyTool } });
