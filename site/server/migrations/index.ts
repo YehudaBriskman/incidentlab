@@ -2,6 +2,8 @@
 // remove one that has run in production (it is in the config:migrations ledger there).
 import { z } from "zod";
 import { AccountRecordSchema, ProgressRecordSchema } from "../domain/types.ts";
+import type { ProgressRecord } from "../domain/types.ts";
+import { ScoreRecordSchema, sameScore, summarizeProgress } from "../domain/score.ts";
 import { mapWithConcurrency } from "../repositories/KvStore.ts";
 import type { Migration } from "./runner.ts";
 
@@ -60,4 +62,60 @@ const importLegacyPlayers: Migration = {
   },
 };
 
-export const MIGRATIONS: readonly Migration[] = [stampSchemaVersion, importLegacyPlayers];
+/**
+ * 003 (open access, #171/#175):
+ * 1. approves every `pending` account (sign-up is open now; approval moves to classes) and stamps `decidedAt`;
+ *    `rejected` accounts stay rejected;
+ * 2. backfills `score:<accountId>` for every account from its progress records, so the opt-in board and the
+ *    rank on /api/me/stats work without reading progress.
+ * `showOnGlobalBoard` is not touched: it stays false (the default), so the public board starts empty until
+ * players opt in. Idempotent: an approved account and a summary equal to its progress are left alone.
+ */
+const openAccess: Migration = {
+  id: "003-open-access",
+  description: "approve pending accounts and backfill score:<accountId> summaries from progress",
+  async run(ctx) {
+    const progressByAccount = new Map<string, ProgressRecord[]>();
+    for (const key of await ctx.kv.listKeys("progress:")) {
+      const parsed = ProgressRecordSchema.safeParse((await ctx.kv.get(key))?.data);
+      if (!parsed.success) continue;
+      const list = progressByAccount.get(parsed.data.accountId) ?? [];
+      list.push(parsed.data);
+      progressByAccount.set(parsed.data.accountId, list);
+    }
+    const nowIso = ctx.now().toISOString();
+    let scanned = 0;
+    let approved = 0;
+    let scores = 0;
+    const accountKeys = await ctx.kv.listKeys("account:");
+    await mapWithConcurrency(accountKeys, async (key) => {
+      const entry = await ctx.kv.get(key);
+      const parsed = AccountRecordSchema.safeParse(entry?.data);
+      if (!entry || !parsed.success) {
+        ctx.log(`  skip ${key}: doesn't parse`);
+        return;
+      }
+      scanned += 1;
+      const account = parsed.data;
+      if (account.status === "pending") {
+        approved += 1;
+        // Conditional write: a live request that changed the account meanwhile wins; the next run approves it.
+        if (!ctx.dryRun) await ctx.kv.setIfMatch(key, { ...account, status: "approved", decidedAt: nowIso }, entry.etag);
+      }
+      const summary = summarizeProgress(account.id, progressByAccount.get(account.id) ?? []);
+      const scoreKey = `score:${account.id}`;
+      const existing = await ctx.kv.get(scoreKey);
+      const current = existing ? ScoreRecordSchema.safeParse(existing.data) : null;
+      if (current && !current.success) {
+        ctx.log(`  skip ${scoreKey}: doesn't parse`);
+        return;
+      }
+      if (sameScore(current?.data ?? null, summary)) return;
+      scores += 1;
+      if (!ctx.dryRun) await ctx.kv.setIfMatch(scoreKey, summary, existing?.etag ?? null);
+    });
+    return { scanned, changed: approved + scores, note: `${approved} approved, ${scores} score summaries written` };
+  },
+};
+
+export const MIGRATIONS: readonly Migration[] = [stampSchemaVersion, importLegacyPlayers, openAccess];
