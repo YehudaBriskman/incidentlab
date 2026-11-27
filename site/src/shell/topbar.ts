@@ -6,6 +6,8 @@ import { TA } from "../i18n/strings-account";
 import { TB } from "../i18n/strings-board";
 import { TG } from "../i18n/strings-game";
 import { TS } from "../i18n/strings-shell";
+import { TC } from "../i18n/strings-classes";
+import { cachedClassName } from "../lib/class-api";
 import { onConnectivity } from "../lib/api";
 import { h, html, setChildren } from "../lib/dom";
 import { cachedEvent, formatCountdown, onEventChange, serverNow, startEventPolling } from "../lib/event";
@@ -48,6 +50,19 @@ function crumbsFor(parts: readonly string[]): Crumb[] {
     return out;
   }
   if (key === "home") return [{ label: TS().navHome }];
+  if (key === "classes") {
+    // #182: Classes > the class (its name once loaded) > Manage > the section on screen.
+    const classesCrumb: Crumb = { label: TC().navClasses, href: "#/classes" };
+    if (section === "classes") return [homeCrumb, { label: TC().navClasses }];
+    if (section === "join") return [homeCrumb, classesCrumb, { label: TC().joinPageTitle }];
+    if (section === "classboard") return [homeCrumb, classesCrumb, { label: TC().boardTitle }];
+    if (section === "class" && id !== undefined) {
+      const name: Crumb = { label: cachedClassName(id) ?? TC().classesTitle, href: `#/class/${encodeURIComponent(id)}`, bdi: true };
+      if (sub !== "manage") return [homeCrumb, classesCrumb, name];
+      const manage: Crumb = { label: TC().manageTitle, href: `#/class/${encodeURIComponent(id)}/manage` };
+      return pageCrumb === null ? [homeCrumb, classesCrumb, name, manage] : [homeCrumb, classesCrumb, name, manage, { label: pageCrumb }];
+    }
+  }
   if (section === "login" || section === "signup") return [homeCrumb, { label: TS().crumbSignIn }];
   const labels: Partial<Record<string, string>> = {
     cases: TS().navCases,

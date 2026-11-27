@@ -123,6 +123,13 @@ type AuthView = typeof import("./views/auth");
 type CaseViews = typeof import("./views/case") & typeof import("./views/toolbox");
 let authView: AuthView | null = null;
 let caseViews: CaseViews | null = null;
+/** The class page and class management (#182): their timers stop on every route change once loaded. */
+type ClassPage = typeof import("./views/classPage");
+type ClassManage = typeof import("./views/classManage");
+let classPage: ClassPage | null = null;
+let classManage: ClassManage | null = null;
+const loadClassPage = (): Promise<ClassPage> => Promise.all([import("./views/classPage"), loadAuthView()]).then(([m]) => (classPage = m));
+const loadClassManage = (): Promise<ClassManage> => Promise.all([import("./views/classManage"), loadAuthView()]).then(([m]) => (classManage = m));
 const loadAuthView = (): Promise<AuthView> => import("./views/auth").then((m) => (authView = m));
 const loadCaseViews = (): Promise<CaseViews> =>
   Promise.all([import("./views/case"), import("./views/toolbox"), loadAuthView()]).then(([caseView, toolbox]) => (caseViews = { ...caseView, ...toolbox }));
@@ -156,6 +163,8 @@ function route(): void {
   caseViews?.stopCaseTimers();
   authView?.stopAuthTimers();
   stopLeaderboard();
+  classPage?.stopClassPage();
+  classManage?.stopClassManage(window.location.hash);
   if (!isRelabel()) {
     closeOverlays(); // a dialog or menu belongs to the page it was opened on
     resetContentScroll();
@@ -195,6 +204,30 @@ function route(): void {
       // The case picker and titles come from the catalog: wait for it on a cold load (instant afterwards).
       if (catalogLoading()) lazyView(() => catalogReady.then(() => legacy((root) => renderLeaderboard(root, query))));
       else mount(legacy((root) => renderLeaderboard(root, query))());
+      return;
+    }
+    // Classes (#182): my classes, the join link, a class page, its management and its board (a capability URL).
+    if (parts[0] === "classes" && parts.length === 1) {
+      lazyView(() => Promise.all([import("./views/classes"), loadAuthView()]).then(([m]): View => m.classesView));
+      return;
+    }
+    if (parts[0] === "join" && parts[1] !== undefined && parts.length === 2) {
+      const code = parts[1];
+      lazyView(() => Promise.all([import("./views/classes"), loadAuthView()]).then(([m]): View => () => m.joinView(code)));
+      return;
+    }
+    if (parts[0] === "class" && parts[1] !== undefined && (parts.length === 2 || (parts.length === 3 && parts[2] === "manage"))) {
+      const id = parts[1];
+      // Case titles come from the catalog; management also shows question names (live grid): load every case.
+      if (parts[2] === "manage") lazyView(() => Promise.all([loadClassManage(), loadAllCases()]).then(([m]): View => () => m.classManageView(id)));
+      else lazyView(() => Promise.all([loadClassPage(), catalogReady]).then(([m]): View => () => m.classPageView(id)));
+      return;
+    }
+    if (parts[0] === "classboard" && parts[1] !== undefined && parts.length === 2) {
+      const board = parts[1];
+      const show = legacy((root) => renderLeaderboard(root, query, { board }));
+      if (catalogLoading()) lazyView(() => catalogReady.then(() => show));
+      else mount(show());
       return;
     }
     if (parts[0] === "me" && parts.length === 1) {
