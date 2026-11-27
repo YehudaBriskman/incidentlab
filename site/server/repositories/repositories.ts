@@ -7,12 +7,14 @@
 //   ratelimit:<bucket>:<sha256(subject)> number[]
 //   score:<accountId>                   ScoreRecord        (board-repositories.ts, #175)
 //   globalboard:<accountId>             { accountId, since } (only while opted in to the public board)
+//   class:, classcode:, classmember:, memberof:   classes (class-repository.ts, #179)
 import { z } from "zod";
 import { ScheduleSchema } from "../../shared/contract.ts";
 import type { Schedule } from "../../shared/contract.ts";
 import { AccountRecordSchema, ProgressRecordSchema, SessionRecordSchema } from "../domain/types.ts";
 import type { AccountRecord, ProgressRecord, SessionRecord } from "../domain/types.ts";
 import { GlobalBoardRepository, ScoreRepository } from "./board-repositories.ts";
+import { ClassRepository } from "./class-repository.ts";
 import { mapWithConcurrency } from "./KvStore.ts";
 import type { KvStore, Versioned } from "./KvStore.ts";
 
@@ -169,6 +171,7 @@ export type Repositories = {
   readonly rateLimits: RateLimitRepository;
   readonly scores: ScoreRepository;
   readonly globalBoard: GlobalBoardRepository;
+  readonly classes: ClassRepository;
 };
 
 export const createRepositories = (kv: KvStore): Repositories => ({
@@ -180,4 +183,5 @@ export const createRepositories = (kv: KvStore): Repositories => ({
   rateLimits: new RateLimitRepository(kv),
   scores: new ScoreRepository(kv),
   globalBoard: new GlobalBoardRepository(kv),
+  classes: new ClassRepository(kv),
 });

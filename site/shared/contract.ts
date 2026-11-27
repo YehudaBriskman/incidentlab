@@ -456,6 +456,132 @@ export const ApproveAllResponseSchema = z.object({ approved: z.number().int().mi
 export const SettingsResponseSchema = z.object({ settings: SettingsSchema });
 export const AuditResponseSchema = z.object({ entries: z.array(AuditEntrySchema) });
 
+// ---- classes (#179) ---------------------------------------------------------
+// Any approved full account may own up to CLASS_DEFAULTS.OWNED_LIMIT classes (account.classLimit overrides it) of
+// up to CLASS_DEFAULTS.MEMBER_LIMIT members (class.memberLimit, set by the site admin). Personalised: no-store.
+// Every class route answers 404 to non-members (never 403), so a class id reveals nothing. Errors:
+// 403 "guest" (guests can't create or join), "not-class-admin", "not-class-owner"; 409 "class-limit",
+// "class-full", "class-archived", "owner-locked"; 404 for an unknown or archived join code.
+// POST /api/classes {name}                          -> 201 {class: ClassDetail}  (creator = owner, active admin member)
+// GET  /api/classes                                 -> {classes: ClassSummary[]}  (mine, from memberof:)
+// POST /api/classes/join {code}                     -> {class: ClassSummary}  (code: active at once; approval: pending)
+// GET  /api/classes/:id                             -> {class: ClassDetail}  (sections by role, see ClassDetailSchema)
+// PATCH /api/classes/:id {name?, joinMode?, schedule?, event?, caseIds?} -> {class}   (class admins)
+// POST /api/classes/:id/archive {} | /restore {}    -> {class}   (owner or site admin)
+// POST /api/classes/:id/join-code/rotate {}         -> {class}   (class admins; the old code stops working)
+// POST /api/classes/:id/board-token/rotate {}       -> {class}   (class admins; old board links stop working)
+// GET  /api/classes/:id/members                     -> {members: ClassMember[]}  (class admins)
+// POST /api/classes/:id/members/:accountId/approve {} | /role {role} -> {member}; .../remove {} -> 204  (docs/API.md)
+// POST /api/classes/:id/leave {}                    -> 204  (the owner can't leave: archive instead)
+// GET  /api/admin/classes                           -> {classes: AdminClass[]}
+// PUT  /api/admin/classes/:id/limits {memberLimit}  -> {class}
+// PUT  /api/admin/accounts/:id/class-limit {classLimit} -> {accountId, classLimit}
+export const CLASS_DEFAULTS = { OWNED_LIMIT: 3, MEMBER_LIMIT: 60, MAX_MEMBER_LIMIT: 1000, MAX_CLASS_LIMIT: 100 } as const;
+export const ClassIdSchema = z.string().regex(/^[0-9A-Za-z]{12}$/, "invalid class id");
+export const ClassNameSchema = z.string().trim().min(1, "Name the class").max(60, "Class names are at most 60 characters");
+export const ClassStatusSchema = z.enum(["active", "archived"]);
+export const ClassJoinModeSchema = z.enum(["code", "approval"]);
+export const ClassRoleSchema = z.enum(["member", "admin"]);
+export type ClassRole = z.infer<typeof ClassRoleSchema>;
+export const ClassMemberStatusSchema = z.enum(["pending", "active"]);
+/** Join codes: 2 groups of 5 from the recovery-code alphabet (31^10, about 49 bits); typed case, spaces and dashes don't matter. */
+export const CLASS_CODE_GROUPS = 2;
+export const normalizeClassCode = (code: string): string => code.toUpperCase().replace(/[\s-]+/g, "");
+/** "Our case of the day": like the site schedule, without the lock (gameplay never blocks on a class). */
+export const ClassScheduleSchema = z.object({
+  timezone: z.string().min(1).max(64),
+  defaultCaseId: CaseIdSchema.nullable(),
+  days: z.record(IsoDateSchema, CaseIdSchema),
+});
+export type ClassSchedule = z.infer<typeof ClassScheduleSchema>;
+/** The class event night: window, leaderboard freeze and announcement. */
+export const ClassEventSchema = EventSchema.omit({ enforceWindow: true });
+export type ClassEvent = z.infer<typeof ClassEventSchema>;
+
+export const CreateClassRequestSchema = z.object({ name: ClassNameSchema }).strict();
+export const UpdateClassRequestSchema = z
+  .object({
+    name: ClassNameSchema.optional(),
+    joinMode: ClassJoinModeSchema.optional(),
+    schedule: ClassScheduleSchema.optional(),
+    event: ClassEventSchema.optional(),
+    /** assigned cases; [] = any public case */
+    caseIds: z.array(CaseIdSchema).max(200).optional(),
+  })
+  .strict()
+  .refine((patch) => Object.keys(patch).length > 0, "nothing to change");
+export type UpdateClassRequest = z.infer<typeof UpdateClassRequestSchema>;
+export const JoinClassRequestSchema = z.object({ code: z.string().trim().min(1).max(64) }).strict();
+export const SetClassRoleRequestSchema = z.object({ role: ClassRoleSchema }).strict();
+export const ClassLimitsRequestSchema = z.object({ memberLimit: z.number().int().min(1).max(CLASS_DEFAULTS.MAX_MEMBER_LIMIT) }).strict();
+export const AccountClassLimitRequestSchema = z.object({ classLimit: z.number().int().min(0).max(CLASS_DEFAULTS.MAX_CLASS_LIMIT).nullable() }).strict();
+
+/** The caller's place in a class. Null for the site admin, who passes every check without being a member. */
+export const ClassMembershipSchema = z.object({ role: ClassRoleSchema, status: ClassMemberStatusSchema, isOwner: z.boolean() });
+export type ClassMembership = z.infer<typeof ClassMembershipSchema>;
+
+export const ClassSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: ClassStatusSchema,
+  membership: ClassMembershipSchema.nullable(),
+});
+export type ClassSummary = z.infer<typeof ClassSummarySchema>;
+
+/**
+ * Pending members see the summary only. Active members also get `schedule`, `event`, `caseIds` and `boardToken`.
+ * Class admins and the site admin also get `admin` (settings and the join code).
+ */
+export const ClassDetailSchema = ClassSummarySchema.extend({
+  schedule: ClassScheduleSchema.optional(),
+  event: ClassEventSchema.optional(),
+  caseIds: z.array(z.string()).optional(),
+  boardToken: z.string().optional(),
+  admin: z
+    .object({
+      ownerId: z.string(),
+      joinMode: ClassJoinModeSchema,
+      joinCode: z.string(),
+      memberLimit: z.number().int().min(1),
+      createdAt: z.string(),
+      updatedAt: z.string(),
+    })
+    .optional(),
+});
+export type ClassDetail = z.infer<typeof ClassDetailSchema>;
+
+/** What a class admin sees of a member: the username and the membership, nothing else of the account. */
+export const ClassMemberSchema = z.object({
+  accountId: z.string(),
+  username: z.string(),
+  role: ClassRoleSchema,
+  status: ClassMemberStatusSchema,
+  isOwner: z.boolean(),
+  joinedAt: z.string(),
+  decidedAt: z.string().nullable(),
+});
+export type ClassMember = z.infer<typeof ClassMemberSchema>;
+
+export const AdminClassSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: ClassStatusSchema,
+  ownerId: z.string(),
+  joinMode: ClassJoinModeSchema,
+  memberLimit: z.number().int().min(1),
+  members: z.number().int().min(0),
+  createdAt: z.string(),
+});
+export type AdminClass = z.infer<typeof AdminClassSchema>;
+
+export const ClassesResponseSchema = z.object({ classes: z.array(ClassSummarySchema) });
+export const ClassResponseSchema = z.object({ class: ClassDetailSchema });
+export const ClassJoinResponseSchema = z.object({ class: ClassSummarySchema });
+export const ClassMembersResponseSchema = z.object({ members: z.array(ClassMemberSchema) });
+export const ClassMemberResponseSchema = z.object({ member: ClassMemberSchema });
+export const AdminClassesResponseSchema = z.object({ classes: z.array(AdminClassSchema) });
+export const AccountClassLimitResponseSchema = z.object({ accountId: z.string(), classLimit: z.number().int().min(0).nullable() });
+
 // Scoring: solved points = max(0, question.points - sum(cost of the first `hintsRevealed` hints)).
 // Rate limit: max 5 wrong answers per account per question per 60s -> 429 with retryAfterSeconds.
 // Answer normalization: trim, lowercase, collapse whitespace (one implementation, in ./normalize.ts).
