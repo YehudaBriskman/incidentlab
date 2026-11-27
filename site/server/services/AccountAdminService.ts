@@ -88,6 +88,17 @@ export class AccountAdminService {
     return toAccountView(account);
   }
 
+  /** How many active classes the account may own (#179); null goes back to the site default. Owned classes stay. */
+  async setClassLimit(accountId: string, classLimit: number | null): Promise<{ accountId: string; classLimit: number | null }> {
+    this.assertId(accountId);
+    const found = await this.repos.accounts.get(accountId);
+    if (!found) throw new AppError(404, "account not found");
+    if (found.data.classLimit !== classLimit && !(await this.repos.accounts.saveIfMatch({ ...found.data, classLimit }, found.etag))) {
+      throw new AppError(409, "concurrent update, please retry");
+    }
+    return { accountId, classLimit };
+  }
+
   /** Approves every pending account. Returns how many were approved. */
   async approveAll(): Promise<number> {
     const pending = (await this.repos.accounts.list()).filter((a) => a.status === "pending");

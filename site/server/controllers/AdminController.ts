@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AdminResetRequestSchema, CaseIdSchema, EventSchema, ScheduleSchema, SetAccountRoleRequestSchema, SettingsSchema } from "../../shared/contract.ts";
+import { AccountClassLimitRequestSchema, AdminResetRequestSchema, CaseIdSchema, EventSchema, ScheduleSchema, SetAccountRoleRequestSchema, SettingsSchema } from "../../shared/contract.ts";
 import type { AuditEntry } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
 import type { AccountAdminService } from "../services/AccountAdminService.ts";
@@ -68,6 +68,14 @@ export class AdminController {
     const { role } = await parseBody(req, SetAccountRoleRequestSchema);
     const account = await this.mutation(req, { action: "account.role", target: accountId, detail: role }, () => this.deps.accounts.setRole(accountId, role));
     return json(200, { account });
+  }
+
+  async setClassLimit(req: Request, accountId: string): Promise<Response> {
+    const { classLimit } = await parseBody(req, AccountClassLimitRequestSchema);
+    const result = await this.mutation(req, { action: "account.class-limit", target: accountId, detail: classLimit === null ? "default" : String(classLimit) }, () =>
+      this.deps.accounts.setClassLimit(accountId, classLimit),
+    );
+    return json(200, result);
   }
 
   async reject(req: Request, accountId: string): Promise<Response> {

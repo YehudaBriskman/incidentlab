@@ -22,7 +22,7 @@ import { TrashService } from "./TrashService.ts";
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const GUEST_IDLE_DAYS = 30;
 export const AUDIT_RETENTION_DAYS = 90;
-/** Longer than any RateLimitRule window (the longest is one hour), so a swept window can't still count. */
+/** At least as long as every RateLimitRule window (the longest is class-create, one day), so a swept window can't still count. */
 export const RATE_LIMIT_STALE_MS = DAY_MS;
 
 export type HygieneReport = {
