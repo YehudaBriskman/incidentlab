@@ -141,6 +141,18 @@ The account's `showOnGlobalBoard` flag is the player's choice. The board also ch
 approved and not a guest, so a rejected or guest account never shows even if a marker is left behind.
 Migration 003 backfills `score:` for every account. Accounts that have no summary yet get one when they opt in.
 
+### Accounts (`account:<id>`, `username:<sha256(key)>`)
+
+`AccountRecordSchema` in `site/server/domain/types.ts`. The open-access fields (#172) are additive, with defaults:
+- `kind` (`user` or `guest`, default `user`), `showOnGlobalBoard` (default false), `classLimit` (default null).
+- `recoveryCodeHash` (#174, default null): the scrypt hash (same format as `passwordHash`) of the account's
+  recovery code, normalized (upper case, no spaces or dashes). The plain code is returned once, by sign-up, by
+  the first sign-in of an account that has none, by `POST /api/auth/recover` and by
+  `POST /api/me/recovery-code`; it is never stored, logged or returned again. Neither hash is in any response.
+- `status`: since #173 sign-ups are `approved` at once (`decidedAt` = `createdAt`). `pending` remains for
+  accounts from before it (migration 003 approves them); `rejected` blocks sign-in and recovery.
+- A recovery bumps `sessionEpoch` (every session ends), clears `mustChangePassword` and replaces the code.
+
 ## Rules for changing stored records
 
 1. **Additive only.** New fields get a zod `.default(...)`, so every record already stored still parses.
