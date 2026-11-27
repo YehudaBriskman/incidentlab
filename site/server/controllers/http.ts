@@ -1,5 +1,6 @@
 // HTTP helpers shared by controllers: JSON responses, body parsing, error mapping.
 import type { z } from "zod";
+import type { ProgressView } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
 
 export const MAX_BODY_BYTES = 4096;
@@ -37,19 +38,28 @@ export const publicCacheHeaders = (cache: PublicCache): Record<string, string> =
 export const errorResponse = (
   status: number,
   error: string,
-  options: { code?: string | undefined; retryAfterSeconds?: number | undefined; details?: readonly string[] | undefined } = {},
+  options: {
+    code?: string | undefined;
+    retryAfterSeconds?: number | undefined;
+    details?: readonly string[] | undefined;
+    progress?: ProgressView | undefined;
+  } = {},
 ): Response => {
   const body = {
     error,
     ...(options.code === undefined ? {} : { code: options.code }),
     ...(options.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: options.retryAfterSeconds }),
     ...(options.details === undefined ? {} : { details: options.details }),
+    ...(options.progress === undefined ? {} : { progress: options.progress }),
   };
   return json(status, body, options.retryAfterSeconds === undefined ? {} : { "retry-after": String(options.retryAfterSeconds) });
 };
 
 export const toErrorResponse = (error: unknown): Response => {
-  if (error instanceof AppError) return errorResponse(error.status, error.message, { code: error.code, retryAfterSeconds: error.retryAfterSeconds, details: error.details });
+  if (error instanceof AppError) {
+    const { code, retryAfterSeconds, details, progress } = error;
+    return errorResponse(error.status, error.message, { code, retryAfterSeconds, details, progress });
+  }
   console.error("[incidentlab-api] unhandled error", error);
   return errorResponse(500, "internal");
 };

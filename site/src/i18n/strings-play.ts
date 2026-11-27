@@ -35,6 +35,9 @@ export const TP = defineStrings({
     solvedAnnounce: (pts: number): string => `Solved. +${pts} points.`,
     revealedAnnounce: (answer: string): string => `Answer revealed: ${answer}. This stage scores 0.`,
     hintAnnounce: (i: number, cost: number): string => `Hint ${i} revealed, −${cost} points.`,
+    // safe writes (#202, #203): the page redraws from the server's progress
+    staleWrite: "This page was out of date, so nothing was charged or counted. It now shows your latest progress.",
+    unconfirmedWrite: "The server didn't confirm that in time. This page now shows what was saved: check it before you try again.",
 
     // the answer form
     checkAnswer: "Check answer",
@@ -154,6 +157,8 @@ export const TP = defineStrings({
     solvedAnnounce: (pts: number): string => `נפתר. ${ltr(`+${pts}`)} נקודות.`,
     revealedAnnounce: (answer: string): string => `התשובה נחשפה: ${answer}. השלב מקבל 0.`,
     hintAnnounce: (i: number, cost: number): string => `רמז ${i} נחשף, ${ltr(`−${cost}`)} נקודות.`,
+    staleWrite: "הדף לא היה מעודכן, ולכן שום דבר לא חויב ולא נספר. עכשיו מוצגת ההתקדמות העדכנית שלכם.",
+    unconfirmedWrite: "השרת לא אישר את הפעולה בזמן. הדף מציג עכשיו את מה שנשמר: בדקו אותו לפני שתנסו שוב.",
 
     checkAnswer: "בדיקת התשובה",
     checking: "בודקים…",

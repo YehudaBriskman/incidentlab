@@ -11,7 +11,8 @@ import { recordVisit } from "../lib/recent";
 import { announce, copyButton, ensureAnnouncer, h, html, setChildren, type Child } from "../lib/dom";
 import { confirm, tooltip } from "../lib/overlay";
 import "../player.css";
-import { playErrorText } from "../lib/errors";
+import { playErrorText, recoverFromWrite } from "../lib/errors";
+import { followProgress, type ProgressFollower } from "../lib/progress-bus";
 import { md } from "../lib/markdown";
 import { isAdmin, loadAccount } from "../lib/session";
 import { caseVersion } from "../content/load";
@@ -165,8 +166,9 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
   // Signed out / not started: the page notice says it once; cards don't repeat it.
   if (!full && toolId !== undefined && progress !== null && progress.setupDoneAt !== null) {
     const stageNo = activeStageNumber(progress);
-    const active = stageNo !== null ? progress.stages[QUESTION_ORDER[stageNo - 1] ?? "q1"] : undefined;
-    if (stageNo !== null && active !== undefined) {
+    const activeId = stageNo !== null ? QUESTION_ORDER[stageNo - 1] : undefined;
+    const active = activeId !== undefined ? progress.stages[activeId] : undefined;
+    if (stageNo !== null && activeId !== undefined && active !== undefined) {
       // The confirm states the full cost; the card re-renders with the command once the server has charged it.
       const reveal = h("button", { type: "button", class: "btn btn-sm btn-reveal" }, TG().revealCommand(SCORING.COMMAND_COST));
       reveal.addEventListener("click", () => {
@@ -177,7 +179,8 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
           body: TP().cmdPrompt(SCORING.COMMAND_COST, stageNo, SCORING.CLEAN_BONUS, isCleanSoFar(active)),
           confirmLabel: TP().cmdConfirm(SCORING.COMMAND_COST),
           run: async () => {
-            charged.progress = await revealCommand(ctx.caseId, toolId);
+            // Charged only to the stage this page shows as active, or refused as stale (#203).
+            charged.progress = await revealCommand(ctx.caseId, toolId, activeId);
           },
         })
           .then((ok) => {
@@ -192,6 +195,8 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
             });
           })
           .catch((err: unknown) => {
+            const server = recoverFromWrite(err);
+            if (server !== null) return ctx.onProgress(server);
             errorEl.textContent = playErrorText(err);
           });
       });
@@ -234,10 +239,27 @@ export function toolboxView(c: Case): ViewResult {
   return { main, nav: createCaseNav(c, "toolbox").section, aside: { label: TS().tbSide, trigger: TS().tbSideTrigger, content: side }, start };
 }
 
+/** Keeps the toolbox page's progress in step with the case in other tabs (#203), so its prices stay right. */
+let follower: ProgressFollower | null = null;
+
 export function renderToolbox(root: HTMLElement, c: Case): void {
   document.title = T().allCommandsTitle(c.title);
   const hash = window.location.hash;
   const stillHere = (): boolean => window.location.hash === hash;
+  follower?.stop();
+  follower = null;
+  const follow = (progress: ProgressView): void => {
+    follower = followProgress({
+      initial: progress,
+      load: () => getProgress(c.id),
+      alive: () => root.isConnected && stillHere(),
+      apply: (next) => {
+        const y = contentScrollTop();
+        drawToolbox(root, c, { kind: "player", progress: next });
+        scrollContentTo(y);
+      },
+    });
+  };
   setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted" }, T().loading)));
   loadAccount()
     .then((account) => {
@@ -248,7 +270,9 @@ export function renderToolbox(root: HTMLElement, c: Case): void {
         withApprovedAccount(root, c.title, () => {
           getProgress(c.id)
             .then((progress) => {
-              if (stillHere()) drawToolbox(root, c, { kind: "player", progress });
+              if (!stillHere()) return;
+              drawToolbox(root, c, { kind: "player", progress });
+              follow(progress);
             })
             .catch((err: unknown) => {
               if (stillHere()) drawToolbox(root, c, { kind: "error", message: playErrorText(err) });

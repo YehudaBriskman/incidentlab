@@ -239,6 +239,16 @@ Migration 003 backfills `score:` for every account. Accounts that have no summar
   accounts from before it (migration 003 approves them); `rejected` blocks sign-in and recovery.
 - A recovery bumps `sessionEpoch` (every session ends), clears `mustChangePassword` and replaces the code.
 
+### Progress (`progress:<caseId>:<accountId>`)
+
+`ProgressRecordSchema` in `site/server/domain/types.ts`: one record per player and case, written by
+`GameService` with `setIfMatch`. Additive fields, with defaults:
+- `commandsRevealed` (default `{}`), `completionBonus` (default 0), and per stage `commandsRevealed`,
+  `breakdown` and `solvedAnswer` (#133).
+- `lastWrongAnswers` (#202, default `{}`): per stage, the last wrong answer, normalized. The same wrong answer
+  sent again (a retried request, a double submit) returns the same result and is not counted or rate-limited a
+  second time. Server-only: no progress view carries it.
+
 ### Audit (`audit:<isoTimestamp>:<random>`)
 
 `AuditEntrySchema` in `site/shared/contract.ts`: `{at, action, target, detail, via}` plus `actor` (#185, additive,

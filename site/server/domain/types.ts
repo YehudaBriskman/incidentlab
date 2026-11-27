@@ -1,7 +1,7 @@
 // Server-side domain types: stored records, secrets and case config.
 import { z } from "zod";
 import { AccountKindSchema, AccountRecordRoleSchema, AccountStatusSchema, QuestionIdSchema, StageProgressSchema } from "../../shared/contract.ts";
-import type { QuestionId } from "../../shared/contract.ts";
+import type { ProgressView, QuestionId } from "../../shared/contract.ts";
 import { CaseSealedSchema } from "../../shared/case-records.ts";
 
 /**
@@ -62,6 +62,11 @@ export const ProgressRecordSchema = z.object({
   wrongAnswerTimestamps: z.partialRecord(QuestionIdSchema, z.array(z.number())), // epoch ms, pruned to the rate window
   commandsRevealed: z.record(z.string(), QuestionIdSchema).default({}), // toolId -> stage it was paid on
   completionBonus: z.number().int().min(0).default(0),
+  /**
+   * Additive (#202): the stage's last wrong answer, normalized. Sending the same wrong answer again (a retried
+   * request, a double submit) is not counted a second time. Server-only: never in a progress view.
+   */
+  lastWrongAnswers: z.partialRecord(QuestionIdSchema, z.string()).default({}),
 });
 export type ProgressRecord = z.infer<typeof ProgressRecordSchema>;
 
@@ -81,11 +86,18 @@ export class AppError extends Error {
   readonly retryAfterSeconds: number | undefined;
   /** itemized problems, e.g. every check a case upload failed */
   readonly details: readonly string[] | undefined;
-  constructor(status: number, message: string, options: { code?: string; retryAfterSeconds?: number; details?: readonly string[] } = {}) {
+  /** the player's current progress, sent with a 409 "stale" so the client redraws from it (#202, #203) */
+  readonly progress: ProgressView | undefined;
+  constructor(
+    status: number,
+    message: string,
+    options: { code?: string; retryAfterSeconds?: number; details?: readonly string[]; progress?: ProgressView } = {},
+  ) {
     super(message);
     this.status = status;
     this.code = options.code;
     this.retryAfterSeconds = options.retryAfterSeconds;
     this.details = options.details;
+    this.progress = options.progress;
   }
 }

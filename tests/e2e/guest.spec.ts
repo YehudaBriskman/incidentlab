@@ -102,3 +102,18 @@ test("a guest's #/me offers the upgrade, not password or recovery-code forms (#2
   await expect(page.locator("#me-pw-current, #me-recovery-current")).toHaveCount(0);
   await expect(page.getByText("Change password")).toHaveCount(0);
 });
+
+test("a guest's \"not you? switch\" on a case warns and offers the account first (#206)", async ({ page, request }) => {
+  await scheduleToday(request, CASE_ID);
+  await page.request.post("/api/guest", { data: {} });
+  await page.goto(`/#/case/${CASE_ID}`);
+  const tag = page.locator(".player-tag");
+  await expect(tag.locator("strong")).toHaveText("Guest");
+  await tag.getByRole("button").click();
+  const prompt = page.getByRole("alertdialog");
+  await expect(prompt).toContainText(/can't sign back in/i);
+  await expect(prompt).not.toContainText(/saved on the server/i);
+  await prompt.getByRole("button", { name: /create an account first/i }).click();
+  await expect(page.getByRole("dialog", { name: /create your account/i })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`#/case/${CASE_ID}$`)); // still a guest, still on the case
+});
