@@ -23,8 +23,18 @@ export type LiveApi = LiveGridApi & {
   resetCase?(caseId: string): Promise<void>;
 };
 
+/** A class member Live expects to see play (#229). */
+export type RosterEntry = { readonly accountId: string; readonly username: string };
+
 export type LiveOptions = {
   host: ManageHost;
+  /**
+   * The class members expected to play (#229): Live then counts everyone, not only those who opened the case, and
+   * lists who hasn't started. Null while the roster loads; omitted on the site-wide dashboard.
+   */
+  roster?(): readonly RosterEntry[] | null;
+  /** The link the empty state offers to share (#229): the class join link. Defaults to this site. */
+  shareUrl?(): string | null;
   /** The case on screen (null when none is released). */
   caseId(): string | null;
   /** The cases to pick from, and today's case (tagged in the picker). */
@@ -68,7 +78,9 @@ export function createLivePanel(opts: LiveOptions): LivePanel {
   const liveTiles = host.foldableTiles(liveTilesEl);
   const funnelEl = h("div", { class: "admin-funnel" });
   const help = createLiveHelp({ onJump: (id) => grid.jumpTo(id), rerender: () => render() });
-  const grid = createLiveGrid({ host, caseId: opts.caseId, progress: opts.progress, api: opts.api, onRestarted: opts.onRestarted });
+  const grid = createLiveGrid({ host, caseId: opts.caseId, progress: opts.progress, api: opts.api, onRestarted: opts.onRestarted, shareUrl: opts.shareUrl });
+  /** Members who haven't opened the case yet (class dashboards only). */
+  const notStartedEl = h("section", { class: "panel admin-panel live-not-started", hidden: true });
   const liveBodyEl = h("div", { class: "admin-live-body" });
   /** "Couldn't load" above data that is still on screen from an earlier fetch. */
   const staleEl = h("p", { class: "admin-error", role: "alert", hidden: true });
@@ -133,6 +145,7 @@ export function createLivePanel(opts: LiveOptions): LivePanel {
       help.el,
       liveTiles,
       grid.section(),
+      notStartedEl,
       h("section", { class: "panel admin-panel" }, h("h2", { class: "admin-h2" }, T().admStageFunnel), funnelEl),
       opts.api.resetCase === undefined
         ? null
@@ -164,16 +177,22 @@ export function createLivePanel(opts: LiveOptions): LivePanel {
     liveTodayTag.hidden = !current || current !== todayId;
   }
 
-  function renderLiveTiles(players: readonly AdminProgress[], caseId: string, entries: readonly HelpEntry[]): void {
+  function renderLiveTiles(players: readonly AdminProgress[], caseId: string, entries: readonly HelpEntry[], members: number | null): void {
     const finished = players.filter(isDone);
+    // With a roster the share finished is of the whole class, not of those who opened the case (#229).
+    const base = members === null ? players.length : Math.max(members, players.length);
     const avg = players.length ? Math.round(players.reduce((s, p) => s + p.score, 0) / players.length) : null;
     const maxScore = players[0]?.maxScore ?? caseMaxScore(caseId);
     const med = median(finished.map(finishDurationMs).filter((v): v is number => v !== null));
     const needing = entries.filter((e) => e.level !== "idle").length;
     setChildren(
       liveTilesEl,
-      tile(T().admPlayers, fmtInt(players.length), T().admStuckCount(needing)),
-      tile(T().admFinished, fmtInt(finished.length), players.length ? formatPct(finished.length / players.length) : undefined),
+      tile(
+        T().admPlayers,
+        fmtInt(players.length),
+        members === null ? T().admStuckCount(needing) : `${T().admOfMembers(fmtInt(base))} · ${T().admStuckCount(needing)}`,
+      ),
+      tile(T().admFinished, fmtInt(finished.length), base ? formatPct(finished.length / base) : undefined),
       // Averaged over every player on the case (Stats averages finishers only): the label says which.
       tile(
         T().admAvgScoreAll,
@@ -183,6 +202,23 @@ export function createLivePanel(opts: LiveOptions): LivePanel {
       tile(T().admMedianTime, med === null ? "—" : formatFinish(med), T().admFinishedSample(finished.length, fmtInt(finished.length))),
     );
     setTilesSummary(liveTiles, T().admLiveSummary(fmtInt(players.length), fmtInt(finished.length), fmtInt(needing)));
+  }
+
+  /** Who in the class hasn't opened the case (#229): hidden on the site-wide dashboard and until progress loads. */
+  function renderNotStarted(roster: readonly RosterEntry[] | null, players: readonly AdminProgress[], loaded: boolean): void {
+    if (roster === null || !loaded) {
+      notStartedEl.hidden = true;
+      return;
+    }
+    const started = new Set(players.map((p) => p.accountId));
+    const waiting = roster.filter((m) => !started.has(m.accountId)).sort((a, b) => a.username.localeCompare(b.username));
+    notStartedEl.hidden = waiting.length === 0;
+    setChildren(
+      notStartedEl,
+      h("h2", { class: "admin-h2" }, T().admNotStarted(fmtInt(waiting.length))),
+      h("p", { class: "muted small" }, T().admNotStartedHint),
+      h("ul", { class: "live-not-started-list" }, waiting.map((m) => h("li", { dir: "auto" }, m.username))),
+    );
   }
 
   function renderFunnel(players: readonly AdminProgress[], caseId: string): void {
@@ -244,7 +280,9 @@ export function createLivePanel(opts: LiveOptions): LivePanel {
     for (const id of grid.expandedIds) if (!players.some((p) => p.accountId === id)) grid.expandedIds.delete(id);
     const entries = progress?.caseId === caseId ? helpEntries(players, Date.now()) : null;
     help.render(entries, caseId);
-    renderLiveTiles(players, caseId, entries ?? []);
+    const roster = opts.roster?.() ?? null;
+    renderNotStarted(roster, players, progress?.caseId === caseId);
+    renderLiveTiles(players, caseId, entries ?? [], roster === null ? null : roster.length);
     renderFunnel(players, caseId);
     grid.render();
   }

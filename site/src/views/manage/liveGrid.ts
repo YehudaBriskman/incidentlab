@@ -47,6 +47,8 @@ export type LiveGridOptions = {
   api: LiveGridApi;
   /** After a confirmed restart: the admin dashboard offers Undo from its trash. */
   onRestarted?: (player: AdminProgress) => Promise<void>;
+  /** The link the empty state offers to share (#229); defaults to this site. */
+  shareUrl?: (() => string | null) | undefined;
 };
 
 export type LiveGrid = {
@@ -395,7 +397,7 @@ export function createLiveGrid(opts: LiveGridOptions): LiveGrid {
     if (!caseId) return;
     if (players.length === 0) {
       playersCountEl.textContent = "";
-      const url = location.origin;
+      const url = opts.shareUrl?.() ?? location.origin;
       setChildren(
         liveTableEl,
         h(
