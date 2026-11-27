@@ -1,11 +1,18 @@
-// "My stats": the signed-in player's totals, rank and per-case breakdown.
-import { ACHIEVEMENT_IDS, type AccountView, type CaseStats, type LeaderboardResponse, type UserStats } from "../../shared/contract";
+// "My stats": the signed-in player's totals, rank and per-case breakdown, the global-board switch and (#183) the
+// player's classes with their rank on each class board. Guests see their stats with the upgrade card.
+import { ACHIEVEMENT_IDS, type AccountView, type CaseStats, type ClassSummary, type LeaderboardResponse, type UserStats } from "../../shared/contract";
 import { caseSummary } from "../content/load";
 import { ApiError, fetchLeaderboard, fetchMyStats, setBoardVisibility } from "../lib/api";
 import { h, html, setChildren, type Child } from "../lib/dom";
 import { iconSvg } from "../shell/icons";
 import { toast, tooltip } from "../lib/overlay";
 import "../player.css";
+import "../stats.css";
+import { fetchClass, fetchClassBoard, fetchMyClasses } from "../lib/class-api";
+import { HOME_CLASS_LIMIT, boardEntryFor, classRoleKind, type ClassRoleKind } from "../lib/challenges";
+import { TC } from "../i18n/strings-challenges";
+import { TGu } from "../i18n/strings-guest";
+import { openUpgradeDialog } from "./guest";
 import { dataTable, type Column } from "../components/dataTable";
 import { statGrid, statTile } from "../components/statGrid";
 import { formatElapsed } from "../lib/time";
@@ -150,11 +157,12 @@ function kpiGrid(stats: UserStats, board: LeaderboardResponse | null): HTMLEleme
   const live = board !== null && !board.frozen ? board : null;
   const classMedian = live !== null && live.entries.length >= 2 ? median(live.entries.map((e) => e.score)) : null;
   const ranked = live?.entries.length ?? null;
+  // The rank is on the global board, which players join by choice (#175); class ranks are in the Classes section.
   const rankTile = !stats.onGlobalBoard
-    ? kpi(TB().kpiRank, TB().notOnBoard, null, [TB().notOnBoardSub])
+    ? kpi(TB().kpiRank, TB().notOnBoard, null, [TC().rankNote, TB().notOnBoardSub])
     : stats.rank === null || stats.totalScore === 0
-      ? kpi(TB().kpiRank, TO().unranked, null, [TO().unrankedSub])
-      : kpi(TB().kpiRank, ranked !== null ? TO().rankOfN(stats.rank, Math.max(ranked, stats.rank)) : TO().rankAlone(stats.rank), null, []);
+      ? kpi(TB().kpiRank, TO().unranked, null, [TC().rankNote, TO().unrankedSub])
+      : kpi(TB().kpiRank, ranked !== null ? TO().rankOfN(stats.rank, Math.max(ranked, stats.rank)) : TO().rankAlone(stats.rank), null, [TC().rankNote]);
   return statGrid([
     kpi(TO().kpiScore, formatNumber(stats.totalScore), TO().ptsUnit, [
       classMedian !== null ? TO().vsMedian(stats.totalScore - classMedian, classMedian) : null,
@@ -173,7 +181,7 @@ function kpiGrid(stats: UserStats, board: LeaderboardResponse | null): HTMLEleme
 function boardSection(account: AccountView, stats: UserStats, onSaved: (account: AccountView) => void): HTMLElement {
   const title = h("h2", { id: "board-h", class: "section-title" }, TB().sectionTitle);
   if (account.kind === "guest") {
-    return h("section", { class: "board-pref", id: "board", "aria-labelledby": "board-h" }, title, h("p", { class: "muted small" }, TB().guestNote));
+    return h("section", { class: "board-pref stats-card", id: "board", "aria-labelledby": "board-h" }, title, h("p", { class: "muted small" }, TB().guestNote));
   }
   const input = h("input", { id: "me-board", type: "checkbox", role: "switch", class: "switch", "aria-describedby": "me-board-note" });
   input.checked = stats.onGlobalBoard;
@@ -202,10 +210,11 @@ function boardSection(account: AccountView, stats: UserStats, onSaved: (account:
   });
   return h(
     "section",
-    { class: "board-pref", id: "board", "aria-labelledby": "board-h" },
+    { class: "board-pref stats-card", id: "board", "aria-labelledby": "board-h" },
     title,
     h("label", { class: "check board-switch", for: "me-board" }, input, h("span", {}, TB().switchLabel)),
     h("p", { id: "me-board-note", class: "muted small board-note" }, TB().privacyNote),
+    h("a", { class: "small stats-card-foot", href: "#/leaderboard" }, TC().openLeaderboard),
   );
 }
 
@@ -238,8 +247,9 @@ function draw(root: HTMLElement, account: AccountView, stats: UserStats, board: 
       h("a", { class: "back-link", href: "#/" }, T().navCases),
       h("h1", {}, TA().statsTitle),
       withTip(h("p", { class: "page-meta" }, h("strong", {}, h("bdi", {}, stats.username)), " · ", TA().memberSince(since)), TO().statsSub),
+      account.kind === "guest" ? upgradeCard() : null,
       grid,
-      boardSection(account, stats, onBoardSaved),
+      h("div", { class: "stats-pair" }, boardSection(account, stats, onBoardSaved), classesSection(account, stats.username)),
       h(
         "section",
         { class: "stat-details", "aria-labelledby": "detail-h" },
@@ -278,6 +288,113 @@ function draw(root: HTMLElement, account: AccountView, stats: UserStats, board: 
       recoveryCodeSection(stats.username),
     ),
   );
+}
+
+/** A guest's upgrade card: the same dialog as the guest banner (views/guest.ts). */
+function upgradeCard(): HTMLElement {
+  return h(
+    "section",
+    { class: "stats-upgrade", "aria-labelledby": "upgrade-h" },
+    h("div", { class: "stats-upgrade-text" }, h("h2", { id: "upgrade-h", class: "stats-upgrade-title" }, TC().guestTitle), h("p", { class: "muted small" }, TC().upgradeNote)),
+    h("button", { type: "button", class: "btn btn-primary btn-sm", onclick: () => openUpgradeDialog() }, TGu().createAccount),
+  );
+}
+
+type ClassRow = { readonly summary: ClassSummary; readonly rank: number | null; readonly of: number; readonly score: number | null; readonly failed: boolean };
+
+const roleText = (kind: ClassRoleKind): string =>
+  kind === "owner" ? TC().roleOwner : kind === "admin" ? TC().roleAdmin : kind === "member" ? TC().roleMember : TC().rolePending;
+
+function classColumns(): Column<ClassRow>[] {
+  return [
+    {
+      id: "class",
+      header: TC().colClass,
+      rowHeader: true,
+      sortValue: (r) => r.summary.name.toLocaleLowerCase(),
+      cell: (r) => h("a", { href: `#/class/${encodeURIComponent(r.summary.id)}` }, h("bdi", {}, r.summary.name)),
+    },
+    { id: "role", header: TC().colRole, sortValue: (r) => classRoleKind(r.summary), cell: (r) => roleText(classRoleKind(r.summary)) },
+    {
+      id: "rank",
+      header: TC().colClassRank,
+      numeric: true,
+      sortValue: (r) => r.rank,
+      cell: (r) =>
+        r.rank !== null
+          ? TO().rankOfN(r.rank, Math.max(r.of, r.rank))
+          : r.failed || classRoleKind(r.summary) === "pending"
+            ? none()
+            : h("span", { class: "muted" }, TC().noClassPoints),
+    },
+    { id: "score", header: TC().colClassScore, numeric: true, sortFirst: "desc", sortValue: (r) => r.score, cell: (r) => (r.score === null ? none() : TG().scorePts(r.score)) },
+  ];
+}
+
+/**
+ * Each class's board place: GET /api/classes, then for at most HOME_CLASS_LIMIT active memberships the class detail
+ * (for its board token) and the class board, which is public and CDN-cached. Pending requests have no board.
+ */
+async function loadClassRows(username: string): Promise<ClassRow[]> {
+  const classes = (await fetchMyClasses()).filter((c) => c.status === "active" && c.membership !== null);
+  let budget = HOME_CLASS_LIMIT;
+  return Promise.all(
+    classes.map(async (summary): Promise<ClassRow> => {
+      const blank: ClassRow = { summary, rank: null, of: 0, score: null, failed: false };
+      if (summary.membership?.status !== "active" || budget <= 0) return blank;
+      budget -= 1;
+      try {
+        const detail = await fetchClass(summary.id);
+        if (detail.boardToken === undefined) return blank;
+        const board = await fetchClassBoard(detail.boardToken, null);
+        const entry = boardEntryFor(board.entries, username);
+        return { summary, rank: entry?.rank ?? null, of: board.entries.length, score: entry?.score ?? null, failed: false };
+      } catch {
+        return { ...blank, failed: true };
+      }
+    }),
+  );
+}
+
+function classesSection(account: AccountView, username: string): HTMLElement {
+  const body = h("div", { class: "stats-classes-body" });
+  const section = h(
+    "section",
+    { class: "stats-card stats-classes", "aria-labelledby": "classes-h" },
+    h(
+      "header",
+      { class: "stats-card-head" },
+      h("h2", { id: "classes-h", class: "section-title" }, TC().statsClassesTitle),
+      account.kind === "guest" ? null : h("a", { class: "small", href: "#/classes" }, TC().allClasses),
+    ),
+    body,
+  );
+  if (account.kind === "guest") {
+    setChildren(body, h("p", { class: "muted small" }, TC().statsClassesGuest));
+    return section;
+  }
+  const load = (): void => {
+    setChildren(body, h("p", { class: "muted small", role: "status" }, T().loading));
+    loadClassRows(username)
+      .then((rows) => {
+        if (rows.length === 0) {
+          setChildren(body, h("p", { class: "muted small" }, TC().statsClassesEmpty), h("a", { class: "btn btn-sm", href: "#/classes" }, TC().ctaAction));
+          return;
+        }
+        setChildren(
+          body,
+          dataTable({ columns: classColumns(), rows, labelledBy: "classes-h", className: "stats-classes-table", wrapClass: "stats-classes-wrap", regionLabel: TC().classesRegion, stackOnPhone: true }).element,
+        );
+      })
+      .catch(() => {
+        setChildren(
+          body,
+          h("div", { class: "stats-classes-error", role: "alert" }, h("p", { class: "small" }, TC().classesFailed), h("button", { type: "button", class: "btn btn-sm", onclick: load }, T().tryAgain)),
+        );
+      });
+  };
+  load();
+  return section;
 }
 
 export function renderStats(root: HTMLElement): void {
