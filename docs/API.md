@@ -40,7 +40,7 @@ plan allows 125,000 function calls a month.
   starts within an hour, every 2 minutes otherwise. It doesn't poll at all while the tab is hidden, and polls
   once when the tab comes back.
 - Errors are non-2xx with body `{ "error": string, "code"?: string, "retryAfterSeconds"?: number, "details"?: string[] }` (`details` lists every failed check of a rejected upload). Status codes: 400 validation, 401 signed out, 403 forbidden (see codes), 404, 405, 409 conflict (username taken, already finished, no more hints, concurrent update: retry), 413, 415, 429 rate limit (also sends `Retry-After`), 500 `{"error":"internal"}`, 503 admin disabled.
-- Error codes the UI acts on: `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`, and for classes (#179) `guest`, `not-class-admin`, `not-class-owner`, `class-limit`, `class-full`, `class-archived`, `owner-locked`, `pending-member`.
+- Error codes the UI acts on (also, for private cases and review, #184: `not-admin`, `not-published`, `already-public`, `not-submitted`): `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`, and for classes (#179) `guest`, `not-class-admin`, `not-class-owner`, `class-limit`, `class-full`, `class-archived`, `owner-locked`, `pending-member`.
 
 ## Accounts and sessions
 
@@ -104,7 +104,8 @@ it, and no public or CDN-cached response carries stage records. Constants: `SCOR
 | POST | `/api/guest` | optional cookie | `{}` | 201 `{account}` + cookie (a new guest), or 200 `{account}` for an existing session |
 | POST | `/api/auth/upgrade` | guest cookie | `{username, password}` | `{account}` + fresh cookie (same id, `kind: "user"`) |
 | GET | `/api/me` | cookie | | `{account}` (401 when signed out) |
-| GET | `/api/session` | optional cookie | | `{account}` or `{account: null}`, always 200. The browser uses this to probe sign-in without logging a 401. |
+| GET | `/api/session` | optional cookie | | `{account, privateCases}` or `{account: null, privateCases: false}`, always 200. The browser uses this to probe sign-in without logging a 401. `privateCases` (#184) says the account may have private cases to play; only then does the browser call `GET /api/me/cases`. |
+| GET | `/api/me/cases` | optional cookie | | `{cases: CatalogEntry[]}`, `no-store`: the live private cases this session may see (#184; the site admin: all of them). The browser merges them into its catalog. Signed out: `{cases: []}`. |
 | GET | `/api/me/stats` | cookie | | `{stats: UserStats}`. `rank` is the place on the live overall public board, null when not on it; `onGlobalBoard` says whether the player opted in (#175). Reads only the player's own progress plus the opted-in players' score summaries. |
 | PUT | `/api/me/board` | approved | `{show: boolean}` | `{account}` with `showOnGlobalBoard`. Opts in to or out of the public global leaderboard (off by default; your username and score become public). 403 `guest` for guests. Purges the `leaderboard` CDN tag. |
 | GET | `/api/today` | none | | `{date, timezone, caseId, lockToToday, releasedCaseIds}` (`lockToToday` is deprecated: returned, never enforced) |
@@ -133,7 +134,18 @@ visible; drafts, older versions and trashed cases are 404.
 | GET | `/api/cases/:caseId/content?lang=en\|he` | none | `{id, version, lang, content: CaseContent, evidence: {filesBase, zip}}` (`CaseContentResponseSchema` in `site/shared/case-records.ts`). `lang` is the one served: `he` falls back to `en`. `evidence` says where this version's evidence lives (below). The browser adds `&v=<version>` (ignored by the server) so its HTTP cache keeps one entry per version. `ETag` = `"<contentSha>-v<version>-<lang>"`. 400 for another `lang`, 404 unless published. |
 
 Both send `Cache-Control: public, max-age=60, stale-while-revalidate=600` and answer `If-None-Match`
-with 304. Errors (404, 400) stay `no-store`. These routes share the `/api/cases/:caseId/*` space with the
+with 304. Errors (404, 400) stay `no-store`.
+
+**Private cases (#184).** A case whose meta says `visibility: "private"` is never in `GET /api/cases`, the
+released ids (`/api/today`, schedules, other classes' assignments), the global leaderboard or a class board's
+`caseIds`. Its `content` route answers only its author, the site admin and active members of an active class in
+the case's `classIds`, with `Cache-Control: no-store` and no `ETag` (personalised: it never enters the CDN). Every
+other caller gets the same 404 body as for an unknown id. The play routes (`progress`, `answer`, `hint`...) answer
+404 `unknown-case` the same way. Membership is read live on each request, so removing a member or a class takes
+effect at once. Private plays stay in the player's score summary but don't count on the global board; on a class
+board they count when the class lists the case in its `caseIds`.
+
+These routes share the `/api/cases/:caseId/*` space with the
 per-player routes above; `content` is the only action there that needs no session.
 
 **Evidence location.** `evidence.filesBase` (ends in `/`; a file is `filesBase` + its URL-encoded path) and
@@ -149,6 +161,16 @@ logic in `site/server/services/evidenceStream.ts`) serves
 |---|---|
 | `/evidence/db/<caseId>/v<n>/files/<path>` | one evidence file (any size; 40 MB today) |
 | `/evidence/db/<caseId>/v<n>.zip` | the prebuilt evidence zip (`content-disposition: attachment; filename="<caseId>-evidence.zip"`, the name the toolbox commands unzip) |
+| `/evidence/db/<caseId>/v<n>~<key>/files/<path>` and `/evidence/db/<caseId>/v<n>~<key>.zip` | the same for a **private** case (#184): `<key>` is the case's `evidenceKey` (32 hex characters, 128 random bits) |
+
+**Private evidence and its residual risk.** The Edge Function can't check a session cheaply (a session, an
+account and a membership read per evidence request, on the edge runtime), so for a private case the URL itself
+is the capability: the plain `v<n>` URL answers 404, and only `v<n>~<key>` with the exact key serves. The key is
+set at the case's first private publish and appears only in the member-checked, `no-store` content response. No
+public response names a private case at all, and a public case never answers on a keyed URL. What remains: anyone
+who was given the URL (a member who copies it, or a member removed later who kept it) can still download that
+version's evidence, and the CDN may cache it under that URL. Evidence holds no answers or paid content, but treat
+a private case's evidence as shared with whoever once had access.
 
 GET and HEAD. `Range: bytes=a-b` / `a-` / `-n` gives 206 with `Content-Range` (one range; a multi-range
 or malformed header gets the whole file; past the end is 416). `ETag` is the file's SHA-256 and
@@ -173,7 +195,21 @@ account id (`403 not-owner`); the admin acts on any case. A new case id becomes 
 author cannot upload a version of a case they do not own (`403 not-owner`; the original cases are owned by
 `admin`). (`409 id-taken` guards ids of the test-only static cases, see `createApp`'s `staticSecrets`.) Every mutation except the single chunk and part
 PUTs is audited (`case.upload`, `case.draft`, `case.publish`, `case.rollback`, `case.delete`,
-`case.restore`; the detail names the author).
+`case.restore`, and since #184 `case.review-submit`, `case.classes`, `case.review-approve`, `case.review-reject`;
+the detail names the author).
+
+**Private cases and the owner's review (#184).** Authors are granted by the owner. An author's case is private
+until the owner approves it (who may see one: DB-stored case content above).
+- An author's publish of a case that is not public yet makes or keeps it private (`visibility: "private"` in the
+  response). Only the site admin may pass `visibility` (403 `not-admin`); without it, the admin's publish keeps
+  the case's visibility (a new admin case is public, as before).
+- **Re-review:** an author's publish of another version of a case that is already public does not go live. It
+  becomes the case's `pendingVersion`, submitted for review (`pendingReview: true`), and the public version stays
+  live until the owner approves. A public case can't change under players without the owner seeing it first.
+  The pending version's evidence isn't served meanwhile. A rejection drops it from review (it stays a stored
+  version).
+- Publishing privately again while a review is submitted resets the review to `none` (what was submitted
+  changed), so the author submits again.
 
 A package travels in pieces so every body stays at or under 4 MiB (the Function limit is about 6 MB):
 evidence files and `evidence.zip` as content-addressed chunks, the small entries as named parts.
@@ -184,8 +220,10 @@ evidence files and `evidence.zip` as content-addressed chunks, the small entries
 | PUT | `/api/author/uploads/:uploadId/chunks/:sha256/:index` | raw bytes, `application/octet-stream`, exactly the chunk's size (4 MiB, the last one shorter) | `{stored, fileComplete, verified}`. Idempotent: a stored chunk is never overwritten. When a file's last chunk arrives the whole file is hashed; a mismatch drops its chunks and answers 422 `sha-mismatch`. 400 `chunk-size`, 413 above 4 MiB, 415 another content type. |
 | PUT | `/api/author/uploads/:uploadId/parts/:name` | raw bytes (≤ 1 MiB) | `{name, size}`. Names: `content.en.json`, `content.he.json` (only for manifest languages), `sealed.answers.json`, `sealed.hints.json`, `sealed.commands.json`, `sealed.scoring.json`, `sealed.debrief.en.md`, `sealed.debrief.he.md` (the package entry with `/` as `.`); 400 `part-not-allowed` otherwise. |
 | POST | `/api/author/uploads/:uploadId/finalize` | `{}` | `{caseId, version, status: "draft", diff}`. Runs the package checks of `validatePackageParts()` (schemas, cross-checks, the answer-leak scan of the public content against the sealed answers, hint texts and commands), checks every chunk is stored and every file's sha256, then writes version `latestVersion + 1` as a **draft**. 422 `invalid-package` / 409 `missing-parts` / `missing-chunks` with `details`; 422 `sha-mismatch`. A repeated finalize returns the same result. |
-| GET | `/api/author/cases` | | `{cases: AuthorCase[]}`: the cases the caller may manage (trashed ones included), each with every version and its state (`published`, `draft`, `previous`). |
-| POST | `/api/author/cases/:caseId/publish` | `{version, acceptAnswerChanges?}` | `{caseId, publishedVersion, previousVersion, rollback, changed}`. Rollback is publishing an older version. 409 `answer-drift` (below), `conflict` (another publish won: the meta is written with `setIfMatch`), `trashed`, `incomplete-version`; 404 unknown version. |
+| GET | `/api/author/cases` | | `{cases: AuthorCase[]}`: the cases the caller may manage (trashed ones included), each with every version and its state (`published`, `draft`, `previous`, `pending`), and (#184) `visibility`, `review`, `reviewNote`, `reviewAt`, `classIds`, `pendingVersion`. Never the evidence key. |
+| POST | `/api/author/cases/:caseId/publish` | `{version, acceptAnswerChanges?, visibility?}` | `{caseId, publishedVersion, previousVersion, rollback, changed, visibility, pendingReview}`. Rollback is publishing an older version. 409 `answer-drift` (below), `conflict` (another publish won: the meta is written with `setIfMatch`), `trashed`, `incomplete-version`; 404 unknown version; 403 `not-admin` for an author's `visibility`. |
+| POST | `/api/author/cases/:caseId/submit-review` | `{}` | `{case: AuthorCase}` with `review: "submitted"` (idempotent). The owner reviews a private case at its published version, a public case at its `pendingVersion`. 409 `not-published` (publish privately first, to try it out), `already-public`, `trashed`. |
+| PUT | `/api/author/cases/:caseId/classes` | `{classIds}` (at most 20) | `{case: AuthorCase}`: the classes whose active members may play the private case. Each class added must be an active class the author is an active admin of (403 `not-class-admin`); the admin may assign any existing class; removing needs no check. A class admin then adds the case to the class's `caseIds` (`PATCH /api/classes/:id`, which accepts a private case only for a class in its `classIds`) to put it on the class board. |
 | DELETE | `/api/author/cases/:caseId` | | `{caseId, trashId, expiresAt}`: soft delete. Every public route answers 404 at once; the records stay. |
 | POST | `/api/author/cases/:caseId/restore` | `{}` | `{caseId, status}`: back to `published` or `draft`. The admin can also restore it from `/api/admin/trash`. 404 after the 7 days. |
 
@@ -229,6 +267,8 @@ may reclaim unreferenced ones). CLI: `scripts/data.ts upload` (see `docs/CASE_CO
 | GET | `/api/admin/audit?limit=` | | `{entries}` newest first (every admin mutation is recorded) |
 | GET | `/api/admin/trash` | | `{entries}` soft-deleted accounts, cases and progress resets, newest first (expire after 7 days) |
 | POST | `/api/admin/trash/:id/restore` | `{}` | `{restored, skipped}` (never overwrites newer data; 409 `conflict` if the account or username exists again, or the case is no longer deleted) |
+| GET | `/api/admin/reviews` | | `{reviews: ReviewItem[]}` (#184): cases waiting for the owner's review, oldest submission first: `caseId`, `title`, `createdBy`, `author` (username), `version` (the one to approve), `publishedVersion`, `visibility`, `langs`, `submittedAt`, `answerKeyChanged`. No answers. Authors get 403 `not-admin`. UI: `#/author/reviews`. |
+| POST | `/api/admin/cases/:caseId/review` | `{decision: "approve" or "reject", note?, acceptAnswerChanges?}` | `{case: AuthorCase}`. Approve: the reviewed version becomes the public published version (`review: "approved"`), under the same answer-drift rule as a publish (409 `answer-drift` unless accepted). Reject: `note` is required (400 otherwise); `review: "rejected"`, the note reaches the author, a pending version is dropped and the case stays as it was. 409 `not-submitted` when nothing waits. Audited. |
 
 ### Classes (#179)
 
