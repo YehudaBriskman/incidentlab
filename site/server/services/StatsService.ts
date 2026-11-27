@@ -20,6 +20,7 @@ import type { Repositories } from "../repositories/repositories.ts";
 import { mapWithConcurrency } from "../repositories/KvStore.ts";
 import { localDate } from "./ScheduleService.ts";
 import { parScore } from "./scoring.ts";
+import { BoardCache } from "./BoardCache.ts";
 
 const average = (values: readonly number[]): number | null => (values.length === 0 ? null : values.reduce((s, v) => s + v, 0) / values.length);
 const round1 = (value: number | null): number | null => (value === null ? null : Math.round(value * 10) / 10);
@@ -41,7 +42,7 @@ const rankOf = (score: number, sortedScores: readonly number[]): number => sorte
 /** Who may be listed on the public board: an approved, full (non-guest) account that opted in. */
 export const isBoardEligible = (account: AccountRecord): boolean => account.status === "approved" && account.kind === "user" && account.showOnGlobalBoard;
 
-type BoardPlayer = { readonly account: AccountRecord; readonly score: ScoreRecord };
+export type BoardPlayer = { readonly account: AccountRecord; readonly score: ScoreRecord };
 
 /**
  * Every account with its score total (from the `score:` summaries), for the console's users list (#185). One
@@ -63,6 +64,7 @@ export class StatsService {
   private readonly secrets: Secrets;
   private readonly privateCaseIds: () => readonly string[];
   private readonly now: () => Date;
+  private readonly boardCache: BoardCache<BoardPlayer[]>;
 
   constructor(deps: {
     repos: Repositories;
@@ -70,11 +72,14 @@ export class StatsService {
     /** #184: private cases never count on the public global board */
     privateCaseIds?: () => readonly string[];
     now: () => Date;
+    /** #185: the opted-in players, shared for a few seconds; the board's writers clear it */
+    boardCache?: BoardCache<BoardPlayer[]>;
   }) {
     this.repos = deps.repos;
     this.secrets = deps.secrets;
     this.privateCaseIds = deps.privateCaseIds ?? (() => []);
     this.now = deps.now;
+    this.boardCache = deps.boardCache ?? new BoardCache<BoardPlayer[]>(() => deps.now().getTime());
   }
 
   private get caseIds(): string[] {
@@ -312,7 +317,12 @@ export class StatsService {
     const stats = this.userStats(account, own.filter((r) => r !== null).map((r) => r.data), schedule);
     const onGlobalBoard = isBoardEligible(account);
     if (!onGlobalBoard) return { ...stats, rank: null, onGlobalBoard };
-    const board = this.rank(this.rows(await this.boardPlayers(), { caseId: null, cutoff: null }));
+    // The others from the shared board read (#185); the player's own row from their current summary, so their
+    // latest solve counts in their rank even when the shared read is a few seconds old.
+    const [players, ownScore] = await Promise.all([this.boardPlayers(), this.repos.scores.get(account.id)]);
+    const others = players.filter((p) => p.account.id !== account.id);
+    const withOwn = ownScore === null ? others : [...others, { account, score: ownScore.data }];
+    const board = this.rank(this.rows(withOwn, { caseId: null, cutoff: null }));
     return { ...stats, rank: board.find((row) => row.accountId === account.id)?.rank ?? null, onGlobalBoard };
   }
 
@@ -340,8 +350,13 @@ export class StatsService {
     };
   }
 
-  /** The opted-in accounts: one key listing, then each one's account and summary (a small set by design). */
-  private async boardPlayers(): Promise<BoardPlayer[]> {
+  /** The opted-in accounts (shared for a few seconds, see BoardCache). */
+  private boardPlayers(): Promise<BoardPlayer[]> {
+    return this.boardCache.get(() => this.readBoardPlayers());
+  }
+
+  /** The opted-in accounts: one key listing, then each one's account and summary. */
+  private async readBoardPlayers(): Promise<BoardPlayer[]> {
     const ids = await this.repos.globalBoard.listAccountIds();
     const players = await mapWithConcurrency(ids, async (id): Promise<BoardPlayer | null> => {
       const [account, score] = await Promise.all([this.repos.accounts.get(id), this.repos.scores.get(id)]);

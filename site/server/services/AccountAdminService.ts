@@ -44,6 +44,7 @@ export class AccountAdminService {
   private readonly trashRepo: TrashRepository;
   private readonly scores: ScoreService | null;
   private readonly now: () => Date;
+  private readonly onBoardChange: () => void;
 
   constructor(deps: {
     repos: Repositories;
@@ -55,7 +56,10 @@ export class AccountAdminService {
     /** the board's score summaries follow progress resets and account deletes (#175) */
     scores?: ScoreService;
     now: () => Date;
+    /** a ban or unban changes who is on the board: the board's shared read is dropped (#185) */
+    onBoardChange?: () => void;
   }) {
+    this.onBoardChange = deps.onBoardChange ?? (() => undefined);
     this.repos = deps.repos;
     this.firstBlood = deps.firstBlood;
     this.game = deps.game;
@@ -74,6 +78,7 @@ export class AccountAdminService {
     // sign-out. Every case route already refuses rejected accounts, and they can't sign in again.
     const account = { ...found.data, status, decidedAt: this.now().toISOString() };
     if (!(await this.repos.accounts.saveIfMatch(account, found.etag))) throw new AppError(409, "concurrent update, please retry");
+    this.onBoardChange();
     return toAccountView(account);
   }
 

@@ -18,12 +18,14 @@ export class GlobalBoardService {
   private readonly scores: ScoreService;
   private readonly purger: CachePurger;
   private readonly now: () => Date;
+  private readonly onChange: () => void;
 
-  constructor(deps: { repos: Repositories; scores: ScoreService; purger?: CachePurger | undefined; now: () => Date }) {
+  constructor(deps: { repos: Repositories; scores: ScoreService; purger?: CachePurger | undefined; now: () => Date; onChange?: () => void }) {
     this.repos = deps.repos;
     this.scores = deps.scores;
     this.purger = deps.purger ?? noopCachePurger;
     this.now = deps.now;
+    this.onChange = deps.onChange ?? (() => undefined);
   }
 
   /** Shows or hides an approved player on the public board, and purges the CDN copy so the change is seen at once. */
@@ -36,6 +38,7 @@ export class GlobalBoardService {
     }
     const account = await this.saveFlag(player.id, show);
     if (show) await this.repos.globalBoard.add(player.id, this.now().toISOString());
+    this.onChange();
     await this.purger.purge(["leaderboard"]);
     return toAccountView(account);
   }
@@ -45,6 +48,7 @@ export class GlobalBoardService {
     if (account.kind !== "user" || !account.showOnGlobalBoard) return;
     await this.scores.ensure(account.id);
     await this.repos.globalBoard.add(account.id, this.now().toISOString());
+    this.onChange();
     await this.purger.purge(["leaderboard"]);
   }
 

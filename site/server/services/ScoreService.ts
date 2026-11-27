@@ -15,10 +15,12 @@ const backoff = (attempt: number): Promise<void> =>
 export class ScoreService {
   private readonly repos: Repositories;
   private readonly caseIds: () => readonly string[];
+  private readonly onChange: () => void;
 
-  constructor(deps: { repos: Repositories; caseIds: () => readonly string[] }) {
+  constructor(deps: { repos: Repositories; caseIds: () => readonly string[]; onChange?: () => void }) {
     this.repos = deps.repos;
     this.caseIds = deps.caseIds;
+    this.onChange = deps.onChange ?? (() => undefined);
   }
 
   /** Re-derives one case's part of the summary from its stored progress record (gone = the case is removed). */
@@ -52,6 +54,7 @@ export class ScoreService {
   /** Drops the summary and the board marker (the account is deleted). */
   async remove(accountId: string): Promise<void> {
     await Promise.all([this.repos.scores.delete(accountId), this.repos.globalBoard.remove(accountId)]);
+    this.onChange();
   }
 
   /** Conditional read-modify-write. `next` must read whatever it derives from after the summary was read. */
@@ -60,7 +63,10 @@ export class ScoreService {
       const current = await this.repos.scores.get(accountId);
       const record = await next(current?.data ?? null);
       if (sameScore(current?.data ?? null, record)) return record;
-      if (await this.repos.scores.saveIfMatch(record, current?.etag ?? null)) return record;
+      if (await this.repos.scores.saveIfMatch(record, current?.etag ?? null)) {
+        this.onChange(); // the board's shared read is stale now (#185)
+        return record;
+      }
       if (attempt >= MAX_WRITE_RETRIES) throw new Error(`score summary for ${accountId}: too many concurrent updates`);
       await backoff(attempt);
     }

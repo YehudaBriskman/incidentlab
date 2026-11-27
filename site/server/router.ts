@@ -34,6 +34,8 @@ import { GuestService } from "./services/GuestService.ts";
 import { RateLimiter } from "./services/RateLimiter.ts";
 import { ScheduleService } from "./services/ScheduleService.ts";
 import { StatsService } from "./services/StatsService.ts";
+import type { BoardPlayer } from "./services/StatsService.ts";
+import { BoardCache } from "./services/BoardCache.ts";
 import { TrashService } from "./services/TrashService.ts";
 import { TrashRepository } from "./repositories/trash-repository.ts";
 import { UploadRepository } from "./repositories/upload-repository.ts";
@@ -81,14 +83,17 @@ export const createApp = (deps: AppDeps): App => {
   const auth = new AuthService({ repos, settings: settingsRepo, limiter, adminKey: deps.adminKey, now });
   const events = new EventService({ events: new EventRepository(deps.store), settings: settingsRepo, now, purger: deps.cachePurger });
   const schedule = new ScheduleService({ repository: repos.schedule, releasedCaseIds: () => Object.keys(secrets.cases), now, purger: deps.cachePurger });
-  const scores = new ScoreService({ repos, caseIds: () => Object.keys(secrets.cases) });
-  const board = new GlobalBoardService({ repos, scores, purger: deps.cachePurger, now });
+  // The global board's opted-in players, shared for a few seconds (#185); every writer that changes them clears it.
+  const boardCache = new BoardCache<BoardPlayer[]>(() => now().getTime());
+  const clearBoard = (): void => boardCache.clear();
+  const scores = new ScoreService({ repos, caseIds: () => Object.keys(secrets.cases), onChange: clearBoard });
+  const board = new GlobalBoardService({ repos, scores, purger: deps.cachePurger, now, onChange: clearBoard });
   // GameService reads private cases too (#184); GameController checks access before every call.
   const game = new GameService({ repository: repos.progress, firstBlood, secrets: secrets.playable, scores, now });
-  const stats = new StatsService({ repos, secrets, privateCaseIds: () => secrets.privateCaseIds(), now });
+  const stats = new StatsService({ repos, secrets, privateCaseIds: () => secrets.privateCaseIds(), now, boardCache });
   const trashRepo = new TrashRepository(deps.store);
   const trash = new TrashService({ trash: trashRepo, repos, cases: caseRepo, scores, board, now });
-  const accounts = new AccountAdminService({ repos, firstBlood, game, stats, trash, trashRepo, scores, now });
+  const accounts = new AccountAdminService({ repos, firstBlood, game, stats, trash, trashRepo, scores, now, onBoardChange: clearBoard });
   const audit = new AuditService({ repository: new AuditRepository(deps.store), repos, now });
 
   // Static (test-fixture) cases: only the admin may upload their ids, and their answer key is the drift
