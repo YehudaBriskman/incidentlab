@@ -22,7 +22,7 @@ import { TrashService } from "./TrashService.ts";
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const GUEST_IDLE_DAYS = 30;
 export const AUDIT_RETENTION_DAYS = 90;
-/** Longer than any RateLimitRule window (the longest is one hour), so a swept window can't still count. */
+/** At least as long as every RateLimitRule window (the longest is class-create, one day), so a swept window can't still count. */
 export const RATE_LIMIT_STALE_MS = DAY_MS;
 
 export type HygieneReport = {
@@ -81,8 +81,11 @@ export class AccountHygieneService {
     if (!apply) return progress.length;
     for (const guest of guests) {
       const own = progress.filter((p) => p.accountId === guest.id);
-      await this.trash.put({ kind: "account", label: `idle guest ${guest.username}`, account: guest, progress: own, firstBlood: {} });
+      // Guests can't join classes, but the delete stays the same as an admin delete: memberships go to the trash too.
+      const memberships = await this.repos.classes.membershipsOf(guest.id);
+      await this.trash.put({ kind: "account", label: `idle guest ${guest.username}`, account: guest, progress: own, firstBlood: {}, memberships });
       await this.repos.progress.deleteMany({ accountId: guest.id });
+      await this.repos.classes.removeAccount(guest.id);
       await this.scores.remove(guest.id); // its score summary (and any stray board marker) go too; a restore re-derives them
       await this.repos.accounts.delete(guest.id);
     }

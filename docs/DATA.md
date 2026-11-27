@@ -7,7 +7,7 @@ click may lose it. This document is the contract for anyone changing stored reco
 
 | Store | What | Notes |
 |---|---|---|
-| `incidentlab-v2` | Live data: `account:`, `username:`, `session:`, `progress:<case>:<account>`, `score:<account>`, `globalboard:<account>`, `config:*` (schedule, settings, event, migrations ledger), `firstblood:`, `audit:`, `trash:`, `legacy:`, `ratelimit:`, `case:`, `evidence:` (binary), `upload:` | Never rename. A new name means an empty store. That's how round-1 players were orphaned. |
+| `incidentlab-v2` | Live data: `account:`, `username:`, `session:`, `progress:<case>:<account>`, `score:<account>`, `globalboard:<account>`, `class:`, `classcode:`, `classmember:`, `memberof:` (#179), `config:*` (schedule, settings, event, migrations ledger), `firstblood:`, `audit:`, `trash:`, `legacy:`, `ratelimit:`, `case:`, `evidence:` (binary), `upload:` | Never rename. A new name means an empty store. That's how round-1 players were orphaned. |
 | `incidentlab-backups` | `daily/<YYYY-MM-DD>.json` snapshots, 30 days | Written by the scheduled function `backup-daily` |
 | `incidentlab-players` | Round-1 anonymous players (pre-accounts) | Read-only. Migration 002 copies it to `legacy:<id>` |
 | `~/.incidentlab-backups/` (your machine) | Pre-deploy, pre-migrate, pre-restore and manual snapshots | Mode 600, never in the repo |
@@ -153,6 +153,52 @@ Migration 003 backfills `score:` for every account. Accounts that have no summar
   accounts from before it (migration 003 approves them); `rejected` blocks sign-in and recovery.
 - A recovery bumps `sessionEpoch` (every session ends), clears `mustChangePassword` and replaces the code.
 
+### Classes (`class:`, `classcode:`, `classmember:`, `memberof:`, since #179)
+
+Schemas in `site/server/domain/classes.ts`, storage in `site/server/repositories/class-repository.ts`. All four
+prefixes are new (additive) and every field has a default, so a record from the first release still parses.
+
+| Key | Holds | Notes |
+|---|---|---|
+| `class:<classId>` | `ClassRecord`: `schemaVersion, id, name, ownerId, createdAt, updatedAt, status (active\|archived), joinMode (code\|approval), memberLimit (60), boardToken, joinCode, schedule {timezone, defaultCaseId, days}, event {name, startsAt, endsAt, freezeAt, announcement}, caseIds ([] = any public case)` | Edits are read, change, `setIfMatch` (retried 3 times). `ownerId` is an account id, or `admin` for classes the site owner made (Class 1). `joinCode` is kept in plain text because class admins are shown it; it is a shareable invite, not a secret like a password. `boardToken` is `<classId>.<random>`, so the board (#181) needs no token index. |
+| `classcode:<sha256(normalized code)>` | `{classId}` | The join-code index, claimed with `onlyIfNew` (a collision picks another code). Rotating writes the new entry, then the class, then deletes the old entry. A join checks that the class's current code hashes to the key, so a stale entry left by a crash opens nothing (and is deleted). |
+| `classmember:<classId>:<accountId>` | `{role (member\|admin), status (pending\|active), isOwner, joinedAt, decidedAt}` | **Authoritative.** Permission checks read it; the member cap counts its keys (one listing, at most `memberLimit` keys). Removing a member deletes it. |
+| `memberof:<accountId>:<classId>` | `{role, status, isOwner}` | The reverse index: "my classes" and the owned-class count list this prefix, with no scan. |
+
+**Keeping the two membership indexes consistent.** There are no transactions, so the order is fixed and every
+gap repairs itself:
+- writes (join, approve, role change, restore) go forward first, then reverse; deletes (remove, leave, account
+  delete) also go forward first, so access ends at once, then reverse;
+- a forward row without its reverse (a crash in between) still grants access; the member's next read of the
+  class, or a repeated join, rewrites the reverse row;
+- a reverse row without its forward row (or one that differs) is dropped or rewritten by `GET /api/classes`;
+- caps are enforced by write-then-count: a join or create writes its record, counts, and removes its own record if
+  the count is over the limit. The last writer always sees every kept record, so the cap can't be exceeded
+  (tested with concurrent joins and creates).
+
+**Deleting a class is archiving it** (the soft delete chosen over the `trash:` pattern). Archiving keeps every
+record: the class, its members and its code index. It only stops joins and edits. There is no hard delete and
+no 7-day expiry, so a restore (owner or site admin) can't conflict with newer data, and a trash bundle never has
+to carry up to 60 memberships. Archived classes don't count toward the owner's limit; restoring one does.
+
+**Account deletes** (admin delete and the hygiene job's idle-guest delete, which share the path) read the
+account's memberships first, store them in the `trash:` bundle (`memberships`, default `[]`), then remove both
+index rows of each. A restore puts them back in both indexes for classes that still exist, keeping any row that
+exists again. It ignores the member cap, because the site admin chose to bring the account back. The classes an
+account owned stay; their `ownerId` points at the deleted account until the restore, and meanwhile only co-admins
+and the site admin can manage them.
+
+**Migration 004 (`004-default-class`).** It turns today's single class into "Class 1" (`class:DefaultClass`,
+owned by `admin`):
+- the class gets copies of `config:schedule` (without `lockToToday`) and `config:event` (without
+  `enforceWindow`);
+- its join code is `config:settings.inviteCode` (or a generated code when none is set), with join mode `code`;
+- every approved user account becomes an active member, and `memberLimit` is 60 or that count, whichever is
+  more.
+
+`config:*` stay as they are and still gate play until #180. The fixed id makes it idempotent: a second run
+changes nothing, and a run that stopped halfway is finished by the next one.
+
 ## Weekly hygiene (#177)
 
 Without a sweep, `session:`, `ratelimit:`, `audit:` and guest accounts grow forever. The scheduled function
@@ -164,7 +210,7 @@ same pass by hand: a dry run that only reads and reports, then `--apply`, which 
 |---|---|---|
 | Guests (`account:` with `kind: "guest"`) | `lastSeenAt` (or `createdAt`) 30 days ago or more | **Soft delete**, like an admin delete: one `trash:` entry of kind `account` (label `idle guest guest-<id>`) with the account and all its progress, then the records go, with its `score:` summary and any `globalboard:` marker (`ScoreService.remove`, the same path as an admin delete). Restorable from Recently deleted for 7 days; a restore re-derives the summary and doesn't claim a username (guests never hold one). Users are never touched. |
 | `session:` | past `expiresAt` | deleted (authenticate() already refuses them) |
-| `ratelimit:` | newest hit more than 24 h ago (the longest window is 1 h) | deleted |
+| `ratelimit:` | newest hit more than 24 h ago (the longest window, class creates, is 24 h) | deleted |
 | `audit:` | key timestamp older than 90 days | deleted; keys that don't start with a timestamp are left alone |
 | `trash:` | past the 7-day restore window | deleted (Recently deleted drops them too, but only when someone opens it) |
 

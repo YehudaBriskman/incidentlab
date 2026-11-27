@@ -1,6 +1,8 @@
 // Tiny router: maps method + path to controller calls. Every dispatch is wrapped so nothing escapes as a crash.
 import { AdminController } from "./controllers/AdminController.ts";
 import { AuthorController } from "./controllers/AuthorController.ts";
+import { ClassController } from "./controllers/ClassController.ts";
+import { ClassService } from "./services/ClassService.ts";
 import { answerFingerprint } from "../shared/answer-fingerprint.ts";
 import { AuthController } from "./controllers/AuthController.ts";
 import { ContentController } from "./controllers/ContentController.ts";
@@ -113,6 +115,10 @@ export const createApp = (deps: AppDeps): App => {
     onPublishedChange: () => secrets.refresh(true), // this instance plays the new version at once; others within SECRETS_REFRESH_MS
   });
 
+  const classController = new ClassController({
+    classes: new ClassService({ repos, limiter, releasedCaseIds: () => Object.keys(secrets.cases), now }), auth, guard: adminGuard, audit,
+  });
+
   const route = (req: Request, ip: string): MethodTable | null => {
     const path = new URL(req.url).pathname.replace(/\/+$/, "");
     const exact: Record<string, MethodTable> = {
@@ -132,6 +138,9 @@ export const createApp = (deps: AppDeps): App => {
       "/api/event": { GET: () => authController.event() },
       "/api/leaderboard": { GET: () => authController.leaderboard(req) },
       "/api/cases": { GET: () => contentController.catalog(req) },
+      "/api/classes": { GET: () => classController.mine(req), POST: () => classController.create(req) },
+      "/api/classes/join": { POST: () => classController.join(req, ip) },
+      "/api/admin/classes": { GET: () => classController.adminList(req) },
       "/api/admin/accounts": { GET: () => adminController.listAccounts(req) },
       "/api/admin/accounts/approve-all": { POST: () => adminController.approveAll(req) },
       "/api/admin/progress": { GET: () => adminController.progress(req) },
@@ -168,6 +177,27 @@ export const createApp = (deps: AppDeps): App => {
       };
       return table[second ?? ""] ?? null;
     }
+    if (area === "classes" && first !== undefined) {
+      const classId = first;
+      const [, , , , third, fourth] = segments;
+      if (segments.length === 3) return { GET: () => classController.detail(req, classId), PATCH: () => classController.update(req, classId) };
+      if (segments.length === 4 && second === "archive") return { POST: () => classController.archive(req, classId) };
+      if (segments.length === 4 && second === "restore") return { POST: () => classController.restore(req, classId) };
+      if (segments.length === 4 && second === "leave") return { POST: () => classController.leave(req, classId) };
+      if (segments.length === 4 && second === "members") return { GET: () => classController.members(req, classId) };
+      if (segments.length === 5 && second === "join-code" && third === "rotate") return { POST: () => classController.rotateJoinCode(req, classId) };
+      if (segments.length === 5 && second === "board-token" && third === "rotate") return { POST: () => classController.rotateBoardToken(req, classId) };
+      if (segments.length === 6 && second === "members" && third !== undefined) {
+        const accountId = third;
+        if (fourth === "approve") return { POST: () => classController.approve(req, classId, accountId) };
+        if (fourth === "remove") return { POST: () => classController.remove(req, classId, accountId) };
+        if (fourth === "role") return { POST: () => classController.setRole(req, classId, accountId) };
+      }
+      return null;
+    }
+    if (area === "admin" && first === "classes" && second !== undefined && segments.length === 5 && segments[4] === "limits") {
+      return { PUT: () => classController.setLimits(req, second) };
+    }
     if (area === "author" && first === "uploads" && second !== undefined) {
       const [, , , , action, a, b] = segments;
       if (segments.length === 5 && action === "finalize") return { POST: () => authorController.finalize(req, second) };
@@ -189,6 +219,7 @@ export const createApp = (deps: AppDeps): App => {
       if (segments.length === 5 && action === "approve") return { POST: () => adminController.approve(req, second) };
       if (segments.length === 5 && action === "reject") return { POST: () => adminController.reject(req, second) };
       if (segments.length === 5 && action === "role") return { PUT: () => adminController.setRole(req, second) };
+      if (segments.length === 5 && action === "class-limit") return { PUT: () => adminController.setClassLimit(req, second) };
       if (segments.length === 5 && action === "reset-password") return { POST: () => adminController.resetPassword(req, second) };
     }
     if (area === "admin" && first === "trash" && second !== undefined && segments.length === 5 && segments[4] === "restore") {

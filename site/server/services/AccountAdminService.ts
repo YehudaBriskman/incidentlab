@@ -88,6 +88,17 @@ export class AccountAdminService {
     return toAccountView(account);
   }
 
+  /** How many active classes the account may own (#179); null goes back to the site default. Owned classes stay. */
+  async setClassLimit(accountId: string, classLimit: number | null): Promise<{ accountId: string; classLimit: number | null }> {
+    this.assertId(accountId);
+    const found = await this.repos.accounts.get(accountId);
+    if (!found) throw new AppError(404, "account not found");
+    if (found.data.classLimit !== classLimit && !(await this.repos.accounts.saveIfMatch({ ...found.data, classLimit }, found.etag))) {
+      throw new AppError(409, "concurrent update, please retry");
+    }
+    return { accountId, classLimit };
+  }
+
   /** Approves every pending account. Returns how many were approved. */
   async approveAll(): Promise<number> {
     const pending = (await this.repos.accounts.list()).filter((a) => a.status === "pending");
@@ -124,10 +135,12 @@ export class AccountAdminService {
     const found = await this.repos.accounts.get(accountId);
     if (!found) throw new AppError(404, "account not found");
     const progress = (await this.repos.progress.list()).filter((r) => r.accountId === accountId);
+    const memberships = await this.repos.classes.membershipsOf(accountId);
     // Trash first: if this write fails, nothing has been deleted yet.
-    await this.trash.put({ kind: "account", label: `account ${found.data.username}`, account: found.data, progress, firstBlood: {} });
+    await this.trash.put({ kind: "account", label: `account ${found.data.username}`, account: found.data, progress, firstBlood: {}, memberships });
     // Sessions die with the account (authenticate() rejects sessions whose account is gone).
     await this.repos.progress.deleteMany({ accountId });
+    await this.repos.classes.removeAccount(accountId); // out of every class, in both indexes (#179)
     await this.scores?.remove(accountId); // off the board at once; a restore rebuilds both from the trash
     await this.repos.accounts.delete(accountId);
     await this.repos.usernames.release(sha256Hex(found.data.usernameKey));

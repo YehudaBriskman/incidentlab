@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { CaseStatusSchema } from "../../shared/case-records.ts";
 import { AccountRecordSchema, ProgressRecordSchema } from "../domain/types.ts";
+import { TrashedMembershipSchema } from "../domain/classes.ts";
 import { mapWithConcurrency } from "./KvStore.ts";
 import type { KvStore } from "./KvStore.ts";
 
@@ -18,6 +19,8 @@ export const TrashBundleSchema = z.object({
   /** a deleted case (#66): its id and the status to restore. The case records stay in place while trashed. */
   caseId: z.string().nullable().default(null),
   caseStatus: CaseStatusSchema.nullable().default(null),
+  /** a deleted account's class memberships (#179), put back in both indexes by a restore */
+  memberships: z.array(TrashedMembershipSchema).default([]),
 });
 export type TrashBundle = z.infer<typeof TrashBundleSchema>;
 

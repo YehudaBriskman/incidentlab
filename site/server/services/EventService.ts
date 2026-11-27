@@ -4,6 +4,13 @@ import { AppError } from "../domain/types.ts";
 import type { EventRepository, SettingsRepository } from "../repositories/config-repositories.ts";
 import { noopCachePurger, type CachePurger } from "./CachePurger.ts";
 
+/** The event's own times must make sense: it ends after it starts, and the board freezes before the end. Classes use it too. */
+export const assertEventWindow = (event: { startsAt: string | null; endsAt: string | null; freezeAt: string | null }): void => {
+  const { startsAt, endsAt, freezeAt } = event;
+  if (startsAt !== null && endsAt !== null && Date.parse(endsAt) <= Date.parse(startsAt)) throw new AppError(400, "the event must end after it starts");
+  if (freezeAt !== null && endsAt !== null && Date.parse(freezeAt) > Date.parse(endsAt)) throw new AppError(400, "freeze the leaderboard before the event ends");
+};
+
 export class EventService {
   private readonly events: EventRepository;
   private readonly settingsRepo: SettingsRepository;
@@ -22,9 +29,8 @@ export class EventService {
   }
 
   async save(event: LiveEvent): Promise<{ event: LiveEvent; serverTime: string }> {
-    const { startsAt, endsAt, freezeAt } = event;
-    if (startsAt !== null && endsAt !== null && Date.parse(endsAt) <= Date.parse(startsAt)) throw new AppError(400, "the event must end after it starts");
-    if (freezeAt !== null && endsAt !== null && Date.parse(freezeAt) > Date.parse(endsAt)) throw new AppError(400, "freeze the leaderboard before the event ends");
+    assertEventWindow(event);
+    const { startsAt, endsAt } = event;
     if (event.enforceWindow && (startsAt === null || endsAt === null)) throw new AppError(400, "set a start and an end to enforce the window");
     await this.events.save(event);
     // Both public GETs read the event: /api/event directly, /api/leaderboard through the freeze moment.
