@@ -24,6 +24,7 @@ plan allows 125,000 function calls a month.
 | `/api/event` | `public, durable, max-age=10, stale-while-revalidate=20` | `event` | `PUT /api/admin/event` |
 | `/api/leaderboard` | `public, durable, max-age=10, stale-while-revalidate=20` | `leaderboard` | `PUT /api/admin/event` (freeze), `PUT /api/me/board` (a player opts in or out) |
 | `/api/today` | `max-age` and `stale-while-revalidate` up to 60 s each, capped at the seconds left until midnight in the schedule's time zone | `today` | `PUT /api/admin/schedule` |
+| `/api/cases`, `/api/cases/:caseId/content` (#243) | `public, durable, max-age=3600, stale-while-revalidate=86400` | `catalog`, `case:<caseId>` | publish, rollback, approve, delete, restore (below) |
 | `/api/classboard/:boardToken` (#181) | `public, durable, max-age=10, stale-while-revalidate=20` | `class:<classId>` | every class edit: `PATCH`, archive, restore, join-code and board-token rotation, an active join, approve, remove, leave. Solves don't purge it. |
 
 - Browsers get `Cache-Control: public, max-age=0, must-revalidate`, so they always ask the CDN.
@@ -133,8 +134,13 @@ visible; drafts, older versions and trashed cases are 404.
 | GET | `/api/cases` | none | `{cases: CatalogEntry[]}` (`site/shared/catalog.ts`; `file` is the case id, `version` the published version). `ETag` = hash of the body. |
 | GET | `/api/cases/:caseId/content?lang=en\|he` | none | `{id, version, lang, content: CaseContent, evidence: {filesBase, zip}}` (`CaseContentResponseSchema` in `site/shared/case-records.ts`). `lang` is the one served: `he` falls back to `en`. `evidence` says where this version's evidence lives (below). The browser adds `&v=<version>` (ignored by the server) so its HTTP cache keeps one entry per version. `ETag` = `"<contentSha>-v<version>-<lang>"`. 400 for another `lang`, 404 unless published. |
 
-Both send `Cache-Control: public, max-age=60, stale-while-revalidate=600` and answer `If-None-Match`
-with 304. Errors (404, 400) stay `no-store`.
+Both are durable at the CDN (#243): `Netlify-CDN-Cache-Control: public, durable, max-age=3600,
+stale-while-revalidate=86400`, tagged `catalog` (the catalog) and `case:<caseId>` (every language and version of
+that case's content), `Netlify-Vary: query`. Browsers get `Cache-Control: public, max-age=0, must-revalidate`, so a
+purge reaches them on their next request. Both answer `If-None-Match` with a 304 that carries the same headers.
+Every change to what they serve purges both tags at once: publish, rollback, the owner's approval, delete, and
+restore (from the author route or the admin trash). A draft upload, a version waiting for review and a rejection
+change nothing public and purge nothing. Errors (404, 400) and private content stay `no-store`.
 
 **Private cases (#184).** A case whose meta says `visibility: "private"` is never in `GET /api/cases`, the
 released ids (`/api/today`, schedules, other classes' assignments), the global leaderboard or a class board's
@@ -183,7 +189,7 @@ non-current versions are 404 `no-store`. The function is not bound by the Functi
 **Caching and `netlify.toml`.** Netlify applies `[[headers]]` rules only to files it serves itself, not to
 Function or Edge Function responses. So the `/api/*` `no-store` rule never reached function responses;
 each route sets its own `Cache-Control` (`http.ts` defaults to `no-store`). The CDN may cache the two
-content routes for 60 s (they vary only by URL, including `?lang`). The Edge Function does not opt in
+content routes for an hour plus a day stale, purged by tag (they vary only by URL, including `?lang`). The Edge Function does not opt in
 to CDN caching (`cache = "manual"` is unset), so its responses are cached by browsers only.
 
 ### Author: upload, publish, rollback, delete (#66)
