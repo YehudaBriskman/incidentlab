@@ -226,7 +226,7 @@ export const ScheduleSchema = z.object({
   defaultCaseId: CaseIdSchema.nullable(),
   /** YYYY-MM-DD -> case id */
   days: z.record(IsoDateSchema, CaseIdSchema),
-  /** true: only today's case can be started (cases already started stay playable) */
+  /** Deprecated (#180): stored and returned, but no longer enforced. Every published case can always be played. */
   lockToToday: z.boolean(),
 });
 export type Schedule = z.infer<typeof ScheduleSchema>;
@@ -241,7 +241,7 @@ export const EventSchema = z.object({
   endsAt: z.string().datetime().nullable(),
   /** after this moment the public leaderboard shows the standings as of freezeAt */
   freezeAt: z.string().datetime().nullable(),
-  /** true: answers, hints and command reveals are refused outside [startsAt, endsAt] */
+  /** Deprecated (#180): stored, but no longer enforced. Gameplay never blocks on an event window. */
   enforceWindow: z.boolean(),
   announcement: AnnouncementSchema.nullable(),
 });
@@ -394,6 +394,7 @@ export const TodayResponseSchema = z.object({
   date: IsoDateSchema,
   timezone: z.string(),
   caseId: z.string().nullable(),
+  /** deprecated (#180): the stored flag, no longer enforced */
   lockToToday: z.boolean(),
   /** case ids with a server-side answer key (playable) */
   releasedCaseIds: z.array(z.string()),
@@ -402,7 +403,7 @@ export type TodayResponse = z.infer<typeof TodayResponseSchema>;
 
 // Every /api/cases/:caseId/* route needs an APPROVED player account (403 code "pending" / "rejected" /
 // "admin" / "password-change-required" otherwise). Every route accepts ?lang=en|he for `unlocked` content.
-// During an event with enforceWindow, mutations outside the window get 403 code "event-closed".
+// Every published case can always be played (#180): no schedule or event window refuses a start or an action.
 // GET  /api/cases/:caseId/progress           -> {progress}
 // POST /api/cases/:caseId/setup-done  {}     -> {progress}  (q1 becomes active)
 // POST /api/cases/:caseId/answer             -> {correct, progress}

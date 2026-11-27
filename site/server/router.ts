@@ -80,7 +80,7 @@ export const createApp = (deps: AppDeps): App => {
   const schedule = new ScheduleService({ repository: repos.schedule, releasedCaseIds: () => Object.keys(secrets.cases), now, purger: deps.cachePurger });
   const scores = new ScoreService({ repos, caseIds: () => Object.keys(secrets.cases) });
   const board = new GlobalBoardService({ repos, scores, purger: deps.cachePurger, now });
-  const game = new GameService({ repository: repos.progress, firstBlood, secrets, schedule, events, scores, now });
+  const game = new GameService({ repository: repos.progress, firstBlood, secrets, scores, now });
   const stats = new StatsService({ repos, secrets, now });
   const trashRepo = new TrashRepository(deps.store);
   const trash = new TrashService({ trash: trashRepo, repos, cases: caseRepo, scores, board, now });

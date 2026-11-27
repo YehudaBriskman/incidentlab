@@ -54,10 +54,6 @@ export class ApiError extends Error {
   get needsGate(): boolean {
     return this.status === 403 && (this.code === "password-change-required" || this.code === "admin");
   }
-  /** During an event that enforces its window: answers, hints and command reveals are refused. */
-  get isEventClosed(): boolean {
-    return this.status === 403 && this.code === "event-closed";
-  }
 }
 
 export type Connectivity = "ok" | "retrying" | "unreachable";

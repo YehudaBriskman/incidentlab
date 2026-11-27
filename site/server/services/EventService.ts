@@ -1,4 +1,5 @@
-// Live event window, announcement and leaderboard freeze; plus the class settings (invite code).
+// The global event: the site announcement and the global event clock, and the freeze of the global leaderboard;
+// plus the class settings (invite code). Since #180 it never refuses gameplay: `enforceWindow` is stored but unused.
 import type { LiveEvent, Settings } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
 import type { EventRepository, SettingsRepository } from "../repositories/config-repositories.ts";
@@ -30,21 +31,10 @@ export class EventService {
 
   async save(event: LiveEvent): Promise<{ event: LiveEvent; serverTime: string }> {
     assertEventWindow(event);
-    const { startsAt, endsAt } = event;
-    if (event.enforceWindow && (startsAt === null || endsAt === null)) throw new AppError(400, "set a start and an end to enforce the window");
     await this.events.save(event);
     // Both public GETs read the event: /api/event directly, /api/leaderboard through the freeze moment.
     await this.purger.purge(["event", "leaderboard"]);
     return this.get();
-  }
-
-  /** Throws 403 "event-closed" when the event enforces its window and now is outside it. */
-  async assertOpen(): Promise<void> {
-    const event = await this.events.get();
-    if (!event.enforceWindow || event.startsAt === null || event.endsAt === null) return;
-    const nowMs = this.now().getTime();
-    if (nowMs < Date.parse(event.startsAt)) throw new AppError(403, "the event hasn't started yet", { code: "event-closed" });
-    if (nowMs >= Date.parse(event.endsAt)) throw new AppError(403, "the event is over", { code: "event-closed" });
   }
 
   /** The moment the public leaderboard is frozen at, or null when it is live. */

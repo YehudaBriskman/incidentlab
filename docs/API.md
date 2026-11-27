@@ -38,7 +38,7 @@ plan allows 125,000 function calls a month.
   starts within an hour, every 2 minutes otherwise. It doesn't poll at all while the tab is hidden, and polls
   once when the tab comes back.
 - Errors are non-2xx with body `{ "error": string, "code"?: string, "retryAfterSeconds"?: number, "details"?: string[] }` (`details` lists every failed check of a rejected upload). Status codes: 400 validation, 401 signed out, 403 forbidden (see codes), 404, 405, 409 conflict (username taken, already finished, no more hints, concurrent update: retry), 413, 415, 429 rate limit (also sends `Retry-After`), 500 `{"error":"internal"}`, 503 admin disabled.
-- Error codes the UI acts on: `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `not-today`, `event-closed`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`, and for classes (#179) `guest`, `not-class-admin`, `not-class-owner`, `class-limit`, `class-full`, `class-archived`, `owner-locked`, `pending-member`.
+- Error codes the UI acts on: `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`, and for classes (#179) `guest`, `not-class-admin`, `not-class-owner`, `class-limit`, `class-full`, `class-archived`, `owner-locked`, `pending-member`.
 
 ## Accounts and sessions
 
@@ -105,7 +105,7 @@ it, and no public or CDN-cached response carries stage records. Constants: `SCOR
 | GET | `/api/session` | optional cookie | | `{account}` or `{account: null}`, always 200. The browser uses this to probe sign-in without logging a 401. |
 | GET | `/api/me/stats` | cookie | | `{stats: UserStats}`. `rank` is the place on the live overall public board, null when not on it; `onGlobalBoard` says whether the player opted in (#175). Reads only the player's own progress plus the opted-in players' score summaries. |
 | PUT | `/api/me/board` | approved | `{show: boolean}` | `{account}` with `showOnGlobalBoard`. Opts in to or out of the public global leaderboard (off by default; your username and score become public). 403 `guest` for guests. Purges the `leaderboard` CDN tag. |
-| GET | `/api/today` | none | | `{date, timezone, caseId, lockToToday, releasedCaseIds}` |
+| GET | `/api/today` | none | | `{date, timezone, caseId, lockToToday, releasedCaseIds}` (`lockToToday` is deprecated: returned, never enforced) |
 | GET | `/api/cases/:caseId/progress` | approved | | `{progress}` (first call creates the record, so the admin sees the player at "setup") |
 | POST | `/api/cases/:caseId/setup-done` | approved | `{}` | `{progress}` (q1 becomes active; idempotent) |
 | POST | `/api/cases/:caseId/answer` | approved | `{questionId, answer}` | `{correct, progress}` |
@@ -222,7 +222,7 @@ may reclaim unreferenced ones). CLI: `scripts/data.ts upload` (see `docs/CASE_CO
 | PUT | `/api/admin/accounts/:id/role` | admin | `{role: "player"\|"author"}` | `{account}`; audited as `account.role`. Authors may manage cases they created (the Author routes above). |
 | POST | `/api/admin/accounts/approve-all` | `{}` | `{approved}` |
 | GET/PUT | `/api/admin/settings` | `{inviteCode}` | `{settings}` |
-| GET/PUT | `/api/admin/event` | `LiveEvent` | `{event, serverTime}` (window, freeze, announcement; `enforceWindow` refuses answers, hints and reveals outside it) |
+| GET/PUT | `/api/admin/event` | `LiveEvent` | `{event, serverTime}`: the site announcement and the global event clock; `freezeAt` freezes the global leaderboard. `enforceWindow` is deprecated: stored, never enforced (#180). |
 | GET | `/api/admin/export.csv` | | CSV, one row per account per opened case |
 | GET | `/api/admin/audit?limit=` | | `{entries}` newest first (every admin mutation is recorded) |
 | GET | `/api/admin/trash` | | `{entries}` soft-deleted accounts, cases and progress resets, newest first (expire after 7 days) |
@@ -230,9 +230,9 @@ may reclaim unreferenced ones). CLI: `scripts/data.ts upload` (see `docs/CASE_CO
 
 ### Classes (#179)
 
-Classes are server-side only for now: the class UI is #182, gameplay gating by class is #180 and the class board
-is #181. The site schedule, event and class code (`config:*`) still gate play as before. Every class response is
-personalised (`no-store`). Contract: the "classes" section of `site/shared/contract.ts`. Implementation:
+Classes are server-side only for now (the class UI is #182). **Gameplay never blocks on a class** (#180): a class's
+case list, event window and freeze decide what counts on that class's board, never whether anyone may play. Every
+class response is personalised (`no-store`), except the public class board (below). Contract: the "classes" section of `site/shared/contract.ts`. Implementation:
 `ClassController` → `ClassService` → `ClassRepository`.
 
 - **Who may call:** an approved full account (pending, rejected and forced-password-change accounts get the
@@ -296,9 +296,14 @@ for viewing and leaving.
 ## Schedule ("incident of the day")
 
 `Schedule = { timezone, defaultCaseId, days: {"YYYY-MM-DD": caseId}, lockToToday }`. "Today" is the
-date in `timezone` (default `Asia/Jerusalem`). Today's case is `days[today] ?? defaultCaseId`. With
-`lockToToday`, only today's case can be **started**; a case the player already opened stays playable,
-so nobody is cut off at midnight.
+date in `timezone` (default `Asia/Jerusalem`). Today's case is `days[today] ?? defaultCaseId`: the daily card on
+the home page and the streaks count it.
+
+**Players can always play every published case** (#180). `lockToToday` (schedule) and `enforceWindow` (event)
+are deprecated: they stay in the stored records and the responses, but nothing enforces them, and the admin
+panel no longer shows their checkboxes. The 403 codes `not-today` and `event-closed` are gone. The global event
+(`config:event`) is the site announcement and the global event clock; its `freezeAt` still freezes the global
+leaderboard. Classes count their own windows on their own boards (see Classes).
 
 ## Rules
 

@@ -16,8 +16,6 @@ export const TG = defineStrings({
     eventOver: "event over",
     eventLabel: "Event",
     announcement: "Announcement",
-    eventNotStarted: "The event hasn't started yet. Answers, hints and commands open when it starts.",
-    eventEnded: "The event is over. Answers, hints and commands are closed.",
     unknownCommand: "That command isn't part of this case.",
 
     // admin session on player pages
@@ -151,8 +149,6 @@ export const TG = defineStrings({
     eventOver: "האירוע הסתיים",
     eventLabel: "אירוע",
     announcement: "הודעה",
-    eventNotStarted: "האירוע עוד לא התחיל. תשובות, רמזים ופקודות ייפתחו כשיתחיל.",
-    eventEnded: "האירוע הסתיים. תשובות, רמזים ופקודות סגורים.",
     unknownCommand: "הפקודה הזו לא שייכת לתיק.",
 
     adminTitle: "נכנסתם בתור המדריך/ה",

@@ -196,8 +196,10 @@ owned by `admin`):
 - every approved user account becomes an active member, and `memberLimit` is 60 or that count, whichever is
   more.
 
-`config:*` stay as they are and still gate play until #180. The fixed id makes it idempotent: a second run
-changes nothing, and a run that stopped halfway is finished by the next one.
+`config:*` stay as they are. Since #180 they no longer gate play: `config:schedule` is the global case of the day
+(the daily card and streaks), `config:event` the site announcement, global event clock and global-board freeze;
+`lockToToday` and `enforceWindow` are kept in the records (additive) but unused. The fixed id makes the migration
+idempotent: a second run changes nothing, and a run that stopped halfway is finished by the next one.
 
 ## Weekly hygiene (#177)
 

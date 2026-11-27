@@ -125,7 +125,7 @@ a.home-row:hover { background: var(--hover); }
 .home-cases-table th[scope="row"] { font-weight: 600; }
 .home-status { font-size: var(--type-small-size); }
 .chip.home-status { font-size: var(--type-label-size); }
-.home-status.is-new, .home-status.is-locked { color: var(--text-2); }
+.home-status.is-new { color: var(--text-2); }
 .home-tags { color: var(--text-2); font-size: var(--type-label-size); }
 .home-none { color: var(--text-2); }
 

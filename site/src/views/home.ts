@@ -48,7 +48,7 @@ type HomeState = {
   isPlayer: boolean;
 };
 
-type Row = { readonly c: CaseSummary; readonly stats: CaseStats | undefined; readonly isToday: boolean; readonly locked: boolean };
+type Row = { readonly c: CaseSummary; readonly stats: CaseStats | undefined; readonly isToday: boolean };
 
 /** The shared filter button's value for the current case filters (the URL query is the source of truth). */
 const filterValue = (f: CaseFilters): FilterValue => ({ difficulty: [...f.difficulty], tag: [...f.tags], status: [...f.status] });
@@ -110,7 +110,6 @@ function statusLabel(st: CaseStatus): string {
 }
 
 function statusChip(row: Row): HTMLElement {
-  if (row.locked) return h("span", { class: "home-status is-locked" }, TA().lockedToday);
   const st = statusOf(row.stats);
   if (st === "not-started") return h("span", { class: "home-status is-new" }, statusLabel(st));
   return h("span", { class: `chip home-status ${st === "completed" ? "pill-success" : ""}` }, st === "completed" ? h("span", { "aria-hidden": "true" }, "✓") : null, statusLabel(st));
@@ -319,7 +318,7 @@ function todayCard(state: HomeState, signedIn: boolean, retry: () => void): HTML
         { class: "home-today-foot" },
         todayAction(c, state, signedIn),
         state.isPlayer && st !== "not-started"
-          ? h("span", { class: "home-today-progress" }, statusChip({ c, stats, isToday: true, locked: false }), h("span", { class: "home-row-num" }, TH().stageCount(done(stats), c.questionCount)))
+          ? h("span", { class: "home-today-progress" }, statusChip({ c, stats, isToday: true }), h("span", { class: "home-row-num" }, TH().stageCount(done(stats), c.questionCount)))
           : null,
         eventLine(),
       ),
@@ -475,13 +474,12 @@ export function renderHome(root: HTMLElement): void {
 
   const allRows = (): Row[] => {
     const released = state.today?.releasedCaseIds;
-    const lock = state.today?.lockToToday === true;
     return caseSummaries()
       .filter((c) => released === undefined || released.includes(c.id))
       .map((c) => {
         const stats = state.stats.get(c.id);
         const isToday = state.today?.caseId === c.id;
-        return { c, stats, isToday, locked: lock && !isToday && statusOf(stats) === "not-started" };
+        return { c, stats, isToday };
       });
   };
 
@@ -567,7 +565,7 @@ export function renderHome(root: HTMLElement): void {
       className: "home-cases-table",
       stackOnPhone: true,
       rowKey: (r) => r.c.id,
-      rowSig: (r) => JSON.stringify([r.stats, r.isToday, r.locked, getLang()]),
+      rowSig: (r) => JSON.stringify([r.stats, r.isToday, getLang()]),
       rowAttrs: (r) => ({ "data-case": r.c.id, class: `home-case-row${r.isToday ? " is-today" : ""}` }),
       initialSort: sortFromParam(filters.sort) ?? undefined,
       empty: h("p", {}, caseSummaries().length === 0 ? T().noCases : TS().filterNoCases),

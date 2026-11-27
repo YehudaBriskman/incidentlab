@@ -7,8 +7,6 @@ import type { AccountRecord, CaseSecrets, ProgressRecord, Secrets } from "../dom
 import type { FirstBloodRepository } from "../repositories/config-repositories.ts";
 import type { ProgressRepository } from "../repositories/repositories.ts";
 import type { Versioned } from "../repositories/KvStore.ts";
-import type { EventService } from "./EventService.ts";
-import type { ScheduleService } from "./ScheduleService.ts";
 import type { ScoreService } from "./ScoreService.ts";
 import { parScore, scoreStage } from "./scoring.ts";
 
@@ -48,8 +46,6 @@ export class GameService {
   private readonly repository: ProgressRepository;
   private readonly firstBlood: FirstBloodRepository;
   private readonly secrets: Secrets;
-  private readonly schedule: ScheduleService;
-  private readonly events: EventService;
   private readonly scores: ScoreService | null;
   private readonly now: () => Date;
 
@@ -57,8 +53,6 @@ export class GameService {
     repository: ProgressRepository;
     firstBlood: FirstBloodRepository;
     secrets: Secrets;
-    schedule: ScheduleService;
-    events: EventService;
     /** keeps the board's score summary in step (#175); left out only by tests that don't need it */
     scores?: ScoreService;
     now: () => Date;
@@ -66,8 +60,6 @@ export class GameService {
     this.repository = deps.repository;
     this.firstBlood = deps.firstBlood;
     this.secrets = deps.secrets;
-    this.schedule = deps.schedule;
-    this.events = deps.events;
     this.scores = deps.scores ?? null;
     this.now = deps.now;
   }
@@ -78,16 +70,17 @@ export class GameService {
     return found;
   }
 
-  /** Opening a case creates its progress record (so the instructor sees the player at "setup"). */
+  /**
+   * Opening a case creates its progress record (so the instructor sees the player at "setup"). Every published
+   * case can always be played (#180): the case of the day and event windows decide what counts on a board, never
+   * whether a player may play.
+   */
   async progress(ctx: PlayContext): Promise<ProgressView> {
     this.caseSecrets(ctx.caseId); // 404 for unknown cases
     const found = await this.repository.get(ctx.caseId, ctx.player.id);
     if (found) {
       if (this.touch(found.data)) await this.repository.saveIfMatch(found.data, found.etag);
       return this.toView(found.data, ctx);
-    }
-    if (!(await this.schedule.canStart(ctx.caseId))) {
-      return { ...this.toView(this.newRecord(ctx.player.id, ctx.caseId), ctx), startedAt: null }; // view only, nothing stored
     }
     const record = this.newRecord(ctx.player.id, ctx.caseId);
     if (!(await this.repository.saveIfMatch(record, null))) return this.progress(ctx); // lost a race: re-read
@@ -97,7 +90,6 @@ export class GameService {
   async setupDone(ctx: PlayContext): Promise<ProgressView> {
     this.caseSecrets(ctx.caseId);
     if (!(await this.repository.get(ctx.caseId, ctx.player.id))) {
-      await this.schedule.assertCanStart(ctx.caseId);
       await this.repository.saveIfMatch(this.newRecord(ctx.player.id, ctx.caseId), null);
     }
     return this.mutate(ctx, (record) => {
@@ -114,7 +106,6 @@ export class GameService {
     const { questionId } = input;
     const expected = secrets.answers[questionId];
     const isCorrect = expected !== undefined && normalizeAnswer(input.answer) === expected;
-    await this.events.assertOpen();
 
     // First blood is claimed before the write; the claim is idempotent per account, so retries keep it.
     let isFirstBlood = false;
@@ -166,7 +157,6 @@ export class GameService {
 
   async hint(ctx: PlayContext, questionId: QuestionId): Promise<ProgressView> {
     const secrets = this.caseSecrets(ctx.caseId);
-    await this.events.assertOpen();
     return this.mutate(ctx, (record) => {
       const stage = this.requireActive(record, questionId);
       if (stage.hintsRevealed >= secrets.questions[questionId].hintCosts.length) throw new AppError(409, "no more hints");
@@ -191,12 +181,11 @@ export class GameService {
       record.stages[active] = { ...stage, commandsRevealed: stage.commandsRevealed + 1 };
       record.commandsRevealed[toolId] = active;
       return { result: this.toView(record, ctx), changed: true };
-    }, { checkEvent: true });
+    });
   }
 
   async reveal(ctx: PlayContext, questionId: QuestionId): Promise<ProgressView> {
     const secrets = this.caseSecrets(ctx.caseId);
-    await this.events.assertOpen();
     const view = await this.mutate(ctx, (record) => {
       if (this.stage(record, questionId).status === "revealed") return { result: this.toView(record, ctx), changed: false };
       const stage = this.requireActive(record, questionId);
@@ -332,15 +321,11 @@ export class GameService {
     return true;
   }
 
-  /**
-   * Optimistic read-modify-write with etag check and bounded retries. With `checkEvent`, the event window
-   * is enforced only when the mutation actually changes something (free re-reveals stay allowed).
-   */
-  private async mutate<T>(ctx: PlayContext, fn: (record: ProgressRecord) => Mutation<T>, options: { checkEvent?: boolean } = {}): Promise<T> {
+  /** Optimistic read-modify-write with etag check and bounded retries. */
+  private async mutate<T>(ctx: PlayContext, fn: (record: ProgressRecord) => Mutation<T>): Promise<T> {
     for (let attempt = 0; attempt <= MAX_WRITE_RETRIES; attempt++) {
       const { data: record, etag } = await this.load(ctx.player.id, ctx.caseId);
       const { result, changed } = fn(record);
-      if (changed && options.checkEvent) await this.events.assertOpen();
       const touched = this.touch(record);
       if (!changed && !touched) return result;
       if (await this.repository.saveIfMatch(record, etag)) return result;

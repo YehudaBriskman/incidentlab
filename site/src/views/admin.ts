@@ -3223,7 +3223,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       h("strong", {}, T().admTodayIs(today.date, today.timezone)),
       " ",
       today.caseId ? caseTitle(today.caseId) : h("span", { class: "muted" }, T().admNoCaseToday),
-      today.lockToToday ? h("span", { class: "today-tag" }, T().admLockedTag) : null,
     );
   }
 
@@ -3427,14 +3426,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     });
     const tzList = h("datalist", { id: tzListId }, timeZoneList().map((z) => h("option", { value: z })));
 
-    const lockInput = h("input", { type: "checkbox", id: "sched-lock", checked: draft.lockToToday, "aria-describedby": "sched-lock-help" });
-    lockInput.addEventListener("change", () => {
-      const v = lockInput.checked;
-      updateDraft((d) => {
-        d.lockToToday = v;
-      });
-    });
-
     const saveBtn = h(
       "button",
       { type: "button", class: "btn btn-primary", id: "sched-save", "aria-describedby": "sched-status" },
@@ -3474,12 +3465,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
           formField({ input: defaultSelect, label: T().admDefaultCase, help: T().admDefaultCaseHelp }).nodes,
           tzField.nodes,
           tzList,
-          h(
-            "div",
-            { class: "sched-field sched-lock" },
-            h("label", { class: "sched-check", for: "sched-lock" }, lockInput, h("span", {}, T().admLockToday)),
-            h("p", { class: "muted small", id: "sched-lock-help" }, T().admLockHelp),
-          ),
         ),
       ),
       calendar(draft, month),
@@ -3523,14 +3508,13 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   }
 
   /** Field-level problems the server would reject, shown next to the field (not only in the save bar). */
-  function eventFieldErrors(d: LiveEvent): { end: string | null; freeze: string | null; enforce: string | null } {
+  function eventFieldErrors(d: LiveEvent): { end: string | null; freeze: string | null } {
     const start = ms(d.startsAt);
     const end = ms(d.endsAt);
     const freeze = ms(d.freezeAt);
     return {
       end: start !== null && end !== null && end <= start ? T().admErrEndBeforeStart : null,
       freeze: freeze !== null && end !== null && freeze > end ? T().admErrFreezeAfterEnd : null,
-      enforce: d.enforceWindow && (start === null || end === null) ? T().admErrEnforceNeedsWindow : null,
     };
   }
 
@@ -3549,7 +3533,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   const evStartPreview = timePreview("ev-start");
   const evEndPreview = timePreview("ev-end");
   const evFreezePreview = timePreview("ev-freeze");
-  const evEnforce = h("input", { type: "checkbox", id: "ev-enforce", "aria-describedby": "ev-enforce-help" });
   const evAnnText = h("textarea", { id: "ev-ann", class: "admin-input ev-ann", maxlength: 280, rows: 3, dir: "auto", "aria-describedby": "ev-ann-help ev-ann-count" });
   const evAnnCount = h("span", { class: "muted small", id: "ev-ann-count" });
   const evAnnLevel = h(
@@ -3567,15 +3550,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   const evStateEl = h("span", { class: "small", role: "status" });
   const evErrorEl = h("p", { class: "admin-error", role: "alert" });
   const evBar = h("div", { class: "sched-actions panel admin-panel" }, evSave, evDiscard, evStateEl, evErrorEl);
-  const evEnforceErr = h("p", { class: "small sched-invalid field-error", id: "ev-enforce-err", hidden: true });
-  /** Puts (or clears) an inline error under a field and wires it to the input for screen readers. */
-  function setFieldError(input: HTMLInputElement, errEl: HTMLElement, baseDescribedBy: string, message: string | null): void {
-    errEl.textContent = message ?? "";
-    errEl.hidden = message === null;
-    if (message === null) input.removeAttribute("aria-invalid");
-    else input.setAttribute("aria-invalid", "true");
-    input.setAttribute("aria-describedby", message === null ? baseDescribedBy : `${errEl.id} ${baseDescribedBy}`);
-  }
 
   function clearTimeBtn(input: HTMLInputElement, label: string, apply: (d: LiveEvent) => void): HTMLButtonElement {
     return h(
@@ -3630,7 +3604,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   evStart.addEventListener("change", () => editEvent((d) => (d.startsAt = localInputToIso(evStart.value))));
   evEnd.addEventListener("change", () => editEvent((d) => (d.endsAt = localInputToIso(evEnd.value))));
   evFreeze.addEventListener("change", () => editEvent((d) => (d.freezeAt = localInputToIso(evFreeze.value))));
-  evEnforce.addEventListener("change", () => editEvent((d) => (d.enforceWindow = evEnforce.checked)));
   const levelOf = (v: string): "info" | "warning" => (v === "warning" ? "warning" : "info");
   evAnnText.addEventListener("input", () => editEvent((d) => (d.announcement = { text: evAnnText.value, level: levelOf(evAnnLevel.value) })));
   evAnnLevel.addEventListener("change", () => editEvent((d) => (d.announcement = { text: evAnnText.value, level: levelOf(evAnnLevel.value) })));
@@ -3643,7 +3616,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     const d = state.event.draft;
     if (!d) return;
     const errs = eventFieldErrors(d);
-    const first = errs.end ? evEnd : errs.freeze ? evFreeze : errs.enforce ? evEnforce : null;
+    const first = errs.end ? evEnd : errs.freeze ? evFreeze : null;
     if (first) {
       state.event.msg = null;
       renderEventControls();
@@ -3683,7 +3656,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         if (!same(draftBefore.startsAt, base.startsAt) && same(next.startsAt, base.startsAt)) merged.startsAt = draftBefore.startsAt;
         if (!same(draftBefore.endsAt, base.endsAt) && same(next.endsAt, base.endsAt)) merged.endsAt = draftBefore.endsAt;
         if (!same(draftBefore.freezeAt, base.freezeAt) && same(next.freezeAt, base.freezeAt)) merged.freezeAt = draftBefore.freezeAt;
-        if (draftBefore.enforceWindow !== base.enforceWindow) merged.enforceWindow = draftBefore.enforceWindow;
         if (!same(draftBefore.announcement, base.announcement)) merged.announcement = draftBefore.announcement ? { ...draftBefore.announcement } : null;
       }
       ev.draft = merged;
@@ -3718,7 +3690,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     const name = saved.name.trim() || T().admTheEvent;
     void askConfirm({
       title: T().admEndTitle(name),
-      body: saved.enforceWindow ? T().admEndBodyEnforced : T().admEndBodyOpen,
+      body: T().admEndBodyOpen,
       note: draftNote(),
       confirmLabel: T().admEndNow,
       tone: "danger",
@@ -3728,7 +3700,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       void quickEvent((d, now) => {
         d.endsAt = isoAt(now);
         const s = ms(d.startsAt);
-        if ((s !== null && s >= now) || (s === null && d.enforceWindow)) d.startsAt = isoAt(now - 60_000);
+        if (s !== null && s >= now) d.startsAt = isoAt(now - 60_000);
         const f = ms(d.freezeAt);
         if (f !== null && f > now) d.freezeAt = null; // never reached: the standings at the end are final anyway
       });
@@ -3839,7 +3811,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     evStart.value = isoToLocalInput(d.startsAt);
     evEnd.value = isoToLocalInput(d.endsAt);
     evFreeze.value = isoToLocalInput(d.freezeAt);
-    evEnforce.checked = d.enforceWindow;
     evAnnText.value = d.announcement?.text ?? "";
     evAnnLevel.value = d.announcement?.level ?? "info";
     renderEventControls();
@@ -3859,7 +3830,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     evStateEl.className = `small ${dirty ? "sched-dirty" : "muted"}`;
     evErrorEl.textContent = ev.error ? T().admSaveFailed(ev.error) : "";
     evErrorEl.hidden = ev.error === null;
-    const errs = ev.draft ? eventFieldErrors(ev.draft) : { end: null, freeze: null, enforce: null };
+    const errs = ev.draft ? eventFieldErrors(ev.draft) : { end: null, freeze: null };
     evEndField.setError(errs.end);
     evFreezeField.setError(errs.freeze);
     if (ev.draft) {
@@ -3870,7 +3841,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       preview(evEndPreview, ev.draft.endsAt);
       preview(evFreezePreview, ev.draft.freezeAt);
     }
-    setFieldError(evEnforce, evEnforceErr, "ev-enforce-help", errs.enforce);
     evBar.hidden = !eventBarVisible();
     syncSaveBarClass();
     renderEventStatus();
@@ -3907,7 +3877,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       tone = "live";
     }
     const parts = [phase];
-    if (start !== null || end !== null) parts.push(e.enforceWindow ? T().admStatusEnforced : T().admStatusNotEnforced);
     const f = ms(e.freezeAt);
     if (f !== null) parts.push(f <= now ? T().admStatusFrozen(formatDateTime(e.freezeAt)) : T().admStatusFreezesIn(formatDuration(f - now)));
     const label = e.name.trim();
@@ -3949,13 +3918,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
           evStartField.nodes,
           evEndField.nodes,
           evFreezeField.nodes,
-          h(
-            "div",
-            { class: "sched-field sched-lock" },
-            h("label", { class: "sched-check", for: "ev-enforce" }, evEnforce, h("span", {}, T().admEnforce)),
-            evEnforceErr,
-            h("p", { class: "muted small", id: "ev-enforce-help" }, T().admEnforceHelp),
-          ),
           h("p", { class: "muted small ev-tz", id: "ev-tz" }, T().admTzNote(tz.name, tz.offset)),
         ),
       ),
