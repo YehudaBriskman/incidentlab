@@ -7,16 +7,12 @@ import { T } from "../i18n/strings-tools";
 import { getLang } from "../i18n/i18n";
 import {
   TRASH_RETENTION_DAYS,
-  type AdminProgress,
   type AuditEntry,
-  type CaseSummary,
   type LiveEvent,
-  type QuestionId,
   type Schedule,
   type Settings,
   type TodayResponse,
   type TrashEntry,
-  type UserStats,
 } from "../../shared/contract";
 import { cachedCase } from "../content/load";
 import { cachedEvent, serverNow as publicServerNow } from "../lib/event";
@@ -63,29 +59,25 @@ import {
   type AdminProgressResult,
   type AdminStatsResult,
 } from "../lib/admin-api";
-import { caseMaxScore, caseQuestionIds, caseTitle, questionTitle } from "./manage/caseInfo";
+import { caseTitle } from "./manage/caseInfo";
 import {
   errMessage,
-  fmtDec1,
   fmtInt,
   formatDateTime,
   formatDateTimeSec,
   formatDateTimeSecZone,
   formatDateTimeZone,
-  formatFinish,
-  formatPct,
-  median,
   ms,
   relativeAgo,
   relativeIn,
 } from "./manage/format";
-import { finishDurationMs } from "./manage/progressMetrics";
 import { headWithHint, tipped } from "./manage/ui";
 import { createMembersPanel } from "./manage/members";
 import { createLivePanel } from "./manage/live";
 import { createSchedulePanel } from "./manage/schedule";
 import { createEventPanel } from "./manage/event";
 import { createBoardPanel } from "./manage/board";
+import { createStatsPanel } from "./manage/stats";
 import { NARROW_QUERY, createManageHost } from "./manage/host";
 
 const POLL_MS = 5000;
@@ -113,8 +105,6 @@ const AUDIT_LIMIT = 100;
 const INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O, 1/I/L: easy to read aloud and type
 
 type AuthMode = "key" | "session";
-/** "Hardest question" needs at least this many players who reached it. */
-const HARDEST_MIN_PLAYERS = 3;
 /** How long a "saved" note stays in the save bar before the bar hides again. */
 const SAVED_NOTE_MS = 4000;
 
@@ -139,47 +129,6 @@ const isAdminHash = (hash: string): boolean => /^#\/?admin(\?|$)/.test(hash);
 let carried: { schedule: Schedule | null; event: LiveEvent | null } | null = null;
 
 
-
-/** Overall leaderboard: approved accounts that have played, by server rank. */
-function topPlayers(accounts: readonly UserStats[], n: number): UserStats[] {
-  return accounts
-    .filter((a) => a.status === "approved" && a.rank !== null && a.casesStarted > 0)
-    .sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0) || b.totalScore - a.totalScore || a.username.localeCompare(b.username))
-    .slice(0, n);
-}
-
-// ---- stats ------------------------------------------------------------------------
-
-type QuestionFunnel = { q: QuestionId; reached: number; solved: number; revealed: number; avgWrong: number; avgHints: number };
-
-/**
- * Per question: how many players reached it (from the per-player progress when we have it; otherwise the
- * lower bound solved + gave up), and the server's solved / gave-up / averages.
- */
-function questionFunnel(summary: CaseSummary, players: readonly AdminProgress[] | null): QuestionFunnel[] {
-  return caseQuestionIds(summary.caseId).map((q) => {
-    const s = summary.questions[q];
-    const solved = s?.solved ?? 0;
-    const revealed = s?.revealed ?? 0;
-    const reached = players ? players.filter((p) => (p.stages[q]?.status ?? "locked") !== "locked").length : solved + revealed;
-    return { q, reached: Math.max(reached, solved + revealed), solved, revealed, avgWrong: s?.avgWrong ?? 0, avgHints: s?.avgHints ?? 0 };
-  });
-}
-
-/**
- * Hardest = the largest share of players who reached the question but haven't solved it (gave up or still
- * on it: the drop-off), then the most wrong attempts. Only questions at least HARDEST_MIN_PLAYERS reached count.
- */
-function hardestQuestion(rows: readonly QuestionFunnel[]): { row: QuestionFunnel; rate: number } | null {
-  let best: { row: QuestionFunnel; rate: number } | null = null;
-  for (const row of rows) {
-    if (row.reached < HARDEST_MIN_PLAYERS) continue;
-    const rate = (row.reached - row.solved) / row.reached;
-    if (rate === 0 && row.avgWrong === 0) continue;
-    if (best === null || rate > best.rate || (rate === best.rate && row.avgWrong > best.row.avgWrong)) best = { row, rate };
-  }
-  return best;
-}
 
 // ---- schedule ---------------------------------------------------------------------
 
@@ -279,8 +228,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     today: null as TodayResponse | null,
     progress: null as AdminProgressResult | null,
     stats: null as AdminStatsResult | null,
-    /** per-case player progress for the Stats tab (how many reached each question) */
-    statsProgress: new Map<string, readonly AdminProgress[]>(),
     liveCaseId: urlState.caseId,
     lastUpdated: 0,
     paused: false,
@@ -757,7 +704,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     syncShellSidebar();
     buildAccountsPanel();
     live.mount(tabPanels.get("live") ?? container);
-    buildStatsPanel();
+    statsPanel.mount(tabPanels.get("stats") ?? container);
     buildAuditPanel();
     pauseBtn.textContent = state.paused ? T().admResume : T().admPause;
     syncTabs();
@@ -1323,229 +1270,15 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   }
 
   // =====================================================================================
-  // Stats tab
+  // Stats tab: the stats panel (views/manage/stats.ts) on the admin API
   // =====================================================================================
 
-  const statsBoardEl = h("div", { class: "admin-table-wrap" });
-  const statsCasesEl = h("div", { class: "stats-cases" });
-
-  function buildStatsPanel(): void {
-    setChildren(
-      tabPanels.get("stats") ?? container,
-      // How each case went comes first; the overall top 10 follows.
-      statsCasesEl,
-      h("section", { class: "panel admin-panel", "aria-labelledby": "admin-top10-title" }, h("h2", { class: "admin-h2", id: "admin-top10-title" }, T().admTop10), statsBoardEl),
-    );
-  }
-
-  const statsBoardTable = dataTable<UserStats>({
-    columns: [
-      { id: "rank", header: T().admColRank, numeric: true, cell: (a) => (a.rank === null ? "—" : fmtInt(a.rank)) },
-      { id: "user", header: T().admColUser, rowHeader: true, className: "col-name", cell: (a) => h("span", { class: "player-name", dir: "auto" }, a.username) },
-      { id: "score", header: T().admColScore, numeric: true, className: "col-score", cell: (a) => fmtInt(a.totalScore) },
-      { id: "completed", header: T().admColCompleted, numeric: true, cell: (a) => fmtInt(a.casesCompleted) },
-      { id: "accuracy", header: T().admColAccuracy, numeric: true, cell: (a) => formatPct(a.accuracy) },
-      { id: "hints", header: T().admColHints, numeric: true, optional: true, cell: (a) => fmtInt(a.hintsUsed) },
-    ],
-    rows: [],
-    rowKey: (a) => a.accountId,
-    rowSig: (a) => JSON.stringify([getLang(), a.rank, a.username, a.totalScore, a.casesCompleted, a.accuracy, a.hintsUsed]),
-    rowAttrs: (a) => ({ class: a.rank === 1 ? "is-first" : "" }),
-    className: "admin-table",
-    wrapClass: "admin-dt",
-    labelledBy: "admin-top10-title",
+  const statsPanel = createStatsPanel({
+    api: { progress: fetchProgress },
+    stats: () => state.stats,
+    accounts: () => state.accounts?.accounts ?? [],
+    todayId: () => state.today?.caseId ?? null,
   });
-
-  function renderStatsBoard(): void {
-    const top = topPlayers(state.accounts?.accounts ?? [], 10);
-    if (top.length === 0) {
-      setChildren(statsBoardEl, h("p", { class: "muted admin-empty-small" }, T().admNoPlayersBoard));
-      return;
-    }
-    statsBoardTable.update(top);
-    if (statsBoardTable.element.parentNode !== statsBoardEl) setChildren(statsBoardEl, statsBoardTable.element);
-  }
-
-  /** Cases whose "Show as a table" is open: the panels re-render on every poll and must not snap shut. */
-  const statsTableOpen = new Set<string>();
-
-  /**
-   * One case: a headline row that answers "how did it go?" (completion, median time, hardest stage with its numbers),
-   * then per-question solved / gave up / still on it as bars, with the full numbers one disclosure away.
-   */
-  function caseSummaryPanel(s: CaseSummary): HTMLElement {
-    const maxScore = s.maxScore > 0 ? s.maxScore : caseMaxScore(s.caseId);
-    const title = cachedCase(s.caseId)?.title ?? s.title;
-    const progress = state.statsProgress.get(s.caseId) ?? null;
-    const funnel = questionFunnel(s, progress);
-    const hardest = hardestQuestion(funnel);
-    const isToday = state.today?.caseId === s.caseId;
-    // Median from the per-player progress when we have it; otherwise the server's mean, labelled as such.
-    const finishTimes = progress ? progress.map(finishDurationMs).filter((v): v is number => v !== null) : [];
-    const med = median(finishTimes);
-    const timeValue = med !== null ? formatFinish(med) : s.avgDurationSeconds !== null ? formatFinish(s.avgDurationSeconds * 1000) : "—";
-    const timeLabel = med !== null || s.avgDurationSeconds === null ? T().admMedianTime : T().admAvgTime;
-    const timeSample = med !== null ? finishTimes.length : s.completed;
-    const head = h(
-      "div",
-      { class: "stats-case-head" },
-      h("h2", { class: "admin-h2" }, title),
-      isToday ? h("span", { class: "today-tag" }, T().admTodayTag) : null,
-      h("code", { class: "muted small" }, s.caseId),
-    );
-    if (s.players === 0) {
-      return h("section", { class: "panel admin-panel stats-case" }, head, h("p", { class: "muted admin-empty-small" }, T().admNobodyPlayed));
-    }
-    const hardestLabel = hardest ? `${hardest.row.q.toUpperCase()} ${questionTitle(s.caseId, hardest.row.q)}`.trim() : null;
-    const headline = h(
-      "div",
-      { class: "stats-headline" },
-      h(
-        "div",
-        { class: "stats-kpi is-lead" },
-        h("div", { class: "admin-tile-label" }, T().admCompletion),
-        h("div", { class: "stats-kpi-value" }, formatPct(s.completed / s.players)),
-        h("div", { class: "admin-tile-sub" }, T().admCompletionSub(fmtInt(s.completed), s.players, fmtInt(s.players))),
-      ),
-      h(
-        "div",
-        { class: "stats-kpi" },
-        h("div", { class: "admin-tile-label" }, timeLabel),
-        h("div", { class: "stats-kpi-value" }, timeValue),
-        h("div", { class: "admin-tile-sub" }, T().admFinishedSample(timeSample, fmtInt(timeSample))),
-      ),
-      h(
-        "div",
-        { class: "stats-kpi is-hardest", title: T().admHardestTip },
-        h("div", { class: "admin-tile-label" }, T().admHardestStage),
-        hardest && hardestLabel
-          ? [
-              h("div", { class: "stats-kpi-value stats-kpi-text", title: hardestLabel }, hardestLabel),
-              h(
-                "div",
-                { class: "admin-tile-sub" },
-                T().admHardestNumbers(formatPct(hardest.rate), fmtInt(hardest.row.reached), fmtDec1(hardest.row.avgWrong)),
-              ),
-            ]
-          : h("div", { class: "admin-tile-sub" }, T().admHardestNotEnough(HARDEST_MIN_PLAYERS)),
-      ),
-    );
-    const secondary = h(
-      "p",
-      { class: "muted small stats-secondary" },
-      `${T().admAvgScoreFinishers}: ${s.avgScore === null ? "—" : fmtInt(Math.round(s.avgScore))}`,
-      maxScore ? ` (${T().admPar(fmtInt(maxScore))})` : "",
-      ` · ${T().admFinishedSample(s.completed, fmtInt(s.completed))}`,
-    );
-    // Per question: a bar of everyone who reached it, split into solved / gave up / still on it (text says the same).
-    const bars = h(
-      "ol",
-      { class: "q-bars", "aria-label": T().admQBarsLabel },
-      funnel.map((row) => {
-        const stillOn = Math.max(0, row.reached - row.solved - row.revealed);
-        const pct = (n: number): string => (row.reached > 0 ? `${(n / row.reached) * 100}%` : "0%");
-        const isHardest = hardest?.row.q === row.q;
-        const qTitle = questionTitle(s.caseId, row.q);
-        return h(
-          "li",
-          { class: `q-bar-row${isHardest ? " is-hardest" : ""}` },
-          h(
-            "span",
-            { class: "q-bar-label", title: qTitle },
-            h("span", { class: "q-id" }, row.q.toUpperCase()),
-            " ",
-            qTitle,
-            isHardest ? h("span", { class: "hardest-badge" }, "⚑ ", T().admHardest) : null,
-          ),
-          h(
-            "span",
-            { class: "q-bar-track", "aria-hidden": "true" },
-            h("span", { class: "q-bar-seg is-solved", style: `width:${pct(row.solved)}` }),
-            h("span", { class: "q-bar-seg is-revealed", style: `width:${pct(row.revealed)}` }),
-            h("span", { class: "q-bar-seg is-open", style: `width:${pct(stillOn)}` }),
-          ),
-          h(
-            "span",
-            { class: "q-bar-nums" },
-            row.reached > 0
-              ? T().admQBarNums(fmtInt(row.solved), fmtInt(row.revealed), fmtInt(stillOn), fmtInt(row.reached))
-              : T().admQBarNobody,
-          ),
-        );
-      }),
-    );
-    const qTable = dataTable<QuestionFunnel>({
-      columns: [
-        { id: "q", header: T().admColQuestion, rowHeader: true, cell: (row) => [h("span", { class: "q-id" }, row.q.toUpperCase()), " ", questionTitle(s.caseId, row.q)] },
-        { id: "reached", header: T().admColReached, numeric: true, cell: (row) => fmtInt(row.reached), sortValue: (row) => row.reached, sortFirst: "desc" },
-        { id: "solved", header: T().admColSolved, numeric: true, cell: (row) => { const qs = s.questions[row.q]; return qs ? fmtInt(qs.solved) : "—"; }, sortValue: (row) => s.questions[row.q]?.solved ?? null, sortFirst: "desc" },
-        { id: "revealed", header: T().admColRevealed, numeric: true, cell: (row) => { const qs = s.questions[row.q]; return qs ? fmtInt(qs.revealed) : "—"; }, sortValue: (row) => s.questions[row.q]?.revealed ?? null, sortFirst: "desc" },
-        {
-          id: "notSolved",
-          header: T().admColNotSolved,
-          numeric: true,
-          cell: (row) => (row.reached > 0 ? `${fmtInt(row.reached - row.solved)} · ${formatPct((row.reached - row.solved) / row.reached)}` : "—"),
-          sortValue: (row) => (row.reached > 0 ? (row.reached - row.solved) / row.reached : null),
-          sortFirst: "desc",
-        },
-        { id: "avgWrong", header: T().admColAvgWrong, numeric: true, cell: (row) => { const qs = s.questions[row.q]; return qs ? fmtDec1(qs.avgWrong) : "—"; }, sortValue: (row) => s.questions[row.q]?.avgWrong ?? null, sortFirst: "desc" },
-        { id: "avgHints", header: T().admColAvgHints, numeric: true, cell: (row) => { const qs = s.questions[row.q]; return qs ? fmtDec1(qs.avgHints) : "—"; }, sortValue: (row) => s.questions[row.q]?.avgHints ?? null, sortFirst: "desc" },
-      ],
-      rows: funnel,
-      rowAttrs: (row) => ({ class: hardest?.row.q === row.q ? "is-hardest" : "" }),
-      className: "admin-table stats-q-table",
-      wrapClass: "admin-dt",
-      caption: `${title} · ${T().admQBarsTitle}`,
-    });
-    const table = h(
-      "details",
-      { class: "stats-table-view", open: statsTableOpen.has(s.caseId) },
-      h("summary", { class: "link-btn" }, T().admTableView),
-      qTable.element,
-    );
-    table.addEventListener("toggle", () => {
-      if (table.open) statsTableOpen.add(s.caseId);
-      else statsTableOpen.delete(s.caseId);
-    });
-    return h(
-      "section",
-      { class: "panel admin-panel stats-case" },
-      head,
-      headline,
-      secondary,
-      h("h3", { class: "admin-label stats-q-title" }, T().admQBarsTitle),
-      h(
-        "p",
-        { class: "muted small funnel-key" },
-        h("span", { class: "key-done" }), `${T().admColSolved} `,
-        h("span", { class: "key-revealed" }), `${T().admColRevealed} `,
-        h("span", { class: "key-open" }), T().admStillOn,
-      ),
-      bars,
-      table,
-    );
-  }
-
-  function renderStats(): void {
-    renderStatsBoard();
-    const stats = state.stats;
-    if (!stats) {
-      setChildren(statsCasesEl, h("p", { class: "muted admin-loading" }, T().admLoading));
-      return;
-    }
-    if (stats.cases.length === 0) {
-      setChildren(statsCasesEl, h("section", { class: "panel admin-panel" }, h("p", { class: "muted admin-empty-small" }, T().admNoReleased)));
-      return;
-    }
-    const todayId = state.today?.caseId;
-    // Rebuild only when the numbers changed: a poll must not move focus out of a sorted per-question table.
-    const sig = JSON.stringify([getLang(), stats, [...state.statsProgress], todayId]);
-    if (sig === statsSig) return;
-    statsSig = sig;
-    const ordered = [...stats.cases].sort((a, b) => Number(b.caseId === todayId) - Number(a.caseId === todayId) || b.players - a.players);
-    setChildren(statsCasesEl, ordered.map(caseSummaryPanel));
-  }
-  let statsSig = "";
 
   // =====================================================================================
   // Projector board (views/manage/board.ts): the public board, with the admin's event clock when it has one
@@ -1576,7 +1309,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         schedule.render();
         break;
       case "stats":
-        renderStats();
+        statsPanel.render();
         break;
       case "event":
         eventForm.render();
@@ -1603,15 +1336,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   function ensureLiveCase(): void {
     if (state.liveCaseId || !state.today) return;
     state.liveCaseId = state.today.caseId ?? state.today.releasedCaseIds[0] ?? null;
-  }
-
-  /** Stats needs who reached each question (drop-off): one progress request per case that has players. */
-  async function loadStatsProgress(stats: AdminStatsResult): Promise<void> {
-    const ids = stats.cases.filter((c) => c.players > 0).map((c) => c.caseId);
-    const results = await Promise.all(ids.map((id) => fetchProgress(id).catch(() => null)));
-    const next = new Map<string, readonly AdminProgress[]>();
-    for (const r of results) if (r) next.set(r.caseId, r.players);
-    state.statsProgress = next;
   }
 
   function applyTrash(res: TrashEntry[] | Error): void {
@@ -1667,7 +1391,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       if (progress && progress.caseId === state.liveCaseId) state.progress = progress;
       if (stats) {
         state.stats = stats;
-        await loadStatsProgress(stats);
+        await statsPanel.loadProgress(stats);
         if (disposed) return;
       }
       if (trashReq) applyTrash(await trashReq);
