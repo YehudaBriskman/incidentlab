@@ -1,12 +1,14 @@
 import "./styles.css";
 import { applyLang, isRelabel, noteRoute } from "./i18n/i18n";
 import { T } from "./i18n/strings-player";
-import { caseSummary, catalogFailed, catalogLoading, catalogReady, loadAllCases, loadCase } from "./content/load";
+import { caseSummary, catalogFailed, catalogLoading, catalogReady, loadAllCases, loadCase, reloadCatalog } from "./content/load";
 import { h, setChildren } from "./lib/dom";
 import type { View, ViewResult } from "./shell/types";
 import { closeOverlays, toast } from "./lib/overlay";
 import { TA } from "./i18n/strings-account";
 import { TO } from "./i18n/strings-onboard";
+import { TE } from "./i18n/strings-errors";
+import { claimReload, classifyLoadError, clearReloadGuard, isChunkLoadError } from "./lib/load-recovery";
 import { homeView } from "./views/home";
 import { renderLeaderboard, stopLeaderboard } from "./views/leaderboard";
 import { applyPendingRestore, labelStatic } from "./shell/lang";
@@ -91,6 +93,78 @@ function notFound(message: string): void {
   );
 }
 
+/* ---------- load failures (#208, #209): "couldn't load" is not "not found" ---------- */
+
+function sessionStore(): Storage | null {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Set while the "couldn't load" card is on screen: what Try again (and coming back online) runs. */
+let failedRetry: (() => void) | null = null;
+let reloading = false;
+
+/** Try again: fetch the catalog again if it was the part that failed, then run the route from the start. */
+function retryRoute(): void {
+  if (catalogFailed()) void reloadCatalog();
+  route();
+}
+
+/**
+ * A route's code is gone (a deploy replaced its chunk): reload once, with a note. False when the one reload
+ * was already spent (sessionStorage guard) or storage is blocked; the caller then shows the "couldn't load" card.
+ */
+function reloadForUpdate(): boolean {
+  if (reloading) return true;
+  if (!claimReload(sessionStore(), Date.now())) return false;
+  reloading = true;
+  failedRetry = null;
+  showPage(null);
+  setChildren(appRoot, h("section", { class: "center-card", role: "status" }, h("p", { class: "muted" }, TE().updatedReloading)));
+  window.setTimeout(() => window.location.reload(), 300);
+  return true;
+}
+
+/** The "couldn't load" card: offline, a server error, or failed content, catalog or code. Never a 404. */
+function loadFailed(err: unknown): void {
+  const kind = classifyLoadError(err, navigator.onLine);
+  // A failed module import stays failed in this document: only a reload fetches it again.
+  const needsReload = kind !== "offline" && isChunkLoadError(err);
+  const retry = needsReload ? (): void => window.location.reload() : retryRoute;
+  failedRetry = retry;
+  document.title = TE().loadFailedPageTitle;
+  showPage(null);
+  const body =
+    kind === "offline" ? TE().loadFailedOffline : needsReload ? TE().loadFailedCode : kind === "server" ? TE().loadFailedServer : TE().loadFailedOther;
+  setChildren(
+    appRoot,
+    h(
+      "section",
+      { class: "center-card load-failed", role: "alert" },
+      h("h1", {}, TE().loadFailedTitle),
+      h("p", { class: "muted" }, body),
+      h(
+        "div",
+        { class: "row-center" },
+        h("button", { type: "button", class: "btn btn-primary", onclick: retry }, needsReload ? TE().reloadPage : T().tryAgain),
+        h("a", { class: "btn btn-ghost", href: "#/" }, T().backToCases),
+      ),
+    ),
+  );
+}
+
+// Back online with the card up: try again without waiting for a click.
+window.addEventListener("online", () => failedRetry?.());
+
+// Vite's preload helper fires this when a chunk's dependency or CSS fails. Reloading now covers every dynamic
+// import, not only the router's; once the one reload is spent, the import rejects and its caller decides.
+window.addEventListener("vite:preloadError", (ev) => {
+  if (navigator.onLine && reloadForUpdate()) ev.preventDefault();
+});
+
 function loadingView(): void {
   setChildren(appRoot, h("section", { class: "center-card" }, h("p", { class: "muted mono" }, T().loading)));
 }
@@ -104,15 +178,20 @@ function lazyView(load: () => Promise<View>): void {
   const token = routeToken;
   load()
     .then((view) => {
+      clearReloadGuard(sessionStore()); // this route's code loaded: a later deploy may reload once again
       if (token === routeToken) mount(view());
     })
     .catch((err: unknown) => {
       console.error(err);
-      if (token === routeToken) notFound(T().pageFailed);
+      if (token !== routeToken) return;
+      if (navigator.onLine && isChunkLoadError(err) && reloadForUpdate()) return;
+      loadFailed(err);
     });
 }
 
 let routeToken = 0;
+/** Case ids already re-checked against a fresh catalog (once per page load, so an unknown id can't loop). */
+const recheckedCases = new Set<string>();
 
 /*
  * The case, toolbox, stats and sign-in views (and the markdown renderer they pull in) are chunks of their
@@ -134,6 +213,12 @@ const loadAuthView = (): Promise<AuthView> => import("./views/auth").then((m) =>
 const loadCaseViews = (): Promise<CaseViews> =>
   Promise.all([import("./views/case"), import("./views/toolbox"), loadAuthView()]).then(([caseView, toolbox]) => (caseViews = { ...caseView, ...toolbox }));
 
+/** Every case (the dashboards show all titles); a failed catalog rejects, so the route shows "couldn't load". */
+const loadEveryCase = (): Promise<void> =>
+  loadAllCases().then(() => {
+    if (catalogFailed()) throw new Error("The case catalog could not be loaded.");
+  });
+
 /**
  * Does `id` name a case this site can show? The content API's catalog (GET /api/cases) is the only list of
  * cases; the router asks before loading any case content. Kept as its own function so the check has one home.
@@ -154,6 +239,8 @@ function asideRoute(parts: readonly string[]): boolean {
 
 function route(): void {
   routeToken++;
+  failedRetry = null;
+  if (reloading) return; // the page is about to reload for a new deploy
   // Strip the "?query" part (Explorer deep links: #/case/<id>/explorer?f=...) before matching.
   const [path, queryString] = window.location.hash.replace(/^#\/?/, "").split("?");
   const hash = path ?? "";
@@ -219,7 +306,7 @@ function route(): void {
     if (parts[0] === "class" && parts[1] !== undefined && (parts.length === 2 || (parts.length === 3 && parts[2] === "manage"))) {
       const id = parts[1];
       // Case titles come from the catalog; management also shows question names (live grid): load every case.
-      if (parts[2] === "manage") lazyView(() => Promise.all([loadClassManage(), loadAllCases()]).then(([m]): View => () => m.classManageView(id)));
+      if (parts[2] === "manage") lazyView(() => Promise.all([loadClassManage(), loadEveryCase()]).then(([m]): View => () => m.classManageView(id)));
       else lazyView(() => Promise.all([loadClassPage(), catalogReady]).then(([m]): View => () => m.classPageView(id)));
       return;
     }
@@ -245,7 +332,7 @@ function route(): void {
     if (parts[0] === "admin" && parts.length === 1) {
       // Admin shows titles and question names of every case: load them all (in parallel with its code).
       // Its sections are nested items in the global nav; the view re-attaches the same dashboard on #/admin?tab=… changes.
-      lazyView(() => Promise.all([import("./views/admin"), loadAllCases()]).then(([m]): View => m.adminView));
+      lazyView(() => Promise.all([import("./views/admin"), loadEveryCase()]).then(([m]): View => m.adminView));
       return;
     }
     if (parts[0] === "case" && parts[1] !== undefined) {
@@ -265,7 +352,18 @@ function route(): void {
         return;
       }
       if (!isKnownCase(id)) {
-        notFound(catalogFailed() ? T().pageFailed : T().caseMissing(id));
+        if (catalogFailed()) {
+          loadFailed(undefined); // the catalog never answered: not knowing is not "does not exist"
+          return;
+        }
+        if (!recheckedCases.has(id)) {
+          // A case published after this page loaded is not in its catalog yet: ask again once before the 404.
+          recheckedCases.add(id);
+          void reloadCatalog();
+          route();
+          return;
+        }
+        notFound(T().caseMissing(id));
         return;
       }
       // The case's content comes from the content API (per language), fetched only now.
