@@ -31,8 +31,11 @@ import { tipped } from "./ui";
 const DENSITY_STORAGE = "il.adminDensity";
 
 export type LiveGridApi = {
-  /** Move one player's progress on a case to the trash (the player starts the case again). */
-  restartPlayer(accountId: string, caseId: string): Promise<void>;
+  /**
+   * Move one player's progress on a case to the trash (the player starts the case again). Optional: a class
+   * dashboard has no restart (only the site admin restarts a player), so its rows get no actions menu.
+   */
+  restartPlayer?(accountId: string, caseId: string): Promise<void>;
 };
 
 export type LiveGridOptions = {
@@ -300,7 +303,9 @@ export function createLiveGrid(opts: LiveGridOptions): LiveGrid {
   }
 
   /** Restart lives in the row's actions menu: a destructive per-player action, not a button on every row. */
-  function liveMenu(p: AdminProgress): HTMLButtonElement {
+  function liveMenu(p: AdminProgress): HTMLButtonElement | null {
+    const restart = opts.api.restartPlayer;
+    if (restart === undefined) return null;
     const caseId = p.caseId;
     const key = `live:${p.accountId}`;
     return host.menuButton(T().admActionsFor(p.username), key, () => [
@@ -317,7 +322,7 @@ export function createLiveGrid(opts: LiveGridOptions): LiveGrid {
             busyLabel: T().admRestarting,
             tone: "danger",
             run: async () => {
-              await opts.api.restartPlayer(p.accountId, caseId);
+              await restart(p.accountId, caseId);
               host.refresh();
             },
             returnFocus: () => host.menuTriggerEl(key),

@@ -2,7 +2,7 @@
 import type { Child } from "../lib/dom";
 
 /** The global nav's top-level items (shell/nav.ts), in their on-screen order. */
-export type NavKey = "home" | "today" | "cases" | "leaderboard" | "stats" | "author" | "admin";
+export type NavKey = "home" | "today" | "cases" | "leaderboard" | "classes" | "stats" | "author" | "admin";
 
 /**
  * A view's nested items in the global nav: drawn under one top-level item (admin sections under Admin, a case's

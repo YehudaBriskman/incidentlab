@@ -11,6 +11,7 @@ const PATHS = {
   home: ['<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/>', 18],
   today: ['<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>', 18],
   cases: ['<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', 18],
+  classes: ['<circle cx="9" cy="8" r="3.25"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M15.5 4.8a3.25 3.25 0 0 1 0 6.4"/><path d="M17.5 14.2A6 6 0 0 1 21 20"/>', 18],
   leaderboard: ['<path d="M8 21V11H4v10"/><path d="M14 21V5h-4v16"/><path d="M20 21v-7h-4v7"/><path d="M3 21h18"/>', 18],
   stats: ['<path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/>', 18],
   present: ['<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4"/><path d="M8 20h8"/><path d="M10 8.5v3.5l3-1.75z"/>', 18],

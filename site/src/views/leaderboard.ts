@@ -1,8 +1,12 @@
 // Public leaderboard: overall or per case, polled every 10 s. `?projector=1` = big-screen mode for a class:
 // huge type, top 10, no header chrome, frozen badge. Usernames are rendered only as text nodes.
-import { usernameKey, type LeaderboardResponse } from "../../shared/contract";
+// The same view draws a class board (#182) from its capability URL (`board`): #/classboard/<token>, and
+// embedded on the class page. A class board shows the class's own event and every active member (no opt-in).
+import { usernameKey, type ClassBoardResponse, type ClassEvent, type LeaderboardResponse, type LiveEvent } from "../../shared/contract";
 import { caseSummaries, caseSummary } from "../content/load";
-import { fetchLeaderboard } from "../lib/api";
+import { ApiError, fetchLeaderboard } from "../lib/api";
+import { fetchClassBoard } from "../lib/class-api";
+import { TC } from "../i18n/strings-classes";
 import { dataTable, type Column } from "../components/dataTable";
 import { h, setChildren } from "../lib/dom";
 import "../player.css";
@@ -49,17 +53,20 @@ function listen<K extends keyof DocumentEventMap>(type: K, fn: (ev: DocumentEven
 
 const timeFmt = (): Intl.DateTimeFormat => new Intl.DateTimeFormat(getLang() === "he" ? "he-IL" : "en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-function hashFor(caseId: string | null, projector: boolean): string {
+function hashFor(caseId: string | null, projector: boolean, board: string | null = null): string {
   const params = new URLSearchParams();
   if (caseId !== null) params.set("case", caseId);
   if (projector) params.set("projector", "1");
   const query = params.toString();
-  return `#/leaderboard${query ? `?${query}` : ""}`;
+  return `${board === null ? "#/leaderboard" : `#/classboard/${encodeURIComponent(board)}`}${query ? `?${query}` : ""}`;
 }
 
-/** "starts in 05:00" / "ends in 1:02:03" / "event over" for the current event ("" without a window). */
-export function eventWhen(): string {
-  const phase = eventPhase(cachedEvent());
+/** A class event as the event helpers read it (they take the site event's shape). */
+export const asLiveEvent = (e: ClassEvent): LiveEvent => ({ ...e, enforceWindow: false });
+
+/** "starts in 05:00" / "ends in 1:02:03" / "event over" for the event ("" without a window). */
+export function eventWhen(event: LiveEvent | null = cachedEvent()): string {
+  const phase = eventPhase(event);
   if (phase.kind === "before") return TG().eventStartsIn(formatCountdown(phase.msLeft));
   if (phase.kind === "running") return phase.msLeft === null ? TG().eventLive : TG().eventEndsIn(formatCountdown(phase.msLeft));
   if (phase.kind === "over") return TG().eventOver;
@@ -79,18 +86,38 @@ export function eventLine(): string {
   return [event.name, eventWhen()].filter((part) => part.length > 0).join(" · ");
 }
 
-export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): void {
+/** The class event's line ("Event night · ends in 12:03"), or "" when the class has none. */
+function classEventLine(event: LiveEvent | null): string {
+  if (!isEventActive(event)) return "";
+  return [event.name, eventWhen(event)].filter((part) => part.length > 0).join(" · ");
+}
+
+export type BoardOptions = {
+  /** A class board token: draws that class's board instead of the global one. */
+  board?: string;
+  /** Inside another page (the class page): no page title, no URL updates, a section heading. */
+  embedded?: boolean;
+};
+
+export function renderLeaderboard(root: HTMLElement, query: URLSearchParams, opts: BoardOptions = {}): void {
   stopLeaderboard();
-  const projector = query.get("projector") === "1";
+  const board = opts.board ?? null;
+  const embedded = opts.embedded === true;
+  const projector = !embedded && query.get("projector") === "1";
   const requested = query.get("case");
   let caseId: string | null = requested !== null && caseSummary(requested) !== undefined ? requested : null;
-  document.title = `${TG().lbTitle} · IncidentLab`;
+  /** The class's assigned cases once the board answered ([] = any case). */
+  let classCases: readonly string[] = [];
+  let classEvent: LiveEvent | null = null;
+  let className = "";
+  if (!embedded) document.title = `${board === null ? TG().lbTitle : TC().boardTitle} · IncidentLab`;
   document.body.classList.toggle("projector", projector);
 
   // Only an approved, opted-in player can have a row (#175); the admin session, guests, pending players and
   // players who keep themselves off the board have none.
   const canPlay = (a: AccountView | null): a is AccountView => a !== null && a.role !== "admin" && a.status === "approved" && a.kind === "user";
-  const keyOf = (a: AccountView | null): string | null => (canPlay(a) && a.showOnGlobalBoard ? usernameKey(a.username) : null);
+  // A class board lists every active member, opted in or not (members see each other there by design).
+  const keyOf = (a: AccountView | null): string | null => (canPlay(a) && (board !== null || a.showOnGlobalBoard) ? usernameKey(a.username) : null);
   let me = cachedAccount();
   let myKey = keyOf(me);
   // Cold load: the account may answer after the first board; redraw with the "you" row then.
@@ -114,8 +141,8 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): vo
   select.value = caseId ?? "";
   select.addEventListener("change", () => {
     caseId = select.value === "" ? null : select.value;
-    history.replaceState(null, "", hashFor(caseId, projector));
-    projectorLink.href = hashFor(caseId, !projector);
+    if (!embedded) history.replaceState(null, "", hashFor(caseId, projector, board));
+    projectorLink.href = hashFor(caseId, !projector, board);
     titleSub.textContent = scopeTitle();
     lastFrozen = undefined;
     void load();
@@ -131,8 +158,9 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): vo
   const frozenRegion = h("div", { role: "status" }, frozenEl);
   const updatedEl = h("p", { class: "lb-updated muted small" });
   // Who is listed: only players who opted in. A signed-in player who isn't gets the way to the setting.
-  const optInEl = h("p", { class: "lb-optin muted small", hidden: projector });
+  const optInEl = h("p", { class: "lb-optin muted small", hidden: projector || board !== null });
   const drawOptIn = (): void => {
+    if (board !== null) return;
     const hidden = canPlay(me) && !me.showOnGlobalBoard;
     setChildren(
       optInEl,
@@ -144,14 +172,39 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): vo
   const body = h("div", { class: "lb-body", "aria-busy": "true" });
   const projectorLink = h(
     "a",
-    { class: projector ? "lb-exit" : "btn btn-sm btn-ghost", href: hashFor(caseId, !projector) },
+    { class: projector ? "lb-exit" : "btn btn-sm btn-ghost", href: hashFor(caseId, !projector, board) },
     projector ? TO().lbExitProjector : TG().lbProjector,
   );
+  // The class name heads a class board once it answered (the token alone names nothing).
+  const headingEl = h(embedded ? "h2" : "h1", { dir: "auto", class: embedded ? "lb-embed-title" : null }, board === null ? TG().lbTitle : TC().boardTitle);
+  const eyebrowEl = h("p", { class: "eyebrow lb-class-eyebrow", hidden: true }, TC().boardTitle);
+  /** The case picker lists the class's assigned cases once they are known. */
+  let optionsSig = "";
+  const syncClassOptions = (): void => {
+    const ids = classCases.length > 0 ? classCases : caseSummaries().map((c) => c.id);
+    const sig = JSON.stringify(ids);
+    if (sig === optionsSig) return;
+    optionsSig = sig;
+    setChildren(select, h("option", { value: "" }, TG().lbOverall), ids.map((id) => h("option", { value: id }, caseSummary(id)?.title ?? id)));
+    select.value = caseId !== null && ids.includes(caseId) ? caseId : "";
+  };
+  const applyClass = (data: ClassBoardResponse): void => {
+    classCases = data.caseIds;
+    classEvent = asLiveEvent(data.event);
+    if (!embedded && className !== data.className) {
+      headingEl.textContent = data.className; // textContent only: a class admin chose it
+      eyebrowEl.hidden = false;
+      document.title = `${data.className} · ${TC().boardTitle} · IncidentLab`;
+    }
+    className = data.className;
+    syncClassOptions();
+    drawEvent();
+  };
   let lastFrozen: string | null | undefined; // undefined = not drawn yet
   let lastData: LeaderboardResponse | null = null;
 
   const drawEvent = (): void => {
-    const line = eventLine();
+    const line = board === null ? eventLine() : classEventLine(classEvent);
     eventEl.textContent = line;
     eventEl.hidden = line.length === 0;
   };
@@ -223,7 +276,7 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): vo
       setChildren(body, h("p", { class: "muted lb-empty" }, data.frozen ? TO().lbEmptyFrozen : TO().lbEmptyLive));
       return;
     }
-    const scope = caseId === null ? TO().lbCaptionOverall : TO().lbCaptionCase(scopeTitle());
+    const scope = board !== null && className !== "" ? `${className} · ${scopeTitle()}` : caseId === null ? TO().lbCaptionOverall : TO().lbCaptionCase(scopeTitle());
     const caption = `${scope}${data.frozen && data.frozenAt ? TO().lbCaptionFrozen(timeFmt().format(new Date(data.frozenAt))) : ""}`;
     // Ranked order is the point of this table, so its columns don't sort. lb-opt (not "optional") keeps the
     // projector showing every column while phones drop the extras.
@@ -255,33 +308,55 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): vo
   };
 
   let inFlight = false;
+  /** The class board link answered 404: it will never work again. */
+  let dead = false;
   const load = async (): Promise<void> => {
-    if (inFlight) return;
+    if (inFlight || dead) return;
     inFlight = true;
     const wanted = caseId;
     try {
-      const data = await fetchLeaderboard(wanted);
-      if (wanted === caseId && root.contains(body)) drawTable(data);
-    } catch {
-      if (root.contains(body) && body.childElementCount === 0) setChildren(body, h("p", { class: "muted", role: "alert" }, TG().lbFailed));
+      if (board === null) {
+        const data = await fetchLeaderboard(wanted);
+        if (wanted === caseId && root.contains(body)) drawTable(data);
+      } else {
+        const data = await fetchClassBoard(board, wanted);
+        if (!root.contains(body)) return;
+        applyClass(data);
+        if (wanted === caseId) drawTable(data);
+      }
+    } catch (err: unknown) {
+      if (!root.contains(body)) return;
+      // A rotated token or an archived class: the link is dead for good, so stop asking.
+      if (board !== null && err instanceof ApiError && err.status === 404) {
+        if (pollTimer !== null) window.clearInterval(pollTimer);
+        pollTimer = null;
+        dead = true;
+        body.setAttribute("aria-busy", "false");
+        setChildren(body, h("p", { class: "muted lb-empty", role: "alert" }, TC().boardGone));
+        return;
+      }
+      if (body.childElementCount === 0) setChildren(body, h("p", { class: "muted", role: "alert" }, TG().lbFailed));
     } finally {
       inFlight = false;
     }
   };
 
+  if (board !== null) syncClassOptions();
+  const backLink = board !== null ? h("a", { class: "back-link", href: "#/classes" }, TC().navClasses) : h("a", { class: "back-link", href: "#/" }, T().navCases);
   setChildren(
     root,
     h(
-      "section",
-      { class: `lb-page${projector ? " is-projector" : ""}` },
+      embedded ? "div" : "section",
+      { class: `lb-page${projector ? " is-projector" : ""}${embedded ? " is-embedded" : ""}` },
       h(
         "header",
         { class: "lb-head" },
         h(
           "div",
           { class: "lb-head-main" },
-          projector ? h("p", { class: "lb-brand mono" }, "▲ incidentlab") : h("a", { class: "back-link", href: "#/" }, T().navCases),
-          h("h1", {}, TG().lbTitle),
+          projector ? h("p", { class: "lb-brand mono" }, "▲ incidentlab") : embedded ? null : backLink,
+          embedded ? null : eyebrowEl,
+          headingEl,
           titleSub,
           eventEl,
         ),
@@ -309,7 +384,7 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): vo
   if (projector) {
     // The big screen has no visible controls: Esc (or the small corner link) leaves projector mode.
     listen("keydown", (ev) => {
-      if (ev.key === "Escape") window.location.hash = hashFor(caseId, false);
+      if (ev.key === "Escape") window.location.hash = hashFor(caseId, false, board);
     });
     // The exit link shows only while the pointer moves (and on keyboard focus), so the room sees no chrome.
     let pointerTimer: number | null = null;
@@ -327,7 +402,7 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams): vo
   drawEvent();
   drawOptIn();
   drawState(null);
-  unsubscribe = onEventChange(drawEvent);
+  if (board === null) unsubscribe = onEventChange(drawEvent);
   tickTimer = window.setInterval(drawEvent, 1000);
   startPolling();
   void load();

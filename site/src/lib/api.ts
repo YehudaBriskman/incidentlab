@@ -80,6 +80,8 @@ function reportClock(res: Response, sentAt: number, receivedAt: number): void {
   if (Number.isFinite(date)) for (const fn of clockListeners) fn({ serverMs: date + 500, sentAt, receivedAt });
 }
 
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH";
+
 const TIMEOUT_MS = 10_000;
 const MAX_RETRIES = 2;
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -97,7 +99,7 @@ async function fetchOnce(url: string, init: RequestInit): Promise<Response> {
   }
 }
 
-async function send(method: "GET" | "POST" | "PUT", path: string, body?: unknown): Promise<Response> {
+async function send(method: HttpMethod, path: string, body?: unknown): Promise<Response> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const init: RequestInit = {
@@ -140,13 +142,14 @@ async function readJson(res: Response): Promise<unknown> {
   }
 }
 
-async function request<S extends z.ZodType>(method: "GET" | "POST" | "PUT", path: string, schema: S, body?: unknown): Promise<z.infer<S>> {
+/** A JSON request parsed with `schema` (also used by lib/class-api.ts). */
+export async function request<S extends z.ZodType>(method: HttpMethod, path: string, schema: S, body?: unknown): Promise<z.infer<S>> {
   return (await requestWithHeaders(method, path, schema, body)).data;
 }
 
 /** `request`, plus the response headers (the event poll reads `Cache-Status` and `Age`). */
 async function requestWithHeaders<S extends z.ZodType>(
-  method: "GET" | "POST" | "PUT",
+  method: HttpMethod,
   path: string,
   schema: S,
   body?: unknown,
@@ -171,7 +174,8 @@ async function requestWithHeaders<S extends z.ZodType>(
   return { data: parsed.data, headers: res.headers };
 }
 
-async function requestNoContent(path: string, body: unknown): Promise<void> {
+/** A POST answered with 204 (also used by lib/class-api.ts). */
+export async function requestNoContent(path: string, body: unknown): Promise<void> {
   const res = await send("POST", path, body);
   if (!res.ok) {
     const parsed = ErrorBodySchema.safeParse(await readJson(res));

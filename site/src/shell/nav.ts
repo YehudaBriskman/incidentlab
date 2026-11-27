@@ -11,18 +11,20 @@ import { cachedAccount, isAdmin, onAccountChange } from "../lib/session";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { TS } from "../i18n/strings-shell";
+import { TC } from "../i18n/strings-classes";
 import { ICONS, type IconName } from "./icons";
 import { createLangToggle } from "./lang";
 import { loadSettings, onSettingsChange, updateSettings } from "./settings";
 import { cachedToday, onTodayChange } from "./today";
 import type { NavKey, NavSection } from "./types";
 
-const KEYS: readonly NavKey[] = ["home", "today", "cases", "leaderboard", "stats", "author", "admin"];
+const KEYS: readonly NavKey[] = ["home", "today", "cases", "leaderboard", "classes", "stats", "author", "admin"];
 const ICON_OF: Record<NavKey, IconName> = {
   home: "home",
   today: "today",
   cases: "cases",
   leaderboard: "leaderboard",
+  classes: "classes",
   stats: "stats",
   author: "author",
   admin: "admin",
@@ -68,6 +70,11 @@ export function currentNavKey(parts: readonly string[] = routeParts()): NavKey |
       return "cases";
     case "leaderboard":
       return "leaderboard";
+    case "classes":
+    case "class":
+    case "join":
+    case "classboard":
+      return "classes";
     case "me":
       return "stats";
     case "author":
@@ -94,6 +101,7 @@ function draw(): void {
     today: TS().navTodayCase,
     cases: TS().navCases,
     leaderboard: TG().leaderboard,
+    classes: TC().navClasses,
     stats: TA().myStats,
     author: TS().navAuthor,
     admin: TG().adminLink,
@@ -103,6 +111,8 @@ function draw(): void {
     cases: true,
     today: todayId !== null && !isAdmin(account),
     leaderboard: true,
+    // classes (#182): any signed-in account; guests find the "create an account to join" note there
+    classes: account !== null,
     // the forced password screen gates every view, so My stats waits for an approved, settled account
     stats: account !== null && !isAdmin(account) && account.status === "approved" && !account.mustChangePassword,
     // authors and the instructor manage cases (#66); approval and password state are enforced by the server
@@ -150,7 +160,7 @@ export function mountNav(el: HTMLElement): void {
   const built = {} as Record<NavKey, Item>;
   const listItems = KEYS.map((key) => {
     const label = h("span", { class: "nav-label" });
-    const link = h("a", { class: "nav-link", href: key === "home" ? "#/" : key === "cases" ? "#/cases" : key === "leaderboard" ? "#/leaderboard" : key === "stats" ? "#/me" : key === "author" ? "#/author" : key === "admin" ? "#/admin" : "#/" }, icon(ICON_OF[key], "nav-icon"), label);
+    const link = h("a", { class: "nav-link", href: key === "home" ? "#/" : key === "cases" ? "#/cases" : key === "leaderboard" ? "#/leaderboard" : key === "classes" ? "#/classes" : key === "stats" ? "#/me" : key === "author" ? "#/author" : key === "admin" ? "#/admin" : "#/" }, icon(ICON_OF[key], "nav-icon"), label);
     const sub = h("div", { class: "nav-sub", hidden: true });
     const li = h("li", { class: `nav-item nav-item-${key}` }, link, sub);
     built[key] = { li, link, label, sub };
