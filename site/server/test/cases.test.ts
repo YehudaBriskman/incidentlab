@@ -322,9 +322,9 @@ test("evidence: the zip route, unknown files and a missing chunk", async () => {
 });
 
 test("evidence paths: only the two URL shapes parse, without traversal", () => {
-  assert.deepEqual(parseEvidencePath("/evidence/db/alpha/v3/files/logs/app.log"), { kind: "file", caseId: "alpha", version: 3, path: "logs/app.log" });
-  assert.deepEqual(parseEvidencePath("/evidence/db/alpha/v3.zip"), { kind: "zip", caseId: "alpha", version: 3 });
-  assert.deepEqual(parseEvidencePath("/evidence/db/alpha/v1/files/a%20b.log"), { kind: "file", caseId: "alpha", version: 1, path: "a b.log" });
+  assert.deepEqual(parseEvidencePath("/evidence/db/alpha/v3/files/logs/app.log"), { kind: "file", caseId: "alpha", version: 3, key: null, path: "logs/app.log" });
+  assert.deepEqual(parseEvidencePath("/evidence/db/alpha/v3.zip"), { kind: "zip", caseId: "alpha", version: 3, key: null });
+  assert.deepEqual(parseEvidencePath("/evidence/db/alpha/v1/files/a%20b.log"), { kind: "file", caseId: "alpha", version: 1, key: null, path: "a b.log" });
   for (const bad of [
     "/evidence/db/alpha/v1/files/../secret", "/evidence/db/alpha/v1/files/a/%2e%2e/b", "/evidence/db/alpha/v1/files/",
     "/evidence/db/alpha/v0.zip", "/evidence/db/alpha/1.zip", "/evidence/db/Alpha/v1.zip", "/evidence/db/alpha/v1/raw/a.log",

@@ -5,6 +5,7 @@ import type { z } from "zod";
 import {
   AccountResponseSchema,
   AuthResponseSchema,
+  CasesResponseSchema,
   RecoveryCodeResponseSchema,
   SessionResponseSchema,
   AnswerResponseSchema,
@@ -23,6 +24,7 @@ import {
   type TodayResponse,
   type UserStats,
 } from "../../shared/contract";
+import type { CatalogEntry } from "../../shared/catalog";
 import { getLang } from "../i18n/i18n";
 import { isCacheHit, type ClockSample } from "./clock";
 
@@ -227,7 +229,17 @@ export async function logout(): Promise<void> {
 
 /** The signed-in account, or null when signed out. `/api/session` answers 200 either way, so visitors see no 401. */
 export async function fetchMe(): Promise<AccountView | null> {
-  return (await request("GET", "/api/session", SessionResponseSchema)).account;
+  return (await fetchSession()).account;
+}
+
+/** The session, with the hint whether the account may have private cases to play (#184). */
+export async function fetchSession(): Promise<{ account: AccountView | null; privateCases: boolean }> {
+  return request("GET", "/api/session", SessionResponseSchema);
+}
+
+/** The private cases this session may play (#184): personalised, never cached. */
+export async function fetchMyCases(): Promise<CatalogEntry[]> {
+  return (await request("GET", "/api/me/cases", CasesResponseSchema)).cases;
 }
 
 export async function fetchMyStats(): Promise<UserStats> {

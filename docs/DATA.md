@@ -78,6 +78,11 @@ credit-based pricing**: it charges credits per production deploy and per GB, and
   - Storage reads per uncached board call: one `classmember:` listing plus up to 60 member, 60 account and 60
     `score:` reads (181). Blobs operations are not one of the allowances above; they cost function runtime
     (milliseconds each), not calls.
+- **Private cases (#184)** add no polling, and no call for most visits. `GET /api/session` (already called once
+  per page load) carries a `privateCases` hint from the in-memory case list: no storage read when there are no
+  private cases, at most one `memberof:` listing otherwise. Only when it is true does the browser call
+  `GET /api/me/cases` (`no-store`), once per page load or sign-in. Private content is `no-store` too: a call per
+  case open, for the few players who can see one. Public content stays CDN-cached.
 - **Check monthly:** `node --experimental-strip-types scripts/data.ts usage`. It prints bandwidth with a 70%
   warning. The API doesn't report function counts on this plan, so check those in the Netlify UI (Team → Usage).
 - **Triggers to move public evidence to GitHub (#145):** Netlify bandwidth over about 50 GB a month, or total
@@ -127,6 +132,20 @@ versions, and the browser reads content and evidence only through the content AP
 - `version`, `langs`, `title`, `difficulty`, `tags`, `answerFingerprint`, `contentSha` describe
   `publishedVersion` (or `latestVersion` while nothing is published). They are kept so the #64 readers keep
   working.
+
+Private cases and owner review (#184), all additive with zod defaults:
+- `visibility` (`public` or `private`, default `public`): who may see the live version (`docs/API.md`, DB-stored
+  case content). **No migration:** a meta stored before #184 has no `visibility`, so it parses as `public`, which
+  is exactly what every case published until then was. Authors' drafts stored before #184 parse as public too,
+  but they are not live, and an author's publish of a case that was never published makes it private. New author
+  uploads store `private` from the start.
+- `review` (`none`, `submitted`, `approved` or `rejected`, default `none`), `reviewNote` and `reviewAt` (default
+  null): the owner's review.
+- `classIds` (default `[]`, at most 20): classes whose active members may play the case while it is private.
+- `pendingVersion` (default null): an author's new version of a public case, waiting for re-review, while the
+  public `publishedVersion` stays live. Must be a stored version.
+- `evidenceKey` (default null; 32 hex characters): the private evidence URL segment, set at the first private
+  publish. Server-only: it is in no public response and not in `GET /api/author/cases`.
 
 Metas written by #64 have only `version`: they still parse, as `publishedVersion = version` (null for a
 `draft`), `latestVersion = version` and one entry in `versions` (`server/test/case-schema.test.ts`).

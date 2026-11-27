@@ -101,6 +101,21 @@ export const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, "expected a lower
 export const CaseStatusSchema = z.enum(["draft", "published", "trashed"]);
 export type CaseStatus = z.infer<typeof CaseStatusSchema>;
 
+/**
+ * Who may see a published case (#184). "public": every route serves it (catalog, content, play, boards).
+ * "private": only its author, the site admin and active members of the classes in `classIds`; everyone else
+ * gets 404. Authors' cases start private and become public only when the site owner approves them.
+ */
+export const CaseVisibilitySchema = z.enum(["public", "private"]);
+export type CaseVisibility = z.infer<typeof CaseVisibilitySchema>;
+/** The owner's review of an author's case: "submitted" waits in the queue, "approved" made it public. */
+export const CaseReviewSchema = z.enum(["none", "submitted", "approved", "rejected"]);
+export type CaseReview = z.infer<typeof CaseReviewSchema>;
+/** The secret path segment of a private case's evidence URLs (128 random bits, hex). */
+export const EvidenceKeySchema = z.string().regex(/^[0-9a-f]{32}$/, "expected 32 lowercase hex characters");
+/** At most this many classes may be assigned to one private case. */
+export const MAX_CASE_CLASSES = 20;
+
 /** One stored version of a case: what its records hold, for listings, diffs and the publish checks. */
 export const CaseVersionInfoSchema = z.object({
   version: z.number().int().min(1),
@@ -148,12 +163,32 @@ const CaseMetaRecordSchema = z.object({
   updatedAt: z.string(), // ISO timestamp
   /** every stored version, oldest first */
   versions: z.array(CaseVersionInfoSchema).min(1),
+  // Private cases and owner review (#184), all additive. Metas saved before them parse as public cases with
+  // no review, which is what every case published until then was.
+  visibility: CaseVisibilitySchema.default("public"),
+  review: CaseReviewSchema.default("none"),
+  /** the owner's note on the last decision (a rejection's reason); null when there is none */
+  reviewNote: z.string().nullable().default(null),
+  /** when the review state last changed (submitted, approved or rejected) */
+  reviewAt: z.string().nullable().default(null),
+  /** classes whose active members may play the case while it is private */
+  classIds: z.array(z.string()).max(MAX_CASE_CLASSES).default([]),
+  /**
+   * An author's new version of a case that is already public, waiting for the owner's review. The public
+   * version (`publishedVersion`) stays live meanwhile; approving makes this one the published version.
+   */
+  pendingVersion: z.number().int().min(1).nullable().default(null),
+  /** the private evidence URL segment; set when the case is first published privately, never shown publicly */
+  evidenceKey: EvidenceKeySchema.nullable().default(null),
 }).refine((m) => m.latestVersion >= (m.publishedVersion ?? 0) && m.version === (m.publishedVersion ?? m.latestVersion), {
   message: "version must equal publishedVersion (latestVersion while nothing is published) and not exceed latestVersion",
   path: ["version"],
 }).refine((m) => m.versions.some((v) => v.version === m.version), {
   message: "versions must include the described version",
   path: ["versions"],
+}).refine((m) => m.pendingVersion === null || m.versions.some((v) => v.version === m.pendingVersion), {
+  message: "pendingVersion must be a stored version",
+  path: ["pendingVersion"],
 });
 
 /**
@@ -199,6 +234,14 @@ export const composeCaseMeta = (input: {
   readonly createdBy: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+  // #184: kept as they are when left out (callers spread the current meta)
+  readonly visibility?: CaseVisibility;
+  readonly review?: CaseReview;
+  readonly reviewNote?: string | null;
+  readonly reviewAt?: string | null;
+  readonly classIds?: readonly string[];
+  readonly pendingVersion?: number | null;
+  readonly evidenceKey?: string | null;
 }): CaseMeta => {
   const versions = [...input.versions].sort((a, b) => a.version - b.version);
   const latest = versions[versions.length - 1];
@@ -222,6 +265,13 @@ export const composeCaseMeta = (input: {
     createdAt: input.createdAt,
     updatedAt: input.updatedAt,
     versions,
+    visibility: input.visibility ?? "public",
+    review: input.review ?? "none",
+    reviewNote: input.reviewNote ?? null,
+    reviewAt: input.reviewAt ?? null,
+    classIds: [...(input.classIds ?? [])],
+    pendingVersion: input.pendingVersion ?? null,
+    evidenceKey: input.evidenceKey ?? null,
   });
 };
 

@@ -10,6 +10,7 @@ import {
 } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
 import type { AuthService } from "../services/AuthService.ts";
+import type { CaseAccessService, CaseViewer } from "../services/CaseAccessService.ts";
 import type { EventService } from "../services/EventService.ts";
 import type { GlobalBoardService } from "../services/GlobalBoardService.ts";
 import type { ScheduleService } from "../services/ScheduleService.ts";
@@ -38,8 +39,10 @@ export class AuthController {
   private readonly stats: StatsService;
   private readonly events: EventService;
   private readonly board: GlobalBoardService;
+  private readonly access: CaseAccessService | null;
 
-  constructor(deps: { auth: AuthService; schedule: ScheduleService; stats: StatsService; events: EventService; board: GlobalBoardService }) {
+  constructor(deps: { auth: AuthService; schedule: ScheduleService; stats: StatsService; events: EventService; board: GlobalBoardService; access?: CaseAccessService }) {
+    this.access = deps.access ?? null;
     this.auth = deps.auth;
     this.schedule = deps.schedule;
     this.stats = deps.stats;
@@ -82,10 +85,17 @@ export class AuthController {
     return renewed ? withCookie(res, sessionCookie(req, renewed)) : res;
   }
 
-  /** Like `me`, but a missing, expired or revoked session is `{account: null}` with 200 instead of a 401. */
+  /**
+   * Like `me`, but a missing, expired or revoked session is `{account: null}` with 200 instead of a 401.
+   * `privateCases` (#184) tells the browser whether to ask GET /api/me/cases for private cases it may play.
+   */
   async session(req: Request): Promise<Response> {
     try {
-      return await this.me(req);
+      const { principal, view, renewed } = await this.auth.authenticate(sessionToken(req));
+      const viewer: CaseViewer = principal.kind === "admin" ? { kind: "admin" } : { kind: "account", accountId: principal.account.id };
+      const privateCases = this.access !== null && (await this.access.hasPrivateCases(viewer));
+      const res = json(200, { account: view, privateCases });
+      return renewed ? withCookie(res, sessionCookie(req, renewed)) : res;
     } catch (error: unknown) {
       if (error instanceof AppError && error.status === 401) return json(200, { account: null });
       throw error;

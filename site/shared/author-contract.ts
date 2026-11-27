@@ -18,9 +18,12 @@ import { CaseIdSchema } from "./contract.ts";
 import {
   CaseLangSchema,
   CasePackageManifestSchema,
+  CaseReviewSchema,
   CaseStatusSchema,
   CaseVersionInfoSchema,
+  CaseVisibilitySchema,
   EVIDENCE_CHUNK_BYTES,
+  MAX_CASE_CLASSES,
   Sha256Schema,
 } from "./case-records.ts";
 import type { CaseLang } from "./case-records.ts";
@@ -153,9 +156,15 @@ export type FinalizeResponse = z.infer<typeof FinalizeResponseSchema>;
 //   publish, from the bundled case's answer key) while players have progress on the case, unless
 //   acceptAnswerChanges. 409 code "conflict" when another publish won the race; "trashed"; 404 unknown version.
 //   Rollback is publishing an older version.
+//   Private cases (#184): an author's publish of a case that is not public yet keeps it private (playable by
+//   the author and the classes in its classIds). An author's publish of another version of a public case does
+//   not go live: it becomes the case's pendingVersion, submitted for the owner's review (pendingReview: true),
+//   and the public version stays live until the owner approves. Only the site admin may pass visibility
+//   (403 code "not-admin" otherwise); left out, the admin's publish keeps the case's visibility.
 export const PublishRequestSchema = z.object({
   version: z.number().int().min(1),
   acceptAnswerChanges: z.boolean().default(false),
+  visibility: CaseVisibilitySchema.optional(),
 });
 export const PublishResponseSchema = z.object({
   caseId: CaseIdSchema,
@@ -164,13 +173,20 @@ export const PublishResponseSchema = z.object({
   rollback: z.boolean(),
   /** false when the version was already published */
   changed: z.boolean(),
+  /** additive (#184) */
+  visibility: CaseVisibilitySchema.default("public"),
+  /** true when the version waits for the owner's review instead of going live (a public case's new version) */
+  pendingReview: z.boolean().default(false),
 });
 export type PublishResponse = z.infer<typeof PublishResponseSchema>;
 
 // GET /api/author/cases -> {cases: AuthorCase[]}   the cases the caller may manage (the admin: all)
 export const AuthorCaseVersionSchema = CaseVersionInfoSchema.extend({
-  /** "published": live now; "draft": newer than the published version; "previous": an older version (rollback target) */
-  state: z.enum(["published", "draft", "previous"]),
+  /**
+   * "published": live now; "draft": newer than the published version; "previous": an older version (rollback
+   * target); "pending" (#184): waiting for the owner's review to replace the public version
+   */
+  state: z.enum(["published", "draft", "previous", "pending"]),
 });
 export const AuthorCaseSchema = z.object({
   id: CaseIdSchema,
@@ -183,6 +199,13 @@ export const AuthorCaseSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   versions: z.array(AuthorCaseVersionSchema),
+  // #184, additive
+  visibility: CaseVisibilitySchema.default("public"),
+  review: CaseReviewSchema.default("none"),
+  reviewNote: z.string().nullable().default(null),
+  reviewAt: z.string().nullable().default(null),
+  classIds: z.array(z.string()).default([]),
+  pendingVersion: z.number().int().min(1).nullable().default(null),
 });
 export type AuthorCase = z.infer<typeof AuthorCaseSchema>;
 export const AuthorCasesResponseSchema = z.object({ cases: z.array(AuthorCaseSchema) });
@@ -191,3 +214,54 @@ export const AuthorCasesResponseSchema = z.object({ cases: z.array(AuthorCaseSch
 // POST   /api/author/cases/:caseId/restore {}   -> {caseId, status}              (also /api/admin/trash/:id/restore)
 export const DeleteCaseResponseSchema = z.object({ caseId: CaseIdSchema, trashId: z.string(), expiresAt: z.string() });
 export const RestoreCaseResponseSchema = z.object({ caseId: CaseIdSchema, status: CaseStatusSchema });
+
+// ---- private cases and owner review (#184) ----------------------------------------------------------------
+// POST /api/author/cases/:caseId/submit-review {}      -> {case}   the owner (or the admin): review "submitted".
+//   A private published case is reviewed at its published version; a public case only has something to review
+//   while it has a pendingVersion. 409 code "not-published" (publish it privately first), "already-public".
+// PUT  /api/author/cases/:caseId/classes {classIds}    -> {case}   the classes whose active members may play the
+//   private case. Every class added must be one the author is an active admin of (403 code "not-class-admin");
+//   the admin may assign any existing class. Removing a class needs no check. Class admins then add the case to
+//   their class's caseIds (PATCH /api/classes/:id) to put it on the class board.
+// GET  /api/admin/reviews                              -> {reviews}  the owner's queue (site admin only)
+// POST /api/admin/cases/:caseId/review {decision, note?, acceptAnswerChanges?} -> {case}
+//   approve: the reviewed version becomes the public published version (answer-drift rules as for publish);
+//   reject: records the note (required) and drops a pending version; the case stays as it was.
+//   409 code "not-submitted" when nothing waits for review.
+export const SubmitReviewRequestSchema = z.object({}).strict();
+export const SetCaseClassesRequestSchema = z.object({
+  classIds: z.array(z.string().min(1).max(64)).max(MAX_CASE_CLASSES),
+});
+export type SetCaseClassesRequest = z.infer<typeof SetCaseClassesRequestSchema>;
+export const AuthorCaseResponseSchema = z.object({ case: AuthorCaseSchema });
+
+export const REVIEW_NOTE_MAX = 500;
+export const ReviewDecisionSchema = z.enum(["approve", "reject"]);
+export const ReviewDecisionRequestSchema = z.object({
+  decision: ReviewDecisionSchema,
+  note: z.string().trim().max(REVIEW_NOTE_MAX).nullable().default(null),
+  acceptAnswerChanges: z.boolean().default(false),
+}).refine((r) => r.decision === "approve" || (r.note !== null && r.note.length > 0), {
+  message: "a rejection needs a note for the author",
+  path: ["note"],
+});
+export type ReviewDecisionRequest = z.infer<typeof ReviewDecisionRequestSchema>;
+
+export const ReviewItemSchema = z.object({
+  caseId: CaseIdSchema,
+  title: z.string(),
+  /** the author's account id and username (null when the account is gone) */
+  createdBy: z.string(),
+  author: z.string().nullable(),
+  /** the version the owner is asked to approve */
+  version: z.number().int().min(1),
+  /** the version live now (the public one, for a pending version of a public case) */
+  publishedVersion: z.number().int().min(1).nullable(),
+  visibility: CaseVisibilitySchema,
+  langs: z.array(CaseLangSchema),
+  submittedAt: z.string().nullable(),
+  /** true when the reviewed version changes the answer key against the public version */
+  answerKeyChanged: z.boolean(),
+});
+export type ReviewItem = z.infer<typeof ReviewItemSchema>;
+export const ReviewsResponseSchema = z.object({ reviews: z.array(ReviewItemSchema) });

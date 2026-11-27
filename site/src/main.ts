@@ -205,6 +205,10 @@ function route(): void {
       lazyView(() => import("./views/author").then((m) => legacy(m.renderAuthor)));
       return;
     }
+    if (parts[0] === "author" && parts[1] === "reviews" && parts.length === 2) {
+      lazyView(() => import("./views/reviews").then((m) => legacy(m.renderReviews)));
+      return;
+    }
     if (parts[0] === "admin" && parts.length === 1) {
       // Admin shows titles and question names of every case: load them all (in parallel with its code).
       // Its sections are nested items in the global nav; the view re-attaches the same dashboard on #/admin?tab=… changes.

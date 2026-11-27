@@ -5,6 +5,9 @@ import { z } from "zod";
 import {
   CreateUploadRequestSchema,
   PublishRequestSchema,
+  ReviewDecisionRequestSchema,
+  SetCaseClassesRequestSchema,
+  SubmitReviewRequestSchema,
   UPLOAD_LIMITS,
   UploadIdSchema,
   UploadPartNameSchema,
@@ -110,13 +113,61 @@ export class AuthorController {
     const id = valid(CaseIdSchema, caseId, "case");
     const body = await parseBody(req, PublishRequestSchema);
     const result = await this.authoring.publish(actor, id, body);
-    if (result.changed) {
+    if (result.changed && result.pendingReview) {
+      await this.record(actor, "case.review-submit", id, "v" + String(body.version) + " submitted for review (the public version stays live)");
+    } else if (result.changed) {
       const from = result.previousVersion === null ? "first publish" : `was v${result.previousVersion}`;
       const accepted = body.acceptAnswerChanges ? ", answer changes accepted" : "";
-      await this.record(actor, result.rollback ? "case.rollback" : "case.publish", id, `v${result.publishedVersion} published (${from})${accepted}`);
+      const privately = result.visibility === "private" ? ", private" : "";
+      await this.record(actor, result.rollback ? "case.rollback" : "case.publish", id, `v${result.publishedVersion} published (${from})${accepted}${privately}`);
       await this.onPublishedChange();
     }
     return json(200, result);
+  }
+
+  /** POST /api/author/cases/:caseId/submit-review (#184) */
+  async submitReview(req: Request, caseId: string): Promise<Response> {
+    const actor = await this.actor(req);
+    const id = valid(CaseIdSchema, caseId, "case");
+    await parseBody(req, SubmitReviewRequestSchema);
+    const result = await this.authoring.submitReview(actor, id);
+    await this.record(actor, "case.review-submit", id, "submitted for review");
+    return json(200, { case: result });
+  }
+
+  /** PUT /api/author/cases/:caseId/classes {classIds} (#184) */
+  async setClasses(req: Request, caseId: string): Promise<Response> {
+    const actor = await this.actor(req);
+    const id = valid(CaseIdSchema, caseId, "case");
+    const body = await parseBody(req, SetCaseClassesRequestSchema);
+    const result = await this.authoring.setClasses(actor, id, body.classIds);
+    await this.record(actor, "case.classes", id, result.classIds.length === 0 ? "no classes" : `classes ${result.classIds.join(", ")}`);
+    await this.onPublishedChange(); // the private-case list the session hint reads
+    return json(200, { case: result });
+  }
+
+  /** GET /api/admin/reviews (#184): the owner's review queue. */
+  async reviews(req: Request): Promise<Response> {
+    await this.requireAdmin(req);
+    return json(200, { reviews: await this.authoring.reviewQueue() });
+  }
+
+  /** POST /api/admin/cases/:caseId/review {decision, note?, acceptAnswerChanges?} (#184) */
+  async review(req: Request, caseId: string): Promise<Response> {
+    const actor = await this.requireAdmin(req);
+    const id = valid(CaseIdSchema, caseId, "case");
+    const body = await parseBody(req, ReviewDecisionRequestSchema);
+    const result = await this.authoring.decide(id, body);
+    const note = body.note === null ? "" : `: ${body.note}`;
+    await this.record(actor, body.decision === "approve" ? "case.review-approve" : "case.review-reject", id, `${body.decision === "approve" ? "approved, now public" : "rejected"}${note}`);
+    await this.onPublishedChange();
+    return json(200, { case: result });
+  }
+
+  private async requireAdmin(req: Request): Promise<Actor> {
+    const actor = await this.actor(req);
+    if (actor.kind !== "admin") throw new AppError(403, "only the site owner reviews cases", { code: "not-admin" });
+    return actor;
   }
 
   /** DELETE /api/author/cases/:caseId */

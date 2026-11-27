@@ -1,7 +1,7 @@
 // Client-side view of "who is signed in". The real session is the HttpOnly cookie; this module only
 // caches the account the server reported, and tells listeners (the header menu, views) when it changes.
 import type { AccountView, TodayResponse } from "../../shared/contract";
-import { fetchMe, fetchToday, logout } from "./api";
+import { fetchSession, fetchToday, logout } from "./api";
 
 type Listener = (account: AccountView | null) => void;
 
@@ -9,6 +9,8 @@ let current: AccountView | null = null;
 /** False until the server has said who is signed in (a null `current` before that means "unknown"). */
 let known = false;
 let loaded: Promise<AccountView | null> | null = null;
+/** From the last /api/session answer (#184): the account may have private cases (content/load.ts then asks for them). */
+let privateCasesHint = false;
 const listeners = new Set<Listener>();
 
 export function onAccountChange(fn: Listener): void {
@@ -72,8 +74,9 @@ function sameAccount(a: AccountView | null, b: AccountView | null): boolean {
 /** Asks the server once per page load (or after `refresh`). */
 export function loadAccount(refresh = false): Promise<AccountView | null> {
   if (!loaded || refresh) {
-    loaded = fetchMe().then(
-      (account) => {
+    loaded = fetchSession().then(
+      ({ account, privateCases }) => {
+        privateCasesHint = account !== null && privateCases;
         if (!sameAccount(account, current)) setAccount(account);
         known = true;
         writeHint(account);
@@ -86,6 +89,11 @@ export function loadAccount(refresh = false): Promise<AccountView | null> {
     );
   }
   return loaded;
+}
+
+/** True when the last session answer said the account may have private cases to play (#184). */
+export function mayHavePrivateCases(): boolean {
+  return privateCasesHint;
 }
 
 export async function signOut(): Promise<void> {
