@@ -112,7 +112,7 @@ a.home-row:hover { background: var(--hover); }
 .home-shown { margin: 0; order: -1; margin-inline-end: auto; color: var(--text-2); font-size: var(--type-label-size); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .home-table-slot { display: flex; flex-direction: column; flex: 0 1 auto; min-block-size: 0; }
-.home-table.dt-wrap { flex: 0 1 auto; min-block-size: 0; overflow: auto; overscroll-behavior: contain; border: 0; border-radius: 0; box-shadow: none; }
+.home-table.dt-wrap { position: relative; flex: 0 1 auto; min-block-size: 0; overflow: auto; overscroll-behavior: contain; border: 0; border-radius: 0; box-shadow: none; }
 .home-col-nowrap { white-space: nowrap; }
 .home-cases-table th, .home-cases-table td { padding-block: var(--space-2); }
 .home-cases-table th:first-child, .home-cases-table td:first-child { padding-inline-start: var(--space-4); }

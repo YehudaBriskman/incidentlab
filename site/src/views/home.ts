@@ -627,12 +627,14 @@ export function renderHome(root: HTMLElement): void {
     if (activeRender !== token || !dash.isConnected) return;
     dash.style.maxBlockSize = "";
     if (window.matchMedia("(max-width: 640px)").matches) return;
-    const doc = document.documentElement;
-    if (doc.scrollHeight <= window.innerHeight) return;
+    // Measure against the content area that scrolls (main.app-content): the room from the dashboard's top, unscrolled,
+    // to the viewport's bottom, less the area's bottom padding. (The document itself only scrolls once that overflows.)
+    const scroller = dash.closest<HTMLElement>("main");
+    const pad = scroller === null ? 0 : Number.parseFloat(getComputedStyle(scroller).paddingBlockEnd) || 0;
     const rect = dash.getBoundingClientRect();
-    const topDoc = rect.top + window.scrollY;
-    const below = doc.scrollHeight - (topDoc + rect.height);
-    const avail = window.innerHeight - topDoc - below;
+    const top = rect.top + (scroller?.scrollTop ?? 0) + window.scrollY;
+    const avail = window.innerHeight - top - pad;
+    if (rect.height <= avail) return;
     dash.style.maxBlockSize = `${Math.max(MIN_DASH_PX, Math.floor(avail))}px`;
   };
   let fitFrame = 0;
