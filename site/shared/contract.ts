@@ -327,12 +327,20 @@ export const ErrorBodySchema = z.object({
   details: z.array(z.string()).optional(),
 });
 
-// POST /api/auth/register  -> 201 {account} + cookie (status "pending" until the admin approves,
-//                             "approved" right away with a valid inviteCode). 409 code "reserved" / "username-taken".
+// POST /api/auth/register  -> 201 {account} + cookie (approved at once since #173). 409 code "reserved" /
+//                             "username-taken". 400 (no code the UI acts on) when the bot checks fail: `website`
+//                             filled, or `elapsedMs` under 2 s.
 // POST /api/auth/login     -> 200 {account} + cookie (403 code "rejected" for rejected accounts).
 //                             username "admin" + the ADMIN_KEY -> an admin session (account.role "admin", 12 h).
 export const CredentialsSchema = z.object({ username: UsernameSchema, password: PasswordSchema });
-export const RegisterRequestSchema = CredentialsSchema.extend({ inviteCode: z.string().trim().max(40).optional() });
+/** Sign-up form: how long the form was open before submit; below this the server refuses it as a bot. */
+export const MIN_SIGNUP_FORM_MS = 2_000;
+export const RegisterRequestSchema = CredentialsSchema.extend({
+  inviteCode: z.string().trim().max(40).optional(),
+  // Bot checks (#173), additive: older clients send neither. `website` is a hidden field people never see.
+  website: z.string().max(200).optional(),
+  elapsedMs: z.number().int().min(0).max(86_400_000 * 30).optional(),
+});
 // POST /api/me/password {currentPassword, newPassword} -> {account}  (also clears mustChangePassword)
 export const ChangePasswordRequestSchema = z.object({ currentPassword: z.string().min(1).max(128), newPassword: PasswordSchema });
 export const LoginRequestSchema = z.object({ username: z.string().trim().min(1).max(64), password: z.string().min(1).max(128) });

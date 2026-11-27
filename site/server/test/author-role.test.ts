@@ -16,7 +16,14 @@ const setup = () => {
   const repos = createRepositories(store);
   const now = (): Date => new Date();
   const auth = new AuthService({ repos, settings: new SettingsRepository(store), limiter: new RateLimiter(repos.rateLimits, now), adminKey: () => ADMIN_KEY, now });
-  return { ...harness, auth };
+  return { ...harness, auth, repos };
+};
+
+/** Sign-up approves at once (#173); accounts from before it can still be pending, so tests write one directly. */
+const markPending = async (h: ReturnType<typeof setup>, id: string): Promise<void> => {
+  const found = await h.repos.accounts.get(id);
+  assert.ok(found);
+  assert.ok(await h.repos.accounts.saveIfMatch({ ...found.data, status: "pending", decidedAt: null }, found.etag));
 };
 
 const register = async (h: ReturnType<typeof setup>, username: string) => {
@@ -79,6 +86,7 @@ test("requireAuthor: admin and approved authors pass; players, pending authors a
   await rejectsWith(h.auth.requireAuthor(dana.token), 403, "not-author");
 
   await h.admin(`/admin/accounts/${dana.id}/role`, { method: "PUT", body: { role: "author" } });
+  await markPending(h, dana.id);
   await rejectsWith(h.auth.requireAuthor(dana.token), 403, "pending");
 
   await h.admin(`/admin/accounts/${dana.id}/approve`, { body: {} });

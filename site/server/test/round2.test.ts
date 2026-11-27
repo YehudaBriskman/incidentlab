@@ -118,16 +118,17 @@ test("password reset by admin forces a change; change-password works", async () 
   await expectStatus(harness.client().call("/auth/login", { body: { username: "forgetful", password: "new-password-1" } }), 200);
 });
 
-test("invite code auto-approves; wrong code is refused; approve-all", async () => {
+test("invite code still accepted; wrong code is refused; approve-all finds nothing left to approve", async () => {
   const harness = createHarness();
   await expectStatus(harness.admin("/admin/settings", { method: "PUT", body: { inviteCode: "Class-2026" } }), 200);
   const withCode = harness.client();
   const res = await withCode.json(await withCode.call("/auth/register", { body: { username: "coded", password: "password1", inviteCode: " class-2026 " } }), AccountResponseSchema);
   assert.equal(res.account.status, "approved");
   await expectStatus(harness.client().call("/auth/register", { body: { username: "guess", password: "password1", inviteCode: "nope" } }), 400, "bad-invite-code");
-  for (const name of ["pend1", "pend2", "pend3"]) await harness.client().call("/auth/register", { body: { username: name, password: "password1" } });
+  // Sign-up is open (#173): accounts without a code are approved too, so approve-all has nothing to do.
+  for (const name of ["open1", "open2", "open3"]) await harness.client().call("/auth/register", { body: { username: name, password: "password1" } });
   const all = await withCode.json(await harness.admin("/admin/accounts/approve-all", { body: {} }), ApproveAllResponseSchema);
-  assert.equal(all.approved, 3);
+  assert.equal(all.approved, 0);
   const list = await withCode.json(await harness.admin("/admin/accounts"), AdminAccountsResponseSchema);
   assert.ok(list.accounts.every((a) => a.status === "approved"));
 });

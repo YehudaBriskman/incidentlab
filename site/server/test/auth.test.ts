@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AccountResponseSchema, AdminAccountsResponseSchema, SessionResponseSchema, UsernameSchema, usernameKey } from "../../shared/contract.ts";
+import { AccountResponseSchema, SessionResponseSchema, UsernameSchema, usernameKey } from "../../shared/contract.ts";
 import { hashPassword, verifyPassword } from "../services/crypto.ts";
 import { createHarness, expectStatus } from "./helpers.ts";
 
@@ -22,8 +22,8 @@ test("password hashing round-trips and rejects wrong passwords", async () => {
   assert.equal(await verifyPassword("x", "garbage"), false);
 });
 
-test("register -> pending -> approved, cookie session survives", async () => {
-  const { client, admin } = createHarness();
+test("register -> approved at once (#173), cookie session survives", async () => {
+  const { client } = createHarness();
   const dana = client();
   const created = await dana.call("/auth/register", { body: { username: "Dana", password: "hunter2hunter2" } });
   assert.equal(created.status, 201);
@@ -31,15 +31,10 @@ test("register -> pending -> approved, cookie session survives", async () => {
   assert.match(cookie, /HttpOnly/);
   assert.match(cookie, /SameSite=Lax/);
   assert.match(cookie, /Path=\/api/);
-  assert.equal((await dana.json(created, AccountResponseSchema)).account.status, "pending");
+  assert.equal((await dana.json(created, AccountResponseSchema)).account.status, "approved");
 
-  // signed in but not approved: can read /me, can't play
+  // no approval wait: the new account plays right away
   assert.equal((await dana.json(await dana.call("/me"), AccountResponseSchema)).account.username, "Dana");
-  await expectStatus(dana.call("/cases/alpha/progress"), 403, "pending");
-
-  const list = await dana.json(await admin("/admin/accounts"), AdminAccountsResponseSchema);
-  const id = list.accounts[0]?.accountId ?? "";
-  await expectStatus(admin(`/admin/accounts/${id}/approve`, { body: {} }), 200);
   await expectStatus(dana.call("/cases/alpha/progress"), 200);
 });
 

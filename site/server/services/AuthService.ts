@@ -1,7 +1,7 @@
 // Accounts, passwords and sessions. Sessions live server-side; the browser only holds an opaque
 // token in an HttpOnly cookie, and the store keeps sha256(token), never the token itself.
 // Signing in as `admin` with the ADMIN_KEY creates an admin session (no account record behind it).
-import { ADMIN_USERNAME, RESERVED_USERNAMES, usernameKey } from "../../shared/contract.ts";
+import { ADMIN_USERNAME, MIN_SIGNUP_FORM_MS, RESERVED_USERNAMES, usernameKey } from "../../shared/contract.ts";
 import type { AccountView } from "../../shared/contract.ts";
 import { ACCOUNT_SCHEMA_VERSION, AppError } from "../domain/types.ts";
 import type { AccountRecord, SessionRecord } from "../domain/types.ts";
@@ -25,15 +25,22 @@ const SESSION_REFRESH_BELOW_MS = 15 * 24 * 60 * 60 * 1000; // renew player sessi
 const LAST_SEEN_RESOLUTION_MS = 60_000;
 const MIN_ADMIN_KEY_LENGTH = 16;
 
-// Classrooms share one NAT IP, so IP limits only stop scripted floods, not a full class.
-export const REGISTER_LIMIT: RateLimitRule = { bucket: "register-ip", max: 100, windowMs: 60 * 60_000, message: "too many sign-ups from this address" };
+// Sign-up is open (#173), so the IP limit is tighter than in the classroom days. A class sharing one NAT IP
+// can still sign up 20 an hour; more than that is a script.
+export const REGISTER_LIMIT: RateLimitRule = { bucket: "register-ip", max: 20, windowMs: 60 * 60_000, message: "too many sign-ups from this address" };
 const LOGIN_IP_LIMIT: RateLimitRule = { bucket: "login-ip", max: 60, windowMs: 15 * 60_000, message: "too many failed logins from this address" };
 export const LOGIN_USER_LIMIT: RateLimitRule = { bucket: "login-user", max: 8, windowMs: 15 * 60_000, message: "too many failed logins for this username, wait a bit" };
 
 export type Session = { readonly token: string; readonly maxAgeSeconds: number };
 export type AuthResult = { readonly account: AccountView; readonly session: Session };
 export type CredentialsInput = { readonly username: string; readonly password: string; readonly ip: string };
-export type RegisterInput = CredentialsInput & { readonly inviteCode?: string | undefined };
+export type RegisterInput = CredentialsInput & {
+  readonly inviteCode?: string | undefined;
+  /** the hidden honeypot field: people leave it empty */
+  readonly website?: string | undefined;
+  /** how long the form was open before submit */
+  readonly elapsedMs?: number | undefined;
+};
 
 /** Who is behind a session cookie. */
 export type Principal = { readonly kind: "player"; readonly account: AccountRecord } | { readonly kind: "admin" };
@@ -79,11 +86,20 @@ export class AuthService {
 
   async register(input: RegisterInput): Promise<AuthResult> {
     await this.limiter.assertAllowed(REGISTER_LIMIT, input.ip);
+    // Bot checks (#173): a filled honeypot or a form sent faster than a person types. The answer is deliberately
+    // generic, and still counts against the IP limit, so a script learns nothing and can't retry for free.
+    const filledHoneypot = input.website !== undefined && input.website.length > 0;
+    const tooFast = input.elapsedMs !== undefined && input.elapsedMs < MIN_SIGNUP_FORM_MS;
+    if (filledHoneypot || tooFast) {
+      await this.limiter.hit(REGISTER_LIMIT, input.ip);
+      throw new AppError(400, "couldn't create the account, please try again", { code: "signup-refused" });
+    }
     const key = usernameKey(input.username);
     if (RESERVED_USERNAMES.includes(key)) throw new AppError(409, "that username is reserved", { code: "reserved" });
     const hashedKey = sha256Hex(key);
     if (await this.repos.usernames.lookup(hashedKey)) throw new AppError(409, "that username is taken", { code: "username-taken" });
 
+    // The class code no longer decides approval (sign-up is open); a wrong one is still refused so a typo shows.
     const { inviteCode } = await this.settings.get();
     const hasValidCode =
       inviteCode !== null && input.inviteCode !== undefined && input.inviteCode.trim().length > 0 && safeEqual(input.inviteCode.trim().toLowerCase(), inviteCode.toLowerCase());
@@ -98,10 +114,10 @@ export class AuthService {
       username: input.username.trim(),
       usernameKey: key,
       passwordHash: await hashPassword(input.password),
-      status: hasValidCode ? "approved" : "pending",
+      status: "approved",
       sessionEpoch: 0,
       createdAt: nowIso,
-      decidedAt: hasValidCode ? nowIso : null,
+      decidedAt: nowIso,
       lastSeenAt: nowIso,
       lastLoginAt: nowIso,
       mustChangePassword: false,
@@ -197,7 +213,7 @@ export class AuthService {
     const { principal } = await this.authenticate(token);
     if (principal.kind === "admin") throw new AppError(403, "the admin account can't play; sign in as a player", { code: "admin" });
     const account = principal.account;
-    if (account.status === "pending") throw new AppError(403, "waiting for the instructor to approve your account", { code: "pending" });
+    if (account.status === "pending") throw new AppError(403, "this account is waiting for approval", { code: "pending" });
     if (account.status === "rejected") throw new AppError(403, "this account was not approved", { code: "rejected" });
     if (account.mustChangePassword) throw new AppError(403, "set a new password first", { code: "password-change-required" });
     return account;
