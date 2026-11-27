@@ -1,8 +1,10 @@
-// Friendly text for API errors raised by gameplay actions (answers, hints, reveals).
+// Friendly text for API errors raised by gameplay actions (answers, hints, reveals) and failed loads.
 import { ApiError } from "./api";
 import { TA } from "../i18n/strings-account";
+import { TE } from "../i18n/strings-errors";
 import { TG } from "../i18n/strings-game";
 import { T } from "../i18n/strings-player";
+import { classifyLoadError } from "./load-recovery";
 
 export function playErrorText(err: unknown): string {
   if (!(err instanceof ApiError)) return T().genericError;
@@ -13,6 +15,25 @@ export function playErrorText(err: unknown): string {
       return TG().adminBody;
     default:
       if (err.isRateLimited) return TA().rateLimited(err.retryAfterSeconds ?? 60);
+      // The server's own English for these ("sign in required", "forbidden") never reaches the page.
+      if (err.isUnauthorized) return TE().signedOut;
+      if (err.status === 403) return TE().forbidden;
+      if (err.status === 0) return TE().loadFailedOffline;
+      if (err.status >= 500) return TE().loadFailedServer;
       return err.message;
+  }
+}
+
+/** Why a panel's data did not load, in the reader's language (offline, server error, or generic). */
+export function loadErrorText(err: unknown): string {
+  switch (classifyLoadError(err, navigator.onLine)) {
+    case "offline":
+      return TE().loadFailedOffline;
+    case "server":
+      return TE().loadFailedServer;
+    case "chunk":
+      return TE().loadFailedCode;
+    case "other":
+      return TE().loadFailedOther;
   }
 }
