@@ -38,7 +38,7 @@ plan allows 125,000 function calls a month.
   starts within an hour, every 2 minutes otherwise. It doesn't poll at all while the tab is hidden, and polls
   once when the tab comes back.
 - Errors are non-2xx with body `{ "error": string, "code"?: string, "retryAfterSeconds"?: number, "details"?: string[] }` (`details` lists every failed check of a rejected upload). Status codes: 400 validation, 401 signed out, 403 forbidden (see codes), 404, 405, 409 conflict (username taken, already finished, no more hints, concurrent update: retry), 413, 415, 429 rate limit (also sends `Retry-After`), 500 `{"error":"internal"}`, 503 admin disabled.
-- Error codes the UI acts on: `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `not-today`, `event-closed`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`.
+- Error codes the UI acts on: `signed-out`, `bad-credentials`, `bad-recovery-code`, `signup-refused`, `username-taken`, `reserved`, `bad-invite-code`, `pending`, `rejected`, `admin`, `password-change-required`, `not-today`, `event-closed`, `locked`, `unknown-case`, `unknown-command`, `rate-limited`, and for classes (#179) `guest`, `not-class-admin`, `not-class-owner`, `class-limit`, `class-full`, `class-archived`, `owner-locked`, `pending-member`.
 
 ## Accounts and sessions
 
@@ -228,6 +228,71 @@ may reclaim unreferenced ones). CLI: `scripts/data.ts upload` (see `docs/CASE_CO
 | GET | `/api/admin/trash` | | `{entries}` soft-deleted accounts, cases and progress resets, newest first (expire after 7 days) |
 | POST | `/api/admin/trash/:id/restore` | `{}` | `{restored, skipped}` (never overwrites newer data; 409 `conflict` if the account or username exists again, or the case is no longer deleted) |
 
+### Classes (#179)
+
+Classes are server-side only for now: the class UI is #182, gameplay gating by class is #180 and the class board
+is #181. The site schedule, event and class code (`config:*`) still gate play as before. Every class response is
+personalised (`no-store`). Contract: the "classes" section of `site/shared/contract.ts`. Implementation:
+`ClassController` → `ClassService` → `ClassRepository`.
+
+- **Who may call:** an approved full account (pending, rejected and forced-password-change accounts get the
+  usual 403 codes), or the site admin (`X-Admin-Key` or the `admin` session), who passes every class check
+  without being a member. Guests get 403 `guest` on create and join, an empty list, and 404 elsewhere.
+- **Non-members get 404** on every `/api/classes/:id/*` route, the same as for an id that doesn't exist. Members
+  who lack the right get 403 `not-class-admin` or `not-class-owner`.
+- **Limits:** an account owns at most `account.classLimit ?? 3` active classes (409 `class-limit`; archived
+  classes don't count, and restoring one counts again). Creates are limited to 10 per account per day (429). A
+  class holds at most `memberLimit` (default 60) members, counting pending requests (409 `class-full`). The site
+  admin sets both. Caps hold under concurrent requests: a create or join writes its record and then counts, and
+  backs out if the count is over.
+- **Join codes:** `ABCDE-FGHJK` (2 groups of 5 from `23456789ABCDEFGHJKMNPQRSTUVWXYZ`, about 49 bits); case,
+  spaces and dashes don't matter. An unknown code, or the code of an archived class, is a generic 404. Wrong
+  codes count against 30 per IP and 10 per account per hour (429); right codes never do, so a class behind one
+  NAT can all join. Joining again is a no-op (200 with the current membership). In `joinMode: "code"` a joiner is
+  `active` at once; in `"approval"` they are `pending` until a class admin approves.
+- **Board token:** `<classId>.<32 base64url chars>`, unguessable, and rotatable by class admins. Only active
+  members and admins get it. The board route that reads it is #181.
+- **No class admin may reset a password** or see anything of an account beyond its username and (later) its class
+  progress: a reset by a class admin would allow account takeover. Only the site admin resets passwords.
+- **Archiving is the soft delete:** nothing is removed. An archived class takes no joins and no edits (409
+  `class-archived`); members still see it and may leave; the owner or the site admin restores it.
+- Every write is in the audit log (`class.*`, target = class id, detail ends with `by <username>`).
+
+| Method | Path | Body | Who | Response |
+|---|---|---|---|---|
+| POST | `/api/classes` | `{name}` (1–60 chars) | approved user, site admin | 201 `{class: ClassDetail}`; the creator becomes the active owner admin (the site admin's classes are owned by `admin`, with no member row) |
+| GET | `/api/classes` | | any player | `{classes: ClassSummary[]}`, mine, from `memberof:` (sorted by name) |
+| POST | `/api/classes/join` | `{code}` | approved user | `{class: ClassSummary}` |
+| GET | `/api/classes/:id` | | member | `{class: ClassDetail}`: pending requests get `id, name, status, membership`; active members also `schedule, event, caseIds, boardToken`; admins also `admin: {ownerId, joinMode, joinCode, memberLimit, createdAt, updatedAt}` |
+| PATCH | `/api/classes/:id` | any of `{name, joinMode, schedule: {timezone, defaultCaseId, days}, event: {name, startsAt, endsAt, freezeAt, announcement}, caseIds}` (up to 64 KB) | class admin | `{class}`; case ids must be published (400 `unknown-case`), the time zone valid, the event window sane |
+| POST | `/api/classes/:id/archive` | `{}` | owner | `{class}` |
+| POST | `/api/classes/:id/restore` | `{}` | owner | `{class}` (409 `class-limit` if the owner is at the limit; the site admin may go past it) |
+| POST | `/api/classes/:id/join-code/rotate` | `{}` | class admin | `{class}`; the old code stops working at once |
+| POST | `/api/classes/:id/board-token/rotate` | `{}` | class admin | `{class}`; old board links stop working |
+| GET | `/api/classes/:id/members` | | class admin | `{members: [{accountId, username, role, status, isOwner, joinedAt, decidedAt}]}` |
+| POST | `/api/classes/:id/members/:accountId/approve` | `{}` | class admin | `{member}` (idempotent) |
+| POST | `/api/classes/:id/members/:accountId/remove` | `{}` | see the matrix | 204 (a removed account can join again with the code: rotate it to stop that) |
+| POST | `/api/classes/:id/members/:accountId/role` | `{role: "member"\|"admin"}` | owner | `{member}`; active members only (409 `pending-member`) |
+| POST | `/api/classes/:id/leave` | `{}` | member | 204; the owner can't leave (409 `owner-locked`): they archive instead |
+| GET | `/api/admin/classes` | | site admin | `{classes: [{id, name, status, ownerId, joinMode, memberLimit, members, createdAt}]}` (newest first) |
+| PUT | `/api/admin/classes/:id/limits` | `{memberLimit}` (1–1000) | site admin | `{class}` |
+| PUT | `/api/admin/accounts/:id/class-limit` | `{classLimit}` (0–100, or null for the default 3) | site admin | `{accountId, classLimit}` |
+
+**Permission matrix.** "Class admin" means the owner or an active co-admin. Pending members are members only
+for viewing and leaving.
+
+| Action | Owner | Co-admin | Member | Pending | Site admin | Non-member |
+|---|---|---|---|---|---|---|
+| View the class | full | full | member view | name only | full | 404 |
+| Edit settings, list members, approve requests, rotate the code or the board token | yes | yes | 403 | 403 | yes | 404 |
+| Archive, restore | yes | 403 | 403 | 403 | yes | 404 |
+| Remove a member or a pending request | yes | yes | 403 | 403 | yes | 404 |
+| Remove a co-admin | yes | 403 | 403 | 403 | yes | 404 |
+| Promote or demote | yes | 403 | 403 | 403 | yes | 404 |
+| Remove or demote the owner | 409 | 409 (remove) / 403 (demote) | 403 | 403 | 409 | 404 |
+| Leave | 409 | yes | yes | yes | 403 `admin` | 404 |
+| Reset a member's password | never (only the site admin, through `/api/admin`) | never | never | never | yes | |
+
 ## Schedule ("incident of the day")
 
 `Schedule = { timezone, defaultCaseId, days: {"YYYY-MM-DD": caseId}, lockToToday }`. "Today" is the
@@ -249,7 +314,8 @@ Rules for changing stored data, backups, restores and migrations: see `docs/DATA
 
 One Netlify Blobs store, `incidentlab-v2`, with key prefixes: `account:`, `username:` (index),
 `session:`, `progress:<caseId>:<accountId>`, `config:schedule`, `config:settings`, `config:event`,
-`firstblood:<caseId>:<questionId>`, `audit:<iso>:<rand>`, `ratelimit:`, and for DB-stored cases `case:`,
+`firstblood:<caseId>:<questionId>`, `audit:<iso>:<rand>`, `ratelimit:`, for classes `class:`, `classcode:`,
+`classmember:` and `memberof:`, and for DB-stored cases `case:`,
 `evidence:` and `upload:` (shapes in `docs/DATA.md`). Records written before scoring v2
 still parse (new fields have defaults); stages solved before it keep their points. The pre-accounts store
 `incidentlab-players` is no longer read.
