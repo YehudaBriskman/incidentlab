@@ -278,14 +278,17 @@ function draw(root: HTMLElement, account: AccountView, stats: UserStats, board: 
         regionLabel: TO().perCaseRegion,
         stackOnPhone: true,
       }).element,
-      h(
-        "details",
-        { class: "pw-section" },
-        h("summary", { class: "section-title" }, TG().pwTitle),
-        passwordChangeForm({ forced: false, idPrefix: "me-pw", onChanged: (account) => setAccount(account) }),
-      ),
+      // Password and recovery code are for accounts only (#207): a guest has neither, and gets the upgrade card above.
+      account.kind === "user"
+        ? h(
+            "details",
+            { class: "pw-section" },
+            h("summary", { class: "section-title" }, TG().pwTitle),
+            passwordChangeForm({ forced: false, idPrefix: "me-pw", onChanged: (changed) => setAccount(changed) }),
+          )
+        : null,
       // Recovery code (#174): replace it, with the current password. Kept in its own section (auth.ts owns it).
-      recoveryCodeSection(stats.username),
+      account.kind === "user" ? recoveryCodeSection(stats.username) : null,
     ),
   );
 }
