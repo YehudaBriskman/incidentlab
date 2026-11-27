@@ -275,5 +275,5 @@ test("gameplay never blocks on the site schedule, the site event or a class wind
   at("2026-12-02T15:00:00Z");
   for (const [i, answer] of ALL_ANSWERS.entries()) await expectStatus(ada.call("/cases/beta/answer", { body: { questionId: `q${i + 2}`, answer } }), 200);
   const stats = UserStatsResponseSchema.parse(await (await ada.call("/me/stats")).json());
-  assert.deepEqual(stats.stats.streak, { current: 2, best: 2 });
+  assert.deepEqual(stats.stats.streak, { current: 2, best: 2, activeToday: true });
 });

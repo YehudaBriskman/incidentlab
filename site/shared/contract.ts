@@ -196,8 +196,8 @@ export const UserStatsSchema = z.object({
   classLimit: z.number().int().min(0).nullable().default(null),
   commandsRevealed: z.number().int().min(0),
   achievements: z.array(z.object({ id: z.string(), earnedAt: z.string() })),
-  /** consecutive incident-of-the-day dates completed on that date */
-  streak: z.object({ current: z.number().int().min(0), best: z.number().int().min(0) }),
+  /** `activeToday`: a stage was solved today (schedule time zone), so the streak is safe (#212); older servers omit it */
+  streak: z.object({ current: z.number().int().min(0), best: z.number().int().min(0), activeToday: z.boolean().default(false) }),
   cases: z.array(CaseStatsSchema),
 });
 export type UserStats = z.infer<typeof UserStatsSchema>;
