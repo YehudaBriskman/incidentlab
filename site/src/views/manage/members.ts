@@ -5,15 +5,15 @@
 // admin dashboard mounts it with /api/admin/* and a class dashboard can mount it with class-scoped calls.
 import { T } from "../../i18n/strings-tools";
 import { getLang } from "../../i18n/i18n";
-import { TRASH_RETENTION_DAYS, type AccountRecordRole, type AccountStatus, type AccountView, type UserStats } from "../../../shared/contract";
+import type { AccountStatus, UserStats } from "../../../shared/contract";
 import { dataTable, type Column } from "../../components/dataTable";
 import { statGrid } from "../../components/statGrid";
 import type { SortState } from "../../components/table-core";
 import { copyButton, h, setChildren } from "../../lib/dom";
-import { openDialog, type MenuItem } from "../../lib/overlay";
 import { errMessage, fmtInt, formatDateTime, formatPct, ms, relativeAgo } from "./format";
 import { NARROW_QUERY, setTilesSummary, syncSortSelect, type ManageHost, type Slot } from "./host";
 import { acctExtras, caseStatsList, caseStatsTable, rolePill, statusPill } from "./memberDetails";
+import { createMemberActions, type MemberActionsApi } from "./memberActions";
 import { createPendingPanel, type PendingApi } from "./pending";
 import { headWithHint, tile, tipped } from "./ui";
 
@@ -22,15 +22,11 @@ const ACCT_COLS_STORAGE = "il.adminAcctCols";
 type AcctSortKey = "rank" | "newest" | "seen" | "name";
 type AcctFilter = "all" | AccountStatus;
 
-export type MembersApi = PendingApi & {
-  setStatus(accountId: string, action: "approve" | "reject"): Promise<AccountView>;
-  setRole(accountId: string, role: AccountRecordRole): Promise<AccountView>;
-  /** Resolves to a one-time temporary password, shown once in a dialog. */
-  resetPassword(accountId: string): Promise<string>;
-  deleteAccount(accountId: string): Promise<void>;
-  /** The full per-account export as a CSV file. */
-  exportCsv(): Promise<{ blob: Blob; filename: string }>;
-};
+export type MembersApi = PendingApi &
+  MemberActionsApi & {
+    /** The full per-account export as a CSV file. */
+    exportCsv(): Promise<{ blob: Blob; filename: string }>;
+  };
 
 export type MembersOptions = {
   host: ManageHost;
@@ -314,136 +310,19 @@ export function createMembersPanel(opts: MembersOptions): MembersPanel {
     }
   }
 
-  // ---- one-time temporary password (a dialog from lib/overlay.ts) ----
-  async function showTempPassword(username: string, password: string): Promise<void> {
-    let copied = false;
-    // The password exists only in this dialog: Done or Escape without copying asks first, and "Back" reopens it.
-    for (;;) {
-      const copy = copyButton(() => password, T().admCopyPassword);
-      copy.addEventListener("click", () => (copied = true));
-      await openDialog({
-        size: "sm",
-        title: T().admTempPwTitle(username),
-        className: "admin-pw-dialog",
-        body: [h("p", { class: "muted" }, T().admTempPwHelp), h("div", { class: "admin-share admin-pw" }, h("code", { class: "admin-share-url admin-pw-value" }, password), copy)],
-        actions: [{ value: "done", label: T().admDone, tone: "primary", autofocus: true }],
-      });
-      if (copied) break;
-      const close = await host.askConfirm({
-        title: T().admPwUncopiedTitle,
-        body: T().admPwUncopiedBody,
-        confirmLabel: T().admPwCloseAnyway,
-        cancelLabel: T().admPwBack,
-        tone: "danger",
-      });
-      if (close || host.disposed()) break;
-    }
-  }
-
-  async function changeStatus(account: UserStats, action: "approve" | "reject"): Promise<void> {
-    const busyKey = `status:${account.accountId}`;
-    busy.add(busyKey);
-    rerender();
-    try {
-      const updated = await opts.api.setStatus(account.accountId, action);
-      const list = opts.accounts.get();
-      if (list) opts.accounts.set(list.map((a) => (a.accountId === updated.id ? { ...a, status: updated.status } : a)));
-      host.setBanner(null);
-      host.refresh();
-    } catch (err: unknown) {
-      host.showActionError(err);
-    } finally {
-      busy.delete(busyKey);
-      if (opts.accounts.get()) rerender();
-    }
-  }
-
-  async function changeRole(account: UserStats, role: AccountRecordRole): Promise<void> {
-    const busyKey = `status:${account.accountId}`;
-    busy.add(busyKey);
-    rerender();
-    try {
-      const updated = await opts.api.setRole(account.accountId, role);
-      const list = opts.accounts.get();
-      if (list) opts.accounts.set(list.map((a) => (a.accountId === updated.id && updated.role !== "admin" ? { ...a, role: updated.role } : a)));
-    } catch (err: unknown) {
-      host.showActionError(err);
-    } finally {
-      busy.delete(busyKey);
-      if (opts.accounts.get()) rerender();
-    }
-  }
-
-  /** Menu items for one account: status changes first, then the password reset, Delete last (danger). */
-  function acctMenuItems(a: UserStats): MenuItem[] {
-    const key = `acct:${a.accountId}`;
-    const items: MenuItem[] = [];
-    if (a.status !== "approved") items.push({ label: T().admApprove, run: () => void changeStatus(a, "approve") });
-    // Revoke signs the player out at once, so it asks first: approving again later can't bring the session back.
-    if (a.status === "approved") {
-      items.push({
-        label: T().admRevoke,
-        run: () =>
-          void host.askConfirm({
-            title: T().admRevokeTitle(a.username),
-            body: T().admRevokeBody,
-            confirmLabel: T().admRevokeConfirm,
-            tone: "danger",
-            returnFocus: () => host.menuTriggerEl(key),
-          }).then((ok) => {
-            if (ok) void changeStatus(a, "reject");
-          }),
-      });
-    } else if (a.status === "pending") items.push({ label: T().admReject, run: () => void changeStatus(a, "reject") });
-    items.push(a.role === "author" ? { label: T().admRemoveAuthor, run: () => void changeRole(a, "player") } : { label: T().admMakeAuthor, run: () => void changeRole(a, "author") });
-    items.push({
-      label: T().admResetPwItem,
-      run: () =>
-        void host.askConfirm({
-          title: T().admResetPwTitle(a.username),
-          body: T().admResetPwBody,
-          confirmLabel: T().admResetPwLabel(a.username),
-          busyLabel: T().admResettingPw,
-          tone: "primary",
-          run: async () => {
-            const password = await opts.api.resetPassword(a.accountId);
-            void showTempPassword(a.username, password);
-          },
-          returnFocus: () => host.menuTriggerEl(key),
-        }),
-    });
-    items.push({
-      label: T().admDeleteItem,
-      tone: "danger",
-      run: () =>
-        void host.askConfirm({
-          title: T().admDeleteTitle(a.username),
-          body: T().admDeleteBody(TRASH_RETENTION_DAYS),
-          confirmLabel: T().admDeleteLabel(a.username),
-          cancelLabel: T().admKeepAccount,
-          busyLabel: T().admDeleting,
-          tone: "danger",
-          typedName: a.username,
-          run: async () => {
-            await opts.api.deleteAccount(a.accountId);
-            expandedIds.delete(a.accountId);
-            const list = opts.accounts.get();
-            if (list) opts.accounts.set(list.filter((x) => x.accountId !== a.accountId));
-            rerender();
-            host.refresh();
-          },
-          returnFocus: () => host.menuTriggerEl(key) ?? acctSearchInput,
-        }).then(async (ok) => {
-          if (!ok) return;
-          await opts.onDeleted?.(a);
-        }),
-    });
-    return items;
-  }
-
-  function acctMenu(a: UserStats): HTMLButtonElement {
-    return host.menuButton(T().admActionsFor(a.username), `acct:${a.accountId}`, () => acctMenuItems(a));
-  }
+  // Row actions (manage/memberActions.ts): the status, role, password and delete flows.
+  const actions = createMemberActions({
+    host,
+    accounts: opts.accounts,
+    api: opts.api,
+    busy,
+    rerender: () => rerender(),
+    onDeleting: (id) => expandedIds.delete(id),
+    fallbackFocus: () => acctSearchInput,
+    onDeleted: opts.onDeleted,
+  });
+  const changeStatus = actions.changeStatus;
+  const acctMenu = actions.menu;
 
   function acctSignature(a: UserStats, now: number): string {
     const id = a.accountId;
