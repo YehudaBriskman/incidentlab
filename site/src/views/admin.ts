@@ -7,11 +7,8 @@ import { T } from "../i18n/strings-tools";
 import { getLang } from "../i18n/i18n";
 import {
   TRASH_RETENTION_DAYS,
-  type AccountRecordRole,
-  type AccountStatus,
   type AdminProgress,
   type AuditEntry,
-  type CaseStats,
   type CaseSummary,
   type LeaderboardResponse,
   type LiveEvent,
@@ -34,7 +31,7 @@ import { clickClosedDrawer, navSubLink, refreshNav, showSubNav } from "../shell/
 import { setPageCrumb } from "../shell/topbar";
 import { scrollerOf } from "../shell/scroll";
 import type { NavSection, ViewResult } from "../shell/types";
-import { banner, closeMenu, openDialog, showDialog, toast, tooltip, type DialogHandle, type MenuItem } from "../lib/overlay";
+import { banner, closeMenu, showDialog, toast, tooltip, type DialogHandle } from "../lib/overlay";
 import {
   AdminApiError,
   approveAll,
@@ -118,6 +115,7 @@ import {
   type LiveSortKey,
 } from "./manage/progressMetrics";
 import { headWithHint, th, tile, tipped } from "./manage/ui";
+import { createMembersPanel } from "./manage/members";
 import { NARROW_QUERY, createManageHost, setTilesSummary, syncSortSelect } from "./manage/host";
 
 const POLL_MS = 5000;
@@ -127,7 +125,6 @@ const TODAY_REFRESH_MS = 60_000;
 const BOARD_ROWS = 10;
 const MAX_BACKOFF_MS = 60000;
 const DENSITY_STORAGE = "il.adminDensity";
-const ACCT_COLS_STORAGE = "il.adminAcctCols";
 const TAB_STORAGE = "il.adminTab";
 const DEFAULT_TIMEZONE = "Asia/Jerusalem";
 
@@ -150,8 +147,6 @@ const AUDIT_LIMIT = 100;
 const EVENT_QUICK_MINUTES = 60;
 const INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O, 1/I/L: easy to read aloud and type
 
-type AcctSortKey = "rank" | "newest" | "seen" | "name";
-type AcctFilter = "all" | AccountStatus;
 type AuthMode = "key" | "session";
 /** "Hardest question" needs at least this many players who reached it. */
 const HARDEST_MIN_PLAYERS = 3;
@@ -193,27 +188,6 @@ function timeZoneList(): string[] {
     return Intl.supportedValuesOf("timeZone");
   } catch {
     return [DEFAULT_TIMEZONE, "UTC"];
-  }
-}
-
-// ---- accounts ---------------------------------------------------------------------
-
-function sortAccounts(list: readonly UserStats[], key: AcctSortKey): UserStats[] {
-  const byName = (a: UserStats, b: UserStats): number => a.username.localeCompare(b.username);
-  const desc = (a: string | null, b: string | null): number => (ms(b) ?? 0) - (ms(a) ?? 0);
-  const out = [...list];
-  switch (key) {
-    case "rank":
-      return out.sort(
-        (a, b) =>
-          (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER) || b.totalScore - a.totalScore || byName(a, b),
-      );
-    case "newest":
-      return out.sort((a, b) => desc(a.createdAt, b.createdAt) || byName(a, b));
-    case "seen":
-      return out.sort((a, b) => desc(a.lastSeenAt, b.lastSeenAt) || byName(a, b));
-    case "name":
-      return out.sort(byName);
   }
 }
 
@@ -434,20 +408,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     liveDensity: (readPref(DENSITY_STORAGE) === "compact" ? "compact" : "comfortable") as "compact" | "comfortable",
     /** phone/tablet layout (cards instead of grids, compact chrome) */
     narrow: window.matchMedia(NARROW_QUERY).matches,
-    /** pending sign-ups ticked for a bulk approve/reject */
-    pendingSelected: new Set<string>(),
-    // accounts tab
-    acctSort: "rank" as AcctSortKey,
-    acctFilter: "all" as AcctFilter,
-    acctSearch: "",
-    expanded: new Set<string>(),
-    tempPassword: null as { username: string; password: string } | null,
-    approvedMsg: null as string | null,
-    exporting: false,
     // live tab: players whose score breakdown is open
     liveExpanded: new Set<string>(),
-    // shared: in-flight row actions
-    busy: new Set<string>(),
     // schedule tab
     schedule: {
       server: null as Schedule | null,
@@ -496,7 +458,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     },
     syncSaveBar: () => syncSaveBarClass(),
   });
-  const { askConfirm, menuButton, menuTriggerEl, foldableTiles, showActionError, withFocusKept } = host;
+  const { askConfirm, menuButton, menuTriggerEl, foldableTiles, withFocusKept } = host;
 
   const stopTimers = (): void => {
     if (pollId !== null) window.clearTimeout(pollId);
@@ -975,261 +937,41 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   }
 
   // =====================================================================================
-  // Accounts tab
+  // Accounts tab: the members panel (views/manage/members.ts) on the admin API, then the trash and invite code
   // =====================================================================================
 
-  const acctTilesEl = statGrid([], "admin-tiles");
-  acctTilesEl.id = "admin-acct-tiles";
-  const acctTiles = foldableTiles(acctTilesEl);
-  const pendingBulkEl = h("div", { class: "pending-bulk" });
-  const pendingEl = h("div", { class: "pending-wrap" });
-  const approveAllEl = h("div", { class: "pending-approve-all" });
-  const pendingStatusEl = h("p", { class: "muted small pending-status", role: "status" });
-  const pendingCountEl = h("span", { class: "count-badge" });
-  const acctCountEl = h("span", { class: "muted small" });
-  const acctTableEl = h("div", { class: "admin-table-wrap" });
-  let pendingSig = "";
-
-  const acctSearchInput = h("input", {
-    type: "search",
-    class: "admin-input admin-search",
-    enterkeyhint: "search",
-    dir: "auto",
-    placeholder: T().admSearchPlaceholder,
-    "aria-label": T().admSearchLabel,
+  const members = createMembersPanel({
+    host,
+    accounts: {
+      get: () => state.accounts?.accounts ?? null,
+      set: (list) => {
+        if (state.accounts && list) state.accounts = { ...state.accounts, accounts: [...list] };
+      },
+    },
+    api: {
+      setStatus: setAccountStatus,
+      setRole: setAccountRole,
+      setStatuses: setAccountsStatus,
+      approveAll,
+      resetPassword: resetAccountPassword,
+      deleteAccount,
+      exportCsv: fetchExportCsv,
+    },
+    onDeleted: async (a) => {
+      const entry = await newestTrash((e) => e.kind === "account" && e.label === `account ${a.username}`);
+      undoToast(T().admDeletedToast(a.username, TRASH_RETENTION_DAYS), entry);
+    },
+    // The pending count is on the Accounts link in the sidebar too (badge and rail tooltip).
+    onPendingCount: (n) => {
+      pendingTabBadge.textContent = fmtInt(n);
+      pendingTabBadge.hidden = n === 0;
+      pendingTabBadge.setAttribute("aria-label", T().admPendingBadge(n));
+      const railLabel = n === 0 ? tabLabel("accounts") : `${tabLabel("accounts")}, ${T().admPendingBadge(n)}`;
+      for (const link of sectionLinks.get("accounts") ?? []) link.dataset.navTip = railLabel;
+      refreshNav();
+    },
+    rerender: () => renderAccounts(),
   });
-  acctSearchInput.addEventListener("input", () => {
-    state.acctSearch = acctSearchInput.value;
-    renderAccountsTable();
-  });
-  const acctFilterSelect = h(
-    "select",
-    { class: "admin-input", "aria-label": T().admFilterStatusLabel },
-    h("option", { value: "all" }, T().admFilterAll),
-    h("option", { value: "pending" }, T().admAcctStatus("pending")),
-    h("option", { value: "approved" }, T().admAcctStatus("approved")),
-    h("option", { value: "rejected" }, T().admAcctStatus("rejected")),
-  );
-  acctFilterSelect.addEventListener("change", () => {
-    const v = acctFilterSelect.value;
-    if (v === "all" || v === "pending" || v === "approved" || v === "rejected") {
-      state.acctFilter = v;
-      renderAccountsTable();
-    }
-  });
-  const acctSortSelect = h(
-    "select",
-    { class: "admin-input", "aria-label": T().admSortLabel },
-    h("option", { value: "rank" }, T().admSortRank),
-    h("option", { value: "newest" }, T().admSortNewest),
-    h("option", { value: "seen" }, T().admSortSeen),
-    h("option", { value: "name" }, T().admSortName),
-    h("option", { value: "custom", hidden: true, disabled: true }, T().admSortCustom),
-  );
-  acctSortSelect.addEventListener("change", () => {
-    const v = acctSortSelect.value;
-    if (v === "rank" || v === "newest" || v === "seen" || v === "name") {
-      state.acctSort = v;
-      acctTable.setSort(ACCT_SORTS[v]);
-    }
-  });
-
-  // The accounts table (components/dataTable.ts): User and Status lead, the actions menu ends the row, and the
-  // rest come from the column picker (remembered). Headers sort; the Sort select drives the same sort, and on
-  // phones and tablets (cards, no headers) it is the only way to sort. Rows are keyed, so focus survives polling.
-  let acctNow = Date.now();
-  const acctColumns: Column<UserStats>[] = [
-    {
-      id: "name",
-      header: T().admColUser,
-      rowHeader: true,
-      className: "col-name",
-      cell: (a) => acctToggle(a, `acct-detail-${a.accountId}`),
-      sortValue: (a) => a.username,
-      csv: (a) => a.username,
-    },
-    { id: "status", header: T().admColStatus, cell: (a) => [statusPill(a.status), rolePill(a)], sortValue: (a) => a.status, csv: (a) => a.status },
-    {
-      id: "score",
-      header: T().admColScore,
-      numeric: true,
-      hideable: true,
-      className: "col-score",
-      cell: (a) => fmtInt(a.totalScore),
-      sortValue: (a) => a.totalScore,
-      sortFirst: "desc",
-      csv: (a) => a.totalScore,
-    },
-    { id: "rank", header: T().admColRank, numeric: true, hideable: true, cell: (a) => (a.rank === null ? "—" : fmtInt(a.rank)), sortValue: (a) => a.rank, csv: (a) => a.rank },
-    {
-      id: "completed",
-      header: T().admColCompleted,
-      numeric: true,
-      hideable: true,
-      cell: (a) => h("span", { title: T().admStartedCount(a.casesStarted) }, T().admOfN(fmtInt(a.casesCompleted), fmtInt(a.casesStarted))),
-      sortValue: (a) => a.casesCompleted,
-      sortFirst: "desc",
-      csv: (a) => a.casesCompleted,
-    },
-    { id: "accuracy", header: T().admColAccuracy, numeric: true, hideable: true, cell: (a) => formatPct(a.accuracy), sortValue: (a) => a.accuracy, sortFirst: "desc", csv: (a) => a.accuracy },
-    {
-      id: "seen",
-      header: T().admColSeen,
-      hideable: true,
-      className: "col-seen muted",
-      cell: (a) => tipped(h("span", {}, relativeAgo(a.lastSeenAt, acctNow)), formatDateTime(a.lastSeenAt)),
-      sortValue: (a) => ms(a.lastSeenAt),
-      sortFirst: "desc",
-      csv: (a) => a.lastSeenAt,
-    },
-    {
-      id: "created",
-      header: T().admColCreated,
-      hideable: true,
-      defaultHidden: true,
-      className: "col-seen muted",
-      cell: (a) => formatDateTime(a.createdAt),
-      sortValue: (a) => ms(a.createdAt),
-      sortFirst: "desc",
-      csv: (a) => a.createdAt,
-    },
-    { id: "hints", header: T().admColHints, numeric: true, hideable: true, defaultHidden: true, cell: (a) => fmtInt(a.hintsUsed), sortValue: (a) => a.hintsUsed, sortFirst: "desc", csv: (a) => a.hintsUsed },
-    { id: "wrong", header: T().admColWrong, numeric: true, hideable: true, defaultHidden: true, cell: (a) => fmtInt(a.wrongAttempts), sortValue: (a) => a.wrongAttempts, sortFirst: "desc", csv: (a) => a.wrongAttempts },
-    {
-      id: "commands",
-      header: T().admColCommands,
-      numeric: true,
-      hideable: true,
-      defaultHidden: true,
-      cell: (a) => fmtInt(a.commandsRevealed),
-      sortValue: (a) => a.commandsRevealed,
-      sortFirst: "desc",
-      csv: (a) => a.commandsRevealed,
-    },
-    {
-      id: "badges",
-      header: T().admColBadges,
-      numeric: true,
-      hideable: true,
-      defaultHidden: true,
-      cell: (a) => h("span", { title: T().admBadgesTip(a.achievements.map((x) => T().admAchievement(x.id)).join(", ")) }, fmtInt(a.achievements.length)),
-      sortValue: (a) => a.achievements.length,
-      sortFirst: "desc",
-      csv: (a) => a.achievements.length,
-    },
-    {
-      id: "streak",
-      header: T().admColStreak,
-      numeric: true,
-      hideable: true,
-      defaultHidden: true,
-      cell: (a) => h("span", { title: T().admStreakTip(a.streak.current, a.streak.best) }, T().admOfN(fmtInt(a.streak.current), fmtInt(a.streak.best))),
-      sortValue: (a) => a.streak.current,
-      sortFirst: "desc",
-      csv: (a) => a.streak.current,
-    },
-    { id: "actions", header: T().admColActions, headerHidden: true, className: "col-actions", cell: (a) => acctMenu(a) },
-  ];
-
-  /** The Sort select's choices as table sorts (the select stays: cards have no headers to click). */
-  const ACCT_SORTS: Record<AcctSortKey, SortState> = {
-    rank: { id: "rank", dir: "asc" },
-    newest: { id: "created", dir: "desc" },
-    seen: { id: "seen", dir: "desc" },
-    name: { id: "name", dir: "asc" },
-  };
-  const acctTable = dataTable<UserStats>({
-    columns: acctColumns,
-    rows: [],
-    rowKey: (a) => a.accountId,
-    rowSig: (a) => acctSignature(a, acctNow),
-    rowAttrs: (a) => ({ class: `acct-row is-${a.status}${state.expanded.has(a.accountId) ? " is-expanded" : ""}`, "data-id": a.accountId }),
-    detail: (a) =>
-      state.expanded.has(a.accountId)
-        ? {
-            attrs: { class: "acct-detail", id: `acct-detail-${a.accountId}` },
-            content: h(
-              "div",
-              { class: "acct-detail-inner" },
-              h("p", { class: "admin-label" }, T().admPerCaseTitle(a.username)),
-              caseStatsTable(a.cases),
-              h("p", { class: "muted small acct-detail-meta" }, acctExtras(a)),
-            ),
-          }
-        : null,
-    labelledBy: "admin-accounts-title",
-    className: "admin-table acct-table",
-    wrapClass: "admin-dt",
-    initialSort: ACCT_SORTS[state.acctSort],
-    columnPicker: {
-      label: T().admColumns,
-      legend: T().admColumnsLegend,
-      resetLabel: T().admColumnsReset,
-      storageKey: ACCT_COLS_STORAGE,
-      countLabel: T().admColumnsCount,
-    },
-    virtualize: { rowHeight: 56 },
-    cards: { query: NARROW_QUERY, build: (a) => buildAcctCard(a, acctNow), className: "acct-cards", labelledBy: "admin-accounts-title" },
-    onSortChange: (s) => syncSortSelect(acctSortSelect, ACCT_SORTS, s),
-  });
-
-  // ---- CSV export ----
-  const exportBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm", title: T().admExportHint }, T().admExportCsv);
-  exportBtn.addEventListener("click", () => void exportCsv());
-
-  async function exportCsv(): Promise<void> {
-    if (state.exporting) return;
-    state.exporting = true;
-    exportBtn.disabled = true;
-    exportBtn.textContent = T().admExporting;
-    try {
-      const { blob, filename } = await fetchExportCsv();
-      const url = URL.createObjectURL(blob);
-      const a = h("a", { href: url, download: filename, hidden: true });
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 10000);
-    } catch (err: unknown) {
-      if (!handleAuthError(err)) {
-        state.banner = T().admExportFailed(errMessage(err));
-        renderBanner();
-      }
-    } finally {
-      state.exporting = false;
-      exportBtn.disabled = false;
-      exportBtn.textContent = T().admExportCsv;
-    }
-  }
-
-  // ---- one-time temporary password (a dialog from lib/overlay.ts) ----
-  async function showTempPassword(username: string, password: string): Promise<void> {
-    state.tempPassword = { username, password };
-    let copied = false;
-    // The password exists only in this dialog: Done or Escape without copying asks first, and "Back" reopens it.
-    for (;;) {
-      const copy = copyButton(() => password, T().admCopyPassword);
-      copy.addEventListener("click", () => (copied = true));
-      await openDialog({
-        size: "sm",
-        title: T().admTempPwTitle(username),
-        className: "admin-pw-dialog",
-        body: [h("p", { class: "muted" }, T().admTempPwHelp), h("div", { class: "admin-share admin-pw" }, h("code", { class: "admin-share-url admin-pw-value" }, password), copy)],
-        actions: [{ value: "done", label: T().admDone, tone: "primary", autofocus: true }],
-      });
-      if (copied) break;
-      const close = await askConfirm({
-        title: T().admPwUncopiedTitle,
-        body: T().admPwUncopiedBody,
-        confirmLabel: T().admPwCloseAnyway,
-        cancelLabel: T().admPwBack,
-        tone: "danger",
-      });
-      if (close || disposed) break;
-    }
-    // Shown once: the dialog left the DOM on close; drop it from memory too.
-    state.tempPassword = null;
-  }
 
   /**
    * The trash entry a soft delete just created (newest first from the server), for the Undo in its toast.
@@ -1464,29 +1206,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   function buildAccountsPanel(): void {
     setChildren(
       tabPanels.get("accounts") ?? container,
-      acctTiles,
-      h(
-        "section",
-        { class: "panel admin-panel pending-panel", "aria-labelledby": "admin-pending-title" },
-        h("div", { class: "admin-table-head" }, h("h2", { class: "admin-h2", id: "admin-pending-title" }, T().admPendingTitle, " ", pendingCountEl), approveAllEl),
-        pendingStatusEl,
-        pendingBulkEl,
-        pendingEl,
-      ),
-      h(
-        "section",
-        { class: "panel admin-panel acct-panel", "aria-labelledby": "admin-accounts-title" },
-        h(
-          "div",
-          { class: "admin-table-head" },
-          headWithHint(h("h2", { class: "admin-h2", id: "admin-accounts-title" }, T().admAccountsTitle, " ", acctCountEl), T().admAccountsHint),
-          h("div", { class: "admin-controls" }, acctFilterSelect, acctSortSelect, acctTable.pickerButton, exportBtn),
-        ),
-        // Search stays in view while the list scrolls (sticky under the tab bar).
-        h("div", { class: "acct-searchbar" }, acctSearchInput),
-        h("p", { class: "muted small admin-hint is-touch-only" }, T().admAccountsHint),
-        acctTableEl,
-      ),
+      members.sections(),
       h(
         "section",
         { class: "panel admin-panel trash-panel", "aria-labelledby": "admin-trash-title" },
@@ -1508,526 +1228,10 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     renderInvite();
   }
 
-  async function changeStatus(account: UserStats, action: "approve" | "reject"): Promise<void> {
-    const busyKey = `status:${account.accountId}`;
-    state.busy.add(busyKey);
-    renderAccounts();
-    try {
-      const updated = await setAccountStatus(account.accountId, action);
-      if (state.accounts) {
-        state.accounts = {
-          ...state.accounts,
-          accounts: state.accounts.accounts.map((a) => (a.accountId === updated.id ? { ...a, status: updated.status } : a)),
-        };
-      }
-      state.banner = null;
-      renderBanner();
-      void load();
-    } catch (err: unknown) {
-      showActionError(err);
-    } finally {
-      state.busy.delete(busyKey);
-      if (state.accounts) renderAccounts();
-    }
-  }
-
-  async function changeRole(account: UserStats, role: AccountRecordRole): Promise<void> {
-    const busyKey = `status:${account.accountId}`;
-    state.busy.add(busyKey);
-    renderAccounts();
-    try {
-      const updated = await setAccountRole(account.accountId, role);
-      if (state.accounts) {
-        state.accounts = {
-          ...state.accounts,
-          accounts: state.accounts.accounts.map((a) => (a.accountId === updated.id && updated.role !== "admin" ? { ...a, role: updated.role } : a)),
-        };
-      }
-    } catch (err: unknown) {
-      showActionError(err);
-    } finally {
-      state.busy.delete(busyKey);
-      if (state.accounts) renderAccounts();
-    }
-  }
-
-  /** Bulk approve/reject of the ticked pending sign-ups (per-account calls; partial failures are reported). */
-  async function bulkStatus(action: "approve" | "reject"): Promise<void> {
-    const ids = [...state.pendingSelected];
-    if (ids.length === 0) return;
-    for (const id of ids) state.busy.add(`status:${id}`);
-    renderAccounts();
-    const res = await setAccountsStatus(ids, action);
-    if (disposed) return;
-    for (const id of ids) state.busy.delete(`status:${id}`);
-    const authFailure = res.errors.find((err) => err instanceof AdminApiError && (err.status === 401 || err.status === 503));
-    if (authFailure && handleAuthError(authFailure)) return;
-    pendingTable.clearSelection();
-    state.approvedMsg =
-      action === "approve" ? T().admBulkApproved(res.ok.length, res.errors.length) : T().admBulkRejected(res.ok.length, res.errors.length);
-    if (state.accounts) {
-      const done = new Map(res.ok.map((v) => [v.id, v.status] as const));
-      state.accounts = {
-        ...state.accounts,
-        accounts: state.accounts.accounts.map((a) => {
-          const st = done.get(a.accountId);
-          return st ? { ...a, status: st } : a;
-        }),
-      };
-    }
-    renderAccounts();
-    pendingStatusEl.focus();
-    void load();
-  }
-
-  /** Menu items for one account: status changes first, then the password reset, Delete last (danger). */
-  function acctMenuItems(a: UserStats): MenuItem[] {
-    const key = `acct:${a.accountId}`;
-    const items: MenuItem[] = [];
-    if (a.status !== "approved") items.push({ label: T().admApprove, run: () => void changeStatus(a, "approve") });
-    // Revoke signs the player out at once, so it asks first: approving again later can't bring the session back.
-    if (a.status === "approved") {
-      items.push({
-        label: T().admRevoke,
-        run: () =>
-          void askConfirm({
-            title: T().admRevokeTitle(a.username),
-            body: T().admRevokeBody,
-            confirmLabel: T().admRevokeConfirm,
-            tone: "danger",
-            returnFocus: () => menuTriggerEl(key),
-          }).then((ok) => {
-            if (ok) void changeStatus(a, "reject");
-          }),
-      });
-    } else if (a.status === "pending") items.push({ label: T().admReject, run: () => void changeStatus(a, "reject") });
-    items.push(a.role === "author" ? { label: T().admRemoveAuthor, run: () => void changeRole(a, "player") } : { label: T().admMakeAuthor, run: () => void changeRole(a, "author") });
-    items.push({
-      label: T().admResetPwItem,
-      run: () =>
-        void askConfirm({
-          title: T().admResetPwTitle(a.username),
-          body: T().admResetPwBody,
-          confirmLabel: T().admResetPwLabel(a.username),
-          busyLabel: T().admResettingPw,
-          tone: "primary",
-          run: async () => {
-            const password = await resetAccountPassword(a.accountId);
-            void showTempPassword(a.username, password);
-          },
-          returnFocus: () => menuTriggerEl(key),
-        }),
-    });
-    items.push({
-      label: T().admDeleteItem,
-      tone: "danger",
-      run: () =>
-        void askConfirm({
-          title: T().admDeleteTitle(a.username),
-          body: T().admDeleteBody(TRASH_RETENTION_DAYS),
-          confirmLabel: T().admDeleteLabel(a.username),
-          cancelLabel: T().admKeepAccount,
-          busyLabel: T().admDeleting,
-          tone: "danger",
-          typedName: a.username,
-          run: async () => {
-            await deleteAccount(a.accountId);
-            state.expanded.delete(a.accountId);
-            if (state.accounts) {
-              state.accounts = { ...state.accounts, accounts: state.accounts.accounts.filter((x) => x.accountId !== a.accountId) };
-            }
-            renderAccounts();
-            void load();
-          },
-          returnFocus: () => menuTriggerEl(key) ?? acctSearchInput,
-        }).then(async (ok) => {
-          if (!ok) return;
-          const entry = await newestTrash((e) => e.kind === "account" && e.label === `account ${a.username}`);
-          undoToast(T().admDeletedToast(a.username, TRASH_RETENTION_DAYS), entry);
-        }),
-    });
-    return items;
-  }
-
-  function acctMenu(a: UserStats): HTMLButtonElement {
-    return menuButton(T().admActionsFor(a.username), `acct:${a.accountId}`, () => acctMenuItems(a));
-  }
-
-  function statusPill(status: AccountStatus): HTMLElement {
-    return h("span", { class: `status-pill is-${status}` }, T().admAcctStatus(status));
-  }
-
-  /** The author pill sits beside the status; players get none. */
-  function rolePill(a: UserStats): Child {
-    return a.role === "author" ? [" ", h("span", { class: "status-pill is-author" }, T().admAuthorPill)] : null;
-  }
-
-  // Waiting for approval: a data table with a checkbox per sign-up and a select-all box (components/dataTable.ts),
-  // so the instructor can tick several and approve or reject them together. Cards on phones and tablets.
-  let pendingNow = Date.now();
-  const pendingBusy = (a: UserStats): boolean => state.busy.has(`status:${a.accountId}`);
-  function pendingButtons(a: UserStats): HTMLElement[] {
-    const busy = pendingBusy(a);
-    return [
-      h(
-        "button",
-        { type: "button", class: "btn btn-sm", disabled: busy, "aria-label": T().admApproveLabel(a.username), onclick: () => void changeStatus(a, "approve") },
-        T().admApprove,
-      ),
-      h(
-        "button",
-        { type: "button", class: "btn btn-ghost btn-sm", disabled: busy, "aria-label": T().admRejectLabel(a.username), onclick: () => void changeStatus(a, "reject") },
-        T().admReject,
-      ),
-    ];
-  }
-  const signedUp = (a: UserStats): HTMLElement => tipped(h("span", {}, T().admSignedUp(relativeAgo(a.createdAt, pendingNow))), formatDateTime(a.createdAt));
-  const pendingTable = dataTable<UserStats>({
-    columns: [
-      { id: "name", header: T().admColUser, rowHeader: true, className: "col-name", cell: (a) => h("span", { class: "player-name", dir: "auto" }, a.username), sortValue: (a) => a.username },
-      { id: "signed", header: T().admColSignedUp, className: "col-seen muted", cell: signedUp, sortValue: (a) => ms(a.createdAt) },
-      { id: "actions", header: T().admColActions, headerHidden: true, className: "col-actions", cell: (a) => h("span", { class: "pending-actions" }, pendingButtons(a)) },
-    ],
-    rows: [],
-    rowKey: (a) => a.accountId,
-    rowSig: (a) => JSON.stringify([getLang(), a.username, pendingBusy(a), relativeAgo(a.createdAt, pendingNow)]),
-    rowAttrs: () => ({ class: "pending-row" }),
-    initialSort: { id: "signed", dir: "asc" },
-    labelledBy: "admin-pending-title",
-    className: "admin-table pending-table",
-    wrapClass: "admin-dt",
-    selection: {
-      rowLabel: (a) => T().admSelectLabel(a.username),
-      allLabel: T().admSelectAll,
-      disabled: pendingBusy,
-      onChange: (keys) => {
-        state.pendingSelected.clear();
-        for (const k of keys) state.pendingSelected.add(k);
-        state.approvedMsg = null;
-        pendingStatusEl.hidden = true;
-        renderPendingBulk();
-      },
-    },
-    cards: {
-      query: NARROW_QUERY,
-      className: "pending-list",
-      labelledBy: "admin-pending-title",
-      build: (a) =>
-        h(
-          "li",
-          { class: "pending-item" },
-          h("span", { class: "pending-name", dir: "auto" }, a.username),
-          h("span", { class: "pending-meta muted small" }, signedUp(a)),
-          h("span", { class: "pending-actions" }, pendingButtons(a)),
-        ),
-    },
-  });
-
-  let pendingBulkSig = "";
-  /** "n selected" with Approve / Reject selected, only while something is ticked. */
-  function renderPendingBulk(): void {
-    const sel = state.pendingSelected.size;
-    const pending = (state.accounts?.accounts ?? []).filter((a) => a.status === "pending");
-    const anyBusy = pending.some(pendingBusy);
-    const sig = JSON.stringify([getLang(), sel, anyBusy]);
-    if (sig === pendingBulkSig) return;
-    pendingBulkSig = sig;
-    if (sel === 0) {
-      pendingBulkEl.replaceChildren();
-      return;
-    }
-    setChildren(
-      pendingBulkEl,
-      h("span", { class: "muted small", role: "status" }, T().admSelectedN(sel)),
-      h(
-        "button",
-        { type: "button", class: "btn btn-sm", id: "pending-bulk-approve", disabled: anyBusy, onclick: () => void bulkStatus("approve") },
-        T().admApproveSelected(sel),
-      ),
-      h(
-        "button",
-        {
-          type: "button",
-          class: "btn btn-ghost btn-sm",
-          id: "pending-bulk-reject",
-          disabled: anyBusy,
-          onclick: () =>
-            void askConfirm({
-              title: T().admRejectSelectedTitle(sel),
-              body: T().admRejectSelectedBody,
-              confirmLabel: T().admRejectSelected(sel),
-              tone: "danger",
-              run: () => bulkStatus("reject"),
-              returnFocus: () => pendingStatusEl,
-            }),
-        },
-        T().admRejectSelected(sel),
-      ),
-    );
-  }
-
-  function renderPending(list: readonly UserStats[]): void {
-    const pending = list.filter((a) => a.status === "pending");
-    pendingCountEl.textContent = fmtInt(pending.length);
-    pendingCountEl.classList.toggle("is-zero", pending.length === 0);
-    pendingTabBadge.textContent = fmtInt(pending.length);
-    pendingTabBadge.hidden = pending.length === 0;
-    pendingTabBadge.setAttribute("aria-label", T().admPendingBadge(pending.length));
-    const railLabel = pending.length === 0 ? tabLabel("accounts") : `${tabLabel("accounts")}, ${T().admPendingBadge(pending.length)}`;
-    for (const link of sectionLinks.get("accounts") ?? []) link.dataset.navTip = railLabel;
-    refreshNav();
-    pendingStatusEl.textContent = state.approvedMsg ?? "";
-    pendingStatusEl.hidden = state.approvedMsg === null;
-    pendingStatusEl.tabIndex = -1;
-    const n = pending.length;
-    const sig = JSON.stringify([getLang(), n]);
-    if (sig !== pendingSig) {
-      pendingSig = sig;
-      // Approving is the intended, safe action: a primary confirm, never a red one.
-      setChildren(
-        approveAllEl,
-        n === 0
-          ? null
-          : h(
-              "button",
-              {
-                type: "button",
-                class: "btn btn-primary btn-sm",
-                id: "admin-approve-all",
-                "aria-label": T().admApproveAllLabel(n),
-                onclick: () =>
-                  void askConfirm({
-                    title: T().admApproveAllTitle(n),
-                    body: T().admApproveAllBody,
-                    confirmLabel: T().admApproveAll(n),
-                    busyLabel: T().admApproving,
-                    tone: "primary",
-                    run: async () => {
-                      const approved = await approveAll();
-                      pendingTable.clearSelection();
-                      state.approvedMsg = T().admApprovedN(approved);
-                      void load();
-                    },
-                    returnFocus: () => document.getElementById("admin-approve-all") ?? pendingStatusEl,
-                  }),
-              },
-              T().admApproveAll(n),
-            ),
-      );
-    }
-    if (n === 0) {
-      setChildren(pendingEl, h("p", { class: "muted admin-empty-small" }, T().admNoPending));
-    } else {
-      pendingNow = Date.now();
-      pendingTable.update(pending);
-      if (pendingTable.element.parentNode !== pendingEl) setChildren(pendingEl, pendingTable.element);
-    }
-    renderPendingBulk();
-  }
-
-  function caseStatsTable(list: readonly CaseStats[]): HTMLElement {
-    if (list.length === 0) return h("p", { class: "muted small admin-empty-small" }, T().admNoCasesYet);
-    return h(
-      "table",
-      { class: "admin-table admin-subtable" },
-      h(
-        "thead",
-        {},
-        h(
-          "tr",
-          {},
-          th(T().admColCase),
-          th(T().admColStatus),
-          th(T().admColScore, "num"),
-          th(T().admColSolved, "num"),
-          th(T().admColRevealed, "num"),
-          th(T().admColHints, "num"),
-          th(T().admColCommands, "num"),
-          th(T().admColWrong, "num"),
-          th(T().admColFirstBloods, "num"),
-          th(T().admColDuration, "num"),
-          th(T().admColStarted),
-          th(T().admColFinishedAt),
-        ),
-      ),
-      h(
-        "tbody",
-        {},
-        list.map((c) =>
-          h(
-            "tr",
-            {},
-            h("td", {}, caseTitle(c.caseId)),
-            h("td", {}, h("span", { class: `case-status is-${c.status}` }, T().admCaseStatus(c.status))),
-            h(
-              "td",
-              { class: "num", title: T().admScoreParTip(c.maxScore) },
-              fmtInt(c.score),
-              " ",
-              h("span", { class: "muted small" }, `(${T().admPar(fmtInt(c.maxScore))})`),
-            ),
-            h("td", { class: "num" }, fmtInt(c.solved)),
-            h("td", { class: "num" }, fmtInt(c.revealed)),
-            h("td", { class: "num" }, fmtInt(c.hintsUsed)),
-            h("td", { class: "num" }, fmtInt(c.commandsRevealed)),
-            h("td", { class: "num" }, fmtInt(c.wrongAttempts)),
-            h("td", { class: "num" }, fmtInt(c.firstBloods)),
-            h("td", { class: "num" }, formatSeconds(c.durationSeconds)),
-            h("td", { class: "col-seen" }, formatDateTime(c.startedAt)),
-            h("td", { class: "col-seen" }, formatDateTime(c.completedAt)),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /** The per-case summary on a phone card: one line per case instead of a 12-column table. */
-  function caseStatsList(list: readonly CaseStats[]): HTMLElement {
-    if (list.length === 0) return h("p", { class: "muted small admin-empty-small" }, T().admNoCasesYet);
-    return h(
-      "ul",
-      { class: "case-lines" },
-      list.map((c) =>
-        h(
-          "li",
-          {},
-          h("span", { class: "case-line-title" }, caseTitle(c.caseId)),
-          h("span", { class: `case-status is-${c.status}` }, T().admCaseStatus(c.status)),
-          h("span", { class: "muted small" }, `${T().admPointsShort(fmtInt(c.score))} · ${formatSeconds(c.durationSeconds)}`),
-        ),
-      ),
-    );
-  }
-
-  function acctSignature(a: UserStats, now: number): string {
-    const id = a.accountId;
-    return JSON.stringify([
-      getLang(),
-      a.username,
-      a.status,
-      a.totalScore,
-      a.rank,
-      a.casesCompleted,
-      a.casesStarted,
-      a.accuracy,
-      a.hintsUsed,
-      a.wrongAttempts,
-      a.commandsRevealed,
-      a.achievements.map((x) => x.id),
-      a.streak,
-      relativeAgo(a.lastSeenAt, now),
-      state.expanded.has(id),
-      state.expanded.has(id) ? a.cases : null,
-      state.busy.has(`status:${id}`),
-    ]);
-  }
-
-  function acctToggle(a: UserStats, detailId: string): HTMLButtonElement {
-    const expanded = state.expanded.has(a.accountId);
-    return h(
-      "button",
-      {
-        type: "button",
-        class: "acct-toggle",
-        "aria-expanded": String(expanded),
-        "aria-controls": detailId,
-        title: T().admShowCaseStats,
-        onclick: () => {
-          if (state.expanded.has(a.accountId)) state.expanded.delete(a.accountId);
-          else state.expanded.add(a.accountId);
-          renderAccountsTable();
-          container.querySelector<HTMLButtonElement>(`[aria-controls="${CSS.escape(detailId)}"]`)?.focus();
-        },
-      },
-      h("span", { class: "acct-caret", "aria-hidden": "true" }, "▸"),
-      h("span", { class: "player-name", dir: "auto" }, a.username),
-    );
-  }
-
-  /** The columns that are off in the chooser still show in the expanded row, so nothing is out of reach. */
-  function acctExtras(a: UserStats): string {
-    return [
-      T().admExtraLine(fmtInt(a.hintsUsed), fmtInt(a.wrongAttempts), fmtInt(a.commandsRevealed)),
-      T().admBadgesTip(a.achievements.map((x) => T().admAchievement(x.id)).join(", ")),
-      T().admStreakTip(a.streak.current, a.streak.best),
-      `${T().admColCreated}: ${formatDateTime(a.createdAt)}`,
-    ].join(" · ");
-  }
-
-  /** Phone/tablet card: name, status, the key numbers in one line, last seen, and the actions menu. */
-  function buildAcctCard(a: UserStats, now: number): HTMLLIElement {
-    const expanded = state.expanded.has(a.accountId);
-    const detailId = `acct-card-${a.accountId}`;
-    const facts = [
-      T().admPointsShort(fmtInt(a.totalScore)),
-      a.rank === null ? null : T().admRankShort(fmtInt(a.rank)),
-      T().admCasesShort(fmtInt(a.casesCompleted), fmtInt(a.casesStarted)),
-      a.accuracy === null ? null : T().admAccuracyShort(formatPct(a.accuracy)),
-    ].filter((x): x is string => x !== null);
-    return h(
-        "li",
-        { class: `acct-card is-${a.status}${expanded ? " is-expanded" : ""}`, "data-id": a.accountId },
-        h("div", { class: "pc-head" }, acctToggle(a, detailId), acctMenu(a)),
-        h("p", { class: "ac-facts" }, statusPill(a.status), rolePill(a), " ", facts.join(" · ")),
-        tipped(h("p", { class: "muted small ac-seen" }, T().admSeenLine(relativeAgo(a.lastSeenAt, now))), formatDateTime(a.lastSeenAt)),
-        expanded ? h("div", { class: "ac-detail", id: detailId }, caseStatsList(a.cases), h("p", { class: "muted small" }, acctExtras(a))) : null,
-      );
-  }
-
-  function renderAccountsTable(): void {
-    const all = state.accounts?.accounts ?? [];
-    acctCountEl.textContent = `(${fmtInt(all.length)})`;
-    if (all.length === 0) {
-      const url = location.origin;
-      setChildren(
-        acctTableEl,
-        h(
-          "div",
-          { class: "admin-empty" },
-          h("p", { class: "admin-empty-title" }, T().admNoAccounts),
-          h("p", { class: "muted" }, T().admShareLink),
-          h("div", { class: "admin-share" }, h("code", { class: "admin-share-url" }, url), copyButton(() => url, T().admCopyLink)),
-        ),
-      );
-      return;
-    }
-    const q = state.acctSearch.trim().toLowerCase();
-    const filtered = all.filter(
-      (a) => (state.acctFilter === "all" || a.status === state.acctFilter) && (!q || a.username.toLowerCase().includes(q)),
-    );
-    if (filtered.length !== all.length) acctCountEl.textContent = `(${T().admShownOf(fmtInt(filtered.length), fmtInt(all.length))})`;
-    if (filtered.length === 0) {
-      setChildren(acctTableEl, h("p", { class: "muted admin-empty-small" }, T().admNoMatch));
-      return;
-    }
-    acctNow = Date.now();
-    // Name order first: the table's sort is stable, so ties (same rank, same score) read alphabetically.
-    acctTable.update(sortAccounts(filtered, "name"));
-    if (acctTable.element.parentNode !== acctTableEl) setChildren(acctTableEl, acctTable.element);
-  }
-
   function renderAccounts(): void {
-    const all = state.accounts?.accounts ?? [];
-    const count = (s: AccountStatus): number => all.filter((a) => a.status === s).length;
-    const active = all.filter((a) => {
-      const t = ms(a.lastSeenAt);
-      return t !== null && Date.now() - t < 24 * 3600 * 1000;
-    }).length;
-    setChildren(
-      acctTilesEl,
-      tile(T().admTileAccounts, fmtInt(all.length), T().admActive24h(active)),
-      tile(T().admAcctStatus("pending"), fmtInt(count("pending")), T().admAwaitingApproval),
-      tile(T().admAcctStatus("approved"), fmtInt(count("approved"))),
-      tile(T().admAcctStatus("rejected"), fmtInt(count("rejected"))),
-    );
-    setTilesSummary(acctTiles, T().admAcctSummary(fmtInt(all.length), fmtInt(count("pending")), fmtInt(active)));
-    renderPending(all);
+    members.render();
     renderInvite();
     renderTrash();
-    // Drop UI state for accounts that disappeared.
-    const ids = new Set(all.map((a) => a.accountId));
-    for (const id of state.expanded) if (!ids.has(id)) state.expanded.delete(id);
-    renderAccountsTable();
   }
 
   // =====================================================================================
@@ -4139,7 +3343,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
 
   function renderData(): void {
     // The pending count is visible on the tab from anywhere.
-    if (state.tab !== "accounts") renderPending(state.accounts?.accounts ?? []);
+    if (state.tab !== "accounts") members.renderPending();
     // Keep the schedule and event editors (and focus) intact while polling.
     if (state.tab === "schedule") renderScheduleToday();
     else if (state.tab === "event") renderEventStatus();
