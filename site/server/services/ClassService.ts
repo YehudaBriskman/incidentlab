@@ -72,14 +72,24 @@ export class ClassService {
   private readonly repos: Repositories;
   private readonly limiter: RateLimiter;
   private readonly releasedCaseIds: () => readonly string[];
+  private readonly privateCaseClasses: (caseId: string) => Promise<readonly string[] | null>;
   private readonly now: () => Date;
   private readonly purger: CachePurger;
 
-  constructor(deps: { repos: Repositories; limiter: RateLimiter; releasedCaseIds: () => readonly string[]; now: () => Date; purger?: CachePurger | undefined }) {
+  constructor(deps: {
+    repos: Repositories;
+    limiter: RateLimiter;
+    releasedCaseIds: () => readonly string[];
+    /** #184: the classes a live private case is assigned to (null: not a live private case) */
+    privateCaseClasses?: (caseId: string) => Promise<readonly string[] | null>;
+    now: () => Date;
+    purger?: CachePurger | undefined;
+  }) {
     this.repos = deps.repos;
     this.classes = deps.repos.classes;
     this.limiter = deps.limiter;
     this.releasedCaseIds = deps.releasedCaseIds;
+    this.privateCaseClasses = deps.privateCaseClasses ?? (() => Promise.resolve(null));
     this.now = deps.now;
     this.purger = deps.purger ?? noopCachePurger;
   }
@@ -167,9 +177,9 @@ export class ClassService {
   // ---- settings (class admins) ---------------------------------------------
 
   async update(actor: ClassActor, classId: string, patch: UpdateClassRequest): Promise<ClassDetail> {
-    const schedule = patch.schedule === undefined ? undefined : this.cleanSchedule(patch.schedule);
+    const schedule = patch.schedule === undefined ? undefined : await this.cleanSchedule(classId, patch.schedule);
     if (patch.event !== undefined) assertEventWindow(patch.event);
-    if (patch.caseIds !== undefined) this.assertReleased(patch.caseIds);
+    if (patch.caseIds !== undefined) await this.assertAssignable(classId, patch.caseIds);
     const caseIds = patch.caseIds === undefined ? undefined : [...new Set(patch.caseIds)];
     return this.mutate(actor, classId, "admin", (record) => ({
       ...record,
@@ -325,6 +335,33 @@ export class ClassService {
 
   // ---- site admin ------------------------------------------------------------
 
+  // ---- membership checks for other services (#184) -------------------------------
+
+  /** True when the account is an active member (any role) of the class and the class is active. */
+  async isActiveMember(accountId: string, classId: string): Promise<boolean> {
+    if (!CLASS_ID_PATTERN.test(classId)) return false;
+    const [record, member] = await Promise.all([this.classes.get(classId), this.classes.getMember(classId, accountId)]);
+    return record?.data.status === "active" && member?.data.status === "active";
+  }
+
+  /** True when the account is an active admin of the active class. */
+  async isActiveClassAdmin(accountId: string, classId: string): Promise<boolean> {
+    if (!CLASS_ID_PATTERN.test(classId)) return false;
+    const [record, member] = await Promise.all([this.classes.get(classId), this.classes.getMember(classId, accountId)]);
+    return record?.data.status === "active" && member?.data.status === "active" && member.data.role === "admin";
+  }
+
+  /** True when the class exists (the site admin may assign any class). */
+  async exists(classId: string): Promise<boolean> {
+    return CLASS_ID_PATTERN.test(classId) && (await this.classes.get(classId)) !== null;
+  }
+
+  /** The ids of the active classes the account is an active member of (one list, then one read each). */
+  async activeClassIdsOf(accountId: string): Promise<string[]> {
+    const rows = await this.classes.listMemberOf(accountId);
+    return rows.filter((r) => r.entry?.status === "active").map((r) => r.classId);
+  }
+
   async adminList(): Promise<Array<{ record: ClassRecord; members: number }>> {
     const records = await this.classes.list();
     const rows = await mapWithConcurrency(records, async (record) => ({ record, members: await this.classes.countMembers(record.id) }));
@@ -444,19 +481,23 @@ export class ClassService {
     return classes.filter((c) => c !== null && c.data.ownerId === accountId && c.data.status === "active").length;
   }
 
-  private cleanSchedule(schedule: ClassSchedule): ClassSchedule {
+  private async cleanSchedule(classId: string, schedule: ClassSchedule): Promise<ClassSchedule> {
     if (!isValidTimeZone(schedule.timezone)) throw new AppError(400, `unknown time zone: ${schedule.timezone}`);
-    this.assertReleased([schedule.defaultCaseId, ...Object.values(schedule.days)].filter((id): id is string => id !== null));
+    await this.assertAssignable(classId, [schedule.defaultCaseId, ...Object.values(schedule.days)].filter((id): id is string => id !== null));
     // Entries older than a year go, so the record can't grow without bound (like the site schedule).
     const cutoff = localDate(new Date(this.now().getTime() - 366 * DAY_MS), schedule.timezone);
     const days = Object.fromEntries(Object.entries(schedule.days).filter(([day]) => day >= cutoff).sort(([a], [b]) => a.localeCompare(b)));
     return { ...schedule, days };
   }
 
-  private assertReleased(caseIds: readonly string[]): void {
+  /** Public cases, and private cases (#184) whose author assigned them to this class. */
+  private async assertAssignable(classId: string, caseIds: readonly string[]): Promise<void> {
     const released = this.releasedCaseIds();
-    const unknown = caseIds.find((id) => !released.includes(id));
-    if (unknown !== undefined) throw new AppError(400, `case is not published: ${unknown}`, { code: "unknown-case" });
+    for (const id of caseIds) {
+      if (released.includes(id)) continue;
+      const classes = await this.privateCaseClasses(id);
+      if (classes === null || !classes.includes(classId)) throw new AppError(400, `case is not published: ${id}`, { code: "unknown-case" });
+    }
   }
 
   private assertActive(record: ClassRecord): void {

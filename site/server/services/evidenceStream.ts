@@ -14,24 +14,43 @@ export const EVIDENCE_DB_PREFIX = "/evidence/db/";
 /**
  * Where a published case version's evidence is served from: today the Edge Function on this site. This is
  * the single switch point for moving evidence elsewhere (the content API hands it to the browser).
+ *
+ * A private case (#184) passes its `evidenceKey`: the version segment becomes `v<n>~<key>`, so the URL is a
+ * capability. The Edge Function can't read sessions cheaply, so it serves whoever holds the URL; the key is
+ * 128 random bits, only the no-store, member-checked content response carries it, and public responses never
+ * name a private case at all.
  */
-export const evidenceLocation = (caseId: string, version: number): EvidenceLocation => {
-  const base = `${EVIDENCE_DB_PREFIX}${encodeURIComponent(caseId)}/v${version}`;
+export const evidenceLocation = (caseId: string, version: number, evidenceKey: string | null = null): EvidenceLocation => {
+  const base = `${EVIDENCE_DB_PREFIX}${encodeURIComponent(caseId)}/v${version}${evidenceKey === null ? "" : `~${evidenceKey}`}`;
   return { filesBase: `${base}/files/`, zip: `${base}.zip` };
 };
 
 /** The name a case's evidence zip downloads as. Toolbox commands say `unzip <caseId>-evidence.zip`. */
 export const evidenceZipName = (caseId: string): string => `${caseId}-evidence.zip`;
 
-/** Public routes see only `publishedVersion`, and only while the case is published (not a draft, not trashed). */
-export const isPublicVersion = (meta: CaseMeta, version: number): boolean => meta.status === "published" && meta.publishedVersion === version;
+/** The live version: `publishedVersion` while the case is published (not a draft, not trashed), public or private. */
+export const isLiveVersion = (meta: CaseMeta, version: number): boolean => meta.status === "published" && meta.publishedVersion === version;
 
+/** Public routes see only `publishedVersion`, only while the case is published, and only when it is public (#184). */
+export const isPublicVersion = (meta: CaseMeta, version: number): boolean => isLiveVersion(meta, version) && meta.visibility === "public";
+
+/**
+ * Evidence of the live version: a public case without a key, a private case only with its exact key. A public
+ * case never answers on a keyed URL, and a private case never on the plain one.
+ */
+export const mayServeEvidence = (meta: CaseMeta, version: number, key: string | null): boolean => {
+  if (!isLiveVersion(meta, version)) return false;
+  if (meta.visibility === "public") return key === null;
+  return key !== null && meta.evidenceKey !== null && key === meta.evidenceKey;
+};
+
+/** `key` is the private case's evidence key from the URL, null on a plain (public) URL. */
 export type EvidenceTarget =
-  | { readonly kind: "file"; readonly caseId: string; readonly version: number; readonly path: string }
-  | { readonly kind: "zip"; readonly caseId: string; readonly version: number };
+  | { readonly kind: "file"; readonly caseId: string; readonly version: number; readonly key: string | null; readonly path: string }
+  | { readonly kind: "zip"; readonly caseId: string; readonly version: number; readonly key: string | null };
 
-const VERSION = /^v([1-9][0-9]{0,8})$/;
-const ZIP_VERSION = /^v([1-9][0-9]{0,8})\.zip$/;
+const VERSION = /^v([1-9][0-9]{0,8})(?:~([0-9a-f]{32}))?$/;
+const ZIP_VERSION = /^v([1-9][0-9]{0,8})(?:~([0-9a-f]{32}))?\.zip$/;
 
 const decodeSegments = (rest: string): string[] | null => {
   try {
@@ -50,12 +69,12 @@ export const parseEvidencePath = (pathname: string): EvidenceTarget | null => {
   if (caseId === undefined || !CaseIdSchema.safeParse(caseId).success || second === undefined) return null;
   if (segments.length === 2) {
     const zip = ZIP_VERSION.exec(second);
-    return zip?.[1] ? { kind: "zip", caseId, version: Number(zip[1]) } : null;
+    return zip?.[1] ? { kind: "zip", caseId, version: Number(zip[1]), key: zip[2] ?? null } : null;
   }
   const version = VERSION.exec(second);
   if (!version?.[1] || third !== "files" || rest.length === 0) return null;
   const path = rest.join("/");
-  return EvidencePathSchema.safeParse(path).success ? { kind: "file", caseId, version: Number(version[1]), path } : null;
+  return EvidencePathSchema.safeParse(path).success ? { kind: "file", caseId, version: Number(version[1]), key: version[2] ?? null, path } : null;
 };
 
 /** An inclusive byte range. */
@@ -168,7 +187,7 @@ export class EvidenceService {
   /** The entry behind a target, or null when the case, version or file is unknown or not published. */
   async resolve(target: EvidenceTarget): Promise<ResolvedEvidence | null> {
     const meta = await this.cases.getMeta(target.caseId);
-    if (!meta || !isPublicVersion(meta.data, target.version)) return null;
+    if (!meta || !mayServeEvidence(meta.data, target.version, target.key)) return null;
     if (target.kind === "zip") {
       const entry = await this.cases.getEvidenceZip(target.caseId, target.version);
       return entry ? { entry, downloadName: evidenceZipName(target.caseId) } : null;

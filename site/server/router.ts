@@ -21,6 +21,8 @@ import { AccountAdminService } from "./services/AccountAdminService.ts";
 import { AdminAuthService } from "./services/AdminAuthService.ts";
 import { AuditService } from "./services/AuditService.ts";
 import { AuthService } from "./services/AuthService.ts";
+import { CaseAccessService } from "./services/CaseAccessService.ts";
+import { isLiveVersion } from "./services/evidenceStream.ts";
 import { CaseSecretsProvider } from "./services/CaseSecretsProvider.ts";
 import { CaseService } from "./services/CaseService.ts";
 import { EvidenceService } from "./services/evidenceStream.ts";
@@ -81,8 +83,9 @@ export const createApp = (deps: AppDeps): App => {
   const schedule = new ScheduleService({ repository: repos.schedule, releasedCaseIds: () => Object.keys(secrets.cases), now, purger: deps.cachePurger });
   const scores = new ScoreService({ repos, caseIds: () => Object.keys(secrets.cases) });
   const board = new GlobalBoardService({ repos, scores, purger: deps.cachePurger, now });
-  const game = new GameService({ repository: repos.progress, firstBlood, secrets, scores, now });
-  const stats = new StatsService({ repos, secrets, now });
+  // GameService reads private cases too (#184); GameController checks access before every call.
+  const game = new GameService({ repository: repos.progress, firstBlood, secrets: secrets.playable, scores, now });
+  const stats = new StatsService({ repos, secrets, privateCaseIds: () => secrets.privateCaseIds(), now });
   const trashRepo = new TrashRepository(deps.store);
   const trash = new TrashService({ trash: trashRepo, repos, cases: caseRepo, scores, board, now });
   const accounts = new AccountAdminService({ repos, firstBlood, game, stats, trash, trashRepo, scores, now });
@@ -103,12 +106,19 @@ export const createApp = (deps: AppDeps): App => {
   const caseUploads = new CaseUploadService({
     uploads: new UploadRepository({ kv: deps.store, bytes }), cases: caseRepo, chunks: chunkRepo, limiter, bundledFingerprint, reservedIds: () => reservedIds, now,
   });
-  const authoring = new CaseAuthoringService({ cases: caseRepo, progress: repos.progress, trash, bundledFingerprint, now });
+  // A live private case's classes: class admins may assign it to their class only when its author did (#184).
+  const privateCaseClasses = async (caseId: string): Promise<readonly string[] | null> => {
+    const meta = (await caseRepo.getMeta(caseId))?.data;
+    return meta && meta.visibility === "private" && meta.publishedVersion !== null && isLiveVersion(meta, meta.publishedVersion) ? meta.classIds : null;
+  };
+  const classes = new ClassService({ repos, limiter, releasedCaseIds: () => Object.keys(secrets.cases), privateCaseClasses, now, purger: deps.cachePurger });
+  const access = new CaseAccessService({ cases, classes, secrets, auth });
+  const authoring = new CaseAuthoringService({ cases: caseRepo, progress: repos.progress, accounts: repos.accounts, classes, trash, bundledFingerprint, now });
 
-  const authController = new AuthController({ auth, schedule, stats, events, board });
-  const gameController = new GameController({ auth, game });
+  const authController = new AuthController({ auth, schedule, stats, events, board, access });
+  const gameController = new GameController({ auth, game, access });
   const guestController = new GuestController({ guests: new GuestService({ repos, auth, limiter, now }) });
-  const contentController = new ContentController({ cases });
+  const contentController = new ContentController({ cases, access });
   const adminGuard = new AdminAuthService({ adminKey: deps.adminKey, auth });
   const adminController = new AdminController({ accounts, schedule, stats, events, audit, trash, guard: adminGuard, now });
   const authorController = new AuthorController({
@@ -117,7 +127,7 @@ export const createApp = (deps: AppDeps): App => {
   });
 
   const classController = new ClassController({
-    classes: new ClassService({ repos, limiter, releasedCaseIds: () => Object.keys(secrets.cases), now, purger: deps.cachePurger }),
+    classes,
     boards: new ClassBoardService({ repos, game, publicCaseIds: () => Object.keys(secrets.cases), now }),
     auth, guard: adminGuard, audit,
   });
@@ -137,6 +147,8 @@ export const createApp = (deps: AppDeps): App => {
       "/api/me/password": { POST: () => authController.changePassword(req) },
       "/api/me/board": { PUT: () => authController.setBoard(req) },
       "/api/me/recovery-code": { POST: () => authController.regenerateRecoveryCode(req) },
+      "/api/me/cases": { GET: () => contentController.mine(req) },
+      "/api/admin/reviews": { GET: () => authorController.reviews(req) },
       "/api/today": { GET: () => authController.today() },
       "/api/event": { GET: () => authController.event() },
       "/api/leaderboard": { GET: () => authController.leaderboard(req) },
@@ -219,7 +231,12 @@ export const createApp = (deps: AppDeps): App => {
       if (segments.length === 4) return { DELETE: () => authorController.remove(req, second) };
       if (segments.length === 5 && segments[4] === "publish") return { POST: () => authorController.publish(req, second) };
       if (segments.length === 5 && segments[4] === "restore") return { POST: () => authorController.restore(req, second) };
+      if (segments.length === 5 && segments[4] === "submit-review") return { POST: () => authorController.submitReview(req, second) };
+      if (segments.length === 5 && segments[4] === "classes") return { PUT: () => authorController.setClasses(req, second) };
       return null;
+    }
+    if (area === "admin" && first === "cases" && second !== undefined && segments.length === 5 && segments[4] === "review") {
+      return { POST: () => authorController.review(req, second) };
     }
     if (area === "admin" && first === "accounts" && second !== undefined) {
       const action = segments[4];

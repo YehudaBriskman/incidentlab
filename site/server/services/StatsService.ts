@@ -38,11 +38,19 @@ type RankedRow = BoardRow & { readonly rank: number };
 export class StatsService {
   private readonly repos: Repositories;
   private readonly secrets: Secrets;
+  private readonly privateCaseIds: () => readonly string[];
   private readonly now: () => Date;
 
-  constructor(deps: { repos: Repositories; secrets: Secrets; now: () => Date }) {
+  constructor(deps: {
+    repos: Repositories;
+    secrets: Secrets;
+    /** #184: private cases never count on the public global board */
+    privateCaseIds?: () => readonly string[];
+    now: () => Date;
+  }) {
     this.repos = deps.repos;
     this.secrets = deps.secrets;
+    this.privateCaseIds = deps.privateCaseIds ?? (() => []);
     this.now = deps.now;
   }
 
@@ -242,8 +250,11 @@ export class StatsService {
   }
 
   private rows(players: readonly BoardPlayer[], filter: { caseId: string | null; cutoff: string | null }): BoardRow[] {
+    const hidden = new Set(this.privateCaseIds());
+    const publicOnly = (cases: BoardPlayer["score"]["cases"]): BoardPlayer["score"]["cases"] =>
+      hidden.size === 0 ? cases : Object.fromEntries(Object.entries(cases).filter(([caseId]) => !hidden.has(caseId)));
     return players
-      .map((p): BoardRow => ({ accountId: p.account.id, username: p.account.username, ...boardTotals(p.score.cases, filter) }))
+      .map((p): BoardRow => ({ accountId: p.account.id, username: p.account.username, ...boardTotals(publicOnly(p.score.cases), filter) }))
       .filter((row) => row.stagesSolved > 0)
       // Same score: whoever got there first is listed first (the rank number is still shared).
       .sort((a, b) => b.score - a.score || (a.lastSolveAt ?? "").localeCompare(b.lastSolveAt ?? ""));

@@ -108,7 +108,7 @@ test("a full upload stores a draft, lists it, and publishing makes it public wit
   assert.equal((await s.fetchEvidence(`${ID}/v1/files/logs/big.log`)).status, 404);
 
   const published = PublishResponseSchema.parse(await (await s.call(s.admin, `/api/author/cases/${ID}/publish`, "POST", { version: 1 })).json());
-  assert.deepEqual(published, { caseId: ID, publishedVersion: 1, previousVersion: null, rollback: false, changed: true });
+  assert.deepEqual(published, { caseId: ID, publishedVersion: 1, previousVersion: null, rollback: false, changed: true, visibility: "public", pendingReview: false });
   const catalog = CasesResponseSchema.parse(await (await s.call(s.admin, "/api/cases")).json());
   assert.deepEqual(catalog.cases.map((c) => c.file), [ID]);
   const content = CaseContentResponseSchema.parse(await (await s.call(s.admin, `/api/cases/${ID}/content`)).json());
@@ -349,7 +349,11 @@ test("soft delete takes a case down and restore brings it back, for the owner an
 
   const restored = RestoreCaseResponseSchema.parse(await (await s.call(dana.send, "/api/author/cases/dana-case/restore", "POST", {})).json());
   assert.deepEqual(restored, { caseId: "dana-case", status: "published" });
-  assert.equal((await s.fetchEvidence("dana-case/v1.zip")).status, 200);
+  // An author's case is private (#184): its evidence is on the keyed URL its content response names.
+  const location = CaseContentResponseSchema.parse(await (await s.call(dana.send, "/api/cases/dana-case/content")).json()).evidence;
+  assert.ok(location);
+  assert.equal((await s.fetchEvidence(location.zip.slice("/evidence/db/".length))).status, 200);
+  assert.equal((await s.fetchEvidence("dana-case/v1.zip")).status, 404);
   await expectStatus(s.call(dana.send, "/api/author/cases/dana-case/restore", "POST", {}), 404);
 
   // The admin restores from Recently deleted, like an account.
@@ -359,7 +363,8 @@ test("soft delete takes a case down and restore brings it back, for the owner an
   assert.ok(entry);
   assert.equal(entry.label, "case dana-case");
   await expectStatus(s.call(s.admin, `/api/admin/trash/${entry.id}/restore`, "POST", {}), 200);
-  assert.equal(CasesResponseSchema.parse(await (await s.call(s.admin, "/api/cases")).json()).cases.length, 1);
+  assert.equal(CasesResponseSchema.parse(await (await s.call(s.admin, "/api/cases")).json()).cases.length, 0, "private: never in the public catalog");
+  assert.equal(CasesResponseSchema.parse(await (await s.call(dana.send, "/api/me/cases")).json()).cases.length, 1, "but back for its author");
   const audit = AuditResponseSchema.parse(await (await s.call(s.admin, "/api/admin/audit")).json());
   assert.ok(["case.delete", "case.restore"].every((a) => audit.entries.some((e) => e.action === a && /author Dana/.test(e.detail ?? ""))));
 });

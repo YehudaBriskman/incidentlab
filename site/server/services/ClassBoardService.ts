@@ -85,7 +85,8 @@ export class ClassBoardService {
       classId: record.id,
       className: record.name,
       event: record.event,
-      caseIds: record.caseIds,
+      // The board is a CDN-cached capability URL: it never names a private case (#184), whose points still count.
+      caseIds: record.caseIds.filter((id) => window.publicCaseIds.includes(id)),
     };
   }
 

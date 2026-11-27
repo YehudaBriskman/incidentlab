@@ -12,7 +12,7 @@ import type { CaseContent, CaseLang, CaseMeta, CaseVersionInfo, EvidenceEntry } 
 import { AppError } from "../domain/types.ts";
 import type { CaseRepository, EvidenceChunkRepository } from "../repositories/case-repository.ts";
 import type { UploadFile, UploadRecord, UploadRepository } from "../repositories/upload-repository.ts";
-import { assertOwner, ownerId } from "./AuthorAuthService.ts";
+import { ADMIN_OWNER, assertOwner, ownerId } from "./AuthorAuthService.ts";
 import type { Actor } from "./AuthorAuthService.ts";
 import type { RateLimitRule, RateLimiter } from "./RateLimiter.ts";
 
@@ -321,6 +321,9 @@ export class CaseUploadService {
         evidenceBytes: record.manifest.evidence.reduce((sum, e) => sum + e.size, 0),
       };
       const meta = composeCaseMeta({
+        // #184: the review and visibility fields carry over; an author's new case is private from the start
+        // (the admin's is public, as before).
+        ...(before ?? { visibility: record.owner === ADMIN_OWNER ? "public" : "private" }),
         id: record.caseId,
         versions: [...(before?.versions ?? []), info],
         publishedVersion: before?.publishedVersion ?? null,

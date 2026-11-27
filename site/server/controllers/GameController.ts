@@ -1,23 +1,30 @@
 import { z } from "zod";
 import { AnswerRequestSchema, QuestionRequestSchema, RevealCommandRequestSchema } from "../../shared/contract.ts";
 import type { AuthService } from "../services/AuthService.ts";
+import type { CaseAccessService } from "../services/CaseAccessService.ts";
 import type { GameService, PlayContext } from "../services/GameService.ts";
 import { json, parseBody, sessionToken } from "./http.ts";
 
 const EmptyBodySchema = z.object({}).strict();
 
-/** /api/cases/:caseId/* — every route needs an approved player account. */
+/**
+ * /api/cases/:caseId/* — every route needs an approved player account. A private case (#184) answers 404 unless
+ * the player is its author or an active member of an assigned class.
+ */
 export class GameController {
   private readonly auth: AuthService;
   private readonly game: GameService;
+  private readonly access: CaseAccessService | null;
 
-  constructor(deps: { auth: AuthService; game: GameService }) {
+  constructor(deps: { auth: AuthService; game: GameService; access?: CaseAccessService }) {
     this.auth = deps.auth;
     this.game = deps.game;
+    this.access = deps.access ?? null;
   }
 
   private async context(req: Request, caseId: string): Promise<PlayContext> {
     const player = await this.auth.requirePlayer(sessionToken(req));
+    await this.access?.assertPlayable(player, caseId);
     const lang = new URL(req.url).searchParams.get("lang") === "he" ? "he" : "en";
     return { player, caseId, lang };
   }

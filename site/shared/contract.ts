@@ -367,7 +367,11 @@ export const RecoveryCodeResponseSchema = z.object({ recoveryCode: z.string() })
 // POST /api/auth/logout (body {}) -> 204, clears the cookie
 // GET  /api/me -> {account}   (401 when not signed in)
 // GET  /api/session -> {account | null}   (always 200: the signed-out probe the browser uses, so a visitor's console stays clean)
-export const SessionResponseSchema = z.object({ account: AccountViewSchema.nullable() });
+export const SessionResponseSchema = z.object({
+  account: AccountViewSchema.nullable(),
+  /** additive (#184): true when the account may have private cases to play; the browser then asks GET /api/me/cases */
+  privateCases: z.boolean().default(false),
+});
 
 // ---- guests (#176) --------------------------------------------------------
 // POST /api/guest {} -> 201 {account} + cookie: a new guest (kind "guest", approved, username "guest-<id>", which
@@ -387,6 +391,10 @@ export type UpgradeRequest = z.infer<typeof UpgradeRequestSchema>;
 //                                            (lang is the one served: he falls back to en; ETag, 304; 404 unless published)
 //     CaseContentResponseSchema is in ./case-records.ts (server-side schemas).
 // Evidence: /evidence/db/<id>/v<n>/files/<path> and /evidence/db/<id>/v<n>.zip (Edge Function; Range, immutable).
+// Private cases (#184): never in GET /api/cases. Their content answers no-store and only to the author, the
+//   site admin and active members of an assigned class (404 otherwise); its evidence location is
+//   /evidence/db/<id>/v<n>~<key>/... with a 128-bit key that no public response carries.
+// GET /api/me/cases -> {cases: CatalogEntry[]}   personalised, no-store: the private cases this session may play
 export const CasesResponseSchema = z.object({ cases: z.array(CatalogEntrySchema) });
 
 // GET /api/today -> public
