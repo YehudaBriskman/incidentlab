@@ -30,6 +30,7 @@ const progress = (q1: Partial<StageProgress> = {}, over: Partial<ProgressView> =
   stages: Object.fromEntries(QUESTION_ORDER.map((q) => [q, q === "q1" ? stage({ status: "active", ...q1 }) : stage()])) as ProgressView["stages"],
   commandsRevealed: {},
   unlocked: { hints: {}, commands: {} },
+  run: null,
   ...over,
 });
 
