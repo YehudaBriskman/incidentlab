@@ -14,8 +14,16 @@
 // The class board gives the first-blood bonus to that member instead of to whoever was first on the whole site:
 // a counted solve's points lose the site-wide bonus it may carry and gain the class bonus if it was the class's
 // first. No new key stores this; it is re-derived from the members' solve times on every board read.
+//
+// Event runs (#253): for the class's current event occurrence (domain/event-run.ts), a member's event-run record of
+// case C replaces their own run of C on this board, whatever it holds (even nothing solved yet). Their own run of C
+// still counts, by the rules above, only when they never opened an event run of C: a member who played tonight the
+// old way keeps their points (back-compat). Event-run solves carry no site-wide first blood, so the class's own
+// first-solver bonus is the only one they get. The same window and freeze apply to both kinds.
 import { SCORING } from "../../shared/contract.ts";
+import { scoreCaseOf } from "./score.ts";
 import type { BoardTotals, ScoreCase } from "./score.ts";
+import type { ProgressRecord } from "./types.ts";
 
 /** The parts of a class record the rules read. */
 export type ClassWindowSource = {
@@ -54,6 +62,19 @@ export const momentCounts = (at: string | null, window: ClassWindow): boolean =>
   if (hasWindow && (t < Date.parse(window.startsAt ?? "") || t >= Date.parse(window.endsAt ?? ""))) return false;
   if (window.cutoff !== null && t > Date.parse(window.cutoff)) return false;
   return true;
+};
+
+/** What an event-run record adds: its solves and completion, or nothing yet (it still replaces the own run). */
+export const eventRunCase = (record: ProgressRecord): ScoreCase => scoreCaseOf(record) ?? { solves: [], completedAt: null, completionBonus: 0 };
+
+/** A member's cases for this board: their own runs, with each event-run case in place of the own run of it. */
+export const withEventRuns = (
+  own: Readonly<Record<string, ScoreCase>>,
+  eventRuns: readonly ProgressRecord[],
+): Readonly<Record<string, ScoreCase>> => {
+  const cases: Record<string, ScoreCase> = { ...own };
+  for (const record of eventRuns) cases[record.caseId] = eventRunCase(record);
+  return cases;
 };
 
 /** One member as the board sees them: the username and the score summary's cases. */
