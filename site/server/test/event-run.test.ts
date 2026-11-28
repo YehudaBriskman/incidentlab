@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { SCORING, AnswerResponseSchema, ClassBoardResponseSchema, ClassResponseSchema, ProgressResponseSchema, UserStatsResponseSchema } from "../../shared/contract.ts";
+import { SCORING, AdminProgressResponseSchema, AnswerResponseSchema, TrashResponseSchema, ClassBoardResponseSchema, ClassResponseSchema, ProgressResponseSchema, UserStatsResponseSchema } from "../../shared/contract.ts";
 import type { ClassBoardResponse, ClassDetail, ProgressView } from "../../shared/contract.ts";
 import { eventKeyOf, isEventLive } from "../domain/event-run.ts";
 import { InMemoryKvStore } from "../repositories/KvStore.ts";
@@ -47,7 +47,7 @@ const setup = () => {
   const at = (iso: string): void => {
     nowMs = Date.parse(iso);
   };
-  return { kv, seed, anonymous, at };
+  return { kv, seed, anonymous, at, harness };
 };
 
 const detailOf = async (res: Promise<Response>): Promise<ClassDetail> => {
@@ -260,4 +260,50 @@ test("class board counts event runs and, for players who never opened one, their
   await detailOf(ada.call(`/classes/${klass.id}`, { method: "PATCH", body: { event: { ...EVENT, startsAt: "2026-12-01T18:15:00Z" } } }));
   board = await boardOf(anonymous(`/classboard/${klass.token}`));
   assert.deepEqual(board.entries.map((e) => e.username).sort(), ["Dan"], "only Dan's own q2 at 18:20 is in the new window");
+});
+
+test("event runs go to the trash with a deleted account, come back on restore, and show in class Live (#268)", async () => {
+  const { kv, seed, at, harness } = setup();
+  const ada = await seed("Ada");
+  const bob = await seed("Bob");
+  const cls = await classWith(ada, [bob]);
+  at("2026-12-01T18:30:00Z"); // the event is live
+  const run = { classId: cls.id };
+  await expectStatus(bob.call("/cases/alpha/setup-done", { body: { run } }), 200);
+  await expectStatus(bob.call("/cases/alpha/answer", { body: { questionId: "q1", answer: "alpha-a1", run } }), 200);
+  // Bob never opened his own run: class Live shows the event run while the event is live.
+  const liveRes = await ada.call(`/classes/${cls.id}/progress?caseId=alpha`);
+  assert.equal(liveRes.status, 200, await liveRes.clone().text());
+  const live = AdminProgressResponseSchema.parse(await liveRes.json());
+  assert.deepEqual(live.players.map((p) => [p.accountId, p.currentStage]), [[bob.id, "q2"]]);
+
+  const eventKeys = await keysOf(kv, "eventprogress:");
+  assert.equal(eventKeys.length, 1);
+  await expectStatus(harness.admin(`/admin/accounts/${bob.id}`, { method: "DELETE" }), 204);
+  assert.deepEqual(await keysOf(kv, "eventprogress:"), []);
+  const trash = TrashResponseSchema.parse(await (await harness.admin("/admin/trash")).json());
+  const entry = trash.entries.find((e) => e.kind === "account");
+  assert.ok(entry);
+  await expectStatus(harness.admin(`/admin/trash/${entry.id}/restore`, { body: {} }), 200);
+  assert.deepEqual(await keysOf(kv, "eventprogress:"), eventKeys);
+});
+
+test("a progress reset clears event runs of that case, and the weekly sweep drops runs older than 180 days (#268)", async () => {
+  const { kv, seed, at, harness } = setup();
+  const ada = await seed("Ada");
+  const bob = await seed("Bob");
+  const cls = await classWith(ada, [bob]);
+  at("2026-12-01T18:30:00Z");
+  await expectStatus(bob.call("/cases/alpha/setup-done", { body: { run: { classId: cls.id } } }), 200);
+  assert.equal((await keysOf(kv, "eventprogress:")).length, 1);
+  await expectStatus(harness.admin("/admin/reset", { body: { confirm: "RESET", caseId: "alpha" } }), 204);
+  assert.deepEqual(await keysOf(kv, "eventprogress:"), []);
+
+  await expectStatus(bob.call("/cases/alpha/setup-done", { body: { run: { classId: cls.id } } }), 200);
+  const { createAccountHygiene } = await import("../services/AccountHygieneService.ts");
+  assert.equal((await createAccountHygiene(kv, () => new Date("2027-03-01T00:00:00Z")).run({ apply: true })).oldEventRuns, 0);
+  const sweep = createAccountHygiene(kv, () => new Date("2027-06-30T00:00:00Z"));
+  assert.equal((await sweep.run({ apply: false })).oldEventRuns, 1);
+  assert.equal((await sweep.run({ apply: true })).oldEventRuns, 1);
+  assert.deepEqual(await keysOf(kv, "eventprogress:"), []);
 });

@@ -8,6 +8,7 @@ import { classToday, fetchClass, fetchMyClasses } from "../lib/class-api";
 import { homeClasses, needsDetail, nextAchievement } from "../lib/challenges";
 import { eventStatus, everySecond } from "../components/classEventStatus";
 import { h, type Child } from "../lib/dom";
+import { nameNode } from "../lib/bidi";
 import { serverNow } from "../lib/event";
 import { getLang } from "../i18n/i18n";
 import { TC } from "../i18n/strings-challenges";
@@ -73,7 +74,7 @@ function classRow(item: ClassItem): HTMLElement {
         { class: "home-class-case" },
         caseId === null
           ? h("span", { class: "home-class-note" }, TC().noCaseToday)
-          : [h("span", { class: "home-class-case-label" }, TC().caseToday), " ", h("bdi", { class: "home-class-case-title" }, caseTitle(caseId))],
+          : [h("span", { class: "home-class-case-label" }, TC().caseToday), " ", nameNode(caseTitle(caseId), "home-class-case-title")],
       ),
     ];
   })();

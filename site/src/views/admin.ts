@@ -1129,7 +1129,6 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   const auditSearch = h("input", {
     type: "search",
     class: "admin-input audit-search",
-    dir: "auto",
     enterkeyhint: "search",
     placeholder: T().admAuditSearch,
     "aria-label": T().admAuditSearch,

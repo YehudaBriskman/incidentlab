@@ -1,5 +1,8 @@
 import { defineStrings } from "./i18n";
 
+/** Signed amounts as an LTR isolate (LRI…PDI), so "+5" keeps its sign before the digits in Hebrew (#248). */
+const ltr = (text: string): string => `\u2066${text}\u2069`;
+
 const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
 
 export const T = defineStrings({
@@ -203,7 +206,7 @@ export const T = defineStrings({
     continueDebrief: "← המשך לתחקיר",
     continueStage: (n: number): string => `← המשך לשלב ${n}`,
     lookFor: "מה לחפש",
-    solvedPts: (pts: number): string => `✓ נפתר · +${pts} נק'`,
+    solvedPts: (pts: number): string => `✓ נפתר · ${ltr(`+${pts}`)} נק'`,
     revealedPts: "התשובה נחשפה · 0 נק'",
     answerLabel: "תשובה: ",
     yourAnswerLabel: "התשובה שלכם: ",

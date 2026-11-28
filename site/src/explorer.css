@@ -379,6 +379,8 @@ th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
 [dir=rtl] .explorer code { direction: ltr; unicode-bidi: isolate; }
 /* Typed patterns stay LTR; an empty field shows its Hebrew placeholder right-aligned in the UI direction. */
 [dir=rtl] .ex-input:placeholder-shown { direction: rtl; text-align: start; }
+/* The file filter is a search field: it keeps the UI direction while typed, so its magnifier and padding stay on one side (#248). */
+[dir=rtl] .ex-input.ex-file-search { direction: rtl; text-align: start; }
 [dir=rtl] .ex-time-out { text-align: left; }
 /* Translated UI text that the global `.mono` rule would otherwise force LTR. */
 [dir=rtl] .ex-count, [dir=rtl] .ex-file-meta { direction: rtl; unicode-bidi: normal; }
