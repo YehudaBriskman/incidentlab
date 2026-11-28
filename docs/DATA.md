@@ -246,8 +246,10 @@ Migration 003 backfills `score:` for every account. Accounts that have no summar
 `{schemaVersion, accountId, status (open|done|rejected, default open), createdAt, expiresAt, vouches (default []),
 decidedAt (default null)}`. Each vouch is `{classId, byAccountId, at}`: a class admin saying "I know this student".
 No password, temporary password or hash is ever in it; approval writes the account (`passwordHash`,
-`mustChangePassword: true`, `sessionEpoch` + 1) and marks the request `done` first, so two approvals can't both
-reset. `expiresAt` is 7 days after the request (a repeat of a live request moves it). The weekly hygiene job deletes
+`mustChangePassword: true`, `temporaryPasswordExpiresAt` = now + 48 h, `sessionEpoch` + 1) and marks the request
+`done` first, so two approvals can't both reset. `AccountRecord.temporaryPasswordExpiresAt` (additive, default
+null) is also set by the console's direct reset and cleared by the password change; sign-in refuses an expired one.
+A vouch counts only when the member's `joinedAt` is at least 7 days before it. `expiresAt` is 7 days after the request (a repeat of a live request moves it). The weekly hygiene job deletes
 requests past `expiresAt`, whatever their status. Cost: the owner's list and a class's list each start from one
 listing of the prefix, which stays small because of the expiry.
 

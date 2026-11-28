@@ -25,6 +25,8 @@ export const AccountRecordSchema = z.object({
   lastSeenAt: z.string().nullable(),
   lastLoginAt: z.string().nullable(),
   mustChangePassword: z.boolean().default(false),
+  /** when a temporary password from an owner reset stops working (#254: 48 h); null when none is pending */
+  temporaryPasswordExpiresAt: z.string().nullable().default(null),
   /** additive (author role): accounts saved before it are players */
   role: AccountRecordRoleSchema.default("player"),
   // Open access (#171, #172), all additive: accounts saved before them parse with these defaults.
