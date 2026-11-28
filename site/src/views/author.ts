@@ -10,13 +10,16 @@ import { z } from "zod";
 import {
   AuthorCaseResponseSchema,
   AuthorCasesResponseSchema,
+  SetCaseClassesResponseSchema,
   DeleteCaseResponseSchema,
   RestoreCaseResponseSchema,
   type AuthorCase,
   type FinalizeResponse,
   type PublishResponse,
 } from "../../shared/author-contract";
-import { ClassesResponseSchema, ErrorBodySchema } from "../../shared/contract";
+import { AUTHOR_REQUEST_NOTE_MAX, AuthorAccessRequestResponseSchema, ClassesResponseSchema, ErrorBodySchema, type AuthorAccessRequest } from "../../shared/contract";
+import { TOw } from "../i18n/strings-owner";
+import "../owner.css";
 import { publishCaseVersion, uploadCasePackage, UploadError, type UploadProgress, type UploadTransport } from "../../shared/upload-client";
 import { dataTable, type DataTable } from "../components/dataTable";
 import { formActions, formField, formSection } from "../components/formLayout";
@@ -74,12 +77,91 @@ export function renderAuthor(root: HTMLElement): void {
         return;
       }
       if (account.role !== "author" && account.role !== "admin") {
-        setChildren(root, h("section", { class: "center-card" }, h("h1", {}, TAu().title), h("p", {}, TAu().notAuthor)));
+        renderAskAccess(root, account.kind === "guest");
         return;
       }
       draw(root, account.role === "admin");
     })
     .catch((err: unknown) => setChildren(root, h("section", { class: "center-card", role: "alert" }, h("p", {}, errorText(err)))));
+}
+
+/** Where outside authors read the package format (the repository is public; docs/CASE_CONTRACT.md, #234). */
+const CONTRACT_URL = "https://github.com/YehudaBriskman/incidentlab/blob/main/docs/CASE_CONTRACT.md#packaging-for-outside-authors";
+
+/** "How to make a package" (#234): the path for authors without the repository's build pipeline. */
+function packageGuide(): HTMLElement {
+  return h(
+    "details",
+    { class: "author-guide" },
+    h("summary", {}, TAu().guideTitle),
+    h("p", {}, TAu().guideLead),
+    h("ol", {}, [TAu().guideStep1, TAu().guideStep2, TAu().guideStep3, TAu().guideStep4].map((step) => h("li", {}, step))),
+    h("p", {}, h("a", { href: CONTRACT_URL, target: "_blank", rel: "noopener" }, TAu().guideLink)),
+  );
+}
+
+/**
+ * Not an author yet (#234): ask the site owner for access. The request lands in the owner's review queue; this page
+ * shows it while it waits. Guests are sent to create an account first.
+ */
+function renderAskAccess(root: HTMLElement, isGuest: boolean): void {
+  const head = [h("h1", {}, TAu().title), h("p", {}, TAu().notAuthor)];
+  if (isGuest) {
+    setChildren(root, h("section", { class: "center-card author-ask" }, head, h("p", {}, TOw().askGuest), h("a", { class: "btn btn-primary", href: "#/signup" }, TOw().askGuestLink)));
+    return;
+  }
+  const status = h("p", { class: "author-ask-status", role: "status" });
+  const note = h("textarea", { id: "author-ask-note", class: "input", maxlength: AUTHOR_REQUEST_NOTE_MAX, rows: 3, dir: "auto" });
+  const field = formField({ input: note, label: TOw().askNoteLabel, help: TOw().askNoteHelp });
+  const submit = h("button", { type: "submit", class: "btn btn-primary", "data-testid": "ask-author" }, TOw().askBtn);
+  const form = h("form", { class: "author-ask-form", novalidate: true }, field.nodes, formActions(submit), status);
+  const dateFmt = new Intl.DateTimeFormat(locale(), { day: "numeric", month: "short", year: "numeric" });
+  const showPending = (request: AuthorAccessRequest | null): void => {
+    submit.textContent = request === null ? TOw().askBtn : TOw().askUpdate;
+    if (request !== null) {
+      status.textContent = TOw().askPending(dateFmt.format(new Date(request.createdAt)));
+      if (note.value === "" && request.note !== null) note.value = request.note;
+    }
+  };
+  let busy = false;
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    if (busy) return;
+    busy = true;
+    submit.setAttribute("aria-disabled", "true");
+    const label = submit.textContent ?? TOw().askBtn;
+    submit.textContent = TOw().askSending;
+    const text = note.value.trim();
+    authorJson("POST", "/api/me/author-request", AuthorAccessRequestResponseSchema, text === "" ? {} : { note: text })
+      .then((res) => {
+        showPending(res.request);
+        toast({ tone: "success", text: TOw().askSent });
+      })
+      .catch((err: unknown) => {
+        submit.textContent = label;
+        const limited = err instanceof ActionError && err.code === "rate-limited";
+        status.textContent = limited ? TOw().askLimited : TOw().askFailed(errorText(err));
+      })
+      .finally(() => {
+        busy = false;
+        submit.removeAttribute("aria-disabled");
+      });
+  });
+  setChildren(
+    root,
+    h(
+      "section",
+      { class: "author-page author-ask", "aria-labelledby": "author-ask-h" },
+      head,
+      h("h2", { id: "author-ask-h", class: "section-title" }, TOw().askTitle),
+      h("p", { class: "muted" }, TOw().askLead),
+      form,
+      packageGuide(),
+    ),
+  );
+  void authorJson("GET", "/api/me/author-request", AuthorAccessRequestResponseSchema)
+    .then((res) => showPending(res.request))
+    .catch(() => undefined); // the form still works; the server answers a second ask the same way
 }
 
 /** The visibility pill, then the review state, a pending version, the owner's note and the class count. */
@@ -129,11 +211,22 @@ function draw(root: HTMLElement, isOwner: boolean): void {
     }
   };
 
+  /**
+   * What a publish does, said truthfully (#234): the owner's publish of a public (or new) case is live at once; a
+   * private case stays private (author or owner); an author's new version of a public case goes to review.
+   */
+  const publishBodyFor = (caseId: string): string => {
+    const c = cases.find((x) => x.id === caseId);
+    const isPublicNow = c !== undefined && c.visibility === "public" && c.publishedVersion !== null;
+    if (isOwner) return c === undefined || c.visibility === "public" ? TAu().publishBody : TAu().publishBodyPrivate;
+    return isPublicNow ? TAu().publishBodyReview : TAu().publishBodyPrivate;
+  };
+
   /** Publishes (or rolls back to) `version`; asks again when the answer key changed under players' feet. */
   const publish = async (caseId: string, version: number, rollback: boolean): Promise<void> => {
     const ok = await confirm({
       title: rollback ? TAu().rollbackTitle(caseId, version) : TAu().publishTitle(caseId, version),
-      body: TAu().publishBody,
+      body: publishBodyFor(caseId),
       confirmLabel: rollback ? TAu().menuRollback(version) : TAu().publishDraft(version),
     });
     if (!ok) return;
@@ -166,13 +259,23 @@ function draw(root: HTMLElement, isOwner: boolean): void {
     const extra = c.classIds.filter((id) => !mine.some((k) => k.id === id)).map((id) => ({ id, name: id }));
     const options = [...mine.map((k) => ({ id: k.id, name: k.name })), ...extra];
     const boxes = options.map((o) => ({ id: o.id, box: h("input", { type: "checkbox", id: `author-class-${o.id}`, checked: c.classIds.includes(o.id) }), name: o.name }));
+    // One step (#234): saving can also put the case on each chosen class's case list (its page and board).
+    const live = c.publishedVersion !== null && c.status === "published";
+    const addBox = h("input", { type: "checkbox", id: "author-classes-add", checked: live, disabled: !live, "aria-describedby": "author-classes-add-help" });
     const body: Child[] = [
       h("p", { class: "muted" }, TRv().classesHelp),
       boxes.length === 0
         ? h("p", {}, TRv().classesEmpty)
         : h("fieldset", { class: "author-classes" }, h("legend", {}, TRv().classesLegend), boxes.map((b) => h("label", { class: "check-row", for: b.box.id }, b.box, " ", h("bdi", {}, b.name)))),
+      boxes.length === 0
+        ? null
+        : [
+            h("label", { class: "check-row", for: addBox.id }, addBox, " ", TRv().classesAddLabel),
+            h("p", { class: "muted small", id: "author-classes-add-help" }, TRv().classesAddHelp),
+          ],
     ];
     let saved = 0;
+    let listed = 0;
     const dialog = showDialog<"save" | "cancel">({
       title: TRv().classesTitle(c.id),
       body,
@@ -182,13 +285,15 @@ function draw(root: HTMLElement, isOwner: boolean): void {
           value: "save", label: TRv().save, tone: "primary", busyLabel: TRv().saving, disabled: boxes.length === 0,
           run: async () => {
             const classIds = boxes.filter((b) => b.box.checked).map((b) => b.id);
-            saved = (await authorJson("PUT", `/api/author/cases/${encodeURIComponent(c.id)}/classes`, AuthorCaseResponseSchema, { classIds })).case.classIds.length;
+            const res = await authorJson("PUT", `/api/author/cases/${encodeURIComponent(c.id)}/classes`, SetCaseClassesResponseSchema, { classIds, addToClassCases: addBox.checked && live });
+            saved = res.case.classIds.length;
+            listed = res.addedToClasses.length;
           },
         },
       ],
     });
     if ((await dialog.result) !== "save") return;
-    toast({ tone: "success", text: TRv().classesSaved(c.id, saved) });
+    toast({ tone: "success", text: `${TRv().classesSaved(c.id, saved)}${TRv().classesListed(listed)}` });
     await loadCases();
   };
 
@@ -335,6 +440,7 @@ function draw(root: HTMLElement, isOwner: boolean): void {
       h("p", { class: "muted" }, TAu().lead),
       h("p", { class: "muted" }, TRv().privateLead),
       isOwner ? h("p", {}, h("a", { class: "btn btn-outline", href: "#/admin/reviews" }, TRv().reviewQueueLink)) : null,
+      packageGuide(),
       form,
       h("h2", { id: "author-cases-h", class: "section-title" }, TAu().casesTitle),
       table.element,
