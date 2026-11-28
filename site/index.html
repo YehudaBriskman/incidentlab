@@ -25,7 +25,7 @@
     <meta name="twitter:description" content="CTF-style puzzles built from real-world incidents. Real evidence, real tools, your root cause." />
     <meta name="twitter:image" content="https://incidentlab-3am-outage.netlify.app/og-image.png" />
     <meta name="twitter:image:alt" content="IncidentLab logo with the line: Work a real outage, end to end, beside a terminal showing a solved case." />
-    <title>IncidentLab</title>
+    <title>IncidentLab: real incidents, real evidence, your RCA</title>
     <!-- Applies the saved display settings (theme, text size, motion, contrast, spacing) before first paint.
          A classic external script: the CSP (script-src 'self') blocks inline ones. -->
     <script src="/settings-boot.js"></script>
@@ -48,8 +48,33 @@
           <!-- a view's page panel (src/shell/frame.ts); html[data-aside-page] reserves it before the view loads -->
           <aside class="page-aside"></aside>
           <div id="app" tabindex="-1">
-            <!-- Static first paint until main.ts renders the route (replaced on the first render). -->
-            <section class="center-card" aria-busy="true"><p class="muted mono">Loading…</p></section>
+            <!-- Static first paint until main.ts renders the route (replaced on the first render), #225.
+                 The hero is the same markup as introStrip() in src/views/home.ts, so the app's own hero takes its
+                 place without a shift; keep the two (and the strings in i18n/strings-onboard.ts) in step.
+                 settings-boot.js sets the language before paint and shows the loading card instead on every
+                 other route and for a signed-in visitor (html[data-boot=app]). -->
+            <div class="view boot-view">
+              <div class="home-dash">
+                <div class="home-intro-slot">
+                  <section class="home-intro">
+                    <div class="home-intro-text">
+                      <h1 class="home-intro-title"><span class="boot-t" lang="en">Debug realistic production outages, from evidence to root cause.</span><span class="boot-t" lang="he" dir="rtl">חקרו תקלות פרודקשן מציאותיות, מהראיות ועד שורש הבעיה.</span></h1>
+                      <p class="home-intro-sub"><span class="boot-t" lang="en">Hands-on incident puzzles for engineers and student cohorts: logs, metrics, chat and a git repo, one question at a time.</span><span class="boot-t" lang="he" dir="rtl">חידות תקלה מעשיות למהנדסים ולכיתות: לוגים, מטריקות, צ'אט ומאגר git, שאלה אחר שאלה.</span></p>
+                      <p class="home-proof"></p>
+                    </div>
+                    <div class="home-intro-cta">
+                      <div class="home-intro-actions">
+                        <a class="btn btn-primary btn-lg home-play" href="#/play"><span class="boot-t" lang="en">Play now, no sign-up</span><span class="boot-t" lang="he" dir="rtl">לשחק עכשיו, בלי הרשמה</span></a>
+                        <a class="btn btn-lg home-create" href="#/signup"><span class="boot-t" lang="en">Create account</span><span class="boot-t" lang="he" dir="rtl">פתיחת חשבון</span></a>
+                        <a class="home-signin hit-link" href="#/login"><span class="boot-t" lang="en">Sign in</span><span class="boot-t" lang="he" dir="rtl">כניסה</span></a>
+                      </div>
+                      <p class="home-trust"><span class="boot-t" lang="en">Free · No email · Nothing to install</span><span class="boot-t" lang="he" dir="rtl">בחינם · בלי אימייל · בלי להתקין כלום</span></p>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </div>
+            <section class="center-card boot-loading" aria-busy="true"><p class="muted mono">Loading…</p></section>
           </div>
         </div>
       </main>

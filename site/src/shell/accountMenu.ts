@@ -186,7 +186,14 @@ export function createAccountMenu(): HTMLElement {
   const wrap = h("div", { class: "account" });
   const button = h("button", { type: "button", class: "account-btn", "aria-haspopup": "dialog" });
   const panel = h("div", { class: "account-panel", role: "dialog" });
-  const signInLink = h("a", { class: "btn btn-sm btn-primary account-signin", href: "#/login" });
+  // Secondary, not primary (#223): a page's one primary action is its own (home's is "Play now"). Hidden on the
+  // sign-in and sign-up pages, where it would only compete with the form.
+  const signInLink = h("a", { class: "btn btn-sm account-signin", href: "#/login" });
+  const hideOnAuthPages = (): void => {
+    signInLink.hidden = /^#\/(login|signup)(\?|$)/.test(window.location.hash);
+  };
+  window.addEventListener("hashchange", hideOnAuthPages);
+  hideOnAuthPages();
   let sheet: DialogHandle<string> | null = null;
 
   const close = (): void => {

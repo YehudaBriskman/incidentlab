@@ -12,12 +12,12 @@ test("a guest plays, upgrades from the banner and keeps the progress", async ({ 
   const username = randomUsername("guest");
   await scheduleToday(request, CASE_ID);
 
-  await test.step("a signed-out visitor sees Play as guest beside sign-in, and it opens the case", async () => {
+  await test.step("a signed-out visitor sees Play now above sign-in, and it opens the case", async () => {
     await page.goto(`/#/case/${CASE_ID}`);
     await expect(page.locator("form.gate")).toBeVisible();
     const choice = page.locator(".guest-choice");
-    await expect(choice.getByRole("heading", { name: /just want to play/i })).toBeVisible();
-    await choice.getByRole("button", { name: /play as guest/i }).click();
+    await expect(choice.getByRole("heading", { level: 1, name: "Play this case now" })).toBeVisible();
+    await choice.getByRole("button", { name: /play now/i }).click();
     await expect(page.getByRole("button", { name: /ready/i })).toBeVisible();
   });
 

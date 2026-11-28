@@ -8,12 +8,14 @@
 // #/cases (#221) is the catalog: the same table with every case, search, the Filter popover and Sort, whose state
 // lives in the URL query (#/cases?difficulty=hard). Each route has its own visible h1 and title.
 import "../home.css";
-import type { AccountView, CaseStats, TodayResponse, UserStats } from "../../shared/contract";
-import { caseSummaries, caseSummary, catalogFailed, catalogReady, reloadCatalog } from "../content/load";
+import type { AccountView, CaseStats, LeaderboardResponse, TodayResponse, UserStats } from "../../shared/contract";
+import { caseSummaries, caseSummary, catalogFailed, catalogReady, reloadCatalog, startHereCaseId } from "../content/load";
 import type { CaseSummary } from "../content/catalog-schema";
 import { dataTable, type Column, type DataTable } from "../components/dataTable";
 import type { SortState } from "../components/table-core";
-import { fetchMyStats } from "../lib/api";
+import { fetchLeaderboard, fetchMyStats } from "../lib/api";
+import { playNow } from "../lib/playNow";
+import { START_HERE } from "../lib/startHere";
 import { h, setChildren, type Child } from "../lib/dom";
 import { cachedAccount, isAccountKnown, likelySignedIn, loadAccount, loadToday, onAccountChange } from "../lib/session";
 import { cachedEvent, isEventActive, onEventChange } from "../lib/event";
@@ -36,7 +38,6 @@ import { listNode, nameNode } from "../lib/bidi";
 import { TA } from "../i18n/strings-account";
 import { TC } from "../i18n/strings-challenges";
 import { TG } from "../i18n/strings-game";
-import { TGu } from "../i18n/strings-guest";
 import { TH } from "../i18n/strings-home";
 import { TO } from "../i18n/strings-onboard";
 import { T } from "../i18n/strings-player";
@@ -319,15 +320,16 @@ function eventLine(): HTMLElement {
   return el;
 }
 
-function todayAction(c: CaseSummary, state: HomeState, signedIn: boolean): HTMLElement {
+function todayAction(c: CaseSummary, state: HomeState, signedIn: boolean, primary: boolean): HTMLElement {
   // Signed out: the case page's gate offers sign-in and guest play (nothing is locked to an account or a time).
   if (!signedIn) return h("a", { class: "btn btn-sm", href: `#/case/${c.id}` }, TC().play);
   const st = statusOf(state.stats.get(c.id));
   const label = st === "completed" ? TO().reviewDebrief : st === "in-progress" ? TH().resume : TH().start;
-  return h("a", { class: "btn btn-primary btn-sm", href: `#/case/${c.id}` }, label);
+  return h("a", { class: primary ? "btn btn-primary btn-sm" : "btn btn-sm", href: `#/case/${c.id}` }, label);
 }
 
-function todayCard(state: HomeState, signedIn: boolean, retry: () => void): HTMLElement {
+/** `primary`: false while the Start-here card beside it carries the view's one primary action (#223). */
+function todayCard(state: HomeState, signedIn: boolean, retry: () => void, primary = true): HTMLElement {
   const today = state.today;
   const c = today?.caseId ? caseSummary(today.caseId) : undefined;
   const body = ((): Child => {
@@ -351,7 +353,7 @@ function todayCard(state: HomeState, signedIn: boolean, retry: () => void): HTML
       h(
         "div",
         { class: "home-today-foot" },
-        todayAction(c, state, signedIn),
+        todayAction(c, state, signedIn, primary),
         state.isPlayer && st !== "not-started"
           ? h("span", { class: "home-today-progress" }, statusChip({ c, stats, isToday: true }), h("span", { class: "home-row-num" }, TH().stageCount(done(stats), c.questionCount)))
           : null,
@@ -368,6 +370,67 @@ function todayCard(state: HomeState, signedIn: boolean, retry: () => void): HTML
 }
 
 
+
+/* ================= the "Start here" card (#224) ================= */
+
+/** Players fewer than this on the public board: the proof line says only how many cases there are (no weak numbers). */
+const PROOF_MIN_PLAYERS = 5;
+
+/** The start-here case id once the catalog and today's answer are in (lib/startHere.ts). */
+function startHereId(state: HomeState): string | null {
+  if (state.loading) return null;
+  const id = startHereCaseId(state.today?.releasedCaseIds ?? null);
+  return id !== null && caseSummary(id) !== undefined ? id : null;
+}
+
+/** First-timers: visitors, and players (guests included) who have not started any case. */
+function isFirstTimer(state: HomeState, signedIn: boolean): boolean {
+  if (!signedIn) return true;
+  return state.isPlayer && !state.loading && !state.statsFailed && [...state.stats.values()].every((s) => s.status === "not-started");
+}
+
+/** A card for first-timers pointing at the start-here case; visitors start it as a guest in one click. */
+function startHereCard(c: CaseSummary, signedIn: boolean): HTMLElement {
+  const tutorial = c.tags.some((t) => t.toLowerCase() === START_HERE.preferTag);
+  const action = signedIn
+    ? h("a", { class: "btn btn-primary btn-sm", href: `#/case/${c.id}` }, TO().startHereBtn)
+    : playNowButton("btn btn-sm", TO().startHereBtn);
+  return h(
+    "section",
+    { class: "home-card home-today home-start", "aria-labelledby": "home-start-h", "data-case": c.id },
+    cardHead("home-start-h", TO().startHereTitle),
+    h(
+      "div",
+      { class: "home-card-body" },
+      h("a", { class: "home-today-title", href: `#/case/${c.id}` }, titleNode(c.title)),
+      h("p", { class: "home-today-sub" }, tutorial ? TO().startHereTutorial : TO().startHereNote),
+      h(
+        "p",
+        { class: "home-today-meta" },
+        difficultyCell(c.difficulty),
+        h("span", { class: "home-row-sep" }, "·"),
+        h("bdi", {}, TO().minutes(c.estMinutes)),
+        h("span", { class: "home-row-sep" }, "·"),
+        TO().stages(c.questionCount),
+      ),
+      h("div", { class: "home-today-foot" }, action),
+    ),
+  );
+}
+
+/** What a visitor sees in the Start-here slot until the catalog answers (same footprint: nothing shifts). */
+function startHereSkeleton(): HTMLElement {
+  return h(
+    "section",
+    { class: "home-card home-today home-start", "aria-busy": "true", "aria-labelledby": "home-start-h" },
+    cardHead("home-start-h", TO().startHereTitle),
+    h("div", { class: "home-card-body" }, h("span", { class: "dt-skeleton home-skel-title" }), h("span", { class: "dt-skeleton" }), h("span", { class: "dt-skeleton home-skel-btn" })),
+  );
+}
+
+/** The public board (CDN-cached, publicJson), asked for once per page load and only for visitors' proof line. */
+let boardForProof: Promise<LeaderboardResponse | null> | null = null;
+const proofBoard = (): Promise<LeaderboardResponse | null> => (boardForProof ??= fetchLeaderboard(null).catch(() => null));
 
 /* ================= the cases table ================= */
 
@@ -487,6 +550,19 @@ export function renderHome(root: HTMLElement, mode: HomeMode = "home"): void {
   let loadedFor: string | null = null;
 
   const intro = h("div", { class: "home-intro-slot" });
+  // Signed out: the intro and its proof line are built once, so a redraw never resets the Play now button mid-click.
+  const proof = h("p", { class: "home-proof", "aria-label": TO().proofLabel });
+  let introEl: HTMLElement | null = null;
+  let board: LeaderboardResponse | null = null;
+  /** "5 cases · 12 investigators on the leaderboard · 48 stages solved": only numbers the site can show (#225). */
+  const drawProof = (): void => {
+    const released = state.today?.releasedCaseIds;
+    const cases = caseSummaries().filter((c) => released === undefined || released.includes(c.id)).length;
+    const players = board?.entries.length ?? 0;
+    const stages = board?.entries.reduce((sum, e) => sum + e.stagesSolved, 0) ?? 0;
+    const parts = [cases > 0 ? TO().proofCases(cases) : null, players >= PROOF_MIN_PLAYERS ? TO().proofLine(players, stages) : null];
+    proof.textContent = parts.filter((p): p is string => p !== null).join(" · ");
+  };
   const top = h("div", { class: "home-top" });
   const chal = h("div", { class: "home-chal" });
   const search = h("input", { type: "search", class: "input home-search", "aria-label": TH().search, placeholder: TH().searchPlaceholder, autocomplete: "off", enterkeyhint: "search", value: filters.q });
@@ -658,12 +734,30 @@ export function renderHome(root: HTMLElement, mode: HomeMode = "home"): void {
     if (!onHome()) return;
     // Before /api/me answers, lay out for the likely state (lib/session.ts hint) so nothing shifts when it does.
     const signedIn = likelySignedIn();
-    setChildren(intro, signedIn || catalog ? null : introStrip());
+    if (signedIn || catalog) setChildren(intro);
+    else {
+      introEl ??= introStrip(proof);
+      if (introEl.parentElement !== intro) setChildren(intro, introEl);
+      if (!state.loading) drawProof();
+    }
     pageH1.hidden = !signedIn && !catalog;
-    const single = isSingleCard(state, signedIn);
-    top.classList.toggle("is-single", single);
-    if (single) setChildren(top, todayCard(state, signedIn, reload));
-    else setChildren(top, continueCard(state, signedIn), todayCard(state, signedIn, reload));
+    // #224: first-timers get the Start-here card in the Continue slot; it is the only card when it is today's case.
+    const startId = isFirstTimer(state, signedIn) ? startHereId(state) : null;
+    const start = startId === null ? undefined : caseSummary(startId);
+    if (start !== undefined) {
+      const alone = start.id === todayCaseId(state);
+      top.classList.toggle("is-single", alone);
+      if (alone) setChildren(top, startHereCard(start, signedIn));
+      else setChildren(top, startHereCard(start, signedIn), todayCard(state, signedIn, reload, false));
+    } else if (!signedIn && state.loading) {
+      top.classList.remove("is-single");
+      setChildren(top, startHereSkeleton(), todayCard(state, signedIn, reload));
+    } else {
+      const single = isSingleCard(state, signedIn);
+      top.classList.toggle("is-single", single);
+      if (single) setChildren(top, todayCard(state, signedIn, reload));
+      else setChildren(top, continueCard(state, signedIn), todayCard(state, signedIn, reload));
+    }
     drawChallenges();
     if (state.loading) {
       // Keep rows already shown (a retry): only the first load draws skeleton rows.
@@ -769,6 +863,13 @@ export function renderHome(root: HTMLElement, mode: HomeMode = "home"): void {
       (): Loaded => ({ me: null, failed: false, player: false }),
     );
     if (!catalog) loadClasses(account); // the catalog shows no classes: don't spend the call
+    // Visitors' proof line (#225): the public, CDN-cached board, once per page load; never for a signed-in player.
+    if (!catalog && !likelySignedIn()) {
+      void proofBoard().then((b) => {
+        board = b;
+        if (onHome() && !state.loading) drawProof();
+      });
+    }
     // The case list (GET /api/cases) arrives with the other two; a failed fetch is retried by reload().
     const catalogLoad = catalogFailed() ? reloadCatalog() : catalogReady;
     void Promise.all([today, stats, catalogLoad]).then(([t, s]) => {
@@ -804,36 +905,44 @@ export function renderHome(root: HTMLElement, mode: HomeMode = "home"): void {
 /** Below this the dashboard stops shrinking and the page scrolls instead (short laptop windows). */
 const MIN_DASH_PX = 420;
 
-/** Signed out: what this is, for whom, and one primary action. Compact, not a marketing hero. */
-function introStrip(): HTMLElement {
+/**
+ * Signed out: what this is, for whom, and one primary action (#223): "Play now, no sign-up" starts a guest and
+ * lands in the start-here case. Create account is secondary and Sign in a text link; the risk reversers sit under
+ * the buttons and the proof line under the value statement (#225). site/index.html carries a static copy of this
+ * markup as the first paint, so keep the two in step.
+ */
+function introStrip(proof: HTMLElement): HTMLElement {
   return h(
     "section",
     { class: "home-intro", "aria-label": TH().introLabel },
-    h("div", { class: "home-intro-text" }, h("h1", { class: "home-intro-title" }, TO().heroTitle), h("p", { class: "home-intro-sub" }, TO().heroSub)),
+    h("div", { class: "home-intro-text" }, h("h1", { class: "home-intro-title" }, TO().heroTitle), h("p", { class: "home-intro-sub" }, TO().heroSub), proof),
     h(
       "div",
-      { class: "home-intro-actions" },
-      h("a", { class: "btn btn-primary btn-sm", href: "#/signup" }, TO().ctaCreate),
-      guestButton(),
-      h("a", { class: "btn btn-ghost btn-sm", href: "#/login" }, TO().ctaSignIn),
+      { class: "home-intro-cta" },
+      h(
+        "div",
+        { class: "home-intro-actions" },
+        playNowButton("btn btn-primary btn-lg home-play", TO().playNow),
+        h("a", { class: "btn btn-lg home-create", href: "#/signup" }, TO().ctaCreate),
+        h("a", { class: "home-signin hit-link", href: "#/login" }, TO().signInLink),
+      ),
+      h("p", { class: "home-trust" }, TO().ctaNote),
     ),
   );
 }
 
-/** "Play as guest" (#176): starts a guest session; the account change then reloads home for the guest. */
-function guestButton(): HTMLElement {
-  const button = h("button", { type: "button", class: "btn btn-sm" }, TGu().playAsGuest);
+/** "Play now" (#223): a guest session (when signed out), then straight into the start-here case (lib/playNow.ts). */
+function playNowButton(cls: string, label: string): HTMLElement {
+  const button = h("button", { type: "button", class: cls }, label);
   let busy = false;
   button.addEventListener("click", () => {
     if (busy) return;
     busy = true;
     button.setAttribute("aria-disabled", "true");
-    void import("./guest")
-      .then((m) => m.playAsGuest())
-      .finally(() => {
-        busy = false;
-        button.removeAttribute("aria-disabled");
-      });
+    void playNow().finally(() => {
+      busy = false;
+      button.removeAttribute("aria-disabled");
+    });
   });
   return button;
 }

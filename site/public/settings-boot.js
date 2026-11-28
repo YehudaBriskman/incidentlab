@@ -11,6 +11,21 @@
   if (/^case\/[^/]+\/(toolbox|explorer)\/?$/.test(path) || /^settings\/(account|security|privacy|display)\/?$/.test(path)) {
     root.setAttribute("data-aside-page", "");
   }
+  // The static first paint in index.html (#225): its language before the app boots (same rule as getLang() in
+  // src/i18n/i18n.ts), and the static hero only where the app will draw the same hero (home, signed out, the same
+  // hint as likelySignedIn() in src/lib/session.ts). Everywhere else the plain loading card shows instead.
+  var lang = null;
+  var signedIn = false;
+  try {
+    lang = window.localStorage.getItem("il.lang");
+    signedIn = window.localStorage.getItem("il.signedIn") === "1";
+  } catch (e) {
+    /* storage blocked: browser language, signed out */
+  }
+  if (lang !== "he" && lang !== "en") lang = (navigator.language || "").toLowerCase().indexOf("he") === 0 ? "he" : "en";
+  root.lang = lang;
+  root.dir = lang === "he" ? "rtl" : "ltr";
+  if (path !== "" || signedIn) root.setAttribute("data-boot", "app");
   var raw = null;
   try {
     raw = window.localStorage.getItem("il.settings");

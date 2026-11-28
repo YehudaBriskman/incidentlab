@@ -169,15 +169,20 @@ export function mountNav(el: HTMLElement): void {
     collapseBtn?.focus();
   });
   const a11y = h("a", { class: "nav-foot-link", href: "/accessibility.html" });
+  // #225: who runs this and what it stores, one tap from every page
+  const about = h("a", { class: "nav-foot-link", href: "#/about" });
+  const privacy = h("a", { class: "nav-foot-link", href: "#/privacy" });
   const labelFoot = (): void => {
     a11y.textContent = TS().a11yStatement;
+    about.textContent = TS().navAbout;
+    privacy.textContent = TS().navPrivacy;
   };
 
   setChildren(
     el,
     h("div", { class: "nav-head" }, h("a", { class: "logo", href: "#/", "aria-label": TS().logoHome }, h("span", { class: "logo-mark", "aria-hidden": "true" }, "▲"), h("span", { class: "logo-word mono" }, "incident", h("span", { class: "accent" }, "lab")))),
     h("div", { class: "nav-scroll" }, h("ul", { class: "nav-list" }, listItems)),
-    h("div", { class: "nav-foot" }, a11y, collapseBtn),
+    h("div", { class: "nav-foot" }, h("div", { class: "nav-foot-links" }, about, privacy, a11y), collapseBtn),
   );
   // A click on a link (or a [data-nav-close] control) inside the drawer closes it first, in the capture phase,
   // so a handler that moves focus (a stage button focuses its heading) keeps the last word.

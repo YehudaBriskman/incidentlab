@@ -17,9 +17,13 @@ import "../player.css";
  * The quiet alternative to signing in on a gate: one button that starts a guest session and calls `onStarted`
  * with the account (the gate then continues into the case).
  */
-export function guestChoice(onStarted: (account: AccountView) => void): HTMLElement {
+export function guestChoice(onStarted: (account: AccountView) => void, options: { lead?: { context: string } } = {}): HTMLElement {
+  // `lead` (#223): the case gate leads with play. The choice comes first with the page's h1 and the one primary
+  // button; the sign-in form follows as the secondary path.
+  const lead = options.lead;
+  const label = lead ? TGu().playNow : TGu().playAsGuest;
   const error = h("p", { class: "form-error", role: "alert" });
-  const button = h("button", { type: "button", class: "btn btn-lg btn-block" }, TGu().playAsGuest);
+  const button = h("button", { type: "button", class: lead ? "btn btn-primary btn-lg btn-block" : "btn btn-lg btn-block" }, label);
   let busy = false;
   button.addEventListener("click", () => {
     if (busy) return;
@@ -35,11 +39,22 @@ export function guestChoice(onStarted: (account: AccountView) => void): HTMLElem
       .catch((err: unknown) => {
         busy = false;
         button.removeAttribute("aria-disabled");
-        button.textContent = TGu().playAsGuest;
+        button.textContent = label;
         error.textContent = startErrorText(err);
         button.focus();
       });
   });
+  if (lead) {
+    return h(
+      "section",
+      { class: "center-card gate guest-choice is-lead", "aria-labelledby": "guest-choice-title" },
+      h("p", { class: "eyebrow" }, lead.context),
+      h("h1", { id: "guest-choice-title" }, TGu().gateTitle),
+      h("p", { class: "muted" }, TGu().gateBody),
+      button,
+      error,
+    );
+  }
   return h(
     "section",
     { class: "center-card gate guest-choice", "aria-labelledby": "guest-choice-title" },

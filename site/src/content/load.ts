@@ -3,6 +3,7 @@ import { TeasersSchema, type CaseSummary, type CatalogEntry, type Teaser } from 
 import type { Case } from "../../shared/case";
 import { fetchDbCatalog, loadDbCase } from "./db-cases";
 import { fetchMyCases } from "../lib/api";
+import { pickStartHere } from "../lib/startHere";
 import { loadAccount, mayHavePrivateCases, onAccountChange } from "../lib/session";
 import teasersRaw from "./teasers.json";
 
@@ -131,6 +132,15 @@ export function caseSummaries(): CaseSummary[] {
         a.en.title.localeCompare(b.en.title),
     )
     .map((e) => summaryIn(e, lang));
+}
+
+/**
+ * The "Start here" case (lib/startHere.ts): a published case tagged `tutorial`, else the easiest and shortest.
+ * Reads the English entries, so the tag test never depends on the active language. Public cases only: a private
+ * class case is never a stranger's first case. `released` (GET /api/today) limits it to playable cases when known.
+ */
+export function startHereCaseId(released?: readonly string[] | null): string | null {
+  return pickStartHere(publicEntries.map((e) => e.en), released);
 }
 
 /* ---------- full cases (lazy, per id, version and language) ---------- */

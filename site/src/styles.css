@@ -592,6 +592,11 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 /* off screen by its own height (not a fixed offset), so it stays hidden at any text size */
 .skip-link { position: absolute; inset-inline-start: var(--space-2); top: 0; transform: translateY(-100%); min-block-size: var(--target-min); display: inline-flex; align-items: center; z-index: calc(var(--z-toast) + 1); background: var(--accent); color: var(--on-accent); font-weight: 600; text-decoration: none; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); }
 .skip-link:focus { top: var(--space-2); transform: none; }
+/* The static first paint in index.html (#225): the hero on home for a visitor (both languages in the HTML, the one
+   settings-boot.js picked shows), the loading card everywhere else. The app replaces both on its first render. */
+:root:not([data-boot="app"]) .boot-loading { display: none; }
+:root[data-boot="app"] .boot-view { display: none; }
+:root:lang(he) .boot-t:lang(en), :root:not(:lang(he)) .boot-t:lang(he) { display: none; }
 [hidden] { display: none !important; }
 
 /* ============ app frame (src/shell/): global nav | top bar over the content area ============
@@ -674,6 +679,8 @@ body { min-height: 0; overflow: hidden; }
 .nav-sub-icon.is-dot::before { content: ""; inline-size: 6px; block-size: 6px; border-radius: var(--radius-full); background: currentColor; }
 .nav-foot { flex: none; display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2) var(--space-3) var(--space-3); }
 .nav-foot-link { display: flex; align-items: center; min-block-size: var(--target-min); padding-inline: var(--space-3); font-size: var(--type-label-size); color: var(--text-2); }
+.nav-foot-links { display: flex; flex-wrap: wrap; column-gap: var(--space-1); }
+.nav-foot-links > .nav-foot-link { padding-inline: var(--space-2); }
 /* The panel icon points inline-start ("fold away"); mirrored for RTL, flipped again to mean "unfold". */
 .nav-collapse-icon { transform: scaleX(var(--dir)); }
 :root[data-nav="collapsed"] .nav-collapse-icon { transform: scaleX(calc(-1 * var(--dir))); }

@@ -113,7 +113,7 @@ test("a guest sees the upgrade card on home and on My stats, and no class calls 
   expect(classCalls).toEqual([]);
 });
 
-test("signed out: today's case says Play, and the intro offers sign-up and guest play", async ({ page, request }) => {
+test("signed out: today's case says Play, and the intro offers guest play and sign-up", async ({ page, request }) => {
   await scheduleToday(request, TODAY_CASE);
   await english(page);
   await page.goto("/#/");
@@ -121,7 +121,9 @@ test("signed out: today's case says Play, and the intro offers sign-up and guest
   await expect(intro.getByRole("link", { name: "Create account" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Today's case" }).getByRole("link", { name: "Play" })).toHaveAttribute("href", `#/case/${TODAY_CASE}`);
   await expect(page.locator(".home-chal")).toBeHidden();
-  await intro.getByRole("button", { name: "Play as guest" }).click();
-  // the account change reloads home for the guest
+  // Play now (#223) starts a guest and lands in a case; back on home the guest sees the upgrade card
+  await intro.getByRole("button", { name: "Play now, no sign-up" }).click();
+  await expect(page).toHaveURL(/#\/case\//);
+  await page.goto("/#/");
   await expect(ui.guestCard(page)).toBeVisible();
 });
