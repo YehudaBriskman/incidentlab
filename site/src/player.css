@@ -50,7 +50,8 @@
 
 /* the stage card, answer form and result panel */
 .question-box { padding: var(--pad-card); border: 0; border-radius: var(--radius-card); box-shadow: var(--surface-lift); background: var(--surface); }
-.answer-format-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-1); }
+/* plain inline flow: the ⓘ follows the last word instead of wrapping to a line of its own (#286) */
+.answer-format-line { display: block; }
 .answer-label { font-size: var(--type-small-size); }
 .result-panel { padding: var(--pad-card); border: 0; border-radius: var(--radius-card); box-shadow: var(--surface-lift); }
 .result-panel.is-revealed { background: var(--surface); }

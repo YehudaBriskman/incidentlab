@@ -136,3 +136,21 @@ test("Hebrew: the console's user search keeps its icon beside the placeholder, a
   expect(await bilingual.evaluate((a) => a.children.length)).toBe(1);
   expect(await bilingual.locator("bdi").count()).toBe(2);
 });
+
+test("Hebrew answer formats keep a path's slash with the path, and free-form answers have a placeholder (#286)", async ({ page }) => {
+  const username = randomUsername("bidifmt");
+  expect((await page.request.post("/api/auth/register", { data: { username, password: PASSWORD } })).status()).toBe(201);
+  expect((await page.request.get("/api/cases/first-shift/progress")).status()).toBe(200);
+  expect((await page.request.post("/api/cases/first-shift/setup-done", { data: {} })).status()).toBe(200);
+  await page.addInitScript(() => localStorage.setItem("il.lang", "he"));
+  await page.goto("/#/case/first-shift");
+  const format = page.locator(".answer-format").first();
+  await expect(format).toBeVisible();
+  // the path is one left-to-right isolate, slash included
+  await expect(format.locator('bdi[dir="ltr"]', { hasText: "/page.html" })).toHaveCount(1);
+  await expect(format).toHaveAttribute("dir", "rtl");
+  // the ⓘ stays on the format's line
+  const [fmtBox, dotBox] = await Promise.all([format.boundingBox(), page.locator(".answer-format-line .info-dot").first().boundingBox()]);
+  expect(fmtBox && dotBox && Math.abs(dotBox.y + dotBox.height / 2 - (fmtBox.y + fmtBox.height - 10)) < 20).toBeTruthy();
+  await expect(page.locator(".answer-form input").first()).toHaveAttribute("placeholder", "התשובה שלכם");
+});

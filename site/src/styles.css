@@ -735,7 +735,7 @@ body { min-height: 0; overflow: hidden; }
 .crumbs-list { display: flex; align-items: center; list-style: none; margin: 0; padding: 0; min-inline-size: 0; white-space: nowrap; font-size: var(--type-small-size); }
 .crumb { display: flex; align-items: center; min-inline-size: 0; color: var(--text-2); }
 .crumb + .crumb::before { content: "/" / ""; padding-inline: var(--space-2); color: var(--text-3); }
-.crumb-link { color: var(--text-2); text-decoration: none; }
+.crumb-link { display: inline-flex; align-items: center; min-block-size: var(--target-min); color: var(--text-2); text-decoration: none; }
 .crumb-link:hover { color: var(--text-1); text-decoration: underline; text-decoration-color: var(--link-underline); }
 .crumb-current { color: var(--text-1); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 .crumb.is-last { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; }
