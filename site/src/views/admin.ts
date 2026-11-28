@@ -1569,7 +1569,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         { class: "center-card" },
         h("h1", {}, TS().navConsole),
         h("p", { class: "muted" }, T().admOwnerOnly),
-        h("div", { class: "row-center" }, h("a", { class: "btn btn-primary", href: "#/" }, TS().navHome)),
+        h("div", { class: "row-center" }, h("a", { class: "btn btn-primary", href: "#/home" }, TS().navHome)),
       ),
     );
   }

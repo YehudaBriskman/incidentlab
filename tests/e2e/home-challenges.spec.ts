@@ -53,7 +53,7 @@ test("a player in a class: the class event on home, the class rank on My stats",
   const solved = await page.request.post(c("/answer"), { data: { questionId: "q1", answer: answerFor(CLASS_CASE, "q1") } });
   expect(solved.status(), await solved.text()).toBe(200);
 
-  await page.goto("/#/");
+  await page.goto("/#/home");
   const card = ui.classesCard(page);
   const row = card.getByRole("link", { name: /E2E challenge class/ });
   await expect(row).toHaveAttribute("href", `#/class/${cls.id}`);
@@ -82,7 +82,7 @@ test("a player without classes sees the call to action on home and on My stats",
   await scheduleToday(request, TODAY_CASE);
   await english(page);
   await register(page, "e2enocls");
-  await page.goto("/#/");
+  await page.goto("/#/home");
   const cta = ui.ctaCard(page);
   await expect(cta.getByRole("link", { name: "Create or join a class" })).toHaveAttribute("href", "#/classes");
   await expect(ui.classesCard(page)).toHaveCount(0);
@@ -100,7 +100,7 @@ test("a guest sees the upgrade card on home and on My stats, and no class calls 
   page.on("request", (r) => {
     if (r.url().includes("/api/classes")) classCalls.push(r.url());
   });
-  await page.goto("/#/");
+  await page.goto("/#/home");
   const card = ui.guestCard(page);
   await expect(card).toContainText("join classes");
   await expect(ui.classesCard(page)).toHaveCount(0);
@@ -113,17 +113,18 @@ test("a guest sees the upgrade card on home and on My stats, and no class calls 
   expect(classCalls).toEqual([]);
 });
 
-test("signed out: today's case says Play, and the intro offers guest play and sign-up", async ({ page, request }) => {
+test("signed out: today's case says Play, and the landing offers guest play and sign-up", async ({ page, request }) => {
   await scheduleToday(request, TODAY_CASE);
   await english(page);
-  await page.goto("/#/");
-  const intro = page.getByRole("region", { name: "About IncidentLab" });
-  await expect(intro.getByRole("link", { name: "Create account" })).toBeVisible();
+  await page.goto("/#/home");
   await expect(page.getByRole("region", { name: "Today's case" }).getByRole("link", { name: "Play" })).toHaveAttribute("href", `#/case/${TODAY_CASE}`);
   await expect(page.locator(".home-chal")).toBeHidden();
-  // Play now (#223) starts a guest and lands in a case; back on home the guest sees the upgrade card
+  // Play now (#223) on the landing (#279) starts a guest and lands in a case; back on home the guest sees the upgrade card
+  await page.goto("/#/");
+  const intro = page.locator(".lp-hero");
+  await expect(intro.getByRole("link", { name: "Create account" })).toBeVisible();
   await intro.getByRole("button", { name: "Play now, no sign-up" }).click();
   await expect(page).toHaveURL(/#\/case\//);
-  await page.goto("/#/");
+  await page.goto("/#/home");
   await expect(ui.guestCard(page)).toBeVisible();
 });

@@ -1,5 +1,5 @@
-// The first visit (#223, #224, #225): the static hero is in index.html before any script runs; home has one
-// primary action, "Play now, no sign-up", which starts a guest and lands in the start-here case; the case gate leads
+// The first visit (#223, #224, #225, #279): the landing's static hero is in index.html before any script runs; the
+// landing (#/) has one primary action, "Play now, no sign-up", which starts a guest and lands in the start-here case; the case gate leads
 // with play and never opens the phone keyboard; About and Privacy are real pages in both languages.
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
@@ -31,7 +31,7 @@ test("index.html has the static hero with an h1 before any script runs", async (
   expect(res.status()).toBe(200);
   const html = await res.text();
   const app = html.slice(html.indexOf('id="app"'));
-  expect(app).toMatch(/<h1 class="home-intro-title">/);
+  expect(app).toMatch(/<h1 id="lp-h1" class="lp-title">/);
   expect(app).toContain("Debug realistic production outages, from evidence to root cause.");
   expect(app).toContain('href="#/play"');
   expect(app).toContain("Free · No email · Nothing to install");
@@ -48,18 +48,18 @@ test("without JavaScript the hero still shows, with its call to action", async (
   await context.close();
 });
 
-test("home has one primary button, and Play now lands a new visitor in the start-here case as a guest", async ({ page, request }) => {
+test("the landing has one primary button, and Play now lands a new visitor in the start-here case as a guest", async ({ page, request }) => {
   await english(page);
   const target = await startHereId(request);
   await page.goto("/#/");
-  const intro = page.getByRole("region", { name: "About IncidentLab" });
+  const intro = page.locator(".lp-hero");
   await expect(intro.getByRole("heading", { level: 1 })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Start here" })).toBeVisible();
+  await expect(page.locator(`.lp-case.is-start[data-case="${target}"]`)).toContainText("Start here");
   // one primary per view (#223): the top bar's Sign in is secondary
   await expect(page.locator(".app-frame .btn-primary:visible")).toHaveCount(1);
   await expect(intro.locator(".btn-primary")).toHaveText("Play now, no sign-up");
   await expect(intro).toContainText("Free · No email · Nothing to install");
-  await expect(page.locator(".home-proof")).toContainText(/\d+ cases?/);
+  await expect(page.locator(".lp-proof")).toContainText(/\d+ cases?/);
 
   await intro.getByRole("button", { name: "Play now, no sign-up" }).click();
   await expect(page).toHaveURL(new RegExp(`#/case/${target}`));
@@ -68,12 +68,12 @@ test("home has one primary button, and Play now lands a new visitor in the start
   await expect(page.locator(".account-name")).toHaveText("Guest");
 });
 
-test("at 360px the intro's buttons stack and no label wraps", async ({ browser }) => {
+test("at 360px the hero's buttons stack and no label wraps", async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 360, height: 640 }, hasTouch: true, isMobile: true });
   const page = await context.newPage();
   await page.addInitScript(() => localStorage.setItem("il.lang", "en"));
   await page.goto("/#/");
-  const buttons = page.locator(".home-intro-actions .btn");
+  const buttons = page.locator(".lp-hero .lp-actions .btn");
   await expect(buttons).toHaveCount(2);
   for (const button of await buttons.all()) {
     const lines = await button.evaluate((el) => {
@@ -85,7 +85,7 @@ test("at 360px the intro's buttons stack and no label wraps", async ({ browser }
     expect(lines).toBeLessThanOrEqual(1);
   }
   // the h1, the value line and Play now are all in the first screen
-  const play = await page.getByRole("button", { name: "Play now, no sign-up" }).boundingBox();
+  const play = await page.locator(".lp-hero").getByRole("button", { name: "Play now, no sign-up" }).boundingBox();
   expect(play).not.toBeNull();
   expect((play?.y ?? 999) + (play?.height ?? 0)).toBeLessThanOrEqual(640);
   await context.close();

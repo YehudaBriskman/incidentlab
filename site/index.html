@@ -48,31 +48,45 @@
           <!-- a view's page panel (src/shell/frame.ts); html[data-aside-page] reserves it before the view loads -->
           <aside class="page-aside"></aside>
           <div id="app" tabindex="-1">
-            <!-- Static first paint until main.ts renders the route (replaced on the first render), #225.
-                 The hero is the same markup as introStrip() in src/views/home.ts, so the app's own hero takes its
-                 place without a shift; keep the two (and the strings in i18n/strings-onboard.ts) in step.
-                 settings-boot.js sets the language before paint and shows the loading card instead on every
-                 other route and for a signed-in visitor (html[data-boot=app]). -->
-            <div class="view boot-view">
-              <div class="home-dash">
-                <div class="home-intro-slot">
-                  <section class="home-intro">
-                    <div class="home-intro-text">
-                      <h1 class="home-intro-title"><span class="boot-t" lang="en">Debug realistic production outages, from evidence to root cause.</span><span class="boot-t" lang="he" dir="rtl">חקרו תקלות פרודקשן מציאותיות, מהראיות ועד שורש הבעיה.</span></h1>
-                      <p class="home-intro-sub"><span class="boot-t" lang="en">Hands-on incident puzzles for engineers and student cohorts: logs, metrics, chat and a git repo, one question at a time.</span><span class="boot-t" lang="he" dir="rtl">חידות תקלה מעשיות למהנדסים ולכיתות: לוגים, מטריקות, צ'אט ומאגר git, שאלה אחר שאלה.</span></p>
-                      <p class="home-proof"></p>
+            <!-- Static first paint until main.ts renders the route (replaced on the first render), #225, #279.
+                 The landing's hero is the same markup as renderLanding() in src/views/landing.ts, so the app's own hero
+                 takes its place without a shift; keep the two (and the strings in i18n/strings-onboard.ts and
+                 strings-landing.ts) in step. settings-boot.js sets the language before paint, marks a signed-in visitor
+                 (html[data-signed]: the dashboard call to action instead of the visitor's) and shows the loading card
+                 on every other route (html[data-boot=app]). The example stage is made up, not from any case. -->
+            <div class="view boot-view landing">
+              <section class="lp-hero" aria-labelledby="lp-h1">
+                <div class="lp-hero-text">
+                  <h1 id="lp-h1" class="lp-title"><span class="boot-t" lang="en">Debug realistic production outages, from evidence to root cause.</span><span class="boot-t" lang="he" dir="rtl">חקרו תקלות פרודקשן מציאותיות, מהראיות ועד שורש הבעיה.</span></h1>
+                  <p class="lp-sub"><span class="boot-t" lang="en">Hands-on incident puzzles for engineers and student cohorts: logs, metrics, chat and a git repo, one question at a time.</span><span class="boot-t" lang="he" dir="rtl">חידות תקלה מעשיות למהנדסים ולכיתות: לוגים, מטריקות, צ'אט ומאגר git, שאלה אחר שאלה.</span></p>
+                  <p class="lp-proof"></p>
+                  <div class="lp-actions-slot">
+                    <div class="lp-actions lp-actions-out">
+                      <a class="btn btn-primary btn-lg lp-play" href="#/play"><span class="boot-t" lang="en">Play now, no sign-up</span><span class="boot-t" lang="he" dir="rtl">לשחק עכשיו, בלי הרשמה</span></a>
+                      <a class="btn btn-lg lp-create" href="#/signup"><span class="boot-t" lang="en">Create account</span><span class="boot-t" lang="he" dir="rtl">פתיחת חשבון</span></a>
+                      <a class="lp-signin hit-link" href="#/login"><span class="boot-t" lang="en">Sign in</span><span class="boot-t" lang="he" dir="rtl">כניסה</span></a>
                     </div>
-                    <div class="home-intro-cta">
-                      <div class="home-intro-actions">
-                        <a class="btn btn-primary btn-lg home-play" href="#/play"><span class="boot-t" lang="en">Play now, no sign-up</span><span class="boot-t" lang="he" dir="rtl">לשחק עכשיו, בלי הרשמה</span></a>
-                        <a class="btn btn-lg home-create" href="#/signup"><span class="boot-t" lang="en">Create account</span><span class="boot-t" lang="he" dir="rtl">פתיחת חשבון</span></a>
-                        <a class="home-signin hit-link" href="#/login"><span class="boot-t" lang="en">Sign in</span><span class="boot-t" lang="he" dir="rtl">כניסה</span></a>
-                      </div>
-                      <p class="home-trust"><span class="boot-t" lang="en">Free · No email · Nothing to install</span><span class="boot-t" lang="he" dir="rtl">בחינם · בלי אימייל · בלי להתקין כלום</span></p>
+                    <div class="lp-actions lp-actions-in">
+                      <a class="btn btn-primary btn-lg lp-go" href="#/home"><span class="boot-t" lang="en">Go to your dashboard</span><span class="boot-t" lang="he" dir="rtl">למסך הבית שלכם</span></a>
+                      <a class="btn btn-lg lp-play" href="#/play"><span class="boot-t" lang="en">Play now</span><span class="boot-t" lang="he" dir="rtl">לשחק עכשיו</span></a>
                     </div>
-                  </section>
+                  </div>
+                  <p class="lp-trust"><span class="boot-t" lang="en">Free · No email · Nothing to install</span><span class="boot-t" lang="he" dir="rtl">בחינם · בלי אימייל · בלי להתקין כלום</span></p>
                 </div>
-              </div>
+                <figure class="lp-shot" aria-labelledby="lp-shot-cap">
+                  <div class="lp-term">
+                    <div class="lp-term-bar" dir="ltr"><span class="lp-term-dots" aria-hidden="true"></span><span class="lp-term-path">evidence/orders.log</span></div>
+                    <pre class="lp-term-body" dir="ltr"><code><span class="lp-log-cmd">$ grep -nE 'WARN|ERROR|PAGE' orders.log</span><span class="lp-log"><span class="lp-log-n">2041</span> 03:12:04 orders WARN  pool 58/64</span><span class="lp-log is-hit"><span class="lp-log-n">2057</span> 03:12:07 orders ERROR pool exhausted</span><span class="lp-log"><span class="lp-log-n">2058</span> 03:12:07 edge   ERROR 502 /checkout</span><span class="lp-log"><span class="lp-log-n">2090</span> 03:12:31 pager  PAGE  p99 &gt; 4s</span></code></pre>
+                    <div class="lp-term-q">
+                      <p class="lp-q-stage"><span class="boot-t" lang="en">Stage 2 of 6</span><span class="boot-t" lang="he" dir="rtl">שלב 2 מתוך 6</span></p>
+                      <p class="lp-q-text"><span class="boot-t" lang="en">Which service ran out of database connections first?</span><span class="boot-t" lang="he" dir="rtl">איזה שירות נשאר ראשון בלי חיבורים למסד הנתונים?</span></p>
+                      <p class="lp-q-answer"><span class="lp-q-label"><span class="boot-t" lang="en">Your answer</span><span class="boot-t" lang="he" dir="rtl">התשובה שלכם</span></span><bdi class="lp-q-value" dir="ltr">orders</bdi></p>
+                      <p class="lp-q-result"><span aria-hidden="true">✓ </span><span class="boot-t" lang="en">Correct. Stage 3 is open.</span><span class="boot-t" lang="he" dir="rtl">נכון. שלב 3 פתוח.</span></p>
+                    </div>
+                  </div>
+                  <figcaption id="lp-shot-cap" class="lp-shot-cap"><span class="boot-t" lang="en">A stage from a case: search the evidence, then answer the question.</span><span class="boot-t" lang="he" dir="rtl">שלב מתוך תיק: מחפשים בראיות, ואז עונים על השאלה.</span></figcaption>
+                </figure>
+              </section>
             </div>
             <section class="center-card boot-loading" aria-busy="true"><p class="muted mono">Loading…</p></section>
           </div>

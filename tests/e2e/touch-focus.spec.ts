@@ -60,7 +60,7 @@ test.describe("phone with touch (390x844)", () => {
   test("player pages: every control has a 44px hit area on a coarse pointer", async ({ page }) => {
     await signedInPlayer(page, "touch44");
     expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
-    for (const path of ["/#/", `/#/case/${CASE_ID}`, `/#/case/${CASE_ID}/toolbox`, "/#/me", "/#/leaderboard", "/#/classes"]) {
+    for (const path of ["/#/", "/#/home", `/#/case/${CASE_ID}`, `/#/case/${CASE_ID}/toolbox`, "/#/me", "/#/leaderboard", "/#/classes"]) {
       await page.goto(path);
       await settle(page);
       expect(await smallTargets(page), path).toEqual([]);
@@ -84,7 +84,7 @@ test.describe("phone with touch (390x844)", () => {
   });
 
   test("home: Tab never lands on an invisible control (the stacked table's header)", async ({ page }) => {
-    await page.goto("/#/");
+    await page.goto("/#/home");
     await settle(page);
     for (let i = 0; i < 30; i++) {
       await page.keyboard.press("Tab");

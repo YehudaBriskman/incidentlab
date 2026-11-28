@@ -29,7 +29,7 @@ test.describe("phone with touch (390x844)", () => {
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
   });
 
-  test("home, signed out: cumulative layout shift stays under 0.1 while the API is slow", async ({ page }) => {
+  test("landing, signed out: cumulative layout shift stays under 0.1 while the API is slow", async ({ page }) => {
     // Production answers in about a second; the local server in a few milliseconds. Hold every API call back so
     // the late answers (who is signed in, today's case, the catalog) land after the first paint, as they do there.
     await page.route("**/api/**", async (route) => {
@@ -46,9 +46,11 @@ test.describe("phone with touch (390x844)", () => {
         }
       }).observe({ type: "layout-shift", buffered: true });
     });
+    // the landing (#279): the static hero, then the cases arrive below it
     await page.goto("/#/");
-    await expect(page.locator(".home-intro")).toBeVisible();
-    await expect(page.locator(".home-today[aria-busy]")).toHaveCount(0);
+    await expect(page.locator(".lp-hero")).toBeVisible();
+    await expect(page.locator(".lp-case:not(.is-skeleton)").first()).toBeVisible();
+    await expect(page.locator(".lp-proof")).not.toBeEmpty();
     await page.waitForTimeout(500); // let the last answer's redraw settle
     const cls = await page.evaluate(() => (window as unknown as { __cls: number }).__cls);
     expect(cls).toBeLessThan(0.1);

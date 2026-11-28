@@ -1,19 +1,19 @@
 // Home: a dashboard in the Cloudflare-console sense. Two fixed-height cards on top ("Continue" at the start edge,
 // "Today's case" at the end edge; RTL mirrors them; only the Today card, full width, when Continue would just repeat
 // today's case, #125), then the cases table, which scrolls inside its own panel so
-// the page itself fits the viewport on desktop. Signed out, a compact intro above the cards carries the value
-// statement and the sign-up and guest actions. Signed in, a challenge row sits between the cards and the table
+// the page itself fits the viewport on desktop. It lives at #/home (#279); #/ is the landing (views/landing.ts),
+// which carries the value statement and the sign-up and guest actions. Signed in, a challenge row sits between the cards and the table
 // (views/homeChallenges.ts, #183): your classes (or a call to action, or the upgrade card for a guest) and your
 // streak, then the top few recommended cases and a link to the catalog.
 // #/cases (#221) is the catalog: the same table with every case, search, the Filter popover and Sort, whose state
 // lives in the URL query (#/cases?difficulty=hard). Each route has its own visible h1 and title.
 import "../home.css";
-import type { AccountView, CaseStats, LeaderboardResponse, TodayResponse, UserStats } from "../../shared/contract";
+import type { AccountView, CaseStats, TodayResponse, UserStats } from "../../shared/contract";
 import { caseSummaries, caseSummary, catalogFailed, catalogReady, reloadCatalog, startHereCaseId } from "../content/load";
 import type { CaseSummary } from "../content/catalog-schema";
 import { dataTable, type Column, type DataTable } from "../components/dataTable";
 import type { SortState } from "../components/table-core";
-import { fetchLeaderboard, fetchMyStats } from "../lib/api";
+import { fetchMyStats } from "../lib/api";
 import { playNow } from "../lib/playNow";
 import { START_HERE } from "../lib/startHere";
 import { h, setChildren, type Child } from "../lib/dom";
@@ -39,6 +39,7 @@ import { TA } from "../i18n/strings-account";
 import { TC } from "../i18n/strings-challenges";
 import { TG } from "../i18n/strings-game";
 import { TH } from "../i18n/strings-home";
+import { TL } from "../i18n/strings-landing";
 import { TO } from "../i18n/strings-onboard";
 import { T } from "../i18n/strings-player";
 import { TS } from "../i18n/strings-shell";
@@ -105,7 +106,7 @@ const statusOf = (s: CaseStats | undefined): CaseStatus => s?.status ?? "not-sta
 const missing = (): HTMLElement => h("span", { class: "home-none" }, h("span", { "aria-hidden": "true" }, "—"), h("span", { class: "visually-hidden" }, TH().noData));
 
 /** Three bars, filled up to the difficulty: a shape cue next to the word (never colour alone). */
-function difficultyCell(d: Difficulty): HTMLElement {
+export function difficultyCell(d: Difficulty): HTMLElement {
   const rank = DIFF_RANK[d];
   return h(
     "span",
@@ -373,9 +374,6 @@ function todayCard(state: HomeState, signedIn: boolean, retry: () => void, prima
 
 /* ================= the "Start here" card (#224) ================= */
 
-/** Players fewer than this on the public board: the proof line says only how many cases there are (no weak numbers). */
-const PROOF_MIN_PLAYERS = 5;
-
 /** The start-here case id once the catalog and today's answer are in (lib/startHere.ts). */
 function startHereId(state: HomeState): string | null {
   if (state.loading) return null;
@@ -394,7 +392,7 @@ function startHereCard(c: CaseSummary, signedIn: boolean): HTMLElement {
   const tutorial = c.tags.some((t) => t.toLowerCase() === START_HERE.preferTag);
   const action = signedIn
     ? h("a", { class: "btn btn-primary btn-sm", href: `#/case/${c.id}` }, TO().startHereBtn)
-    : playNowButton("btn btn-sm", TO().startHereBtn);
+    : playNowButton("btn btn-primary btn-sm", TO().startHereBtn);
   return h(
     "section",
     { class: "home-card home-today home-start", "aria-labelledby": "home-start-h", "data-case": c.id },
@@ -427,10 +425,6 @@ function startHereSkeleton(): HTMLElement {
     h("div", { class: "home-card-body" }, h("span", { class: "dt-skeleton home-skel-title" }), h("span", { class: "dt-skeleton" }), h("span", { class: "dt-skeleton home-skel-btn" })),
   );
 }
-
-/** The public board (CDN-cached, publicJson), asked for once per page load and only for visitors' proof line. */
-let boardForProof: Promise<LeaderboardResponse | null> | null = null;
-const proofBoard = (): Promise<LeaderboardResponse | null> => (boardForProof ??= fetchLeaderboard(null).catch(() => null));
 
 /* ================= the cases table ================= */
 
@@ -525,7 +519,7 @@ function recommended(rows: readonly Row[]): Row[] {
 
 const queryOfHash = (): URLSearchParams => new URLSearchParams(window.location.hash.split("?")[1] ?? "");
 
-/** Which page: the dashboard (#/) or the case catalog (#/cases). */
+/** Which page: the dashboard (#/home) or the case catalog (#/cases). */
 export type HomeMode = "home" | "cases";
 
 /** How many recommended cases the dashboard lists before "Browse all cases". */
@@ -539,8 +533,8 @@ export function homeView(mode: HomeMode = "home"): ViewResult {
 
 export function renderHome(root: HTMLElement, mode: HomeMode = "home"): void {
   const catalog = mode === "cases";
-  const path = catalog ? "cases" : "";
-  document.title = catalog ? TH().casesPageTitle : T().homeTitle;
+  const path = catalog ? "cases" : "home";
+  document.title = catalog ? TH().casesPageTitle : TL().dashboardTitle;
   const token = Symbol("home");
   activeRender = token;
   // The dashboard has no filters: its rows are the recommended order. Only the catalog reads (and writes) the query.
@@ -549,20 +543,6 @@ export function renderHome(root: HTMLElement, mode: HomeMode = "home"): void {
   /** the account the current answers were loaded for (`id:kind`): a change to another account reloads */
   let loadedFor: string | null = null;
 
-  const intro = h("div", { class: "home-intro-slot" });
-  // Signed out: the intro and its proof line are built once, so a redraw never resets the Play now button mid-click.
-  const proof = h("p", { class: "home-proof", "aria-label": TO().proofLabel });
-  let introEl: HTMLElement | null = null;
-  let board: LeaderboardResponse | null = null;
-  /** "5 cases · 12 investigators on the leaderboard · 48 stages solved": only numbers the site can show (#225). */
-  const drawProof = (): void => {
-    const released = state.today?.releasedCaseIds;
-    const cases = caseSummaries().filter((c) => released === undefined || released.includes(c.id)).length;
-    const players = board?.entries.length ?? 0;
-    const stages = board?.entries.reduce((sum, e) => sum + e.stagesSolved, 0) ?? 0;
-    const parts = [cases > 0 ? TO().proofCases(cases) : null, players >= PROOF_MIN_PLAYERS ? TO().proofLine(players, stages) : null];
-    proof.textContent = parts.filter((p): p is string => p !== null).join(" · ");
-  };
   const top = h("div", { class: "home-top" });
   const chal = h("div", { class: "home-chal" });
   const search = h("input", { type: "search", class: "input home-search", "aria-label": TH().search, placeholder: TH().searchPlaceholder, autocomplete: "off", enterkeyhint: "search", value: filters.q });
@@ -577,12 +557,11 @@ export function renderHome(root: HTMLElement, mode: HomeMode = "home"): void {
     h("header", { class: "home-cases-head" }, h("h2", { id: "home-cases-h", class: "home-card-title" }, TH().casesTitle), catalog ? toolbar : browseAll),
     tableSlot,
   );
-  // One visible h1 per route (#222). Signed out, home's h1 is the intro's value statement (introStrip), so this one
-  // is hidden from everyone then, not only visually.
+  // One visible h1 per route (#222): "Home" on the dashboard (signed in or not; the value statement is the landing's), "Cases" on the catalog.
   const pageH1 = h("h1", { class: "home-title" }, catalog ? TH().casesHeading : TH().pageHeading);
   const dash = catalog
     ? h("div", { class: "home-dash is-catalog" }, h("header", { class: "home-catalog-head" }, pageH1, h("p", { class: "muted" }, TH().casesIntro)), cases)
-    : h("div", { class: "home-dash" }, pageH1, intro, top, chal, cases);
+    : h("div", { class: "home-dash" }, pageH1, top, chal, cases);
   setChildren(root, dash);
 
   let table: DataTable<Row> | null = null;
@@ -734,13 +713,6 @@ export function renderHome(root: HTMLElement, mode: HomeMode = "home"): void {
     if (!onHome()) return;
     // Before /api/me answers, lay out for the likely state (lib/session.ts hint) so nothing shifts when it does.
     const signedIn = likelySignedIn();
-    if (signedIn || catalog) setChildren(intro);
-    else {
-      introEl ??= introStrip(proof);
-      if (introEl.parentElement !== intro) setChildren(intro, introEl);
-      if (!state.loading) drawProof();
-    }
-    pageH1.hidden = !signedIn && !catalog;
     // #224: first-timers get the Start-here card in the Continue slot; it is the only card when it is today's case.
     const startId = isFirstTimer(state, signedIn) ? startHereId(state) : null;
     const start = startId === null ? undefined : caseSummary(startId);
@@ -863,13 +835,6 @@ export function renderHome(root: HTMLElement, mode: HomeMode = "home"): void {
       (): Loaded => ({ me: null, failed: false, player: false }),
     );
     if (!catalog) loadClasses(account); // the catalog shows no classes: don't spend the call
-    // Visitors' proof line (#225): the public, CDN-cached board, once per page load; never for a signed-in player.
-    if (!catalog && !likelySignedIn()) {
-      void proofBoard().then((b) => {
-        board = b;
-        if (onHome() && !state.loading) drawProof();
-      });
-    }
     // The case list (GET /api/cases) arrives with the other two; a failed fetch is retried by reload().
     const catalogLoad = catalogFailed() ? reloadCatalog() : catalogReady;
     void Promise.all([today, stats, catalogLoad]).then(([t, s]) => {
@@ -905,34 +870,8 @@ export function renderHome(root: HTMLElement, mode: HomeMode = "home"): void {
 /** Below this the dashboard stops shrinking and the page scrolls instead (short laptop windows). */
 const MIN_DASH_PX = 420;
 
-/**
- * Signed out: what this is, for whom, and one primary action (#223): "Play now, no sign-up" starts a guest and
- * lands in the start-here case. Create account is secondary and Sign in a text link; the risk reversers sit under
- * the buttons and the proof line under the value statement (#225). site/index.html carries a static copy of this
- * markup as the first paint, so keep the two in step.
- */
-function introStrip(proof: HTMLElement): HTMLElement {
-  return h(
-    "section",
-    { class: "home-intro", "aria-label": TH().introLabel },
-    h("div", { class: "home-intro-text" }, h("h1", { class: "home-intro-title" }, TO().heroTitle), h("p", { class: "home-intro-sub" }, TO().heroSub), proof),
-    h(
-      "div",
-      { class: "home-intro-cta" },
-      h(
-        "div",
-        { class: "home-intro-actions" },
-        playNowButton("btn btn-primary btn-lg home-play", TO().playNow),
-        h("a", { class: "btn btn-lg home-create", href: "#/signup" }, TO().ctaCreate),
-        h("a", { class: "home-signin hit-link", href: "#/login" }, TO().signInLink),
-      ),
-      h("p", { class: "home-trust" }, TO().ctaNote),
-    ),
-  );
-}
-
 /** "Play now" (#223): a guest session (when signed out), then straight into the start-here case (lib/playNow.ts). */
-function playNowButton(cls: string, label: string): HTMLElement {
+export function playNowButton(cls: string, label: string): HTMLElement {
   const button = h("button", { type: "button", class: cls }, label);
   let busy = false;
   button.addEventListener("click", () => {

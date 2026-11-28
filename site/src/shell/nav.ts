@@ -8,7 +8,7 @@
 import { h, html, setChildren, type Child } from "../lib/dom";
 import { nameNode } from "../lib/bidi";
 import { openSheet, type DialogHandle } from "../lib/overlay";
-import { cachedAccount, isAdmin, onAccountChange } from "../lib/session";
+import { cachedAccount, isAdmin, likelySignedIn, onAccountChange } from "../lib/session";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { TS } from "../i18n/strings-shell";
@@ -38,6 +38,8 @@ let home: { parent: HTMLElement; next: Node | null } | null = null;
 let items: Record<NavKey, Item> | null = null;
 let collapseBtn: HTMLButtonElement | null = null;
 let collapseLabel: HTMLSpanElement | null = null;
+/** The logo: the landing for visitors, the dashboard (#/home) for signed-in players and guests (#279). */
+let logo: HTMLAnchorElement | null = null;
 let subSpec: NavSection | null = null;
 let drawer: DialogHandle<string> | null = null;
 let clickedInDrawer = false;
@@ -59,10 +61,12 @@ export function routeParts(hash = window.location.hash): string[] {
     });
 }
 
-/** Which top-level item the route belongs to. */
+/** Which top-level item the route belongs to. The landing (#/, #279) belongs to none: Home is the dashboard. */
 export function currentNavKey(parts: readonly string[] = routeParts()): NavKey | null {
-  if (parts.length === 0) return "home";
+  if (parts.length === 0) return null;
   switch (parts[0]) {
+    case "home":
+      return "home";
     case "cases":
     case "case":
       return "cases";
@@ -116,6 +120,11 @@ function draw(): void {
   };
   const current = currentNavKey();
   const rail = drawer === null && isRail();
+  if (logo !== null) {
+    const href = likelySignedIn() ? "#/home" : "#/";
+    if (logo.getAttribute("href") !== href) logo.setAttribute("href", href);
+    logo.setAttribute("aria-label", TS().logoHome);
+  }
   navEl.setAttribute("aria-label", TS().navMain);
   for (const key of KEYS) {
     const it = items[key];
@@ -154,7 +163,7 @@ export function mountNav(el: HTMLElement): void {
   const built = {} as Record<NavKey, Item>;
   const listItems = KEYS.map((key) => {
     const label = h("span", { class: "nav-label" });
-    const link = h("a", { class: "nav-link", href: key === "home" ? "#/" : key === "cases" ? "#/cases" : key === "leaderboard" ? "#/leaderboard" : key === "classes" ? "#/classes" : key === "stats" ? "#/me" : key === "author" ? "#/author" : key === "admin" ? "#/admin" : "#/" }, icon(ICON_OF[key], "nav-icon"), label);
+    const link = h("a", { class: "nav-link", href: key === "home" ? "#/home" : key === "cases" ? "#/cases" : key === "leaderboard" ? "#/leaderboard" : key === "classes" ? "#/classes" : key === "stats" ? "#/me" : key === "author" ? "#/author" : key === "admin" ? "#/admin" : "#/" }, icon(ICON_OF[key], "nav-icon"), label);
     const sub = h("div", { class: "nav-sub", hidden: true });
     const li = h("li", { class: `nav-item nav-item-${key}` }, link, sub);
     built[key] = { li, link, label, sub };
@@ -178,9 +187,11 @@ export function mountNav(el: HTMLElement): void {
     privacy.textContent = TS().navPrivacy;
   };
 
+  logo = h("a", { class: "logo", href: likelySignedIn() ? "#/home" : "#/", "aria-label": TS().logoHome }, h("span", { class: "logo-mark", "aria-hidden": "true" }, "▲"), h("span", { class: "logo-word mono" }, "incident", h("span", { class: "accent" }, "lab")));
+
   setChildren(
     el,
-    h("div", { class: "nav-head" }, h("a", { class: "logo", href: "#/", "aria-label": TS().logoHome }, h("span", { class: "logo-mark", "aria-hidden": "true" }, "▲"), h("span", { class: "logo-word mono" }, "incident", h("span", { class: "accent" }, "lab")))),
+    h("div", { class: "nav-head" }, logo),
     h("div", { class: "nav-scroll" }, h("ul", { class: "nav-list" }, listItems)),
     h("div", { class: "nav-foot" }, h("div", { class: "nav-foot-links" }, about, privacy, a11y), collapseBtn),
   );
