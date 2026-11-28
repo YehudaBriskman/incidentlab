@@ -207,6 +207,8 @@ export const UserStatsSchema = z.object({
   kind: AccountKindSchema.default("user"),
   classLimit: z.number().int().min(0).nullable().default(null),
   commandsRevealed: z.number().int().min(0),
+  /** additive (#240): solved stages with no hint bought, the progress toward "no-hints-5"; older servers omit it */
+  stagesNoHints: z.number().int().min(0).default(0),
   achievements: z.array(z.object({ id: z.string(), earnedAt: z.string() })),
   /** `activeToday`: a stage was solved today (schedule time zone), so the streak is safe (#212); older servers omit it */
   streak: z.object({ current: z.number().int().min(0), best: z.number().int().min(0), activeToday: z.boolean().default(false) }),

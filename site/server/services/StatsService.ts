@@ -205,6 +205,7 @@ export class StatsService {
       stagesRevealed: sum((c) => c.revealed),
       hintsUsed: sum((c) => c.hintsUsed),
       commandsRevealed: sum((c) => c.commandsRevealed),
+      stagesNoHints: records.flatMap(stagesOf).filter((s) => s.status === "solved" && s.hintsRevealed === 0).length,
       wrongAttempts: wrong,
       accuracy: solved + wrong === 0 ? null : Math.round((solved / (solved + wrong)) * 1000) / 1000,
       achievements: this.achievements(records, streak.reachedAt),

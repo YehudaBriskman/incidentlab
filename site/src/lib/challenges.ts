@@ -75,22 +75,43 @@ export type NextAchievement =
   /** locked, but its progress can't be counted from the stats (first blood, clean case…) */
   | { readonly id: string; readonly have: null; readonly need: null };
 
+/** The stats an achievement's progress is counted from. */
+export type AchievementStats = Pick<UserStats, "achievements" | "streak" | "cases" | "casesCompleted"> & { readonly stagesNoHints?: number };
+
 /**
- * The closest locked achievement. Only progress the stats can count exactly is measured: the streaks (from the
- * current streak) and "all cases" (completed of released). Otherwise the first locked achievement, unmeasured.
- * Null when every achievement is earned.
+ * How far a player is toward one achievement, when the stats can count it exactly: the streaks (from the current
+ * streak), "all cases" (completed of released) and "no hints" (solved stages without a hint, #240). Null for the
+ * rest (first blood, clean case, speedrun are one-off feats with nothing to count).
  */
-export function nextAchievement(stats: Pick<UserStats, "achievements" | "streak" | "cases" | "casesCompleted">, ids: readonly string[]): NextAchievement | null {
+export function achievementProgress(stats: AchievementStats, id: string): { readonly have: number; readonly need: number } | null {
+  const of = (have: number, need: number): { have: number; need: number } | null => (need > 0 ? { have: Math.min(have, need), need } : null);
+  switch (id) {
+    case "streak-3":
+      return of(stats.streak.current, 3);
+    case "streak-7":
+      return of(stats.streak.current, 7);
+    case "all-cases":
+      return of(stats.casesCompleted, stats.cases.length);
+    case "no-hints-5":
+      return stats.stagesNoHints === undefined ? null : of(stats.stagesNoHints, 5);
+    default:
+      return null;
+  }
+}
+
+/**
+ * The closest locked achievement. Only progress the stats can count exactly is measured (achievementProgress).
+ * Otherwise the first locked achievement, unmeasured. Null when every achievement is earned.
+ */
+export function nextAchievement(stats: AchievementStats, ids: readonly string[]): NextAchievement | null {
   const earned = new Set(stats.achievements.map((a) => a.id));
   const locked = ids.filter((id) => !earned.has(id));
   if (locked.length === 0) return null;
   const measured: { id: string; have: number; need: number }[] = [];
-  const measure = (id: string, have: number, need: number): void => {
-    if (locked.includes(id) && need > 0) measured.push({ id, have: Math.min(have, need), need });
-  };
-  measure("streak-3", stats.streak.current, 3);
-  measure("streak-7", stats.streak.current, 7);
-  measure("all-cases", stats.casesCompleted, stats.cases.length);
+  for (const id of ["streak-3", "streak-7", "all-cases", "no-hints-5"]) {
+    const progress = locked.includes(id) ? achievementProgress(stats, id) : null;
+    if (progress !== null) measured.push({ id, ...progress });
+  }
   measured.sort((a, b) => b.have / b.need - a.have / a.need || a.need - a.have - (b.need - b.have));
   const best = measured[0];
   if (best !== undefined) return best;
