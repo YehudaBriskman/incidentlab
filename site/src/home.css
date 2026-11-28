@@ -16,15 +16,23 @@
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--gap-related) var(--gap-stack);
   padding: var(--space-3) var(--space-4); background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift);
 }
-.home-intro-text { min-inline-size: 0; flex: 1 1 32rem; }
-.home-intro-title { margin: 0; font-size: var(--type-body-size); font-weight: 600; line-height: var(--type-body-lh); letter-spacing: 0; }
+.home-intro-text { min-inline-size: 0; flex: 1 1 32rem; display: flex; flex-direction: column; gap: var(--gap-tight); }
+.home-intro-title { margin: 0; font-size: var(--type-title-size); font-weight: var(--type-title-weight); line-height: var(--type-title-lh); letter-spacing: var(--type-title-track); text-wrap: balance; }
+/* #225: the proof line reserves its one line before the numbers arrive, so filling it never moves the cards below */
+.home-proof { margin: 0; min-block-size: calc(var(--type-small-size) * var(--type-small-lh)); color: var(--text-2); font-size: var(--type-small-size); line-height: var(--type-small-lh); font-variant-numeric: tabular-nums; }
+/* #223: one primary (Play now), a secondary (Create account), Sign in as a text link; the risk reversers under them */
+.home-intro-cta { display: flex; flex-direction: column; align-items: flex-end; gap: var(--gap-tight); flex: none; max-inline-size: 100%; }
+.home-signin { color: var(--text-1); font-size: var(--type-small-size); text-decoration: underline; text-decoration-color: var(--link-underline); text-underline-offset: 0.2em; padding-inline: var(--space-2); white-space: nowrap; }
+.home-signin:hover { text-decoration-thickness: 2px; }
+.home-trust { margin: 0; color: var(--text-2); font-size: var(--type-small-size); line-height: var(--type-small-lh); white-space: nowrap; }
+.home-intro-actions .btn { white-space: nowrap; }
 /* the page's visible h1 (#222): "Home" when signed in (signed out the intro's statement is the h1), "Cases" on the catalog */
 .home-title { margin: 0; }
 .home-catalog-head { display: flex; flex-direction: column; gap: var(--space-1); }
 .home-catalog-head p { margin: 0; }
 .home-browse { margin-inline-start: auto; }
 .home-intro-sub { margin: 0; color: var(--text-2); font-size: var(--type-small-size); line-height: var(--type-small-lh); }
-.home-intro-actions { display: flex; gap: var(--gap-related); flex: none; }
+.home-intro-actions { display: flex; align-items: center; gap: var(--gap-related); flex: none; }
 
 /* the two cards */
 .home-top { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--gap-stack); flex: none; }
@@ -194,8 +202,17 @@ a.home-row:hover { background: var(--hover); }
   .home-toolbar { justify-content: flex-start; }
   .home-search-wrap { flex: 1 1 100%; }
   .home-shown { order: 0; inline-size: 100%; }
-  .home-intro-actions { inline-size: 100%; }
+  .home-intro-cta { inline-size: 100%; align-items: stretch; }
+  .home-intro-actions { inline-size: 100%; flex-wrap: wrap; }
   .home-intro-actions .btn { flex: 1 1 auto; }
+  .home-trust { white-space: normal; }
+}
+/* #223: phones stack the actions (primary on top, full width) so no label wraps inside its button at 360px */
+@media (max-width: 480px) {
+  .home-intro-actions { flex-direction: column; align-items: stretch; }
+  .home-intro-actions .btn { inline-size: 100%; }
+  .home-signin { align-self: center; padding-block: var(--space-2); }
+  .home-trust { text-align: center; }
 }
 @media (max-width: 600px) {
   .home-cases { overflow: visible; background: transparent; box-shadow: none; }

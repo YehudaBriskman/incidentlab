@@ -11,6 +11,7 @@ import { getLang, isRelabel } from "../i18n/i18n";
 import { isAdmin, loadAccount, setAccount, signOut } from "../lib/session";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
+import { TGu } from "../i18n/strings-guest";
 import { TO } from "../i18n/strings-onboard";
 import { T } from "../i18n/strings-player";
 import { guestChoice } from "./guest";
@@ -154,16 +155,20 @@ export function withApprovedAccount(
         carriedTempPassword = null;
         classLanding = null;
         // Guest play (#176): the form renders into its own host, so switching sign-in/sign-up keeps the choice.
-        const formRoot = options.allowGuest ? h("div", { class: "gate-form" }) : root;
-        if (formRoot !== root) setChildren(root, formRoot, guestChoice(() => again()));
+        // The gate leads with play (#223): the guest choice first, with the h1 and the one primary button; the
+        // form follows as "Already have an account? Sign in", secondary and without autofocus.
+        const guest = options.allowGuest === true;
+        const formRoot = guest ? h("div", { class: "gate-form" }) : root;
+        if (formRoot !== root) setChildren(root, guestChoice(() => again(), { lead: { context } }), formRoot);
         renderAuthForm(formRoot, {
           context,
           mode: draft?.mode ?? (afterRecovery !== null ? "sign-in" : (options.signedOutMode ?? "sign-in")),
           onSignedIn: again,
           inviteCode: options.inviteCode,
           titled: options.titled,
-          signInTitle: options.signInTitle,
-          titleTag: options.titleTag,
+          signInTitle: guest ? TGu().haveAccount : options.signInTitle,
+          titleTag: guest ? "h2" : options.titleTag,
+          secondary: guest,
         });
       } else if (isAdmin(account)) (options.onAdmin ?? (() => renderAdminCard(root, again)))();
       else if (account.status === "pending") renderPending(root, account, again);
@@ -338,7 +343,17 @@ function setBusy(button: HTMLButtonElement, busy: boolean, label: string): void 
 
 export function renderAuthForm(
   root: HTMLElement,
-  opts: { context: string; mode: Mode; onSignedIn: () => void; inviteCode?: string; titled?: boolean; signInTitle?: string; titleTag?: "h1" | "h2" },
+  opts: {
+    context: string;
+    mode: Mode;
+    onSignedIn: () => void;
+    inviteCode?: string;
+    titled?: boolean;
+    signInTitle?: string;
+    titleTag?: "h1" | "h2";
+    /** Below a lead choice (the case gate's Play now, #223): no eyebrow, a secondary submit, never autofocus. */
+    secondary?: boolean;
+  },
 ): void {
   stopAuthTimers();
   if (opts.mode === "recover") {
@@ -408,7 +423,7 @@ export function renderAuthForm(
   const trap = isSignUp ? h("div", { class: "hp-field", "aria-hidden": "true" }, h("label", { for: "auth-website" }, "Website"), honeypot) : null;
   const summary = errorSummary(baseTitle);
   const submitLabel = isSignUp ? TA().signUpBtn : TA().signInBtn;
-  const submit = h("button", { type: "submit", class: "btn btn-primary btn-lg btn-block" }, submitLabel);
+  const submit = h("button", { type: "submit", class: opts.secondary === true ? "btn btn-lg btn-block" : "btn btn-primary btn-lg btn-block" }, submitLabel);
   const switchMode = h(
     "button",
     {
@@ -443,7 +458,7 @@ export function renderAuthForm(
     "form",
     { class: "center-card gate", novalidate: true, "data-mode": opts.mode },
     summary.el,
-    h("p", { class: "eyebrow" }, opts.context),
+    opts.secondary === true ? null : h("p", { class: "eyebrow" }, opts.context),
     h(opts.titleTag ?? "h1", {}, isSignUp ? TA().authTitleSignUp : (opts.signInTitle ?? TA().authTitleSignIn)),
     h("p", { class: "muted" }, isSignUp ? TA().authHelpSignUp : TA().authHelpSignIn),
     recovered !== null ? h("p", { class: "form-ok", role: "status" }, TA().recoveredNotice) : null,
@@ -571,7 +586,8 @@ export function renderAuthForm(
   });
 
   setChildren(root, form);
-  if (!restoreDraft(form)) user.input.focus();
+  // No autofocus on touch, or below the gate's Play now (#223): the phone keyboard would cover the page.
+  if (!restoreDraft(form) && opts.secondary !== true && !window.matchMedia("(pointer: coarse)").matches) user.input.focus();
 }
 
 /* ================= recovery codes (#174) ================= */

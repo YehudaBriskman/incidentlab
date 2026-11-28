@@ -36,12 +36,14 @@ async function englishHome(page: Page, hash = "#/"): Promise<void> {
   await expect(ui.rows(page).first()).toBeVisible();
 }
 
-test("signed out: intro with sign-up and guest actions, how-it-works card, today's card and the table", async ({ page, request }) => {
+test("signed out: intro with guest and sign-up actions, the Start-here card, today's card and the table", async ({ page, request }) => {
   await scheduleToday(request, CASE_ID);
   await englishHome(page);
   await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
   await expect(page.getByRole("region", { name: "About IncidentLab" }).getByRole("link", { name: "Create account" })).toBeVisible();
-  await expect(ui.continueCard(page)).toContainText(/how it works/i);
+  // first-timers get the Start-here card in the Continue slot (#224)
+  await expect(page.getByRole("region", { name: "Start here" })).toBeVisible();
+  await expect(ui.continueCard(page)).toHaveCount(0);
   await expect(ui.todayCard(page)).toContainText("Ghost in the Network");
   await expect(ui.todayCard(page).getByRole("link", { name: "Play", exact: true })).toHaveAttribute("href", `#/case/${CASE_ID}`);
   await expect(ui.table(page).getByRole("columnheader", { name: /status/i })).toHaveCount(0);
@@ -174,7 +176,8 @@ test("Hebrew at 390px: right-to-left, cards stacked, no horizontal overflow", as
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
   await expect(ui.rows(page).first()).toBeVisible();
   const today = await page.getByRole("region", { name: "התיק של היום" }).boundingBox();
-  const cont = await page.getByRole("region", { name: "להמשיך" }).boundingBox();
+  // a player with no progress yet gets the Start-here card (#224) where Continue would be
+  const cont = await page.getByRole("region", { name: "מתחילים כאן" }).boundingBox();
   expect(today !== null && cont !== null && today.y > cont.y).toBe(true);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);

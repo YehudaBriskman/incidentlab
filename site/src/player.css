@@ -245,9 +245,11 @@ input[type="checkbox"].switch:checked::before { transform: none; background: var
 .center-card.gate .input { min-block-size: var(--control-base); }
 /* teacher-vouched reset (#254): the numbered next steps after a reset request */
 .reset-steps { margin: 0; padding-inline-start: var(--space-5); display: flex; flex-direction: column; gap: var(--gap-related); color: var(--text-2); }
-/* guest play (#176): the quieter second card under the sign-in form, and the upgrade dialog's form */
-.center-card.guest-choice { margin-block-start: var(--space-4); }
-.guest-choice h2 { margin: 0; font-size: var(--step-1); }
+/* guest play (#176): the upgrade dialog's form. The case gate leads with play (#223): the guest choice comes first
+   with the h1 and the primary button, and the sign-in form follows as a second, quieter card. */
+.center-card.guest-choice.is-lead h1 { margin: 0; }
+.guest-choice.is-lead + .gate-form > .center-card { margin-block-start: var(--space-4); }
+.gate-form .center-card.gate h2 { margin: 0; font-size: var(--type-title-size); line-height: var(--type-title-lh); }
 .upgrade-form { display: flex; flex-direction: column; gap: var(--gap-stack); }
 .upgrade-form .input { min-block-size: var(--control-base); }
 .field-label { font-size: var(--type-small-size); font-weight: 600; }
