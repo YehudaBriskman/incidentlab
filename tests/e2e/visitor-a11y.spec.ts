@@ -1,9 +1,9 @@
 // axe scan of every main page as the visitor (#135, #166); the scan itself is in a11y-support.ts.
 import { test } from "@playwright/test";
-import { axeScan } from "./a11y-support";
+import { axeScan, WIDTHS } from "./a11y-support";
 
 for (const scheme of ["light", "dark"] as const) {
   for (const lang of ["en", "he"] as const) {
-    test(`axe: visitor, ${lang}, ${scheme}`, axeScan("visitor", lang, scheme));
+    for (const width of WIDTHS) test(`axe: visitor, ${lang}, ${scheme}, ${width}px`, axeScan("visitor", lang, scheme, width));
   }
 }

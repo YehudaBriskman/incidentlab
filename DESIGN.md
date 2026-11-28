@@ -424,8 +424,8 @@ Token names in this table are the pre-2.0 names the components still use; each r
 
 | Component | Classes | Tokens |
 |---|---|---|
-| Button | `.btn` + `-primary`, `-ghost`, `-danger`, `-sm`, `-lg`, `-copy`, `.link-btn` | heights `--control-xs/sm/md/lg` = 28/36/44/52 (xs and sm become 44 on `pointer: coarse`); `--radius-control`; variants: filled amber primary (one per view), tinted secondary, outline (`--edge-control`), ghost, danger; `.link-btn` min 24px |
-| Input | `.input`, `.admin-input`, `.ex-input`, `.ex-select` | `--level-1` fill, 1px `--edge-control` edge (3:1), `--radius-control`; `.input` 40 (16px text on phones, 14px from 768px), admin/explorer 36 beside `.btn-sm` |
+| Button | `.btn` + `-primary`, `-ghost`, `-danger`, `-sm`, `-lg`, `-copy`, `.link-btn` | heights from tokens only: `.btn` `--control-base` 40, `-sm` `--control-sm` 36, `-lg` `--control-md` 44, `-copy` and the "⋯" row menu `--control-xs` 28; on `pointer: coarse` xs, sm and base become 44 and every `.btn` is at least 44 wide; icon buttons and `.info-dot` get a 44px `::after` hit area; `--radius-control`; variants: filled amber primary (one per view), tinted secondary, outline (`--edge-control`), ghost, danger; `.link-btn` min 24px |
+| Input | `.input`, `.admin-input`, `.ex-input`, `.ex-select` | `--level-1` fill, 1px `--edge-control` edge (3:1), `--radius-control`; `.input` `--control-base` 40 (16px text on phones, 14px from 768px), `.admin-input` `--control-sm` 36 beside `.btn-sm`, the calendar select 32; all 44 on `pointer: coarse`. Checkboxes keep a 16px box with a `--target-min` hit area (24, 44 on touch) |
 | Pill | `.chip`, `.meter-item`, `.event-clock`, `.stuck-badge`, `.status-pill`, `.via-pill`, `.today-tag`, `.hardest-badge`, `.tab-badge`, `.count-badge`, `.ex-chip`, `.board-*-chip` | one base rule; tones set `--pill-fg/-bg/-line`: neutral, accent, success, warning, danger, info (`.pill-*` helpers) |
 | Table header | `.stats-table thead th`, `.admin-table th`, `.prose thead th`, `.ex-table th` | label role (12px), sentence case (`--label-case: none`), `--text-2` on the muted header band; a 60% `--edge-subtle` underline; sticky headers separate with a shadow edge |
 | Focus ring | global `:focus-visible` | `--focus-width` 2px solid `--focus-ring`, offset `--focus-offset` 2px; inset (-2px) only inside clipped scrollers (shell tabs, explorer rows); `Highlight` in forced colours; `--code-accent` inside the code island |
@@ -544,6 +544,11 @@ Check: `node --experimental-strip-types scripts/check-contrast.mts [--markdown] 
 ## Accessibility floors
 
 - WCAG 2.2 AA plus APCA: text Lc 75 (dark small text included), bold labels on fills and `--text-3` Lc 60, non-text Lc 30. Targets 24px everywhere, 44px on `pointer: coarse`.
+  - Control heights come from the `--control-*` tokens, never px literals, so the coarse-pointer block lifts them all. Small text links (`.hit-link`, card footers, the "today" titles) keep their layout and grow a 44px-tall `::after` hit area on touch. Inline links inside prose are exempt (WCAG 2.5.8 inline exception).
+  - The e2e axe scans run at 1280 and at 390 with touch, with the best-practice rules, and fail on moderate or worse.
+- **Route focus:** a new route moves focus to its h1 (`tabindex=-1`; the ring shows only for `:focus-visible`, so a tap or click shows none); a language switch, a `?query` change or a view that focused a field keeps focus where it is, and the page title is announced politely instead when no h1 takes it (`src/shell/routeFocus.ts`).
+- **Scroll regions:** `main.app-content` is `position: relative`, so visually hidden text inside it can never stretch the document; every sideways-scrolling table sits in a focusable `role=region` with a name that differs from the landmarks around it.
+- **Stacked tables:** below 600px a `dataTable({ stackOnPhone })` header becomes a visible row of 44px sort pills (`.dt-stack thead`); a page with its own Sort control (home) hides it. Never clip focusable header controls to 1px.
 - **Focus:** `:focus-visible` is a 2px `--focus-ring` outline at 2px offset over a 2px `--focus-halo` (the page colour), so it holds on any background; inside the code island both follow the pane (`--code-accent`, `--code-bg`); `Highlight` in forced colours.
 - **Forced colours:** raised surfaces keep a `CanvasText` edge; progress, score and meter bars, admin progress cells, legend keys and funnel use `forced-color-adjust: none` with Canvas/CanvasText/Highlight; selected shell tabs, pressed language buttons and the current admin section in the rail use Highlight; pills and status markers get CanvasText borders.
 - **Hebrew:** no uppercase, no letter-spacing and looser leading, by global rule (Typography).
@@ -552,6 +557,8 @@ Check: `node --experimental-strip-types scripts/check-contrast.mts [--markdown] 
 - An IS 5568 accessibility statement for the Hebrew UI is still owed (tracked in #39).
 
 ## Decision log
+
+- **3.1.1 (2026-11-27): accessibility foundations (#246, #247, #249).** New token `--control-base` (40px, 44px on `pointer: coarse`) for the Soft UI default button and input, which hard-coded 40px; the Soft UI layer, the admin inputs, row menus, segmented buttons and calendar selects now read the control tokens, so touch gets 44px everywhere as the profile promised. Rail count badges use the 12px label role (were 10px). Route changes focus the page h1; stacked phone tables show their sort controls as visible pills; the content scroller is a containing block.
 
 - **3.1.0 (2026-11-26): app frame (#97).** The navbar, live strip, per-page sidebar and footer became one frame: a global nav with nested page items and a rail, a slim top bar (breadcrumb, status chip, account menu), and a 100dvh content area that scrolls on its own, with "fit" dashboards whose panels scroll inside. New: `filterButton()`, `pageHeader()`/`panel()`, `navCollapsed` setting. Removed: `src/shell/navbar.ts`, `sidebar.ts`, `liveStrip.ts`, `.navbar`, `.live-strip`, `#sidebar`, `.side-*` admin rail parts. Home's sidebar filters move to `filterButton()` (home view).
 - **3.0.0 (2026-11-26): Soft UI design language (owner decision, after the Liba frontend).** Breaking for the look, not the API: the Night Shift colour roles stay (warm graphite, pager amber, APCA-verified text).
