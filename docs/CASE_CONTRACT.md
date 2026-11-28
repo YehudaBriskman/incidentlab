@@ -177,6 +177,39 @@ node --experimental-strip-types scripts/data.ts upload build/packages/<id>-v1.ca
 - Limits: 100 MiB of evidence, 500 evidence files, 1 MiB per content or sealed part; unfinished uploads expire
   after 24 hours.
 
+### Packaging for outside authors
+
+You don't need repository access or the admin key to publish a case: an **author account** and a `.case.zip`
+are enough (#234). The author page (`#/author`) links here.
+
+1. **Get author access.** Sign up on the site, open Authoring (`#/author`) and press **Request author access**,
+   with a line about the case you want to write. The request goes to the site owner's review queue
+   (`#/admin/reviews`); once granted, the same page shows the upload form. A guest must create an account first.
+2. **Build the package on your own machine.** The repository is public, so clone it and work locally:
+   - write the case as above: `docs/cases/<id>.md` (your bible), `generator/cases/<id>/build.py`, the content
+     JSON (`site/src/content/cases/<id>.json`, and `.he.json` if you translate it), the debrief under
+     `content-sealed/`, and an evidence-only `solutions/<id>/solve.sh`;
+   - build it with `./scripts/build-all.sh --no-site` (it runs your generator and solver, checks every command
+     with stock tools only, and writes `build/packages/<id>-v1.case.zip`), or, for the package alone:
+     `python3 generator/cases/<id>/build.py && python3 scripts/make_flags.py && bash scripts/package.sh &&
+     python3 scripts/make_package.py <id>`.
+   - **Never commit or push these files, and never open a pull request with them**: the bible, the sealed
+     debrief, the solver and `build/` contain your answers, and the repository is public. They stay on your
+     machine; only the package goes to the site, and it is stored there privately.
+3. **Upload it on `#/author`.** The browser checks the package with the same `validateCasePackage()` as the
+   CLI, sends only missing chunks (resumable), and the server checks it again, including the answer-leak scan.
+   An upload is a draft; nothing changes for players.
+4. **Publish privately, then assign your classes.** Your first publish is private: only you, the site owner and
+   active members of the classes you assign can play it. In the case's row menu, **Classes…** picks the classes
+   you admin; leave "Also add it to each class's case list" on to put it on those class pages and boards in the
+   same step.
+5. **Ask for review.** "Submit for review" puts the case in the owner's queue. The owner reads the public
+   content (never your answers) and approves it, which makes it public, or sends it back with a note shown on
+   your row. A new version of a public case goes through review again; the public version stays live meanwhile.
+
+The package format above is the whole contract: a package built another way (your own script) is accepted as
+long as it passes `validateCasePackage()`.
+
 ## Pipeline (for reference; you don't edit it)
 
 `scripts/build-all.sh` runs every `generator/cases/*/build.py`, then `scripts/make_flags.py` merges every

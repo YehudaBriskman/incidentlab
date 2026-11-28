@@ -7,7 +7,7 @@ click may lose it. This document is the contract for anyone changing stored reco
 
 | Store | What | Notes |
 |---|---|---|
-| `incidentlab-v2` | Live data: `account:`, `username:`, `session:`, `progress:<case>:<account>`, `score:<account>`, `globalboard:<account>`, `class:`, `classcode:`, `classmember:`, `memberof:` (#179), `eventprogress:` (#253), `resetrequest:` (#254), `config:*` (schedule, settings, event, migrations ledger), `firstblood:`, `audit:`, `trash:`, `legacy:`, `ratelimit:`, `case:`, `evidence:` (binary), `upload:` | Never rename. A new name means an empty store. That's how round-1 players were orphaned. |
+| `incidentlab-v2` | Live data: `account:`, `username:`, `session:`, `progress:<case>:<account>`, `score:<account>`, `globalboard:<account>`, `class:`, `classcode:`, `classmember:`, `memberof:` (#179), `eventprogress:` (#253), `resetrequest:` (#254), `authorrequest:` (#234), `config:*` (schedule, settings, event, migrations ledger, `config:usage` #235), `firstblood:`, `audit:`, `trash:`, `legacy:`, `ratelimit:`, `case:`, `evidence:` (binary), `upload:` | Never rename. A new name means an empty store. That's how round-1 players were orphaned. |
 | `incidentlab-backups` | `daily/<YYYY-MM-DD>.json` snapshots, 30 days | Written by the scheduled function `backup-daily` |
 | `incidentlab-players` | Round-1 anonymous players (pre-accounts) | Read-only. Migration 002 copies it to `legacy:<id>` |
 | `~/.incidentlab-backups/` (your machine) | Pre-deploy, pre-migrate, pre-restore and manual snapshots | Mode 600, never in the repo |
@@ -141,6 +141,9 @@ credit-based pricing**: it charges credits per production deploy and per GB, and
   `site/server/test/scale.test.ts` runs the check in CI with a read budget per call (`READ_BUDGET` in
   `tests/load/scale-check.ts`), so a change that brings back a full scan on one of these paths fails the build.
   Print the table with `node --experimental-strip-types tests/load/scale-check.ts`.
+- **The owner overview (#235)** costs one call when opened or refreshed (`no-store`, never polled). It reads every
+  `account:` and `class:` record and the case metas, plus the request queues: no `progress:` or `score:` record.
+  Its function-call tile reads the Netlify API at most once an hour, only when `NETLIFY_USAGE_TOKEN` is set.
 - **Check monthly:** `node --experimental-strip-types scripts/data.ts usage`. It prints bandwidth with a 70%
   warning. The API doesn't report function counts on this plan, so check those in the Netlify UI (Team → Usage).
 - **Triggers to move public evidence to GitHub (#145):** Netlify bandwidth over about 50 GB a month, or total
@@ -246,6 +249,23 @@ Migration 003 backfills `score:` for every account. Accounts that have no summar
   accounts from before it (migration 003 approves them); `rejected` blocks sign-in and recovery.
 - A recovery bumps `sessionEpoch` (every session ends), clears `mustChangePassword` and replaces the code.
 - A password change that clears `mustChangePassword` (after an owner reset, #254) also replaces the recovery code.
+- Moderation (#236), additive with defaults: `hiddenFromBoards` (default false: on the boards) and `banReason`
+  (default null; set by a ban with a reason, cleared by an unban). A forced rename changes `username` and
+  `usernameKey` and moves the `username:` index entry: the new key is claimed with a conditional write first, the
+  account saved with one, and only then the old key deleted (a lost race deletes the new claim again).
+
+### Author access requests (`authorrequest:<accountId>`, since #234)
+
+One open request per account (`{schemaVersion, accountId, note, createdAt}`), written by
+`POST /api/me/author-request` and deleted when the owner grants or declines it (or when the queue finds the account
+gone or already an author). The owner's queue is one key listing plus one read per request. Backed up like
+everything else; nothing else reads the prefix.
+
+### Usage cache (`config:usage`, since #235)
+
+The owner overview's last Netlify usage answer (or error), with `fetchedAt`. Read on every overview load; the
+Netlify API is asked only when it is older than an hour and `NETLIFY_USAGE_TOKEN` is set. Safe to delete (the next
+overview asks again).
 
 ### Password reset requests (`resetrequest:<accountId>`, since #254)
 

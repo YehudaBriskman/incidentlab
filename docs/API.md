@@ -75,6 +75,13 @@ plan allows 125,000 function calls a month.
   lockout and issues a new code; it sets no cookie.
 - **Password reset:** the admin (the owner) gets a one-time temporary password; the account is signed out and
   must set a new password (`POST /api/me/password`) before playing. Nobody else can reset a password.
+  **Limits (#236):** there is no email, so the password reaches the player only through the owner (in person or a
+  channel they trust), and nothing checks identity except the owner's own judgement or a teacher's vouch (below).
+  The console says so in the reset confirm. It works for 48 hours, once.
+- **Request author access (#234):** `POST /api/me/author-request {note?}` (≤ 300 chars; approved full accounts that
+  aren't authors: 403 `guest`, 409 `already-author`; one open request per account, a second ask updates the note
+  and keeps its place; 3 asks a day, then 429) answers 201 `{request}`; `GET /api/me/author-request` answers
+  `{request | null}` (`no-store`, read only on `#/author`). The owner decides in the review queue (Admin, below).
 - **Forced password change:** while `mustChangePassword` is set, the session works only for
   `POST /api/me/password`, `GET /api/me`, `GET /api/session` and sign-out. Every other signed-in route answers 403
   `password-change-required`. The change clears the flag and, because the player lost their recovery code, issues a
@@ -272,7 +279,7 @@ evidence files and `evidence.zip` as content-addressed chunks, the small entries
 | GET | `/api/author/cases` | | `{cases: AuthorCase[]}`: the cases the caller may manage (trashed ones included), each with every version and its state (`published`, `draft`, `previous`, `pending`), and (#184) `visibility`, `review`, `reviewNote`, `reviewAt`, `classIds`, `pendingVersion`. Never the evidence key. |
 | POST | `/api/author/cases/:caseId/publish` | `{version, acceptAnswerChanges?, visibility?}` | `{caseId, publishedVersion, previousVersion, rollback, changed, visibility, pendingReview}`. Rollback is publishing an older version. 409 `answer-drift` (below), `conflict` (another publish won: the meta is written with `setIfMatch`), `trashed`, `incomplete-version`; 404 unknown version; 403 `not-admin` for an author's `visibility`. |
 | POST | `/api/author/cases/:caseId/submit-review` | `{}` | `{case: AuthorCase}` with `review: "submitted"` (idempotent). The owner reviews a private case at its published version, a public case at its `pendingVersion`. 409 `not-published` (publish privately first, to try it out), `already-public`, `trashed`. |
-| PUT | `/api/author/cases/:caseId/classes` | `{classIds}` (at most 20) | `{case: AuthorCase}`: the classes whose active members may play the private case. Each class added must be an active class the author is an active admin of (403 `not-class-admin`); the admin may assign any existing class; removing needs no check. A class admin then adds the case to the class's `caseIds` (`PATCH /api/classes/:id`, which accepts a private case only for a class in its `classIds`) to put it on the class board. |
+| PUT | `/api/author/cases/:caseId/classes` | `{classIds, addToClassCases?}` (at most 20) | `{case: AuthorCase, addedToClasses}`: the classes whose active members may play the private case. Each class added must be an active class the author is an active admin of (403 `not-class-admin`); the admin may assign any existing class; removing needs no check. With `addToClassCases: true` (#234, the author page's default) the same call also adds the case to each chosen class's `caseIds` (as `PATCH /api/classes/:id` would; skipped for an archived class or a draft-only case) and `addedToClasses` lists them. Without it, a class admin adds the case to the class's `caseIds` (`PATCH /api/classes/:id`, which accepts a private case only for a class in its `classIds`) to put it on the class board. |
 | DELETE | `/api/author/cases/:caseId` | | `{caseId, trashId, expiresAt}`: soft delete. Every public route answers 404 at once; the records stay. |
 | POST | `/api/author/cases/:caseId/restore` | `{}` | `{caseId, status}`: back to `published` or `draft`. The admin can also restore it from `/api/admin/trash`. 404 after the 7 days. |
 
@@ -295,18 +302,27 @@ may reclaim unreferenced ones). CLI: `scripts/data.ts upload` (see `docs/CASE_CO
 
 ### Admin (`X-Admin-Key: <ADMIN_KEY>` or the `admin` session cookie)
 
-The platform owner console is `#/admin` (`src/views/admin.ts`, panels in `src/views/manage/*`, #185): Users, Classes,
-Live, Stats, Global daily case (`/api/admin/schedule`), Site announcement (`/api/admin/event`), Audit log, and a
+The platform owner console is `#/admin` (`src/views/admin.ts`, panels in `src/views/manage/*`, #185): Overview (the
+default since #235: `/api/admin/overview`), Users, Classes, Live, Stats, Global daily case (`/api/admin/schedule`), Site announcement (`/api/admin/event`), Audit log, and a
 Reviews link to `#/admin/reviews` (inside the console; `#/author/reviews` redirects there) with the number waiting. Only Live (`/api/admin/progress`) and the site
 announcement poll, every 5 s in a visible tab; Users, Classes, Stats and Audit load on demand (opening the
-section, a search, filter or page, an action, or Refresh).
+section, a search, filter or page, an action, or Refresh). Under the one console header (also on the review queue,
+#285), a "Needs you" strip links the queues that wait on the owner (vouched resets, reviews, author access requests,
+pending sign-ups); its counts load with the console and on Refresh, never on the timer.
 
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/api/admin/accounts` | | `{generatedAt, accounts: UserStats[]}` (every account with stats and rank; cached 2 s). A full scan of accounts and progress: scripts and tests only, the console uses `/api/admin/users`. |
 | GET | `/api/admin/users?q=&kind=&role=&status=&sort=&offset=&limit=` | | `AdminUsersResponse` (#185): `{generatedAt, total, matched, offset, limit, counts, accounts, pending}`. `q` matches part of the username (case-insensitive); `kind` `user`/`guest`, `role` `player`/`author`, `status` `pending`/`approved`/`rejected` (empty = any); `sort` `rank` (default), `newest`, `seen`, `name`; `limit` 1–200 (default 50). `counts` (users, guests, authors, pending, approved, rejected, active24h) cover every account; `pending` is the 50 oldest pending sign-ups. Reads every `account:` and `score:` record (cached 2 s, dropped by any admin write) and only the page's progress records. `UserStats` gains `kind` and `classLimit`. The console fetches it on demand, never on a timer. |
 | POST | `/api/admin/accounts/:id/approve` | `{}` | `{account}` |
-| POST | `/api/admin/accounts/:id/reject` | `{}` | `{account}` (the player sees the "not approved" screen; can't sign in again) |
+| POST | `/api/admin/accounts/:id/reject` | `{reason?}` (≤ 200 chars, #236) | `{account}` (a ban: the player sees the "not approved" screen and can't sign in again). The reason is stored (`banReason`), audited, and shown to the player: in their own `GET /api/session`/`/api/me` (`account.banReason`) and as `banReason` on the 403 `rejected` of a sign-in with the right password (a wrong password learns nothing). Approving clears it. |
+| PUT | `/api/admin/accounts/:id/username` | `{username}` (#236) | `{account}`: a forced rename. 409 `username-taken` (any case), `reserved`, `guest`; 400 for an invalid name. The new name is claimed in the `username:` index first (conditional write), then the account is saved (conditional), then the old name is released; a lost race releases the new claim (409). Sessions stay; the player signs in with the new name. Audited as `account.rename` with `old -> new`; the leaderboard and the account's class boards are purged. |
+| PUT | `/api/admin/accounts/:id/board-visibility` | `{hidden}` (#236) | `{accountId, hiddenFromBoards}`: hides the account from every board (global, per case, class boards and projector) without a ban: it still plays, its `rank` is null. Audited as `account.board-hide` / `account.board-show`; the boards' CDN copies are purged. |
+| GET | `/api/admin/overview` | | `AdminOverview` (#235, `no-store`): `signups` (30 calendar days in the schedule's time zone, users and guests), `accounts` (users, guests, authors, banned, hidden), `active` (last seen within 1/7/30 days), `classes` (active, archived, live events now), `queues` (reviews, vouched resets, author requests, pending sign-ups) and `usage` (function calls this period against 125,000: `ok`, `not-configured`, `not-reported` when Netlify reports 0 on the legacy plan, or `error`). Reads account, class and case-meta records and the request queues; never `progress:` or `score:`. Usage comes from the Netlify API only when `NETLIFY_USAGE_TOKEN` is set, at most once an hour (kept in `config:usage`). Fetched when the owner opens the Overview or presses Refresh. |
+| GET | `/api/admin/author-requests` | | `{requests: [{accountId, username, note, createdAt}]}` (#234), oldest first |
+| POST | `/api/admin/author-requests/:accountId/approve` | `{}` | `{account}`: grants the author role and closes the request. 404 `no-author-request`. Audited. |
+| POST | `/api/admin/author-requests/:accountId/reject` | `{}` | 204: closes the request (the player may ask again). Audited. |
+| GET | `/api/admin/cases/:caseId/review-content?lang=en\|he` | | `{caseId, version, lang, content}` (#235): the public content of the version waiting for review (the pending version of a public case, else the published one), so the owner can judge it. Public content only: no answer, hint text, command or debrief. `he` falls back to `en`. 403 `not-admin` for authors. |
 | DELETE | `/api/admin/accounts/:id` | | 204 (soft delete: account + progress go to the trash for 7 days; sessions end; username freed) |
 | GET | `/api/admin/progress?caseId=` | | `{generatedAt, caseId, players: AdminProgress[]}` (reads the case's progress and only those players' accounts, #185: the Live section polls it) |
 | DELETE | `/api/admin/progress/:accountId/:caseId` | | 204 (restart one player's case) |
@@ -482,6 +498,7 @@ still parse (new fields have defaults); stages solved before it keep their point
 | Var | Meaning |
 |---|---|
 | `ADMIN_KEY` | Admin secret. If it is unset or shorter than 16 chars, every admin route returns 503 `admin disabled`. |
+| `NETLIFY_USAGE_TOKEN` | Optional (#235): a Netlify personal access token, used server-side only to read the account's monthly usage for the owner overview, at most once an hour. Unset, the overview says "not configured" and points to `scripts/data.ts usage`. `NETLIFY_USAGE_SITE_ID` overrides the site id (Netlify sets `SITE_ID` in functions). |
 | `INCIDENTLAB_STORE` | Set to `memory` to use the in-process stores, JSON and bytes (tests and local work; data is lost on restart). Otherwise Netlify Blobs. |
 
 Answers, debriefs, hint texts, commands and points are read from the published case versions in Blobs (`case:<id>:v<n>:sealed`), refreshed at most once a minute per instance and at once after a publish on the instance that served it. `site/server/generated/secrets.json` (written by the pipeline) is a build artefact for the checks only: no runtime code imports it (`server/test/handler.test.ts` checks), and it must never be imported from `site/src`.
