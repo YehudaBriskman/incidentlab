@@ -19,7 +19,8 @@ import type { ScoreService } from "./ScoreService.ts";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TRASH_ID = /^[0-9TZ:.-]+:[0-9a-f]{8}$/;
 
-export type TrashInput = Omit<TrashBundle, "deletedAt" | "caseId" | "caseStatus" | "memberships"> & Partial<Pick<TrashBundle, "caseId" | "caseStatus" | "memberships">>;
+export type TrashInput = Omit<TrashBundle, "deletedAt" | "caseId" | "caseStatus" | "memberships" | "eventRuns"> &
+  Partial<Pick<TrashBundle, "caseId" | "caseStatus" | "memberships" | "eventRuns">>;
 
 export class TrashService {
   private readonly trash: TrashRepository;
@@ -45,7 +46,7 @@ export class TrashService {
   }
 
   put(bundle: TrashInput): Promise<string> {
-    return this.trash.put({ caseId: null, caseStatus: null, memberships: [], ...bundle, deletedAt: this.now().toISOString() });
+    return this.trash.put({ caseId: null, caseStatus: null, memberships: [], eventRuns: [], ...bundle, deletedAt: this.now().toISOString() });
   }
 
   /** Drops an entry without restoring it (a delete that did not go through). */
@@ -115,6 +116,10 @@ export class TrashService {
       else skipped += 1; // newer progress exists: keep it
       // The board's summary follows whatever progress is stored now (restored or newer).
       await this.scores?.syncCase(record.accountId, record.caseId);
+    }
+    for (const entry of bundle.eventRuns) {
+      if (await this.repos.eventProgress.restoreEntry(entry)) restored += 1;
+      else skipped += 1; // a newer event run exists: keep it
     }
     if (bundle.account) {
       await this.board?.restoreMarker(bundle.account);

@@ -15,7 +15,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { AdminProgress, ClassBoardResponse } from "../../shared/contract.ts";
 import { classBoardRows, classWindow, withEventRuns } from "../domain/class-board.ts";
-import { eventKeyOf } from "../domain/event-run.ts";
+import { eventKeyOf, isEventLive } from "../domain/event-run.ts";
 import type { ProgressRecord } from "../domain/types.ts";
 import type { ClassBoardMember } from "../domain/class-board.ts";
 import type { ClassRecord } from "../domain/classes.ts";
@@ -99,13 +99,21 @@ export class ClassBoardService {
   /**
    * Class admins' live view of one case: each active member's progress, the same view as the admin Live tab.
    * Reads only the members' own `progress:<caseId>:<member>` records (at most `memberLimit` of them); members who
-   * haven't opened the case are left out.
+   * haven't opened the case are left out. While the class event is live, a member's event run of the case
+   * replaces their own run (#268), the same rule as the class board.
    */
   async liveProgress(record: ClassRecord, caseId: string): Promise<{ generatedAt: string; caseId: string; players: AdminProgress[] }> {
     this.game.caseSecrets(caseId); // 404 for unknown cases
     const active = (await this.repos.classes.listMembers(record.id, record.memberLimit)).filter(({ member }) => member.status === "active");
+    const eventKey = isEventLive(record.event, this.now()) ? eventKeyOf(record.event) : null;
+    const eventStore = eventKey === null ? null : this.repos.eventProgress.forEvent(record.id, eventKey);
     const rows = await mapWithConcurrency(active, async ({ accountId }) => {
-      const [account, progress] = await Promise.all([this.repos.accounts.get(accountId), this.repos.progress.get(caseId, accountId)]);
+      const [account, own, event] = await Promise.all([
+        this.repos.accounts.get(accountId),
+        this.repos.progress.get(caseId, accountId),
+        eventStore === null ? Promise.resolve(null) : eventStore.get(caseId, accountId),
+      ]);
+      const progress = event ?? own;
       return account && progress ? this.game.toAdminView(progress.data, account.data) : null;
     });
     const players = rows.filter((p): p is AdminProgress => p !== null).sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
