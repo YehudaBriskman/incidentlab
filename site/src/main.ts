@@ -10,6 +10,7 @@ import { TO } from "./i18n/strings-onboard";
 import { TE } from "./i18n/strings-errors";
 import { claimReload, classifyLoadError, clearReloadGuard, isChunkLoadError } from "./lib/load-recovery";
 import { homeView } from "./views/home";
+import { playNow } from "./lib/playNow";
 import { renderLeaderboard, stopLeaderboard } from "./views/leaderboard";
 import { applyPendingRestore, labelStatic } from "./shell/lang";
 import { mountNav } from "./shell/nav";
@@ -296,6 +297,22 @@ function route(): void {
           ),
         ),
       );
+      return;
+    }
+    // #225: the static About and Privacy pages (no API calls).
+    if ((parts[0] === "about" || parts[0] === "privacy") && parts.length === 1) {
+      const which = parts[0];
+      lazyView(() => import("./views/pages").then((m): View => (which === "about" ? m.aboutView : m.privacyView)));
+      return;
+    }
+    // #223: "Play now" as an address (the static hero's link in index.html works before the app boots): a guest
+    // session when signed out, then the start-here case. It replaces itself in the history, so Back skips it.
+    if (parts[0] === "play" && parts.length === 1) {
+      loadingView();
+      const token = routeToken;
+      void playNow({ replace: true }).then((ok) => {
+        if (!ok && token === routeToken) window.location.replace("#/");
+      });
       return;
     }
     if (parts[0] === "leaderboard" && parts.length === 1) {

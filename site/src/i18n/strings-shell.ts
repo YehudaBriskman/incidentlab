@@ -42,6 +42,9 @@ export const TS = defineStrings({
     shortcutsOn: "On",
     shortcutsOff: "Off",
     a11yStatement: "Accessibility statement",
+    // #225: the About and Privacy pages (nav foot links and crumbs)
+    navAbout: "About",
+    navPrivacy: "Privacy",
 
     // sidebar chrome (shell/sidebar.ts)
     sidebarCollapse: "Collapse the sidebar",
@@ -169,6 +172,8 @@ export const TS = defineStrings({
     shortcutsOn: "פעילים",
     shortcutsOff: "כבויים",
     a11yStatement: "הצהרת נגישות",
+    navAbout: "אודות",
+    navPrivacy: "פרטיות",
 
     sidebarCollapse: "כיווץ סרגל הצד",
     sidebarExpand: "הרחבת סרגל הצד",

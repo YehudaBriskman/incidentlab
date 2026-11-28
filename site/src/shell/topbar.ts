@@ -65,6 +65,8 @@ function crumbsFor(parts: readonly string[]): Crumb[] {
       return pageCrumb === null ? [homeCrumb, classesCrumb, name, manage] : [homeCrumb, classesCrumb, name, manage, { label: pageCrumb }];
     }
   }
+  if (section === "about") return [homeCrumb, { label: TS().navAbout }];
+  if (section === "privacy") return [homeCrumb, { label: TS().navPrivacy }];
   if (section === "login") return [homeCrumb, { label: TS().crumbSignIn }];
   if (section === "signup") return [homeCrumb, { label: TS().crumbSignUp }];
   // #221: the review queue sits inside the platform console
