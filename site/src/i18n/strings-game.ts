@@ -4,6 +4,8 @@ import type { IconName } from "../shell/icons";
 // Round 2 player UI: paid commands, scoring v2, events, leaderboard, achievements, password changes.
 const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
 const signed = (n: number): string => (n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : "0");
+/** Signed amounts as an LTR isolate (LRI…PDI), so "−5" keeps its sign before the digits in Hebrew (#248). */
+const ltr = (text: string): string => `\u2066${text}\u2069`;
 
 export const TG = defineStrings({
   en: {
@@ -166,7 +168,7 @@ export const TG = defineStrings({
     labOpenTemplate: "תבנית Codespaces",
     labNote: "מעבדה: לאימג' המעבדה, מעטפת לינוקס עם tcpdump, dig, jq ו-gawk והראיות של התיק ב-/case. מריצים מתוך /case.",
     syntaxHelp: "השלימו את ה-<placeholders> בעצמכם, או חשפו את הפקודה המדויקת.",
-    revealCommand: (cost: number): string => `חשיפת הפקודה המלאה (−${cost} נק')`,
+    revealCommand: (cost: number): string => `חשיפת הפקודה המלאה (${ltr(`−${cost}`)} נק')`,
     revealing: "חושפים…",
     revealedTag: (stage: string): string => `נחשפה · ${stage}`,
     unlockedTag: "פתוחה",
@@ -194,7 +196,7 @@ export const TG = defineStrings({
     bdClean: "פתרון נקי",
     bdFirstBlood: "ראשונים לפתור",
     bdTotal: "סה\"כ לשלב",
-    pts: (n: number): string => signed(n),
+    pts: (n: number): string => ltr(signed(n)),
     ptsUnit: "נק'",
     scorePts: (score: number): string => `${num(score)} נק'`,
     parOf: (par: number): string => `יעד ${num(par)}`,
@@ -205,7 +207,7 @@ export const TG = defineStrings({
     meterTimeFading: "יורד",
     meterTimeGone: "נגמר",
     wrongSoFarCost: (n: number, penalty: number): string =>
-      `${n === 1 ? "ניסיון שגוי אחד" : `${n} ניסיונות שגויים`} עד עכשיו (−${penalty} נק').`,
+      `${n === 1 ? "ניסיון שגוי אחד" : `${n} ניסיונות שגויים`} עד עכשיו (${ltr(`−${penalty}`)} נק').`,
     perStage: "לפי שלב",
     completionBonus: "בונוס סיום",
     completionNone: "בונוס סיום (דורש לפתור את כל השלבים בלי לחשוף תשובה)",

@@ -32,6 +32,7 @@ import {
   type Difficulty,
 } from "../lib/caseFilters";
 import { getLang } from "../i18n/i18n";
+import { listNode, nameNode } from "../lib/bidi";
 import { TA } from "../i18n/strings-account";
 import { TC } from "../i18n/strings-challenges";
 import { TG } from "../i18n/strings-game";
@@ -69,11 +70,8 @@ const filterValue = (f: CaseFilters): FilterValue => ({ difficulty: [...f.diffic
 /** Hebrew prefixes glued to a Latin word ("ה-commit") keep a non-breaking hyphen, so "ה-" is never orphaned. */
 const keepPrefix = (text: string): string => text.replace(/([֐-׿])-(?=[A-Za-z0-9])/g, "$1‑");
 
-/** A case title as bidi-isolated segments, so mixed-language titles keep each run in order. */
-function titleNode(title: string): Child[] {
-  const parts = keepPrefix(title).split(" – ");
-  return parts.flatMap((part, i) => (i === 0 ? [h("bdi", {}, part)] : [" – ", h("bdi", {}, part)]));
-}
+/** A case title as one element of bidi-isolated parts (#248): a flex parent then wraps it as one item, in order. */
+const titleNode = (title: string): Child[] => [nameNode(title)];
 
 const locale = (): string => (getLang() === "he" ? "he-IL" : "en-GB");
 
@@ -440,7 +438,7 @@ function columns(isPlayer: boolean): Column<Row>[] {
     header: TH().colTags,
     optional: true,
     className: "home-col-tags",
-    cell: (r) => h("span", { class: "home-tags" }, r.c.tags.slice(0, 4).map((t, i) => [i > 0 ? ", " : "", h("bdi", {}, t)])),
+    cell: (r) => h("span", { class: "home-tags" }, listNode(r.c.tags.slice(0, 4))),
   });
   return cols;
 }

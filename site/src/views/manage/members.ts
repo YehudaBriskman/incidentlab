@@ -13,6 +13,7 @@ import { dataTable, type Column } from "../../components/dataTable";
 import { statGrid } from "../../components/statGrid";
 import type { SortState } from "../../components/table-core";
 import { copyButton, h, setChildren } from "../../lib/dom";
+import { listText } from "../../lib/bidi";
 import { errMessage, fmtInt, formatDateTime, formatPct, ms, relativeAgo } from "./format";
 import { NARROW_QUERY, setTilesSummary, syncSortSelect, type ManageHost, type Slot } from "./host";
 import { acctExtras, caseStatsList, caseStatsTable, kindPill, rolePill, statusPill } from "./memberDetails";
@@ -282,7 +283,7 @@ export function createMembersPanel(opts: MembersOptions): MembersPanel {
       numeric: true,
       hideable: true,
       defaultHidden: true,
-      cell: (a) => h("span", { title: T().admBadgesTip(a.achievements.map((x) => T().admAchievement(x.id)).join(", ")) }, fmtInt(a.achievements.length)),
+      cell: (a) => h("span", { title: T().admBadgesTip(listText(a.achievements.map((x) => T().admAchievement(x.id)))) }, fmtInt(a.achievements.length)),
       sortValue: (a) => a.achievements.length,
       sortFirst: "desc",
       csv: (a) => a.achievements.length,

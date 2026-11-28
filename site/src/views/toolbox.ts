@@ -9,6 +9,7 @@ import type { Case } from "../../shared/case";
 import { getProgress, revealCommand } from "../lib/api";
 import { recordVisit } from "../lib/recent";
 import { announce, copyButton, ensureAnnouncer, h, html, setChildren, type Child } from "../lib/dom";
+import { bidiProse } from "../lib/bidi";
 import { confirm, tooltip } from "../lib/overlay";
 import "../player.css";
 import { playErrorText, recoverFromWrite } from "../lib/errors";
@@ -250,7 +251,7 @@ export function commandCard(item: ToolItem, ctx: CommandContext): HTMLElement {
       h("div", { class: "code-wrap" }, pre, full ? copyButton(current, T().copy) : null),
       fallback,
       labNote,
-      html("div", { class: "prose small" }, md(item.explain)),
+      bidiProse(html("div", { class: "prose small" }, md(item.explain))),
       action !== null ? h("div", { class: "cmd-actions" }, action, errorEl) : null,
     ),
   );

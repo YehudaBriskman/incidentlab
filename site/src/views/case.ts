@@ -15,7 +15,7 @@ import { announce, copyButton, ensureAnnouncer, h, html, setChildren, type Child
 import { ICONS, type IconName } from "../shell/icons";
 import { confirm, popover } from "../lib/overlay";
 import { caseClassEvent, eventStatus } from "../components/classEventStatus";
-import { HEBREW, bidiProse, contentText } from "../lib/bidi";
+import { HEBREW, bidiProse, contentText, nameNode } from "../lib/bidi";
 import { answerForm, clearAnswerDrafts } from "./answerForm";
 import { isNarrow, workbench, writePane } from "./caseWorkbench";
 import { TW } from "../i18n/strings-case";
@@ -374,7 +374,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
     return h(
       "header",
       { class: "case-head case-status", "aria-label": TW().statusLabel },
-      h("div", { class: "cs-line" }, contentText("h1", { class: "cs-title" }, c.title), stageItem(), elScore, elTime, eventSlot, costsBtn, costsPanel),
+      h("div", { class: "cs-line" }, h("h1", { class: "cs-title" }, nameNode(c.title)), stageItem(), elScore, elTime, eventSlot, costsBtn, costsPanel),
       h("span", { class: "cs-progress", "aria-hidden": "true" }, elFill),
     );
   };
