@@ -198,6 +198,10 @@ a.home-row:hover { background: var(--hover); }
 @media (max-width: 640px) {
   .home-top, .home-chal { grid-template-columns: minmax(0, 1fr); }
   .home-card { block-size: auto; max-block-size: 18rem; }
+  /* the Start-here card (#224) keeps its desktop height, so its skeleton and its case take the same room */
+  .home-card.home-start { block-size: 13.5rem; }
+  /* the proof line may wrap to two lines here: reserve both, so filling it moves nothing (#225) */
+  .home-proof { min-block-size: calc(2 * var(--type-small-size) * var(--type-small-lh)); }
   .home-chal-card { min-block-size: 0; }
   .home-toolbar { justify-content: flex-start; }
   .home-search-wrap { flex: 1 1 100%; }
