@@ -130,5 +130,5 @@ test("trash entries past the restore window are dropped; live ones stay", async 
 
 test("an empty store is a no-op", async () => {
   const report = await createAccountHygiene(new InMemoryKvStore(), () => new Date()).run({ apply: true });
-  assert.deepEqual(report, { applied: true, idleGuests: [], guestProgress: 0, expiredSessions: 0, staleRateLimits: 0, oldAudit: 0, expiredTrash: 0, expiredResetRequests: 0 });
+  assert.deepEqual(report, { applied: true, idleGuests: [], guestProgress: 0, expiredSessions: 0, staleRateLimits: 0, oldAudit: 0, expiredTrash: 0, expiredResetRequests: 0, oldEventRuns: 0 });
 });
