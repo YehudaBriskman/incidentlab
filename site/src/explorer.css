@@ -1,23 +1,55 @@
 /* ============ evidence explorer ============ */
 /* The log pane is the always-dark code island (DESIGN.md deviation D1): it uses the --code-* roles,
    which are verified on --code-bg in both themes. Everything outside the pane uses the page roles. */
-.explorer {
-  display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3) var(--gutter) var(--space-6);
-}
+/* Logs first (#280): one header row, then the files pane beside a column of the question strip, the filter
+   toolbar and the split of the log and the Analyze panel. Above 640px it is a "fit" page: the log takes all the
+   height that is left, and nothing else grows into it. */
+.explorer { display: flex; flex-direction: column; gap: var(--space-2); min-inline-size: 0; }
 .ex-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-.ex-topbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-/* the page's one h1: the tool name and the case, at the size of the bar it sits in */
-.ex-heading { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; min-inline-size: 0; margin: 0; font: inherit; letter-spacing: 0; }
-.ex-status { color: var(--text-muted); font-size: var(--step--1); margin: 0; flex: 1; }
-/* The evidence files and the time converter live in the shell sidebar (.ex-side, #60): the layout is one column. */
-.ex-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.ex-icon { inline-size: 16px; block-size: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+/* the header row: files · case › Evidence explorer › file · format · description … counts · line actions */
+.ex-head { display: flex; align-items: center; gap: var(--space-1) var(--space-2); min-inline-size: 0; min-block-size: var(--control-sm); }
+.ex-files-btn { gap: var(--space-1); flex: none; }
+.ex-files-btn[aria-expanded="true"] { background: var(--fill-inset); color: var(--text-1); }
+.ex-crumb { display: inline-flex; align-items: center; min-block-size: var(--target-min); max-inline-size: 14rem; min-inline-size: 0; flex: 0 1 auto; color: var(--text-2); font-size: var(--type-small-size); text-decoration: none; }
+.ex-crumb-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-crumb:hover { color: var(--text-1); text-decoration: underline; text-decoration-color: var(--link-underline); }
+.ex-crumb-sep { flex: none; color: var(--text-2); font-size: var(--type-small-size); }
+/* the page's one h1: the tool, at the size of the row it sits in */
+.ex-heading { flex: none; margin: 0; font-size: var(--type-small-size); font-weight: 600; line-height: var(--type-small-lh); letter-spacing: 0; white-space: nowrap; }
+.ex-head-main { flex: 1 1 8rem; min-inline-size: 0; display: flex; align-items: baseline; gap: var(--space-2); }
+/* the file name keeps its width; the description gives way first */
+.ex-head-title { display: flex; align-items: baseline; gap: var(--space-2); min-inline-size: 0; flex: 0 1 auto; max-inline-size: 100%; }
+.ex-head-main > .ex-head-title { flex-shrink: 0.2; }
+.ex-title { font-size: var(--type-small-size); font-weight: 600; margin: 0; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0; }
+/* Mono only once it shows a file path (copyable); the "Pick a file" prompt is a UI label (#129). */
+.ex-title[dir=ltr] { font-family: var(--font-mono); }
+.ex-format { flex: none; color: var(--text-muted); font-size: var(--type-label-size); }
+/* the picked file's description: one muted line after its name, in the reading direction of its text */
+.ex-file-desc { flex: 1 1 6rem; min-inline-size: 0; margin: 0; font-size: var(--type-label-size); color: var(--text-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ex-file-desc[hidden] { display: none; }
+.ex-count { flex: none; color: var(--text-2); font-size: var(--type-label-size); margin: 0; font-variant-numeric: tabular-nums; }
+.ex-count.is-warn { color: var(--danger-fg); font-weight: 600; }
+.ex-actions { flex: none; display: flex; gap: var(--space-1) var(--space-2); align-items: center; margin-inline-start: auto; }
+.ex-match-nav { display: inline-flex; align-items: center; gap: var(--space-1); }
+.ex-match-nav[hidden] { display: none; }
+.ex-match-pos { font-size: var(--type-label-size); color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ex-drawer-tools .btn.is-copied { color: var(--success-fg); background: var(--success-bg); }
+/* the ⋯ menu button (#112): an icon button at the row's end, after the wrap toggle */
+.ex-more { font-size: var(--step-1); line-height: 1; }
+.ex-toggle { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--control-sm); padding: 0 var(--space-2); font-size: var(--type-label-size); color: var(--text-2); cursor: pointer; white-space: nowrap; }
+
+/* the body: the files pane (start) beside the working column */
+.ex-body { display: flex; gap: var(--space-3); min-inline-size: 0; }
+.ex-filespane { flex: 0 0 var(--sidebar-size); min-inline-size: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-3); border-radius: var(--radius-card); background: var(--level-1); box-shadow: var(--surface-lift); }
+.ex-filespane.is-collapsed { display: none; }
+.ex-col { flex: 1 1 auto; min-inline-size: 0; display: flex; flex-direction: column; gap: var(--space-2); }
 .ex-side { display: flex; flex-direction: column; }
-.ex-side-h { font-size: var(--type-label-size); font-weight: 500; color: var(--text-muted); margin: var(--space-1) 0 var(--space-2); padding-inline: var(--space-3); }
+.ex-side-h { font-size: var(--type-label-size); font-weight: 500; color: var(--text-muted); margin: var(--space-1) 0 var(--space-2); padding-inline: var(--space-3); letter-spacing: 0; }
+.ex-files-sheet .ex-filespane { display: block; padding: 0; box-shadow: none; background: none; overflow: visible; }
 .ex-input.ex-file-search { width: 100%; margin: 0 0 var(--space-2); }
 .ex-no-files { margin: 0 0 var(--space-4); font-size: var(--step--1); }
-.ex-match-nav { display: inline-flex; align-items: center; gap: var(--space-2); }
-.ex-match-nav[hidden] { display: none; }
-.ex-match-pos { font-size: var(--step--1); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .ex-files { list-style: none; margin: 0 0 var(--space-4); padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .ex-file { width: 100%; min-height: var(--control-sm); text-align: start; display: flex; flex-direction: row; align-items: center; gap: var(--space-2); padding: 6px var(--space-3); border-radius: var(--radius-control); border: 0; background: transparent; color: var(--text-2); cursor: pointer; font: inherit; transition: background-color var(--motion-settle) var(--ease-standard), color var(--motion-settle) var(--ease-standard); }
 .ex-file:hover { background: var(--hover-fill); color: var(--text-1); }
@@ -41,88 +73,77 @@
 .ex-time-out dd { margin: 0; word-break: break-all; font-family: var(--font-mono); }
 .ex-zone-tag { color: var(--accent-text); }
 
-/* head */
-.ex-main { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
-/* the terminal window's slim title bar: file name and format at the start, line counts at the end */
-.ex-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-3); flex-wrap: wrap; min-height: 40px; padding: var(--space-1) var(--space-4); }
-.ex-head-main { flex: 1 1 12rem; min-inline-size: 0; display: flex; flex-direction: column; gap: 2px; padding-block: var(--space-1); }
-.ex-head-title { display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; min-width: 0; }
-/* the picked file's description: one muted line under its name (#217), in the reading direction of its text */
-.ex-file-desc { margin: 0; font-size: var(--type-label-size); color: var(--text-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.ex-file-desc[hidden] { display: none; }
-.ex-title { font-size: var(--type-small-size); font-weight: 600; margin: 0; overflow-wrap: break-word; min-inline-size: 0; letter-spacing: 0; }
-/* Mono only once it shows a file path (copyable); the "Pick a file" prompt is a UI label (#129). */
-.ex-title[dir=ltr] { font-family: var(--font-mono); }
-.ex-format { color: var(--text-muted); font-size: var(--type-label-size); }
-.ex-count { color: var(--text-2); font-size: var(--type-label-size); margin: 0; font-variant-numeric: tabular-nums; }
-.ex-count.is-warn { color: var(--danger-fg); font-weight: 600; }
-
-/* controls */
-/* the filters sit in one soft card; its steps are muted rows inside it */
-.ex-controls { border-radius: var(--radius-card); background: var(--level-2); box-shadow: var(--surface-lift); padding: var(--space-3) var(--space-4); }
-.ex-controls-sum { display: none; }
-.ex-fieldset { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); }
-.ex-fieldset:disabled { opacity: 0.55; }
-.ex-pipeline { display: flex; flex-direction: column; gap: var(--space-2); align-items: flex-start; }
-/* each filter step is a soft row: a muted fill, 8px corners, no edge */
+/* the filter toolbar (#280): the quick filter (step 1), the active-filter chips, + add filter, Analyze, Maximize */
+.ex-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-inline-size: 0; }
+.ex-quickset { flex: 1 1 24rem; min-inline-size: 0; border: 0; margin: 0; padding: 0; }
+.ex-quickset:disabled, .ex-fieldset:disabled { opacity: 0.55; }
+.ex-tool-btns { flex: none; display: flex; align-items: center; gap: var(--space-2); margin-inline-start: auto; }
+.ex-analyze-btn { gap: var(--space-2); }
+.ex-analyze-btn[aria-expanded="true"] { background: var(--accent-soft); color: var(--text-1); }
+.ex-max-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--text-1); }
+.ex-fieldset { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.ex-pipeline { display: flex; flex-direction: column; gap: var(--space-2); align-items: stretch; }
+.ex-pipeline:empty { display: none; }
+/* each filter step is a soft row: a muted fill, 8px corners, no edge; the quick filter sits on the page itself */
 .ex-step { width: 100%; display: flex; flex-direction: column; gap: 2px; padding: var(--space-1) var(--space-2); border-radius: var(--radius-control); background: var(--fill-inset); }
+.ex-step.is-quick { padding: 0; background: none; }
 .ex-step-line { display: flex; align-items: center; gap: var(--space-2); width: 100%; flex-wrap: wrap; }
-.ex-step .ex-input { flex: 1; min-width: 160px; }
+.ex-step .ex-input { flex: 1; min-width: 10rem; }
 .ex-step.is-invalid { background: var(--danger-bg); }
+.ex-step.is-quick.is-invalid { background: none; }
 .ex-step.is-invalid .ex-input { border-color: var(--danger-fg); box-shadow: 0 0 0 1px var(--danger-fg); }
 .ex-step-err { margin: 0; color: var(--danger-fg); font-size: var(--step--1); padding-inline-start: var(--space-1); }
 .ex-step-err::before { content: "⚠ "; }
 .ex-pipe { color: var(--text-muted); }
-.ex-ci { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--control-sm); padding: 0 var(--space-1); font-size: var(--step--1); color: var(--text-2); cursor: pointer; }
+.ex-ci { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--control-sm); padding: 0 var(--space-1); font-size: var(--type-label-size); color: var(--text-2); cursor: pointer; white-space: nowrap; }
+.ex-remove[hidden] { display: none; }
+.ex-ci-short { display: none; font-family: var(--font-mono); }
 /* inputs and selects carry the shared .input recipe (40px, 8px corners, the 3:1 control edge); these only size them */
 .ex-input, .ex-select { width: auto; color: var(--text); }
+.ex-quickset .ex-input, .ex-quickset .ex-select { min-block-size: var(--control-sm); }
 .ex-input.mono { font-family: var(--font-mono); }
 .ex-year { width: 100%; }
-.ex-filter-tools { display: flex; align-items: center; gap: var(--space-2) var(--space-3); flex-wrap: wrap; }
-.ex-presets { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; font-size: var(--step--1); flex: 1 1 auto; min-inline-size: 0; }
+.ex-presets { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; font-size: var(--step--1); min-inline-size: 0; }
 .ex-presets .ex-chips { margin: 0; }
-/* "More filters (n)": a disclosure at the end of the filter card; its panel holds the JSON conditions, the column
-   view and the aggregations, with a hairline above it */
-.ex-more-filters { gap: var(--space-1); }
-.ex-more-chev::before { content: "▸"; display: inline-block; }
-.ex-more-filters[aria-expanded="true"] .ex-more-chev::before { transform: rotate(90deg); }
-[dir=rtl] .ex-more-chev::before { content: "◂"; }
-[dir=rtl] .ex-more-filters[aria-expanded="true"] .ex-more-chev::before { transform: rotate(-90deg); }
-.ex-more-panel { display: flex; flex-direction: column; gap: var(--space-3); padding-block-start: var(--space-3); border-block-start: 1px solid color-mix(in oklab, var(--edge-subtle) 60%, transparent); }
-.ex-more-panel[hidden] { display: none; }
-.ex-more-panel .ex-agg { box-shadow: none; background: var(--fill-inset); }
+.ex-presets[hidden] { display: none; }
 
-/* active filters: one bar of removable chips (#217) */
-.ex-fchips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+/* active filters: removable chips (#217); the label opens the filter where it is edited */
+.ex-fchips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); min-inline-size: 0; flex: 0 1 auto; }
 .ex-fchips[hidden] { display: none; }
-.ex-fchip { display: inline-flex; align-items: center; gap: var(--space-1); max-inline-size: 100%; min-block-size: var(--target-min); padding-inline: var(--space-3) var(--space-1); border-radius: var(--radius-full); background: var(--accent-soft); color: var(--text); font-size: var(--type-label-size); }
-.ex-fchip-label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-fchip { display: inline-flex; align-items: center; max-inline-size: 100%; min-block-size: var(--target-min); padding-inline-end: var(--space-1); border-radius: var(--radius-full); background: var(--accent-soft); color: var(--text); font-size: var(--type-label-size); }
+.ex-fchip.is-warn { background: var(--warning-bg); color: var(--warning-fg); }
+.ex-fchip-label { min-inline-size: 0; max-inline-size: 22rem; min-block-size: var(--target-min); padding: 0 var(--space-1) 0 var(--space-3); border: 0; border-radius: var(--radius-full); background: none; color: inherit; font: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; }
+.ex-fchip-label:hover { text-decoration: underline; }
+.ex-fchip-label:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: 0; }
 .ex-fchip-k { color: var(--text-2); }
 .ex-fchip-x { flex: none; display: inline-grid; place-items: center; inline-size: var(--target-min); block-size: var(--target-min); padding: 0; border: 0; border-radius: var(--radius-full); background: transparent; color: var(--text-2); font: inherit; font-size: var(--step-0); line-height: 1; cursor: pointer; }
 .ex-fchip-x:hover { background: var(--hover-fill); color: var(--text-1); }
 .ex-fchip-x:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: 0; }
-.ex-presets[hidden] { display: none; }
 .ex-chips { display: flex; gap: var(--space-2); flex-wrap: wrap; margin: var(--space-2) 0; }
 .ex-chips:empty { display: none; }
 .ex-chip { --pill-bg: var(--fill-inset); --pill-fg: var(--text-2); min-height: 28px; padding: 2px var(--space-3); font-family: inherit; font-weight: 500; cursor: pointer;
   transition: background-color var(--motion-settle) var(--ease-standard), color var(--motion-settle) var(--ease-standard); }
 .ex-chip:hover { --pill-bg: var(--accent-soft); --pill-fg: var(--accent-strong); }
 .ex-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.ex-jsonbar { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.ex-jsonbar { display: grid; grid-template-columns: 1fr; gap: var(--space-3); }
 .ex-jsonbar label { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--type-label-size); font-weight: 500; color: var(--text-2); }
-.ex-jsonbar[hidden] { display: none; }
-.ex-badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 var(--space-2); margin-inline-start: var(--space-2); border-radius: var(--radius-full); background: var(--accent); color: var(--on-accent); font-size: var(--step--2); font-weight: 700; }
-.ex-badge[hidden] { display: none; }
+.ex-jsonbar[hidden], .ex-json-note[hidden] { display: none; }
 
 .ex-notice { border-radius: var(--radius-card); padding: var(--space-2) var(--space-3); font-size: var(--step--1); }
 .ex-notice-warn { background: var(--danger-bg); color: var(--danger-fg); }
 .ex-notice-info { background: var(--success-bg); color: var(--success-fg); }
-.ex-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
-.ex-head .ex-actions { margin-inline-start: auto; }
-.ex-drawer-tools .btn.is-copied { color: var(--success-fg); background: var(--success-bg); }
-/* the ⋯ menu button (#112): an icon button at the toolbar end, after the wrap toggle */
-.ex-more { font-size: var(--step-1); line-height: 1; }
-.ex-toggle { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--control-sm); padding: 0 var(--space-2); font-size: var(--step--1); color: var(--text-2); cursor: pointer; }
+
+/* the split: the log, the window splitter and the Analyze panel at the inline end (#280) */
+.ex-split { display: flex; min-inline-size: 0; }
+.ex-split > .ex-work { flex: 1 1 auto; min-inline-size: 0; }
+.ex-split.is-resizing { cursor: col-resize; user-select: none; }
+/* APG window splitter: a 12px gutter with a visible grip; its hit area is 24px (44px on touch) */
+.ex-splitter { position: relative; flex: 0 0 var(--space-3); display: grid; place-items: center; cursor: col-resize; touch-action: none; outline: none; }
+.ex-splitter[hidden] { display: none; }
+.ex-splitter::before { content: ""; inline-size: 4px; block-size: 3rem; border-radius: var(--radius-pill); background: var(--edge-control); transition: background-color var(--motion-settle) var(--ease-standard); }
+.ex-splitter::after { content: ""; position: absolute; inset-block: 0; inset-inline: calc((var(--space-3) - var(--target-min)) / 2); }
+.ex-splitter:hover::before, .ex-split.is-resizing .ex-splitter::before { background: var(--edge-selected); }
+.ex-splitter:focus-visible::before { background: var(--focus-ring); box-shadow: 0 0 0 2px var(--focus-halo), 0 0 0 4px var(--focus-ring); }
 
 /* log pane (always dark) */
 /* the terminal window: a soft card (12px, elevation 2) whose title bar sits on the card colour over the dark code surface */
@@ -156,9 +177,17 @@
 .ex-viewport.is-wrap .ex-row { height: auto; min-height: 20px; }
 .ex-viewport.is-wrap .ex-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; flex: 1; }
 .ex-empty { padding: var(--space-4); color: var(--code-muted); font-family: var(--font-sans); }
-.ex-empty-card { margin: var(--space-5); max-width: 440px; padding: var(--space-5); border: 1px dashed var(--code-border); border-radius: var(--radius-card); font-family: var(--font-sans); font-size: var(--step--1); color: var(--code-text); white-space: normal; }
-.ex-empty-card p { margin: 0 0 var(--space-3); }
-.ex-empty-title { font-weight: 600; font-size: 1rem; }
+/* "Pick a file" (#280): centred in the pane and filling it, in the page's direction, on the code surface */
+.ex-empty-state { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; padding: var(--space-5); overflow: auto; background: var(--code-bg); }
+.ex-empty-state[hidden] { display: none; }
+.ex-empty-card { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); max-inline-size: 30rem; padding: var(--space-6) var(--space-5); border: 1px dashed var(--code-border); border-radius: var(--radius-card); font-family: var(--font-sans); font-size: var(--type-small-size); color: var(--code-text); text-align: center; white-space: normal; }
+.ex-empty-card p { margin: 0; color: var(--code-muted); }
+.ex-empty-card .ex-icon { inline-size: 40px; block-size: 40px; stroke-width: 1; color: var(--code-muted); }
+.ex-empty-title { margin: 0; font-size: var(--type-title-size); font-weight: 600; line-height: var(--type-title-lh); letter-spacing: 0; color: var(--code-text); }
+.ex-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); margin-block-start: var(--space-2); }
+.ex-empty-state .btn { color: var(--code-text); background: var(--code-surface); border-color: var(--code-border); }
+.ex-empty-state .btn-primary { background: var(--code-accent); border-color: var(--code-accent); color: var(--code-on-accent); }
+.ex-empty-state :focus-visible { outline-color: var(--code-accent); }
 
 /* loading overlay: sits on the pane, so it never shifts the controls */
 .ex-progress { position: absolute; inset: 0; display: flex; flex-direction: column; background: color-mix(in oklab, var(--code-bg) 88%, transparent); color: var(--code-text); z-index: 4; }
@@ -177,10 +206,32 @@
 .ex-progress .btn-primary { background: var(--code-accent); border-color: var(--code-accent); color: var(--code-on-accent); }
 .ex-progress :focus-visible { outline-color: var(--code-accent); }
 
-/* aggregations */
-.ex-aggs { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
-.ex-agg { background: var(--level-2); border: 0; border-radius: var(--radius-card); box-shadow: var(--surface-lift); padding: var(--space-2) var(--space-5) var(--space-4); min-width: 0; }
-.ex-agg summary { cursor: pointer; font-weight: 600; min-block-size: var(--target-min); padding-block: max(0px, (var(--target-min) - 1lh) / 2); }
+/* the Analyze panel (#280): a soft card at the split's inline end, tabs over one scrolling panel */
+.ex-analyze { flex: 0 0 var(--ex-panel, 380px); min-inline-size: 0; display: flex; flex-direction: column; border-radius: var(--radius-card); background: var(--level-1); box-shadow: var(--surface-lift); overflow: hidden; }
+.ex-analyze[hidden] { display: none; }
+.ex-analyze-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-1) var(--space-2) 0 var(--space-4); }
+.ex-analyze-h { margin: 0; font-size: var(--type-small-size); font-weight: 600; letter-spacing: 0; }
+.ex-analyze-close { font-size: var(--step-1); line-height: 1; }
+.ex-analyze-body { flex: 1; min-block-size: 0; display: flex; flex-direction: column; }
+.ex-tabs { display: flex; gap: var(--space-1); padding-inline: var(--space-2); border-block-end: 1px solid var(--edge-subtle); overflow-x: auto; scrollbar-width: none; }
+.ex-tab { display: inline-flex; align-items: center; min-block-size: var(--control-sm); padding: 0 var(--space-3); border: 0; border-radius: var(--radius-control) var(--radius-control) 0 0; background: none; color: var(--text-2); font: inherit; font-size: var(--type-label-size); font-weight: 500; white-space: nowrap; cursor: pointer; }
+.ex-tab:hover { background: var(--hover-fill); color: var(--text-1); }
+.ex-tab[aria-selected="true"] { color: var(--text-1); font-weight: 600; box-shadow: inset 0 -3px 0 var(--accent); }
+.ex-tab:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: -2px; }
+.ex-tabpanel { flex: 1; min-block-size: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-3) var(--space-4) var(--space-4); }
+.ex-tabpanel[hidden] { display: none; }
+.ex-tabpanel:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: -2px; }
+.ex-sec { display: flex; flex-direction: column; gap: var(--space-2); min-inline-size: 0; }
+.ex-sec + .ex-sec { padding-block-start: var(--space-3); border-block-start: 1px solid color-mix(in oklab, var(--edge-subtle) 60%, transparent); }
+.ex-sec-h { margin: 0; font-size: var(--type-label-size); font-weight: 600; color: var(--text-2); letter-spacing: 0; }
+.ex-sec > .ex-muted, .ex-sec-help { margin: 0; }
+.ex-sec-tools { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.ex-time-state { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap; }
+.ex-time-state p { margin: 0; font-size: var(--step--1); }
+.ex-time-state p:focus { outline: none; }
+.ex-analyze-sheet .ex-analyze-body { min-block-size: 50dvh; }
+.ex-analyze-sheet .ex-tabpanel { padding-inline: 0; }
+.ex-analyze-sheet .ex-step .ex-input { min-width: 0; flex-basis: 100%; }
 .ex-agg-strip { margin: var(--space-2) 0; padding: var(--space-1) var(--space-3); border-radius: var(--radius-control); font-size: var(--step--2); background: var(--accent-soft); color: var(--text); }
 .ex-agg-strip[hidden] { display: none; }
 .ex-agg-out.is-stale { opacity: 0.5; }
@@ -293,8 +344,8 @@ th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
 .ex-detail-raw:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); }
 
 @media (min-width: 1180px) {
-  .ex-work.has-detail { grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); }
-  .ex-drawer { position: sticky; top: var(--space-3); max-height: calc(min(60vh, 560px) + 40px); }
+  .ex-work.has-detail { grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); }
+  .ex-drawer { position: sticky; top: var(--space-3); max-height: 70vh; }
 }
 @media (max-width: 1179.98px) {
   /* Bottom sheet: the log stays visible above it, so the cursor row and the details read together. */
@@ -306,11 +357,15 @@ th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
   @keyframes ex-sheet-in { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
 }
 @media (forced-colors: active) {
-  .ex-drawer { border-color: CanvasText; }
+  .ex-drawer, .ex-analyze, .ex-filespane { border: 1px solid CanvasText; }
   .ex-chart rect.is-picked { fill: Highlight; }
   /* the cursor line is a tint and an inset bar, both erased by forced colours (#130) */
   .ex-row.is-cursor { forced-color-adjust: none; background: Highlight; color: HighlightText; box-shadow: none; }
   .ex-row.is-cursor .ex-ln, .ex-row.is-cursor mark { color: HighlightText; }
+  .ex-splitter::before { forced-color-adjust: none; background: CanvasText; }
+  .ex-splitter:hover::before, .ex-splitter:focus-visible::before { background: Highlight; }
+  .ex-tab[aria-selected="true"] { box-shadow: none; border-block-end: 3px solid Highlight; }
+  .ex-fchip { border: 1px solid CanvasText; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -318,26 +373,22 @@ th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
   .ex-progress-track.is-indeterminate .ex-progress-bar { animation: none; left: 0; width: 100%; opacity: 0.5; }
 }
 
-
-@media (max-width: 860px) {
-  .ex-aggs, .ex-jsonbar { grid-template-columns: 1fr; }
-  .ex-viewport { height: 60vh; height: 60svh; }
+/* the files pane is a Sheet up to 1024px (opened from the header's Files button) */
+@media (max-width: 1024px) {
+  .ex-body > .ex-filespane { display: none; }
 }
 
-/* The tagline wraps to two lines beside the case name up to 1280px: it goes, and the h1 keeps the row. */
-@media (max-width: 1280px) {
-  .ex-status { display: none; }
-}
-
-/* "fit" above 640px (#217): the Explorer fills the content area and only the log scrolls, so there is no page
-   scroll around a nested scroller. The filter card and "More filters" scroll inside themselves when they grow. */
+/* "fit" above 640px: the Explorer fills the content area, the log takes the height that is left and only it (and
+   the panels beside it) scroll. Nothing above the log grows with the filters (#280). */
 @media (min-width: 641px) {
-  /* the column scrolls only when the strip and "More filters" are both open on a short screen */
-  .app-content[data-layout="fit"] .explorer { flex: 1; min-block-size: 0; padding-block-end: 0; overflow-y: auto; overscroll-behavior: contain; }
-  .app-content[data-layout="fit"] .ex-layout { flex: 1; min-block-size: 0; display: flex; flex-direction: column; }
-  .app-content[data-layout="fit"] .ex-main { flex: 1; min-block-size: 0; }
-  .app-content[data-layout="fit"] .ex-controls { flex: none; max-block-size: 40vh; max-block-size: 40dvh; overflow: auto; overscroll-behavior: contain; }
-  .app-content[data-layout="fit"] .ex-work { flex: 1; min-block-size: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+  .app-content[data-layout="fit"] .explorer { flex: 1; min-block-size: 0; }
+  .app-content[data-layout="fit"] .ex-body { flex: 1; min-block-size: 0; }
+  .app-content[data-layout="fit"] .ex-filespane { align-self: stretch; }
+  .app-content[data-layout="fit"] .ex-col { min-block-size: 0; }
+  .app-content[data-layout="fit"] .ex-col > :not(.ex-split) { flex: none; }
+  .app-content[data-layout="fit"] .q-strip-prompt { max-block-size: 18vh; }
+  .app-content[data-layout="fit"] .ex-split { flex: 1; min-block-size: 0; }
+  .app-content[data-layout="fit"] .ex-work { min-block-size: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
   .app-content[data-layout="fit"] .ex-view { display: flex; flex-direction: column; min-block-size: 0; }
   .app-content[data-layout="fit"] .ex-screen { flex: 1; min-block-size: 0; display: flex; flex-direction: column; }
   .app-content[data-layout="fit"] .ex-viewport { flex: 1; block-size: auto; min-block-size: 12rem; }
@@ -346,16 +397,44 @@ th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
   .app-content[data-layout="fit"] .ex-drawer { position: static; max-height: none; }
 }
 
-@media (max-width: 600px) {
-  .ex-status { display: none; }
-  .ex-heading, .ex-case { flex: 1; }
-  .ex-controls { padding: 0; }
-  .ex-controls-sum { display: flex; align-items: center; min-height: var(--control-md); padding: 0 var(--space-3); font-weight: 600; cursor: pointer; }
-  .ex-controls[open] > .ex-fieldset { padding: 0 var(--space-3) var(--space-3); }
-  .ex-step .ex-input { min-width: 0; flex-basis: 100%; }
-  .ex-toggle { margin-inline-start: 0; }
-  .ex-more { margin-inline-start: auto; }
+/* the maximized log (#280): only the log and a thin bar of the active filters and the restore button */
+/* the h1 stays for the outline and screen readers (visually hidden); the rest of the header row goes */
+.explorer.is-max .ex-head { min-block-size: 0; }
+.explorer.is-max .ex-head > :not(.ex-heading) { display: none; }
+.explorer.is-max .ex-heading { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.explorer.is-max :is(.q-strip, .ex-filespane, .ex-analyze, .ex-splitter, .ex-quickset, .ex-add-step, .ex-analyze-btn) { display: none; }
+.explorer.is-max .ex-toolbar { min-block-size: 0; }
+
+/* the header row narrows: first the description, then the case crumb */
+@media (max-width: 1100px) {
+  .ex-file-desc { display: none; }
 }
+@media (max-width: 900px) {
+  .ex-crumb, .ex-crumb-sep { display: none; }
+}
+
+/* Phones: the page scrolls; the log keeps most of the screen and the Analyze panel opens in a bottom Sheet. */
+/* Phones: the page scrolls, with as little as possible above the log: two header rows (Files and the file; the
+   counts and the line actions), the quick filter on one row, the buttons on the next. The h1 is visually hidden:
+   the top bar's crumb names the page. The Analyze panel and the files open in Sheets. */
+@media (max-width: 640px) {
+  .ex-head { flex-wrap: wrap; row-gap: 0; }
+  .ex-heading { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .ex-crumb-sep { display: none; }
+  .ex-head-main { flex: 1 1 calc(100% - 8rem); }
+  .ex-format { display: none; }
+  .ex-quickset { flex-basis: 100%; }
+  .ex-step.is-quick .ex-step-line { flex-wrap: nowrap; }
+  .ex-step.is-quick .ex-select { flex: none; inline-size: 7rem; }
+  .ex-step.is-quick .ex-input { flex: 1 1 0; min-width: 0; }
+  .ex-step.is-quick .ex-ci-short { display: inline; }
+  .ex-step.is-quick .ex-ci-text { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .ex-step:not(.is-quick) .ex-input { min-width: 0; flex-basis: 100%; }
+  .ex-tool-btns { flex: 1 1 100%; justify-content: flex-end; }
+  .ex-viewport { height: calc(100vh - 9rem); height: calc(100svh - 9rem); }
+  .ex-toggle { margin-inline-start: 0; }
+}
+
 
 /* ============ RTL (Hebrew) ============ */
 /* The shell grid follows dir, so the sidebar naturally flips to the right. */
@@ -384,7 +463,3 @@ th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
 [dir=rtl] .ex-time-out { text-align: left; }
 /* Translated UI text that the global `.mono` rule would otherwise force LTR. */
 [dir=rtl] .ex-count, [dir=rtl] .ex-file-meta { direction: rtl; unicode-bidi: normal; }
-
-/* Phones: the filters open in the shared bottom sheet (#61); the fieldset moves in and back out. */
-.ex-filter-sheet .ex-fieldset { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
-.ex-filter-sheet .ex-step .ex-input { min-width: 0; flex-basis: 100%; }
