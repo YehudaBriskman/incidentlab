@@ -8,7 +8,8 @@ import { T as TP } from "../../i18n/strings-player";
 import { getLang } from "../../i18n/i18n";
 import { h, setChildren } from "../../lib/dom";
 import { statGrid } from "../../components/statGrid";
-import type { AdminProgress } from "../../../shared/contract";
+import { dataTable } from "../../components/dataTable";
+import type { AdminProgress, QuestionId } from "../../../shared/contract";
 import type { AdminProgressResult } from "../../lib/admin-api";
 import { caseMaxScore, caseStages, caseTitle, questionTitle } from "./caseInfo";
 import { fmtInt, formatFinish, formatPct, median } from "./format";
@@ -77,6 +78,8 @@ export function createLivePanel(opts: LiveOptions): LivePanel {
   liveTilesEl.id = "admin-live-tiles";
   const liveTiles = host.foldableTiles(liveTilesEl);
   const funnelEl = h("div", { class: "admin-funnel" });
+  /** "Show as a table" under the funnel stays open across polls once opened. */
+  let funnelTableOpen = false;
   const help = createLiveHelp({ onJump: (id) => grid.jumpTo(id), rerender: () => render() });
   const grid = createLiveGrid({ host, caseId: opts.caseId, progress: opts.progress, api: opts.api, onRestarted: opts.onRestarted, shareUrl: opts.shareUrl });
   /** Members who haven't opened the case yet (class dashboards only). */
@@ -221,25 +224,49 @@ export function createLivePanel(opts: LiveOptions): LivePanel {
     );
   }
 
-  function renderFunnel(players: readonly AdminProgress[], caseId: string): void {
-    const total = players.length;
-    const rows = caseStages(caseId).map((stage) => {
-      const reached = players.filter((p) => stageStatus(p, stage) !== "locked").length;
-      const done = players.filter((p) => isFinishedStatus(stageStatus(p, stage))).length;
-      const pct = (n: number): string => (total ? `${(n / total) * 100}%` : "0%");
-      const title = stage === "setup" ? T().admSetup : questionTitle(caseId, stage);
-      return h(
-        "div",
-        { class: "funnel-row", title: T().admFunnelTip(`${stageLabel(stage)} ${title}`, reached, done) },
-        h("span", { class: "funnel-label" }, stageLabel(stage)),
+  /**
+   * The stage funnel (#240): per stage how many reached it and finished it, out of a stated denominator (the class
+   * roster when there is one, else the players who opened the case), with the same numbers as a table.
+   */
+  function renderFunnel(players: readonly AdminProgress[], caseId: string, members: number | null): void {
+    const base = members === null ? players.length : Math.max(members, players.length);
+    type FunnelRow = { readonly stage: "setup" | QuestionId; readonly title: string; readonly reached: number; readonly done: number };
+    const data: FunnelRow[] = caseStages(caseId).map((stage) => ({
+      stage,
+      title: stage === "setup" ? T().admSetup : questionTitle(caseId, stage),
+      reached: players.filter((p) => stageStatus(p, stage) !== "locked").length,
+      done: players.filter((p) => isFinishedStatus(stageStatus(p, stage))).length,
+    }));
+    const pct = (n: number): string => (base ? `${(n / base) * 100}%` : "0%");
+    const rows = data.map((row) =>
+      h(
+        "li",
+        { class: "funnel-row" },
+        h("span", { class: "funnel-label", title: row.title }, stageLabel(row.stage)),
         h(
           "div",
-          { class: "funnel-track" },
-          h("div", { class: "funnel-reached", style: `width:${pct(reached)}` }),
-          h("div", { class: "funnel-done", style: `width:${pct(done)}` }),
+          { class: "funnel-track", "aria-hidden": "true" },
+          h("div", { class: "funnel-reached", style: `width:${pct(row.reached)}` }),
+          h("div", { class: "funnel-done", style: `width:${pct(row.done)}` }),
         ),
-        h("span", { class: "funnel-count" }, `${fmtInt(done)}/${fmtInt(reached)}`),
-      );
+        h("span", { class: "funnel-count" }, T().admFunnelCount(fmtInt(row.done), fmtInt(row.reached), fmtInt(base))),
+      ),
+    );
+    const table = dataTable<FunnelRow>({
+      columns: [
+        { id: "stage", header: T().admFunnelColStage, rowHeader: true, cell: (row) => [h("span", { class: "q-id" }, stageLabel(row.stage)), " ", row.title] },
+        { id: "reached", header: T().admColReached, numeric: true, cell: (row) => fmtInt(row.reached) },
+        { id: "done", header: T().admKeyFinished, numeric: true, cell: (row) => fmtInt(row.done) },
+        { id: "share", header: T().admFunnelColShare, numeric: true, cell: (row) => (base ? formatPct(row.done / base) : "—") },
+      ],
+      rows: data,
+      className: "admin-table funnel-table",
+      wrapClass: "admin-dt",
+      caption: `${T().admStageFunnel} · ${caseTitle(caseId)}`,
+    });
+    const details = h("details", { class: "stats-table-view funnel-table-view", open: funnelTableOpen }, h("summary", { class: "link-btn" }, T().admTableView), table.element);
+    details.addEventListener("toggle", () => {
+      funnelTableOpen = details.open;
     });
     setChildren(
       funnelEl,
@@ -249,7 +276,9 @@ export function createLivePanel(opts: LiveOptions): LivePanel {
         h("span", { class: "key-done" }), `${T().admKeyFinished} `,
         h("span", { class: "key-reached" }), T().admKeyReached,
       ),
-      rows,
+      h("p", { class: "muted small funnel-base" }, T().admFunnelBase(fmtInt(base), members !== null)),
+      h("ol", { class: "funnel-list", "aria-label": T().admStageFunnel }, rows),
+      details,
     );
   }
 
@@ -283,7 +312,7 @@ export function createLivePanel(opts: LiveOptions): LivePanel {
     const roster = opts.roster?.() ?? null;
     renderNotStarted(roster, players, progress?.caseId === caseId);
     renderLiveTiles(players, caseId, entries ?? [], roster === null ? null : roster.length);
-    renderFunnel(players, caseId);
+    renderFunnel(players, caseId, roster === null ? null : roster.length);
     grid.render();
   }
 
