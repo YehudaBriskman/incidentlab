@@ -7,7 +7,7 @@ click may lose it. This document is the contract for anyone changing stored reco
 
 | Store | What | Notes |
 |---|---|---|
-| `incidentlab-v2` | Live data: `account:`, `username:`, `session:`, `progress:<case>:<account>`, `score:<account>`, `globalboard:<account>`, `class:`, `classcode:`, `classmember:`, `memberof:` (#179), `resetrequest:` (#254), `config:*` (schedule, settings, event, migrations ledger), `firstblood:`, `audit:`, `trash:`, `legacy:`, `ratelimit:`, `case:`, `evidence:` (binary), `upload:` | Never rename. A new name means an empty store. That's how round-1 players were orphaned. |
+| `incidentlab-v2` | Live data: `account:`, `username:`, `session:`, `progress:<case>:<account>`, `score:<account>`, `globalboard:<account>`, `class:`, `classcode:`, `classmember:`, `memberof:` (#179), `eventprogress:` (#253), `resetrequest:` (#254), `config:*` (schedule, settings, event, migrations ledger), `firstblood:`, `audit:`, `trash:`, `legacy:`, `ratelimit:`, `case:`, `evidence:` (binary), `upload:` | Never rename. A new name means an empty store. That's how round-1 players were orphaned. |
 | `incidentlab-backups` | `daily/<YYYY-MM-DD>.json` snapshots, 30 days | Written by the scheduled function `backup-daily` |
 | `incidentlab-players` | Round-1 anonymous players (pre-accounts) | Read-only. Migration 002 copies it to `legacy:<id>` |
 | `~/.incidentlab-backups/` (your machine) | Pre-deploy, pre-migrate, pre-restore and manual snapshots | Mode 600, never in the repo |
@@ -93,7 +93,14 @@ credit-based pricing**: it charges credits per production deploy and per GB, and
     roughly **30 class nights a month** with room for daily play. Solves never purge the board (a purge per answer would add a call per solve); class edits
     do, and they are rare.
   - Storage reads per uncached board call: one `classmember:` listing plus up to 60 member, 60 account and 60
-    `score:` reads (181). Blobs operations are not one of the allowances above; they cost function runtime
+    `score:` reads (181). While the class has an event window, one more listing of
+    `eventprogress:<classId>:<eventKey>:` and one read per event-run record (#253: at most one per member and
+    assigned case played tonight).
+  - **Event runs (#253)** add no polling and no call: the run rides on the play requests a player makes anyway
+    (`run` in the body or `?run=`), and the case page decides whether to offer it from the class lookup it already
+    makes once per page load (`GET /api/classes` plus at most 5 details, cached 10 minutes). Each event-run play
+    request costs two more small reads (the class and the membership), not a call. A player who switches runs
+    reloads the case once (one `GET .../progress`). Blobs operations are not one of the allowances above; they cost function runtime
     (milliseconds each), not calls.
 - **Private cases (#184)** add no polling, and no call for most visits. `GET /api/session` (already called once
   per page load) carries a `privateCases` hint from the in-memory case list: no storage read when there are no
@@ -262,6 +269,17 @@ listing of the prefix, which stays small because of the expiry.
 - `lastWrongAnswers` (#202, default `{}`): per stage, the last wrong answer, normalized. The same wrong answer
   sent again (a retried request, a double submit) returns the same result and is not counted or rate-limited a
   second time. Server-only: no progress view carries it.
+
+### Event runs (`eventprogress:<classId>:<eventKey>:<caseId>:<accountId>`, since #253)
+
+The same `ProgressRecordSchema` as `progress:`, written by `GameService` through `EventProgressRepository` when a play
+route names a live class event run (`docs/API.md`, Classes, "Event runs"). Additive: a new prefix, no migration, and
+no other record changes. `eventKey` is the first 16 hex characters of sha256 over the class event's `startsAt` as an
+ISO instant (`server/domain/event-run.ts`): stable when the event is renamed or its end or freeze moves; a new
+`startsAt` is a new occurrence. Records of earlier occurrences stay stored and are no longer counted. The class
+board lists the current occurrence's records; nothing else reads them. An event run never writes `score:` or
+`firstblood:`. Not yet covered: account deletes, progress resets and the trash leave event-run records in place (the
+board shows only active members, so a deleted account's records are never listed).
 
 ### Audit (`audit:<isoTimestamp>:<random>`)
 

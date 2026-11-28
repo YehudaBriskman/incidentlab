@@ -7,6 +7,7 @@ import { TE } from "../i18n/strings-errors";
 import { TG } from "../i18n/strings-game";
 import { TP } from "../i18n/strings-play";
 import { T } from "../i18n/strings-player";
+import { TR } from "../i18n/strings-event-run";
 import { classifyLoadError } from "./load-recovery";
 
 export function playErrorText(err: unknown): string {
@@ -16,6 +17,9 @@ export function playErrorText(err: unknown): string {
       return TG().unknownCommand;
     case "admin":
       return TG().adminBody;
+    case "event-not-live":
+    case "not-a-member":
+      return TR().runRefused;
     default:
       if (err.isRateLimited) return TA().rateLimited(err.retryAfterSeconds ?? 60);
       // The server's own English for these ("sign in required", "forbidden") never reaches the page.
