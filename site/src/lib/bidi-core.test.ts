@@ -61,3 +61,9 @@ test("formatIsoDay reads the calendar day, not the browser's zone", () => {
   assert.equal(formatIsoDay("en-GB", "2026-11-28"), "28 Nov 2026");
   assert.equal(formatIsoDay("en-GB", "not-a-date"), "not-a-date");
 });
+
+test("ltrRuns keeps a path's leading slash or dot in its run (#286)", () => {
+  assert.deepEqual(isolated(ltrRuns("נתיב שמתחיל ב-/, בלי query string (למשל /page.html)")), ["query string", "/page.html"]);
+  assert.deepEqual(isolated(ltrRuns("הריצו את ./run.sh או ~/notes")), ["./run.sh", "~/notes"]);
+  assert.deepEqual(isolated(ltrRuns("שם קובץ בלבד, בלי / בהתחלה (למשל page.html)")), ["page.html"]);
+});
