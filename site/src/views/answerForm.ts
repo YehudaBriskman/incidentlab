@@ -14,7 +14,8 @@ import { playErrorText, recoverFromWrite } from "../lib/errors";
 import { handleAuthLoss } from "../lib/auth-loss";
 import { announce, h } from "../lib/dom";
 import { tooltip } from "../lib/overlay";
-import { contentText } from "../lib/bidi";
+import { bidiProse, contentText } from "../lib/bidi";
+import { getLang } from "../i18n/i18n";
 import { formatElapsed } from "../lib/time";
 import { locale } from "../i18n/i18n";
 import { TG } from "../i18n/strings-game";
@@ -62,6 +63,14 @@ export type AnswerFormHandle = {
   readonly dispose: () => void;
 };
 
+/**
+ * The answer format in the reader's language. In Hebrew its paths and English terms are isolated runs inside a
+ * right-to-left isolate (#286), so "(למשל /page.html)" keeps its slash; in English it is plain text.
+ */
+function formatText(text: string): HTMLElement {
+  return getLang() === "he" ? bidiProse(h("bdi", { class: "answer-format" }, text)) : contentText("bdi", { class: "answer-format" }, text);
+}
+
 /** The placeholder shows the format's shape, never a realistic value that reads as a prefilled answer. */
 function formatPlaceholder(kind: FormatKind): string | null {
   const t = TP();
@@ -74,7 +83,8 @@ function formatPlaceholder(kind: FormatKind): string | null {
     change: t.phChange,
     order: t.phOrder,
     accessKey: t.phAccessKey,
-    other: null,
+    // a free-form answer has no fixed shape: a neutral prompt, never an example that reads as a value (#286)
+    other: t.phOther,
   };
   return map[kind];
 }
@@ -174,7 +184,7 @@ export function answerForm(opts: AnswerFormOptions): AnswerFormHandle {
     "form",
     { class: "answer-form", id: `form-${id}`, novalidate: true },
     h("label", { class: "answer-label", for: inputId }, T().yourAnswer),
-    h("p", { id: `fmt-${id}`, class: "muted small answer-format-line" }, T().format, contentText("bdi", { class: "answer-format" }, q.answerFormat), costInfo),
+    h("p", { id: `fmt-${id}`, class: "muted small answer-format-line" }, T().format, " ", formatText(q.answerFormat), costInfo),
     h("div", { class: "answer-row" }, input, submit),
     feedback,
     costNote,

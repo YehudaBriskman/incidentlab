@@ -17,6 +17,14 @@ function coreStart(chunk: string, afterHebrew: boolean): number {
   for (let j = 0; j < chunk.length; j++) {
     const ch = chunk[j] ?? "";
     if (STRONG_LTR.test(ch)) return j;
+    // A path prefix ("/page.html", "./run.sh", "~/notes") belongs to its run, or the slash ends up on the wrong
+    // side in Hebrew (#286); a lone "/" ("ב-/,") is not a path.
+    if (/[/.~]/.test(ch)) {
+      let k = j;
+      while (/[/.~]/.test(chunk[k] ?? "")) k++;
+      const before = j === 0 ? (afterHebrew ? "א" : " ") : (chunk[j - 1] ?? " ");
+      if (k > j && STRONG_LTR.test(chunk[k] ?? "") && /[\s(\[]/.test(before)) return j;
+    }
     const next = chunk[j + 1] ?? "";
     if (SIGN.test(ch) && /[0-9]/.test(next)) {
       const before = j === 0 ? (afterHebrew ? "א" : " ") : (chunk[j - 1] ?? " ");
