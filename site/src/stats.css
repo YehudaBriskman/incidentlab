@@ -26,3 +26,35 @@
 @media (forced-colors: active) {
   .stats-card, .stats-upgrade { border: 1px solid CanvasText; }
 }
+
+/* My stats groups (#240): summary, progress per case, achievements, history; or the zero state's one card */
+.stats-summary .kpi-grid { margin-block-end: var(--gap-section); }
+.stats-progress, .stats-history { margin-block-end: var(--gap-section); }
+.stats-progress .section-title, .stats-history .section-title { margin-block-end: var(--gap-related); }
+.stats-group-note { margin: calc(-1 * var(--space-2)) 0 var(--gap-related); }
+.stats-zero { align-items: flex-start; margin-block: var(--gap-stack) var(--gap-section); padding-block: var(--space-5); }
+.stats-zero .eyebrow, .stats-zero p { margin: 0; }
+.stats-zero-title { margin: 0; font-size: var(--step-1); line-height: 1.3; }
+.stats-zero-play { min-block-size: var(--control-md); }
+/* progress toward a counted achievement: the text says it, the bar repeats it */
+.ach-progress { display: flex; flex-direction: column; gap: var(--space-1); }
+.ach-meter { display: block; inline-size: 100%; max-inline-size: 12rem; block-size: 6px; border-radius: var(--radius-full); background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--border-strong); overflow: hidden; }
+.ach-meter-fill { display: block; block-size: 100%; background: var(--success-fg); border-radius: inherit; }
+/* history: a dated list, newest first */
+.stats-history-list { list-style: none; margin: 0; padding: 0; background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift); }
+.stats-history-item { display: grid; grid-template-columns: 8rem 10rem minmax(0, 1fr); align-items: center; gap: var(--space-3); min-block-size: var(--target-min); padding: var(--space-2) var(--pad-card); }
+.stats-history-item + .stats-history-item { border-block-start: 1px solid var(--edge-subtle); }
+.stats-history-when { font-variant-numeric: tabular-nums; }
+.stats-history-kind { color: var(--text-2); }
+.stats-history-name { font-weight: 600; min-inline-size: 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .stats-history-item { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name name" "kind when"; row-gap: 2px; }
+  .stats-history-name { grid-area: name; }
+  .stats-history-kind { grid-area: kind; }
+  .stats-history-when { grid-area: when; }
+}
+@media (forced-colors: active) {
+  .stats-history-list { border: 1px solid CanvasText; }
+  .ach-meter { forced-color-adjust: none; background: Canvas; border: 1px solid CanvasText; box-shadow: none; }
+  .ach-meter-fill { forced-color-adjust: none; background: Highlight; }
+}

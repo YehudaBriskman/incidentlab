@@ -3,6 +3,7 @@ import type { LiveEvent } from "../../shared/contract.ts";
 import {
   BoardVisibilityRequestSchema,
   CaseIdSchema,
+  LeaderboardPeriodSchema,
   ChangePasswordRequestSchema,
   LoginRequestSchema,
   RecoverRequestSchema,
@@ -198,7 +199,11 @@ export class AuthController {
     const raw = new URL(req.url).searchParams.get("caseId");
     const parsed = raw === null || raw === "" ? null : CaseIdSchema.safeParse(raw);
     if (parsed && !parsed.success) throw new AppError(400, "invalid caseId");
-    const board = await this.stats.leaderboard({ caseId: parsed ? parsed.data : null, frozenAt: await this.events.freezeMoment() });
+    // #239: one CDN copy per period (Netlify-Vary: query), all under the `leaderboard` tag so every purge reaches them.
+    const rawPeriod = new URL(req.url).searchParams.get("period");
+    const period = rawPeriod === null || rawPeriod === "" ? "all" : LeaderboardPeriodSchema.safeParse(rawPeriod).data;
+    if (period === undefined) throw new AppError(400, "invalid period");
+    const board = await this.stats.leaderboard({ caseId: parsed ? parsed.data : null, frozenAt: await this.events.freezeMoment(), period });
     return publicJson(board, { ...PUBLIC_CACHE.leaderboard, tags: ["leaderboard"] });
   }
 }
