@@ -616,7 +616,7 @@ export function renderHome(root: HTMLElement, mode: HomeMode = "home"): void {
       rows: [],
       caption: TA().allCases,
       labelledBy: "home-cases-h",
-      regionLabel: TH().casesTitle,
+      regionLabel: TA().allCases, // not "Cases": the section around it already is that landmark (#249)
       wrapClass: "home-table",
       className: "home-cases-table",
       stackOnPhone: true,

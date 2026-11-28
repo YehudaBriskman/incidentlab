@@ -117,7 +117,6 @@ export const TS = defineStrings({
     roleAdmin: "Platform owner",
     roleAuthor: "Author",
     rolePlayer: "Player",
-    pageAsideOpen: (label: string): string => `Open ${label}`,
 
     // the account menu (shell/accountMenu.ts, #220)
     prefsButton: "Language and display",
@@ -240,7 +239,6 @@ export const TS = defineStrings({
     roleAdmin: "בעלי הפלטפורמה",
     roleAuthor: "כותב תיקים",
     rolePlayer: "שחקן",
-    pageAsideOpen: (label: string): string => `פתיחת ${label}`,
 
     prefsButton: "שפה ותצוגה",
     menuDisplayOptions: "אפשרויות תצוגה…",

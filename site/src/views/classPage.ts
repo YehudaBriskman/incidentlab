@@ -37,7 +37,7 @@ export function classPageView(id: string): ViewResult {
 }
 
 const boardHref = (token: string): string => `#/classboard/${encodeURIComponent(token)}?projector=1`;
-const caseLink = (caseId: string): HTMLElement => h("a", { href: `#/case/${encodeURIComponent(caseId)}`, dir: "auto" }, caseSummary(caseId)?.title ?? caseId);
+const caseLink = (caseId: string): HTMLElement => h("a", { class: "hit-link", href: `#/case/${encodeURIComponent(caseId)}`, dir: "auto" }, caseSummary(caseId)?.title ?? caseId);
 
 function card(id: string, title: string, aside: Child, body: Child, extra = ""): HTMLElement {
   return h(
