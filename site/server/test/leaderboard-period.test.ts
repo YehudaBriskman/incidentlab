@@ -9,18 +9,18 @@ import type { CachePurger, CacheTag } from "../services/CachePurger.ts";
 import { ALL_ANSWERS, createHarness, expectStatus } from "./helpers.ts";
 import type { Client } from "./helpers.ts";
 
-test("a week starts on Monday 00:00 and a month on the 1st 00:00, in the schedule's time zone", () => {
+test("a week starts on Sunday 00:00 and a month on the 1st 00:00, in the schedule's time zone", () => {
   // Saturday 28 Nov 2026, 10:00 UTC = 12:00 in Jerusalem (UTC+2 in winter).
   const now = new Date("2026-11-28T10:00:00Z");
   assert.equal(periodStart("all", now, "Asia/Jerusalem"), null);
-  assert.equal(periodStart("week", now, "Asia/Jerusalem"), "2026-11-22T22:00:00.000Z", "Mon 23 Nov 00:00 in Jerusalem");
+  assert.equal(periodStart("week", now, "Asia/Jerusalem"), "2026-11-21T22:00:00.000Z", "Sun 22 Nov 00:00 in Jerusalem");
   assert.equal(periodStart("month", now, "Asia/Jerusalem"), "2026-10-31T22:00:00.000Z", "1 Nov 00:00 in Jerusalem");
-  assert.equal(periodStart("week", now, "UTC"), "2026-11-23T00:00:00.000Z");
-  // A Monday at 00:30 local is already in the new week; 23:30 on the Sunday before is still in the old one.
-  assert.equal(periodStart("week", new Date("2026-11-22T22:30:00Z"), "Asia/Jerusalem"), "2026-11-22T22:00:00.000Z");
-  assert.equal(periodStart("week", new Date("2026-11-22T21:30:00Z"), "Asia/Jerusalem"), "2026-11-15T22:00:00.000Z");
-  // On a Sunday the week began six days earlier.
-  assert.equal(periodStart("week", new Date("2026-11-29T12:00:00Z"), "UTC"), "2026-11-23T00:00:00.000Z");
+  assert.equal(periodStart("week", now, "UTC"), "2026-11-22T00:00:00.000Z");
+  // A Sunday at 00:30 local is already in the new week; 23:30 on the Saturday before is still in the old one.
+  assert.equal(periodStart("week", new Date("2026-11-21T22:30:00Z"), "Asia/Jerusalem"), "2026-11-21T22:00:00.000Z");
+  assert.equal(periodStart("week", new Date("2026-11-21T21:30:00Z"), "Asia/Jerusalem"), "2026-11-14T22:00:00.000Z");
+  // On a Saturday the week began six days earlier.
+  assert.equal(periodStart("week", new Date("2026-11-28T12:00:00Z"), "UTC"), "2026-11-22T00:00:00.000Z");
 });
 
 test("period starts follow daylight saving time", () => {
@@ -28,8 +28,10 @@ test("period starts follow daylight saving time", () => {
   assert.equal(new Date(zonedMidnight(2026, 7, 1, "Asia/Jerusalem")).toISOString(), "2026-06-30T21:00:00.000Z");
   // New York, the month DST ends (1 Nov 2026): the month began at 00:00 EDT (UTC-4) on 1 Nov.
   assert.equal(periodStart("month", new Date("2026-11-20T12:00:00Z"), "America/New_York"), "2026-11-01T04:00:00.000Z");
-  // A week that spans the change: Monday 2 Nov 00:00 EST (UTC-5).
-  assert.equal(periodStart("week", new Date("2026-11-04T12:00:00Z"), "America/New_York"), "2026-11-02T05:00:00.000Z");
+  // A week that spans the change: Sunday 1 Nov 00:00 is still EDT (UTC-4); the clocks go back at 02:00.
+  assert.equal(periodStart("week", new Date("2026-11-04T12:00:00Z"), "America/New_York"), "2026-11-01T04:00:00.000Z");
+  // The next week starts Sunday 8 Nov 00:00 EST (UTC-5).
+  assert.equal(periodStart("week", new Date("2026-11-10T12:00:00Z"), "America/New_York"), "2026-11-08T05:00:00.000Z");
 });
 
 test("boardTotals counts only what happened from `since`, with the freeze cut on top", () => {
@@ -92,7 +94,7 @@ test("GET /api/leaderboard?period= ranks by what each player scored in the perio
 
   const week = await get("?period=week");
   assert.equal(week.period, "week");
-  assert.equal(week.periodStart, "2026-11-22T22:00:00.000Z");
+  assert.equal(week.periodStart, "2026-11-21T22:00:00.000Z");
   assert.deepEqual(week.entries.map((e) => [e.rank, e.username, e.stagesSolved]), [[1, "Bob", 1]], "Ada scored nothing this week");
 
   const month = await get("?period=month&caseId=alpha");

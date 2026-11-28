@@ -203,7 +203,7 @@ export function renderLeaderboard(root: HTMLElement, query: URLSearchParams, opt
     lastSignature = null;
     void load();
   });
-  // The resolved start of the period, with the time zone (a week is Monday 00:00 in the site's zone).
+  // The resolved start of the period, with the time zone (a week is Sunday 00:00 in the site's zone).
   const sinceEl = h("p", { class: "lb-since muted small", hidden: true });
 
   // Find a player: filters the loaded list by name as you type.

@@ -1,4 +1,4 @@
-// The leaderboard's periods (#239). "This week" starts on Monday 00:00 and "this month" on the 1st at 00:00, both
+// The leaderboard's periods (#239). "This week" starts on Sunday 00:00 (the Israeli week, owner decision) and "this month" on the 1st at 00:00, both
 // in the schedule's time zone, so a board's week turns over at the same moment as its "today". Pure: the
 // boundary is computed from `now`, so every cached copy of a period board agrees on where it starts.
 import type { LeaderboardPeriod } from "../../shared/contract.ts";
@@ -7,9 +7,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 type LocalParts = { year: number; month: number; day: number; hour: number; minute: number; second: number; weekday: number };
 
-const WEEKDAYS: Readonly<Record<string, number>> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+const WEEKDAYS: Readonly<Record<string, number>> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 
-/** The wall-clock parts of `ms` in `timezone`; `weekday` counts from Monday = 0. */
+/** The wall-clock parts of `ms` in `timezone`; `weekday` counts from Sunday = 0. */
 function localParts(ms: number, timezone: string): LocalParts {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
@@ -23,7 +23,7 @@ function localParts(ms: number, timezone: string): LocalParts {
     hourCycle: "h23",
   }).formatToParts(new Date(ms));
   const num = (type: Intl.DateTimeFormatPartTypes): number => Number(parts.find((p) => p.type === type)?.value ?? "0");
-  const weekday = WEEKDAYS[parts.find((p) => p.type === "weekday")?.value ?? "Mon"] ?? 0;
+  const weekday = WEEKDAYS[parts.find((p) => p.type === "weekday")?.value ?? "Sun"] ?? 0;
   return { year: num("year"), month: num("month"), day: num("day"), hour: num("hour"), minute: num("minute"), second: num("second"), weekday };
 }
 
@@ -45,7 +45,7 @@ export function periodStart(period: LeaderboardPeriod, now: Date, timezone: stri
   if (period === "all") return null;
   const today = localParts(now.getTime(), timezone);
   if (period === "month") return new Date(zonedMidnight(today.year, today.month, 1, timezone)).toISOString();
-  // Monday of this week, as a calendar date (UTC arithmetic on the date alone never meets a DST gap).
-  const monday = new Date(Date.UTC(today.year, today.month - 1, today.day) - today.weekday * DAY_MS);
-  return new Date(zonedMidnight(monday.getUTCFullYear(), monday.getUTCMonth() + 1, monday.getUTCDate(), timezone)).toISOString();
+  // Sunday of this week, as a calendar date (UTC arithmetic on the date alone never meets a DST gap).
+  const weekStart = new Date(Date.UTC(today.year, today.month - 1, today.day) - today.weekday * DAY_MS);
+  return new Date(zonedMidnight(weekStart.getUTCFullYear(), weekStart.getUTCMonth() + 1, weekStart.getUTCDate(), timezone)).toISOString();
 }
