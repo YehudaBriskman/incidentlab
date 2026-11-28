@@ -427,6 +427,8 @@ export const ClassResetRequestSchema = z.object({
   expiresAt: z.string(),
   /** this class admin already vouched for it */
   vouchedByMe: z.boolean(),
+  /** from when a vouch counts: 7 days after the student joined the class (#254); older servers omit it */
+  vouchableAt: z.string().nullable().default(null),
 });
 export type ClassResetRequest = z.infer<typeof ClassResetRequestSchema>;
 export const ClassResetRequestsResponseSchema = z.object({ requests: z.array(ClassResetRequestSchema) });

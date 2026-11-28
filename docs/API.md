@@ -90,14 +90,19 @@ plan allows 125,000 function calls a month.
      `account.reset-request` (actor null) only when a request was written;
   2. an active admin of an active class the player is an active member of vouches ("I know this student") on the
      class's Members tab. Vouching changes no credential. An admin of an unrelated class gets 404, a plain member
-     403 `not-class-admin`, and the site owner can't vouch (their vouch would skip the second person). Audited as
-     `account.reset-vouch`;
+     403 `not-class-admin`, and the site owner can't vouch (their vouch would skip the second person). A vouch
+     needs the player to have been in that class for 7 days (409 `member-too-new`; the class list's `vouchableAt`
+     says from when, and a rejoin restarts the clock), so a brand-new class can't be used to take an account.
+     Audited as `account.reset-vouch`;
   3. the site owner sees vouched requests in the console and approves. Approval needs at least one vouch that
      still holds (the class is active, the voucher still an active admin and the player still an active member;
      409 `no-vouch` otherwise), runs the same reset as `reset-password` (temporary password, `mustChangePassword`,
      every session ends) and returns the temporary password once, for the owner to pass on. It is never stored in
      plain text or logged; the audit (`account.reset-approve`) names the vouchers only. Reject closes a request.
      Expired requests can't be vouched for or approved (404 `no-reset-request`); the weekly hygiene job deletes them.
+  4. a temporary password (from this queue or the console's direct `reset-password`) works for 48 hours: after
+     that, sign-in answers 401 `temporary-password-expired` and the player asks again. The direct reset skips the
+     vouch, so the console asks the owner to confirm who it is, and its audit entry carries detail `unvouched`.
 - **Guests (#176):** `POST /api/guest` gives a signed-out visitor a guest account (`kind: "guest"`, `approved`,
   role `player`, username `guest-<id>`) and a player session, so every approved-player route works. A guest has
   no password and its generated name is never claimed in the `username:` index, so login always refuses it
