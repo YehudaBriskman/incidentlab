@@ -31,6 +31,7 @@ import { createCaseNav } from "./caseNav";
 import { withApprovedAccount } from "./auth";
 import { TGu } from "../i18n/strings-guest";
 import { playAsGuest } from "./guest";
+import { questionStrip, type QuestionStrip } from "./questionStrip";
 
 type ToolItem = Case["toolbox"][number]["items"][number];
 type Shell = "bash" | "powershell" | "lab";
@@ -295,6 +296,9 @@ export function toolboxView(c: Case): ViewResult {
   return { main, nav: createCaseNav(c, "toolbox").section, aside: { label: TS().tbSide, trigger: TS().tbSideTrigger, content: side }, start };
 }
 
+/** The toolbox's docked "Current question" strip: kept across redraws, so its field, draft and focus survive them. */
+let strip: { readonly caseId: string; readonly handle: QuestionStrip } | null = null;
+
 /** Keeps the toolbox page's progress in step with the case in other tabs (#203), so its prices stay right. */
 let follower: ProgressFollower | null = null;
 
@@ -305,6 +309,8 @@ export function renderToolbox(root: HTMLElement, c: Case): void {
   const stillHere = (): boolean => window.location.hash === hash;
   follower?.stop();
   follower = null;
+  strip?.handle.dispose();
+  strip = null;
   const follow = (progress: ProgressView): void => {
     follower = followProgress({
       initial: progress,
@@ -409,16 +415,27 @@ const prefersReducedMotion = (): boolean => window.matchMedia("(prefers-reduced-
 
 function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
   ensureAnnouncer();
+  const redraw = (next: ProgressView): void => {
+    const y = contentScrollTop();
+    drawToolbox(root, c, { kind: "player", progress: next });
+    scrollContentTo(y);
+  };
   const ctx: CommandContext = {
     caseId: c.id,
     progress: state.kind === "player" ? state.progress : null,
     onProgress: (next, revealedTool) => {
-      const y = contentScrollTop();
-      drawToolbox(root, c, { kind: "player", progress: next });
-      scrollContentTo(y);
+      redraw(next);
       if (revealedTool !== undefined) focusRevealedCommand(root, revealedTool);
     },
   };
+  // The docked question (#215) answers for players only; signed out, the page's own note is the gate prompt.
+  if (strip === null || strip.caseId !== c.id) {
+    strip?.handle.dispose();
+    strip = { caseId: c.id, handle: questionStrip({ c, place: "toolbox", onProgress: redraw, onReload: () => renderToolbox(root, c), quietWhenIdle: true }) };
+  }
+  const stripEl = strip.handle.el;
+  const typingId = document.activeElement instanceof HTMLInputElement && stripEl.contains(document.activeElement) ? document.activeElement.id : "";
+  strip.handle.set(state.kind === "player" ? { kind: "player", progress: state.progress } : { kind: "none" });
   bindSlashToFilter();
   const activeNo = state.kind === "player" ? activeStageNumber(state.progress) : null;
   const activeQ = activeNo !== null ? QUESTION_ORDER[activeNo - 1] : undefined;
@@ -545,12 +562,15 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
       h("a", { class: "back-link", href: `#/case/${c.id}` }, T().backToCase),
       h("h1", {}, T().allCommands),
       h("p", { class: "muted" }, T().allCommandsSub),
+      stripEl,
       toolboxNote(c, root, state),
       side === null ? [filterBox, toc] : null,
       none,
       sections.map((sec) => sec.el),
     ),
   );
+  // Moving the strip with the page blurs its field: a redraw (another tab's write) keeps the caret where it was.
+  if (typingId !== "" && document.activeElement?.id !== typingId) document.getElementById(typingId)?.focus({ preventScroll: true });
 }
 
 /**
