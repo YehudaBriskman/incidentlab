@@ -1,0 +1,493 @@
+{
+  "setupChecklist": [
+    "פתחו את ה-**Evidence Explorer**: כל קבצי החבילה, עם חיפוש, ישר בדפדפן ובלי להתקין כלום. מעדיפים טרמינל? הורידו את **חבילת הראיות** ופרסו אותה.",
+    "התחילו מ-`README_FIRST.txt`. יש בו את רשימת הקבצים והסבר איך לקרוא שורה אחת מה-access log.",
+    "שימו לב לשעונים: `access.log` ו-`deploy.log` ב-**UTC**; `team-chat.txt` ב-**שעון מקומי (CET, ‏UTC+1)**.",
+    "בחרו מסלול: ה-**Explorer בדפדפן**, **bash** (Linux, macOS, WSL או Git Bash) או **Windows PowerShell**. לכל פקודה ב-Toolbox יש גרסת bash וגרסת PowerShell.",
+    "בכל שלב יש מטרה, דברים לחפש וטיפ ל-Explorer. עונים עליו, והשלב הבא נפתח."
+  ],
+  "id": "first-shift",
+  "title": "משמרת ראשונה",
+  "subtitle": "עשר הדקות הראשונות שלכם בתורנות. תפריט החורף החדש של המאפייה עלה לאוויר, ועכשיו המסך ליד הקופה מציג \"404 Not Found\". לומדים את העבודה תוך כדי שמגלים למה.",
+  "difficulty": "easy",
+  "estMinutes": 10,
+  "tags": [
+    "tutorial",
+    "beginner",
+    "nginx",
+    "access-log",
+    "http-404",
+    "deploys"
+  ],
+  "inspiredBy": {
+    "title": "Link rot, ו-\"Cool URIs don't change\"",
+    "year": 1998,
+    "summary": "ב-1998 פרסם טים ברנרס-לי את מסמך ה-W3C ‏\"Cool URIs don't change\". הטענה שלו: הכתובת של עמוד היא הבטחה לכל מי שמקשר אליו, ושינוי שמות של קבצים הוא אחת הדרכים הנפוצות ביותר להפר אותה. הבעיה לא נעלמה: מחקר של Pew Research Center מ-2024 מצא שבערך רבע מהעמודים שהיו קיימים בשלב כלשהו בין 2013 ל-2023 כבר לא נגישים."
+  },
+  "briefing": "**שבת, 11:45 שעון מקומי. מאפיית Juniper & Rye.**\n\nברוכים הבאים למשמרת הראשונה. זה תיק תרגול קצר, **כעשר דקות**, שנועד להראות איך IncidentLab עובד.\n\nל-Juniper & Rye יש אתר סטטי קטן: קבצי HTML פשוטים ש-nginx מגיש. הבוקר סאם, שאחראי על האתר, העלה את **תפריט החורף** החדש. זמן קצר אחר כך מאיה, הבעלים, שמה לב שהמסך ליד הקופה מציג **\"404 Not Found\"** במקום התפריט. גם לקוחות שסורקים את קוד ה-QR בפלאייר המודפס מקבלים את אותה שגיאה. עמוד הבית נטען כרגיל, וה-uptime monitor ירוק.\n\nב-**חבילת הראיות** יש ארבעה קבצים קטנים: ה-access log של האתר, לוג ה-deploys, הצ'אט של הצוות ו-README. **פתחו קודם את `README_FIRST.txt`.**\n\n**איך תיק עובד.** יש **שישה שלבים**, וכל אחד פותח את הבא. בכל שלב תקבלו מטרה, כמה דברים לחפש, טיפ ל-Explorer ואת פקודות ה-Toolbox שיעזרו. התשובות קצרות ומדויקות, בפורמט שמופיע מתחת לשאלה. נתקעתם? **רמזים** עולים כמה נקודות, וכך גם חשיפת **פקודה מלאה** ב-Toolbox (התחביר שלה תמיד חינמי). תשובה שגויה עולה 2 נקודות; תשובה בפורמט לא נכון לא עולה כלום.\n\nששת השלבים: **איזה עמוד** שבור, **מתי** הוא נשבר, **איזה deploy** שבר אותו, **כמה** בקשות נכשלו, **מי** נפגע הכי הרבה, ו**איך העמוד נקרא עכשיו**.",
+  "evidenceZip": "/evidence/first-shift-evidence.zip",
+  "evidence": [
+    {
+      "path": "README_FIRST.txt",
+      "format": "טקסט",
+      "description": "הערות התורנות: מה קרה, רשימת הקבצים, השעונים, ואיך לקרוא שורה אחת מה-access log. מתחילים כאן."
+    },
+    {
+      "path": "access.log",
+      "format": "לוג nginx ‏(UTC)",
+      "description": "ה-access log של האתר מ-nginx, מ-08:00 עד 11:00 UTC. שורה לכל בקשה: IP של הלקוח, זמן, הבקשה, קוד סטטוס, גודל, referer ו-user agent."
+    },
+    {
+      "path": "deploy.log",
+      "format": "לוג deploy ‏(ISO-8601 UTC)",
+      "description": "הלוג של כלי ה-deploy מאותו בוקר. שורה לכל צעד, מ-`deploy started` ועד `deploy finished`."
+    },
+    {
+      "path": "team-chat.txt",
+      "format": "ייצוא צ'אט (שעון מקומי, UTC+1)",
+      "description": "הצ'אט של הצוות כטקסט. שעון מקומי (CET): מחסירים שעה כדי לקבל UTC. מלא תיאוריות, ולא כולן נכונות."
+    }
+  ],
+  "rules": [
+    "עובדים רק מחבילת הראיות. אל תקראו את קוד ה-generator או את קוד האתר; זה הורס את הכיף.",
+    "אין הבדל בין אותיות גדולות לקטנות בתשובות, ורווחים בהתחלה ובסוף לא נחשבים. הקפידו על הפורמט שמופיע מתחת לכל שאלה. תשובה בפורמט לא נכון נעצרת לפני הבדיקה ולא עולה כלום.",
+    "הרמזים נחשפים לפי הסדר, מדחיפה עדינה ועד כמעט הפקודה המלאה, וכל אחד עולה את הנקודות המעטות שמופיעות עליו. ב-Toolbox התחביר של כל פקודה חינמי; חשיפת הפקודה המלאה עולה 5 נקודות. אחרי שמסיימים את התיק, כל הפקודות חינמיות.",
+    "לא צריך להתקין כלום. כל פקודה ב-Toolbox משתמשת בכלים שכבר מגיעים עם Linux, macOS, WSL, Git Bash או Windows PowerShell 5.1, וה-Explorer בדפדפן יודע לעשות את כל זה בעצמו.",
+    "כל תשובה שגויה עולה 2 נקודות, עד 20 לכל שלב. נסו להיות מסוגלים להסביר *למה* התשובה שלכם נכונה.",
+    "מהירות ודיוק משתלמים: פתרון מהיר מזכה בבונוס זמן של עד +30 לכל שלב, שהולך ופוחת אחרי זמן היעד של השלב. פתרון נקי (בלי רמזים, פקודות או תשובות שגויות) מזכה ב-+10, השחקן הראשון שפותר שלב מקבל +15 first blood, וסיום כל שישת השלבים בלי לחשוף תשובה מזכה ב-+50.",
+    "זה תיק תרגול: לנסות את הרמזים ואת ה-Toolbox זה חלק מהשיעור. אל תשתפו flags עם שחקנים אחרים עד שכולם מסיימים. לשתף טכניקות זה בסדר."
+  ],
+  "questions": [
+    {
+      "stage": {
+        "name": "איזה עמוד שבור?",
+        "goal": "מצאו את הנתיב שקיבל הכי הרבה תשובות 404 (לא נמצא).",
+        "lookFor": [
+          "ב-`access.log` קוד הסטטוס בא מיד אחרי הבקשה שבמירכאות: `\" 404 `",
+          "חלק מה-404 הם רעש יומיומי: `/favicon.ico`, וסורקים שמחפשים תוכנות שלא רצות באתר",
+          "לנתיב יכול להיות query string בסוף, כמו `?src=flyer`; זה עדיין אותו עמוד"
+        ],
+        "tools": [
+          "read-readme",
+          "head-lines",
+          "nginx-fields",
+          "status-codes",
+          "grep-filter",
+          "top-404-paths"
+        ],
+        "explorerTip": "ב-Explorer בחרו את `access.log` מרשימת הקבצים. הקלידו `\" 404 ` (מירכאה, רווח, 404, רווח) בסינון **מכיל**: נשארות רק שורות 404. אחר כך פתחו את **ספירת ערכים ייחודיים**, בחרו בדוגמה **נתיב** ולחצו **ספירה**. הרשימה ממוינת לפי כמות, כך שהשורה העליונה היא התשובה."
+      },
+      "id": "q1",
+      "title": "איזה עמוד שבור?",
+      "prompt": "הלקוחות אומרים \"התפריט שבור\", אבל אתר מכיר רק נתיבים. התחילו מה-access log: כל שורה היא בקשה אחת, וקוד הסטטוס אומר איך היא הסתיימה (`200` תקין, `404` לא נמצא).\n\nמצאו את **הנתיב שהחזיר 404 הכי הרבה פעמים** וענו איתו בדיוק כפי שהתבקש, החל מ-`/` ובלי query string.\n\nהשלב הראשון הוא סיור ב-**Evidence Explorer**: פותחים קובץ, מסננים, סופרים ערכים. הטיפ ל-Explorer למטה מוביל אתכם צעד אחר צעד.",
+      "answerFormat": "נתיב URL שמתחיל ב-/, בלי query string (למשל /page.html)",
+      "placeholder": "/page.html",
+      "points": 100,
+      "targetMinutes": 2,
+      "hints": [
+        {
+          "cost": 5,
+          "text": "לא כל 404 חשוב. השאירו רק את שורות ה-404, ובדקו **איזה נתיב** כל אחת מהן ביקשה. נתיב אחד מקדים בהרבה את כל השאר."
+        },
+        {
+          "cost": 10,
+          "text": "ב-Explorer: **מכיל** `\" 404 `, ואז **ספירת ערכים ייחודיים** עם הדוגמה **נתיב**. התעלמו מ-`/favicon.ico` (דפדפנים מבקשים אותו, ולאתר הזה אין) ומנתיבי הסורקים כמו `/wp-login.php`. ענו בלי `?src=...`."
+        },
+        {
+          "cost": 20,
+          "text": "```sh\ngrep '\" 404 ' access.log | awk '{print $7}' | cut -d'?' -f1 | sort | uniq -c | sort -rn | head -n 5\n```\n`$7` הוא השדה השביעי בשורה, כשמפרידים לפי רווחים: הנתיב. `cut -d'?' -f1` מוריד את ה-query string."
+        }
+      ],
+      "successNote": "זה העמוד שקוד ה-QR בפלאייר, תוצאות חיפוש ישנות והמסך ליד הקופה מצביעים עליו. שימו לב איך נראה **הרעש**: דפדפן שמבקש favicon וסורק שמחפש WordPress מחזירים גם הם 404, כל יום, בכל אתר. הספירה לפי נתיב היא מה שמבדיל בין \"הרבה 404\" לבין \"עמוד אחד שנעלם\". השתמשתם עכשיו בסינון **מכיל** וב-**ספירת ערכים ייחודיים** של ה-Explorer, הגרסאות הדפדפניות של `grep` ושל `sort | uniq -c`."
+    },
+    {
+      "stage": {
+        "name": "מתי זה נשבר?",
+        "goal": "מצאו את הזמן של ה-404 הראשון לעמוד משלב 1.",
+        "lookFor": [
+          "לפני התקלה, אותו עמוד ענה `200`",
+          "שני סינונים אחד על השני: הנתיב, וסטטוס 404",
+          "הזמן הוא השדה הרביעי, בסוגריים מרובעים, ב-UTC ‏(`+0000`)"
+        ],
+        "tools": [
+          "grep-and",
+          "grep-first",
+          "nginx-time"
+        ],
+        "explorerTip": "השאירו את הסינון `\" 404 ` ולחצו **+ הוספת סינון** כדי להוסיף שלב **מכיל** שני עם הנתיב משלב 1. שורה צריכה לעבור את שניהם. פתחו את הפעולות על השורות ובחרו **התאמה ראשונה** כדי לקפוץ לראשונה (הקובץ מסודר לפי זמן). **Enter** על שורה פותח את **פרטי השורה**, ושם רואים את השדות שלה."
+      },
+      "id": "q2",
+      "title": "מתי זה נשבר?",
+      "prompt": "העמוד עבד פעם: מוקדם יותר בלוג אותו נתיב ענה `200`. מצאו את הבקשה **הראשונה** אליו שקיבלה **404**.\n\nענו עם הזמן של השורה הזאת ב-**UTC**, בפורמט `HH:MM:SS` (בלי תאריך). בשורת nginx הזמן נמצא בסוגריים מרובעים, למשל `[14/Nov/2026:08:00:40 +0000]`, ו-`+0000` אומר UTC.\n\nבשלב הזה מתרגלים **שני סינונים יחד** וקפיצה ל-**התאמה הראשונה**.",
+      "answerFormat": "HH:MM:SS (UTC)",
+      "placeholder": "08:30:00",
+      "points": 100,
+      "targetMinutes": 2,
+      "hints": [
+        {
+          "cost": 5,
+          "text": "שני תנאים: בשורה יש את הנתיב משלב 1 **וגם** סטטוס 404. הלוג ממוין לפי זמן, אז השורה הראשונה שעומדת בשניהם היא התשובה."
+        },
+        {
+          "cost": 10,
+          "text": "ב-Explorer: סינון **מכיל** `\" 404 `, ואז **+ הוספת סינון**, **מכיל** את הנתיב. השתמשו ב-**התאמה ראשונה**. העתיקו רק את החלק `HH:MM:SS` מתוך `[14/Nov/2026:HH:MM:SS +0000]`."
+        },
+        {
+          "cost": 20,
+          "text": "```sh\npage='<your Stage 1 answer>'\ngrep '\" 404 ' access.log | grep \"GET $page\" | head -n 1\n```\nאחר כך קראו את הזמן שמופיע אחרי התאריך."
+        }
+      ],
+      "successNote": "עד השנייה הזאת העמוד עבד; ממנה והלאה הוא לא עבד יותר אף פעם. **קצה חד של לפני ואחרי** כזה כמעט תמיד מתיישר עם שינוי, ואותו תחפשו עכשיו. הכרתם גם את המבנה של חותמת זמן ב-nginx: יום/חודש/שנה, נקודתיים, השעה, וההפרש מ-UTC. תמיד בדקו את ההפרש הזה לפני שמשווים זמנים מקבצים שונים."
+    },
+    {
+      "stage": {
+        "name": "איזה deploy עשה את זה?",
+        "goal": "מצאו את ה-commit של ה-deploy שהיה באוויר כשהעמוד החזיר 404 בפעם הראשונה.",
+        "lookFor": [
+          "גם `deploy.log` ב-UTC, אז אפשר להשוות את הזמנים שלו ישירות לשלב 2",
+          "deploy נכנס לתוקף רק כשהוא **מסתיים**",
+          "deploy שהסתיים **אחרי** ה-404 הראשון לא יכול היה לגרום לו"
+        ],
+        "tools": [
+          "deploy-finished",
+          "deploy-steps",
+          "chat-search",
+          "chat-to-utc"
+        ],
+        "explorerTip": "עברו קובץ: בחרו את `deploy.log` ברשימת הקבצים והוסיפו סינון **מכיל** ‏`deploy finished`. נשארות שלוש שורות. השוו כל זמן לתשובה משלב 2. בלשונית Toolbox יש את אותו הדבר כפקודה: ה-**תחביר** שלה חינמי, וחשיפת **הפקודה המלאה** עולה 5 נקודות."
+      },
+      "id": "q3",
+      "title": "איזה deploy עשה את זה?",
+      "prompt": "סאם עשה הבוקר שלושה deploys לאתר. לכל deploy יש מזהה, `commit` ורשימת צעדים.\n\nמצאו את ה-deploy **האחרון שהסתיים לפני** ה-404 הראשון משלב 2, וענו עם ערך ה-`commit` שלו.\n\nהשלב הזה עוסק ב-**Toolbox**: את ה-**תחביר** של כל פקודה (עם `<placeholders>`) אפשר לקרוא בחינם. חשיפת **הפקודה המלאה והמוכנה להרצה** עולה 5 נקודות. נסו קודם להשלים placeholder בעצמכם.",
+      "answerFormat": "short SHA בן 7 תווים (hex)",
+      "placeholder": "1a2b3c4",
+      "points": 100,
+      "targetMinutes": 2,
+      "hints": [
+        {
+          "cost": 5,
+          "text": "השוו את זמני ה-`deploy finished` לזמן משלב 2. שני הקבצים ב-UTC, אז אין צורך בהמרה."
+        },
+        {
+          "cost": 10,
+          "text": "בצ'אט סאם חושד בשינוי ה-CSS של 11:24. הצ'אט בשעון מקומי (UTC+1), כלומר זה 10:24 UTC: **אחרי** שהעמוד נשבר. בדקו את ה-deploy שלפניו."
+        },
+        {
+          "cost": 20,
+          "text": "```sh\ngrep 'deploy finished' deploy.log\n```\nבחרו את השורה האחרונה שהזמן שלה מוקדם מהתשובה משלב 2, והעתיקו את ערך ה-`commit=` שלה."
+        }
+      ],
+      "successNote": "לוג ה-deploy אמר `status=ok`, והוא צדק: ה-deploy עשה בדיוק את מה שביקשו ממנו. **\"הצליח\" זה לא אותו דבר כמו \"בטוח\"**. שימו לב גם איך הצ'אט הצביע על ה-deploy הלא נכון: סאם זכר את השינוי האחרון שלו, והזמנים בצ'אט היו באזור זמן אחר. התאמה לפי זמן בין קבצים, אחרי המרת אזורי זמן, היא מיומנות הליבה של כל תחקיר תקלה."
+    },
+    {
+      "stage": {
+        "name": "כמה בקשות נכשלו?",
+        "goal": "ספרו את כל תשובות ה-404 לעמוד משלב 1.",
+        "lookFor": [
+          "אותם שני סינונים כמו בשלב 2, אבל הפעם צריך את הכמות",
+          "גם בקשות עם query string ‏(`?src=flyer`) נספרות",
+          "רק 404: לפני ה-deploy העמוד ענה `200`"
+        ],
+        "tools": [
+          "grep-count",
+          "grep-and"
+        ],
+        "explorerTip": "חזרו ל-`access.log` עם שני סינוני ה-**מכיל** משלב 2 (הסטטוס `\" 404 ` והנתיב). מעל השורות ה-Explorer כותב **\"N מתוך M שורות\"**: N הוא התשובה. סינון **מכיל** על הנתיב תופס גם את השורות עם `?src=flyer`."
+      },
+      "id": "q4",
+      "title": "כמה בקשות נכשלו?",
+      "prompt": "כמה גדול הנזק? ספרו את **כל** הבקשות לעמוד משלב 1 שקיבלו **404**, בכל הלוג. בקשות עם query string הן אותו עמוד, וגם הן נספרות.\n\nענו עם מספר שלם.\n\nבשלב הזה מתרגלים קריאה של **כמות**: ב-Explorer היא מופיעה ממש מעל השורות, ובטרמינל זה `grep -c`.",
+      "answerFormat": "מספר שלם (בקשות)",
+      "placeholder": "12",
+      "points": 100,
+      "targetMinutes": 2,
+      "hints": [
+        {
+          "cost": 5,
+          "text": "אותם סינונים כמו בשלב 2. הפעם אל תעצרו בהתאמה הראשונה: ספרו את כולן."
+        },
+        {
+          "cost": 10,
+          "text": "ב-Explorer מספר השורות מופיע כ-\"N מתוך M שורות\" מעל הרשימה. ודאו שסינון הנתיב הוא **מכיל** פשוט של הנתיב, כדי שהשורות עם `?src=flyer` יישארו."
+        },
+        {
+          "cost": 20,
+          "text": "```sh\npage='<your Stage 1 answer>'\ngrep '\" 404 ' access.log | grep -c \"GET $page\"\n```"
+        }
+      ],
+      "successNote": "כל אחת מהבקשות האלה הייתה אדם או מכשיר שרצה את התפריט וקיבל דף שגיאה. ובכל זאת ה-uptime monitor נשאר ירוק כל הזמן, כי הוא בודק רק את עמוד הבית. **ניטור שבודק רק את `/` אומר לכם שהשרת למעלה, לא שהעמודים שלכם עובדים.** מספר כזה הוא גם המספר שנכנס לדוח התקלה."
+    },
+    {
+      "stage": {
+        "name": "מי נפגע הכי הרבה?",
+        "goal": "מצאו את ה-IP של הלקוח שקיבל הכי הרבה 404 לעמוד משלב 1.",
+        "lookFor": [
+          "ה-IP של הלקוח הוא השדה הראשון בכל שורה",
+          "השאירו את הסינונים משלב 4 וספרו לפי IP",
+          "ה-user agent (השדה האחרון במירכאות) מגלה מה הלקוח"
+        ],
+        "tools": [
+          "top-clients",
+          "user-agent",
+          "nginx-fields"
+        ],
+        "explorerTip": "כשהסינונים משלב 4 עדיין פעילים, פתחו את **ספירת ערכים ייחודיים**, בחרו בדוגמה **IP של הלקוח** ולחצו **ספירה**. כתובת אחת מקדימה בהרבה את כל השאר. לחצו עליה כדי להוסיף אותה כסינון, ואז **Enter** על אחת השורות שלה פותח את **פרטי השורה**, ושם רואים את ה-user agent."
+      },
+      "id": "q5",
+      "title": "מי נפגע הכי הרבה?",
+      "prompt": "רוב הבקשות שנכשלו הגיעו מאנשים שונים, כל אחד פעם אחת. לקוח אחד נכשל שוב ושוב.\n\nמצאו את **ה-IP של הלקוח** עם **הכי הרבה 404 לעמוד משלב 1** וענו איתו. אחר כך הסתכלו על ה-user agent שלו: תזהו אותו מהצ'אט.\n\nהשלב הזה מחבר את מה שלמדתם: **מסננים**, ואז **סופרים ערכים ייחודיים** של שדה אחר.",
+      "answerFormat": "כתובת IPv4",
+      "placeholder": "192.0.2.1",
+      "points": 100,
+      "targetMinutes": 2,
+      "hints": [
+        {
+          "cost": 5,
+          "text": "השאירו את הסינונים משלב 4. עכשיו ספרו את **השדה הראשון** בכל שורה, ה-IP של הלקוח."
+        },
+        {
+          "cost": 10,
+          "text": "ב-Explorer: **ספירת ערכים ייחודיים**, הדוגמה **IP של הלקוח**. המנצח רחוק מאוד מהמקום השני. ה-user agent שלו מגלה שזה לא אדם."
+        },
+        {
+          "cost": 20,
+          "text": "```sh\npage='<your Stage 1 answer>'\ngrep '\" 404 ' access.log | grep \"GET $page\" | awk '{print $1}' | sort | uniq -c | sort -rn | head -n 3\n```"
+        }
+      ],
+      "successNote": "זה מסך התפריט ליד הקופה: הוא טוען מחדש את הכתובת הישנה כל שתי דקות, ולכן הוא גם הנפגע הכי רועש וגם הראשון ששם לב. מכונות ששומרות סימנייה לנצח (מסכים, אפליקציות, קודי QR מודפסים, מנועי חיפוש) הן בדיוק הלקוחות שנשברים כשכתובת משתנה. הכרתם גם את ה-**user agent**: השדה שאומר *מה* שלח את הבקשה, ולא רק *מאיפה*."
+    },
+    {
+      "stage": {
+        "name": "לאן העמוד נעלם?",
+        "goal": "מצאו את שם הקובץ החדש שה-deploy נתן לעמוד.",
+        "lookFor": [
+          "ה-deploy משלב 3 מפרט כל קובץ שהוא שינה",
+          "האותיות כמו ב-git: ‏`M` שונה, `A` נוסף, `R` שינוי שם (`old -> new`)",
+          "אחרי ה-deploy השם החדש עונה `200` ב-access log"
+        ],
+        "tools": [
+          "deploy-steps",
+          "grep-filter"
+        ],
+        "explorerTip": "פתחו את `deploy.log` וסננו **מכיל** לפי מזהה ה-deploy ‏(`dep-...`) משלב 3: תראו את כל הצעדים שלו. קראו את שורות ה-`changed`. כדי לוודא, חזרו ל-`access.log` וסננו **מכיל** את השם החדש יחד עם `\" 200 `."
+      },
+      "id": "q6",
+      "title": "לאן העמוד נעלם?",
+      "prompt": "העמוד לא נעלם במקרה: ה-deploy **שינה את השם שלו**. הקישור בעמוד הבית עודכן, ולכן הכול נראה תקין כשסאם לחץ על הקישורים. כל קישור ישן (הפלאייר, המסך ליד הקופה, תוצאות החיפוש) עדיין מצביע על השם הישן.\n\nמצאו את **שם הקובץ החדש** של העמוד וענו איתו, רק שם הקובץ, בלי `/` בהתחלה.\n\nהתיקון יהיה **redirect** מהכתובת הישנה לחדשה.",
+      "answerFormat": "שם קובץ בלבד, בלי / בהתחלה (למשל page.html)",
+      "placeholder": "page.html",
+      "points": 150,
+      "targetMinutes": 2,
+      "hints": [
+        {
+          "cost": 5,
+          "text": "קראו את כל הצעדים של ה-deploy משלב 3. אחת משורות ה-`changed` שלו היא לא סתם שינוי."
+        },
+        {
+          "cost": 10,
+          "text": "חפשו את שורת ה-`R` (שינוי שם): היא נראית כך: `R old -> new`. ב-access log רואים את השם החדש עונה `200` אחרי ה-deploy."
+        },
+        {
+          "cost": 20,
+          "text": "```sh\ngrep ' R ' deploy.log\n```\nענו עם השם שמופיע אחרי `->`."
+        }
+      ],
+      "successNote": "התיק סגור. שינוי שם מסודר שבר כל קישור שה-deploy לא ראה: קוד QR מודפס, מסך ליד הקופה, האינדקס של מנוע חיפוש. **כתובת URL היא הבטחה לכל מי שמקשר אליה.** התיקון הוא שורה אחת ב-nginx ‏(`return 301` מהנתיב הישן לחדש), והלקח: כשמשנים שם של עמוד, משאירים את הכתובת הישנה עובדת. בתחקיר יש את כל הסיפור ואת כל מה שתרגלתם."
+    }
+  ],
+  "toolbox": [
+    {
+      "category": "התמצאות",
+      "items": [
+        {
+          "id": "unzip-evidence",
+          "title": "פריסת הראיות",
+          "syntax": "unzip <evidence-zip> && cd <case-folder>",
+          "syntaxPowershell": "Expand-Archive .\\<evidence-zip> -DestinationPath <dest>\ncd .\\<case-folder>",
+          "command": "unzip first-shift-evidence.zip && cd first-shift",
+          "explain": "מחלץ את החבילה. הכול נמצא תחת תיקייה עליונה אחת, `first-shift/`. את שאר הפקודות מריצים מתוכה.",
+          "powershell": "Expand-Archive .\\first-shift-evidence.zip -DestinationPath .\ncd .\\first-shift"
+        },
+        {
+          "id": "list-files",
+          "title": "מה יש לנו",
+          "syntax": "ls -la <dir>",
+          "syntaxPowershell": "Get-ChildItem <dir> | Select-Object <properties>",
+          "command": "ls -la",
+          "explain": "כל הקבצים עם הגודל שלהם. כל הארבעה קטנים מספיק כדי לקרוא אותם מההתחלה עד הסוף.",
+          "powershell": "Get-ChildItem | Select-Object Name, Length"
+        },
+        {
+          "id": "read-readme",
+          "title": "קריאת ה-README",
+          "syntax": "cat <file>",
+          "syntaxPowershell": "Get-Content <file>",
+          "command": "cat README_FIRST.txt",
+          "explain": "הערות התורנות: הקבצים, השעונים ודוגמה מוסברת של שורה אחת מה-access log.",
+          "powershell": "Get-Content README_FIRST.txt"
+        },
+        {
+          "id": "head-lines",
+          "title": "הצצה בשורות הראשונות",
+          "syntax": "head -n <count> <file>",
+          "syntaxPowershell": "Get-Content <file> -TotalCount <count>",
+          "command": "head -n 3 access.log",
+          "explain": "מסתכלים על הפורמט **לפני** שמפרקים אותו. `tail -n 3` מראה את סוף הקובץ.",
+          "powershell": "Get-Content access.log -TotalCount 3"
+        }
+      ]
+    },
+    {
+      "category": "קריאת שורה ב-access log",
+      "items": [
+        {
+          "id": "nginx-fields",
+          "title": "שליפת שדות",
+          "syntax": "awk '{print <fields>}' <file> | head -n <count>",
+          "syntaxPowershell": "Get-Content <file> -TotalCount <count> | ForEach-Object { $f = $_ -split ' '; '{0} {1} {2} {3}' -f $f[<i>], $f[<j>], $f[<k>], $f[<l>] }",
+          "command": "awk '{print $1, $4, $7, $9}' access.log | head -n 5",
+          "explain": "`awk` מפצל כל שורה לפי רווחים וממספר את החלקים: `$1` ה-IP של הלקוח, `$4` הזמן, `$7` הנתיב, `$9` קוד הסטטוס. ב-PowerShell סופרים מ-0, אז אותם שדות הם `[0]`, `[3]`, `[6]` ו-`[8]`.",
+          "powershell": "Get-Content access.log -TotalCount 5 | ForEach-Object { $f = $_ -split ' '; '{0} {1} {2} {3}' -f $f[0], $f[3], $f[6], $f[8] }"
+        },
+        {
+          "id": "status-codes",
+          "title": "ספירת קודי סטטוס",
+          "syntax": "awk '{print $<field>}' <file> | sort | uniq -c",
+          "syntaxPowershell": "Get-Content <file> | ForEach-Object { ($_ -split ' ')[<index>] } | Group-Object | Select-Object Count, Name",
+          "command": "awk '{print $9}' access.log | sort | uniq -c",
+          "explain": "שדה אחד, ספור: כמה `200`, כמה `404` וכמה אחרים. `sort | uniq -c` הוא ההיסטוגרמה הקלאסית.",
+          "powershell": "Get-Content access.log | ForEach-Object { ($_ -split ' ')[8] } | Group-Object | Select-Object Count, Name"
+        },
+        {
+          "id": "nginx-time",
+          "title": "רק השעה",
+          "syntax": "awk '{print substr($4, <start>, <length>)}' <file> | head -n <count>",
+          "syntaxPowershell": "Get-Content <file> -TotalCount <count> | ForEach-Object { ($_ -split ' ')[3].Substring(<start>, <length>) }",
+          "command": "awk '{print substr($4, 14, 8)}' access.log | head -n 3",
+          "explain": "חותך את `HH:MM:SS` מתוך `[14/Nov/2026:HH:MM:SS`. השעה מתחילה בתו ה-14 של שדה 4.",
+          "powershell": "Get-Content access.log -TotalCount 3 | ForEach-Object { ($_ -split ' ')[3].Substring(13, 8) }"
+        },
+        {
+          "id": "user-agent",
+          "title": "קריאת ה-user agent",
+          "syntax": "grep '<pattern>' <file> | awk -F'\"' '{print $6}' | sort | uniq -c",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<pattern>' -SimpleMatch | ForEach-Object { ($_.Line -split '\"')[5] } | Group-Object | Select-Object Count, Name",
+          "command": "grep 'GET /robots.txt' access.log | awk -F'\"' '{print $6}' | sort | uniq -c",
+          "explain": "כשמפצלים לפי `\"` במקום לפי רווחים, החלקים שבמירכאות הופכים לשדות: החלק השישי הוא ה-user agent, שאומר איזה סוג לקוח שלח את הבקשה.",
+          "powershell": "Select-String -Path access.log -Pattern 'GET /robots.txt' -SimpleMatch | ForEach-Object { ($_.Line -split '\"')[5] } | Group-Object | Select-Object Count, Name"
+        }
+      ]
+    },
+    {
+      "category": "grep וחברים",
+      "items": [
+        {
+          "id": "grep-filter",
+          "title": "השארת שורות תואמות",
+          "syntax": "grep '<pattern>' <file> | head -n <count>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<pattern>' -SimpleMatch | Select-Object -First <count>",
+          "command": "grep '\" 404 ' access.log | head -n 10",
+          "explain": "`grep` משאיר את השורות שמכילות את התבנית. חיפוש של `\" 404 ` עם המירכאה תופס רק את שדה הסטטוס, אף פעם לא גודל.",
+          "powershell": "Select-String -Path access.log -Pattern '\" 404 ' -SimpleMatch | Select-Object -First 10"
+        },
+        {
+          "id": "grep-and",
+          "title": "שני סינונים יחד",
+          "syntax": "grep '<first pattern>' <file> | grep '<second pattern>' | head -n <count>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<first pattern>' -SimpleMatch | Where-Object { $_.Line -like '*<second pattern>*' } | Select-Object -First <count>",
+          "command": "grep '\" 404 ' access.log | grep 'GET /favicon.ico' | head -n 5",
+          "explain": "מעבירים `grep` אחד לתוך אחר: שורה צריכה להתאים לשניהם. ב-Explorer עושים את אותו הדבר עם **+ הוספת סינון**.",
+          "powershell": "Select-String -Path access.log -Pattern '\" 404 ' -SimpleMatch | Where-Object { $_.Line -like '*GET /favicon.ico*' } | Select-Object -First 5"
+        },
+        {
+          "id": "grep-first",
+          "title": "עצירה בהתאמה הראשונה",
+          "syntax": "grep -m1 '<pattern>' <file>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<pattern>' -SimpleMatch | Select-Object -First 1",
+          "command": "grep -m1 '\" 404 ' access.log",
+          "explain": "`-m1` עוצר אחרי ההתאמה הראשונה. בקובץ שממוין לפי זמן, זו **המוקדמת ביותר**. (ה-404 הראשון בכל הקובץ הוא רעש; קודם משלבים סינונים.)",
+          "powershell": "Select-String -Path access.log -Pattern '\" 404 ' -SimpleMatch | Select-Object -First 1"
+        },
+        {
+          "id": "grep-count",
+          "title": "ספירת התאמות",
+          "syntax": "grep -c '<pattern>' <file>",
+          "syntaxPowershell": "(Select-String -Path <file> -Pattern '<pattern>' -SimpleMatch).Count",
+          "command": "grep -c '\" 404 ' access.log",
+          "explain": "`-c` מדפיס כמה שורות מתאימות במקום את השורות עצמן. ב-Explorer אותו מספר מופיע כ-\"N מתוך M שורות\".",
+          "powershell": "(Select-String -Path access.log -Pattern '\" 404 ' -SimpleMatch).Count"
+        }
+      ]
+    },
+    {
+      "category": "ספירת ערכים",
+      "items": [
+        {
+          "id": "top-404-paths",
+          "title": "אילו נתיבים נכשלים הכי הרבה",
+          "syntax": "grep '<status filter>' <file> | awk '{print $<field>}' | cut -d'?' -f1 | sort | uniq -c | sort -rn | head -n <count>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<status filter>' -SimpleMatch | ForEach-Object { (($_.Line -split ' ')[<index>] -split '\\?')[0] } | Group-Object | Sort-Object Count -Descending | Select-Object -First <count> Count, Name",
+          "command": "grep '\" 404 ' access.log | awk '{print $7}' | cut -d'?' -f1 | sort | uniq -c | sort -rn | head -n 5",
+          "explain": "משאיר את ה-404, לוקח את הנתיב (שדה 7), מוריד `?query` אם יש, ואז סופר וממיין מהגדול לקטן.",
+          "powershell": "Select-String -Path access.log -Pattern '\" 404 ' -SimpleMatch | ForEach-Object { (($_.Line -split ' ')[6] -split '\\?')[0] } | Group-Object | Sort-Object Count -Descending | Select-Object -First 5 Count, Name"
+        },
+        {
+          "id": "top-clients",
+          "title": "אילו לקוחות פונים לנתיב הכי הרבה",
+          "syntax": "grep '<pattern>' <file> | awk '{print $1}' | sort | uniq -c | sort -rn | head -n <count>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<pattern>' -SimpleMatch | ForEach-Object { ($_.Line -split ' ')[0] } | Group-Object | Sort-Object Count -Descending | Select-Object -First <count> Count, Name",
+          "command": "grep 'GET /favicon.ico' access.log | awk '{print $1}' | sort | uniq -c | sort -rn | head -n 5",
+          "explain": "אותו טריק ספירה על שדה 1, ה-IP של הלקוח. הדוגמה סופרת בקשות favicon; אפשר להחליף לכל נתיב.",
+          "powershell": "Select-String -Path access.log -Pattern 'GET /favicon.ico' -SimpleMatch | ForEach-Object { ($_.Line -split ' ')[0] } | Group-Object | Sort-Object Count -Descending | Select-Object -First 5 Count, Name"
+        }
+      ]
+    },
+    {
+      "category": "לוג ה-deploys",
+      "items": [
+        {
+          "id": "deploy-finished",
+          "title": "מתי כל deploy הסתיים?",
+          "syntax": "grep '<step name>' <file>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<step name>' -SimpleMatch",
+          "command": "grep 'deploy finished' deploy.log",
+          "explain": "שורה לכל deploy עם הזמן (UTC), ה-commit והסטטוס. deploy נכנס לתוקף כשהוא מסתיים.",
+          "powershell": "Select-String -Path deploy.log -Pattern 'deploy finished' -SimpleMatch"
+        },
+        {
+          "id": "deploy-steps",
+          "title": "כל הצעדים של deploy אחד",
+          "syntax": "grep 'id=<deploy id> ' <file>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern 'id=<deploy id> ' -SimpleMatch",
+          "command": "grep 'id=dep-0412 ' deploy.log",
+          "explain": "כל השורות של מזהה deploy אחד, מההתחלה ועד הסוף, כולל כל קובץ ב-`changed`. הרווח בסוף התבנית מונע מ-`dep-041` להתאים גם ל-`dep-0412`.",
+          "powershell": "Select-String -Path deploy.log -Pattern 'id=dep-0412 ' -SimpleMatch"
+        }
+      ]
+    },
+    {
+      "category": "אזורי זמן והצ'אט",
+      "items": [
+        {
+          "id": "chat-search",
+          "title": "חיפוש בצ'אט",
+          "syntax": "grep -i '<word>' <file>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<word>'",
+          "command": "grep -i 'deploy' team-chat.txt",
+          "explain": "מוצאים מי אמר מה על מילה מסוימת, `-i` מתעלם מאותיות גדולות וקטנות. זכרו שהשעון של הצ'אט הוא שעון מקומי, UTC+1.",
+          "powershell": "Select-String -Path team-chat.txt -Pattern 'deploy'"
+        },
+        {
+          "id": "chat-to-utc",
+          "title": "משעון הצ'אט ל-UTC",
+          "syntax": "date -u -d '<local date and time> +0100' +%H:%M",
+          "syntaxPowershell": "([DateTimeOffset]::Parse('<local date and time> +01:00')).UtcDateTime.ToString('HH:mm')",
+          "command": "date -u -d '2026-11-14 10:44 +0100' +%H:%M",
+          "explain": "ממיר שעה מהצ'אט (CET, ‏+01:00) ל-UTC. או פשוט מחסירים שעה. `date -d` הוא של GNU ‏(Linux, WSL, Git Bash); ב-macOS מחסירים ידנית.",
+          "powershell": "([DateTimeOffset]::Parse('2026-11-14 10:44 +01:00')).UtcDateTime.ToString('HH:mm')"
+        }
+      ]
+    }
+  ],
+  "debrief": "_חתום._ סיימו את כל ששת השלבים כדי לפתוח את התחקיר."
+}

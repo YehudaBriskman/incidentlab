@@ -33,6 +33,7 @@ test("reset request: the student asks, the teacher vouches, the owner approves, 
   const cls = ((await created.json()) as { class: { id: string; admin: { joinCode: string } } }).class;
   const joined = await student.page.request.post("/api/classes/join", { data: { code: cls.admin.joinCode } });
   expect(joined.status(), await joined.text()).toBe(200);
+  const me = (await (await student.page.request.get("/api/me")).json()) as { account: { id: string } };
   // The student "forgets" everything: signed out, no recovery code.
   await student.page.request.post("/api/auth/logout", { data: {} });
 
@@ -54,7 +55,15 @@ test("reset request: the student asks, the teacher vouches, the owner approves, 
     await teacher.page.goto(`/#/class/${cls.id}/manage`);
     const panel = teacher.page.locator(".class-reset-panel");
     await expect(panel.getByRole("heading", { name: /Password reset requests/ })).toBeVisible();
-    const row = panel.locator(".class-request", { hasText: student.username });
+    let row = panel.locator(".class-request", { hasText: student.username });
+    // A student who joined today can't be vouched for yet (#254: a week in the class first).
+    await expect(row.getByTestId("vouch-later")).toContainText("Can vouch from");
+    await expect(row.getByRole("button", { name: "Vouch" })).toHaveCount(0);
+    // The local server's test hook moves the join date back a week.
+    const back = await teacher.page.request.post("/__local/backdate-member", { data: { classId: cls.id, accountId: me.account.id, days: 8 } });
+    expect(back.status()).toBe(204);
+    await teacher.page.reload();
+    row = teacher.page.locator(".class-reset-panel .class-request", { hasText: student.username });
     await row.getByRole("button", { name: "Vouch" }).click();
     const confirm = teacher.page.getByRole("alertdialog");
     await expect(confirm).toContainText("Only vouch for a student you know in person");

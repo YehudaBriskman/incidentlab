@@ -168,6 +168,7 @@ export class AuthService {
       lastSeenAt: nowIso,
       lastLoginAt: nowIso,
       mustChangePassword: false,
+      temporaryPasswordExpiresAt: null,
       role: "player",
       kind: "user",
       showOnGlobalBoard: false,
@@ -217,6 +218,11 @@ export class AuthService {
     }
     const account = found.data;
     if (account.status === "rejected") throw new AppError(403, "this account was not approved", { code: "rejected" });
+    // An unused temporary password stops working after 48 hours (#254): ask for a new reset.
+    const expiresAt = account.mustChangePassword ? account.temporaryPasswordExpiresAt : null;
+    if (expiresAt !== null && Date.parse(expiresAt) <= this.now().getTime()) {
+      throw new AppError(401, "this temporary password has expired; ask for a new reset", { code: "temporary-password-expired" });
+    }
     await this.limiter.clear(LOGIN_USER_LIMIT, key);
     // Accounts from before #174 get their first recovery code here, shown once by the client.
     const recovery = account.recoveryCodeHash === null ? await issueRecoveryCode() : null;
@@ -261,6 +267,7 @@ export class AuthService {
       passwordHash: await hashPassword(input.newPassword),
       recoveryCodeHash: recovery.hash,
       mustChangePassword: false,
+      temporaryPasswordExpiresAt: null,
       sessionEpoch: found.data.sessionEpoch + 1,
     };
     if (!(await this.repos.accounts.saveIfMatch(account, found.etag))) throw new AppError(409, "concurrent update, please retry");
@@ -388,6 +395,7 @@ export class AuthService {
       ...found.data,
       passwordHash: await hashPassword(input.newPassword),
       mustChangePassword: false,
+      temporaryPasswordExpiresAt: null,
       sessionEpoch: found.data.sessionEpoch + 1,
       ...(recovery === null ? {} : { recoveryCodeHash: recovery.hash }),
     };

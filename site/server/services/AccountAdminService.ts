@@ -35,6 +35,9 @@ const csvField = (value: string | number | null): string => {
   return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 };
 
+/** How long a temporary password works before the player must ask again (#254). */
+export const TEMPORARY_PASSWORD_TTL_MS = 48 * 60 * 60 * 1000;
+
 export class AccountAdminService {
   private readonly repos: Repositories;
   private readonly firstBlood: FirstBloodRepository;
@@ -119,6 +122,7 @@ export class AccountAdminService {
   }
 
   /** Sets a random temporary password, signs the account out and forces a change at next sign-in. */
+  /** A temporary password (the console's reset, or an approved reset request) works for 48 hours (#254). */
   async resetPassword(accountId: string): Promise<string> {
     this.assertId(accountId);
     const found = await this.repos.accounts.get(accountId);
@@ -128,6 +132,7 @@ export class AccountAdminService {
       ...found.data,
       passwordHash: await hashPassword(password),
       mustChangePassword: true,
+      temporaryPasswordExpiresAt: new Date(this.now().getTime() + TEMPORARY_PASSWORD_TTL_MS).toISOString(),
       sessionEpoch: found.data.sessionEpoch + 1,
     };
     if (!(await this.repos.accounts.saveIfMatch(account, found.etag))) throw new AppError(409, "concurrent update, please retry");

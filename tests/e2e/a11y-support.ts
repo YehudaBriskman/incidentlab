@@ -89,8 +89,18 @@ export async function toHebrew(page: Page): Promise<void> {
     const menu = page.locator(".account-btn:visible").first();
     if ((await menu.count()) > 0) {
       await menu.click();
-      await page.locator(".account-panel").getByRole("radio", { name: "עברית" }).check();
+      // a popover on wide screens, a bottom sheet on phones (#220)
+      await page.locator(".account-panel:visible, .account-sheet:visible").first().getByRole("radio", { name: "עברית" }).check();
+      // Playwright's click is a mouse even with touch emulation: park it off the page, or once the menu closes it
+      // hovers whatever row was under the radio and that row's tooltip opens (a real phone sends touch, which
+      // tooltips ignore).
+      await page.mouse.move(-10, -10);
       await page.keyboard.press("Escape");
+      // Escape returns focus to the menu button (a sheet does so after its close animation), whose tooltip then
+      // opens: wait for the menu to close, then drop focus so the scan sees the page.
+      await page.locator(".account-panel:visible, .account-sheet:visible").first().waitFor({ state: "hidden" });
+      await expect(menu).toBeFocused();
+      await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined));
     } else {
       // no visible account button (a narrow layout): choose Hebrew the way the radios store it
       await page.evaluate(() => window.localStorage.setItem("il.lang", "he"));

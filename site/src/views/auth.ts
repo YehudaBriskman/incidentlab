@@ -205,6 +205,7 @@ function errorText(err: unknown): string {
   if (err.code === "bad-class-code" || err.code === "bad-invite-code") return TG().badInvite;
   if (err.code === "class-full") return TG().classFullSignUp;
   if (err.code === "bad-credentials") return TA().badCredentials;
+  if (err.code === "temporary-password-expired") return TA().tempPasswordExpired;
   if (err.code === "rejected") return TA().rejectedLogin;
   if (err.code === "signup-refused") return TA().signupRefused;
   if (err.code === "bad-recovery-code") return TA().badRecoveryCode;
