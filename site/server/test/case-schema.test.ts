@@ -24,9 +24,9 @@ const readJson = (path: string): unknown => JSON.parse(readFileSync(path, "utf8"
 const caseFiles = readdirSync(CASES_DIR).filter((f) => f.endsWith(".json")).sort();
 const realCaseFiles = caseFiles.filter((f) => !f.startsWith("_"));
 
-test("there are five real cases, each in English and Hebrew", () => {
-  assert.equal(realCaseFiles.filter((f) => !f.endsWith(".he.json")).length, 5);
-  assert.equal(realCaseFiles.filter((f) => f.endsWith(".he.json")).length, 5);
+test("there are six real cases, each in English and Hebrew", () => {
+  assert.equal(realCaseFiles.filter((f) => !f.endsWith(".he.json")).length, 6);
+  assert.equal(realCaseFiles.filter((f) => f.endsWith(".he.json")).length, 6);
 });
 
 for (const file of caseFiles) {

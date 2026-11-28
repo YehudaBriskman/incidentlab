@@ -1,0 +1,493 @@
+{
+  "setupChecklist": [
+    "Open the **Evidence Explorer**: every file in the pack, searchable right in your browser, nothing to install. Prefer a terminal? Download the **evidence pack** and unzip it.",
+    "Open `README_FIRST.txt` first. It lists the files and shows how to read one line of the access log.",
+    "Note the clocks: `access.log` and `deploy.log` are **UTC**; `team-chat.txt` is **local time (CET, UTC+1)**.",
+    "Pick your path: the **browser Explorer**, **bash** (Linux, macOS, WSL or Git Bash) or **Windows PowerShell**. Every Toolbox command comes in bash and PowerShell.",
+    "Each stage shows a goal, what to look for and an Explorer tip. Answer it to unlock the next one."
+  ],
+  "id": "first-shift",
+  "title": "First Shift",
+  "subtitle": "Your first ten minutes on call. The bakery's new winter menu went live, and now the screen by the till says \"404 Not Found\". Learn the ropes while you find out why.",
+  "difficulty": "easy",
+  "estMinutes": 10,
+  "tags": [
+    "tutorial",
+    "beginner",
+    "nginx",
+    "access-log",
+    "http-404",
+    "deploys"
+  ],
+  "inspiredBy": {
+    "title": "Link rot, and \"Cool URIs don't change\"",
+    "year": 1998,
+    "summary": "In 1998 Tim Berners-Lee published the W3C note \"Cool URIs don't change\", arguing that a page's address is a promise to everyone who links to it, and that renaming files is one of the most common ways that promise gets broken. The problem has not gone away: a 2024 Pew Research Center study found that about a quarter of the web pages that existed at some point between 2013 and 2023 could no longer be reached."
+  },
+  "briefing": "**Saturday, 11:45 local time. Juniper & Rye bakery.**\n\nWelcome to your first shift. This is a short practice case, about **ten minutes**, built to show you how IncidentLab works.\n\nJuniper & Rye has a small static website: plain HTML files served by nginx. This morning Sam, who looks after the site, published the new **winter menu**. Soon after, Maya, the owner, noticed that the screen by the till shows **\"404 Not Found\"** instead of the menu. Customers who scan the QR code on the paper flyer get the same error. The home page loads fine, and the uptime monitor is green.\n\nThe **evidence pack** has four small files: the website's access log, the deploy log, the team chat and a README. **Open `README_FIRST.txt` first.**\n\n**How a case works.** There are **six stages**, and each one unlocks the next. Every stage gives you a goal, a few things to look for, an Explorer tip and the Toolbox commands that help. Answers are short and exact, in the format shown under the question. If you get stuck, **hints** cost a few points, and so does revealing a **full command** in the Toolbox (its syntax is always free). A wrong answer costs 2 points; a badly formatted one costs nothing.\n\nThe six stages: **which page** is broken, **when** it broke, **which deploy** did it, **how many** requests failed, **who** was hit hardest, and **what the page is called now**.",
+  "evidenceZip": "/evidence/first-shift-evidence.zip",
+  "evidence": [
+    {
+      "path": "README_FIRST.txt",
+      "format": "text",
+      "description": "On-call notes: what happened, the file list, the clocks and how to read one access log line. Start here."
+    },
+    {
+      "path": "access.log",
+      "format": "nginx log (UTC)",
+      "description": "The website's nginx access log, 08:00 to 11:00 UTC. One line per request: client IP, time, request, status code, size, referer and user agent."
+    },
+    {
+      "path": "deploy.log",
+      "format": "deploy log (ISO-8601 UTC)",
+      "description": "The deploy tool's log for the same morning. One line per step, from `deploy started` to `deploy finished`."
+    },
+    {
+      "path": "team-chat.txt",
+      "format": "chat export (local time, UTC+1)",
+      "description": "The team's chat as text. Local time (CET): subtract one hour for UTC. Full of theories; not all of them are right."
+    }
+  ],
+  "rules": [
+    "Work only from the evidence pack. Don't read the generator source or the site's source code; that spoils the fun.",
+    "Answers are case-insensitive, and leading and trailing whitespace is ignored. Stick to the format shown under each question. An answer in the wrong format is caught before it is checked and costs nothing.",
+    "Hints are revealed in order, from a gentle nudge to almost the full command, and each costs the few points shown on it. In the Toolbox, a command's syntax is free; seeing the full command costs 5 points. Once you finish the case, every command is free.",
+    "Nothing needs installing. Every Toolbox command uses tools that already ship with Linux, macOS, WSL, Git Bash or Windows PowerShell 5.1, and the browser Explorer can do all of it too.",
+    "Each wrong answer costs 2 points, capped at 20 per stage. Try to be able to explain *why* your answer is right.",
+    "Speed and care pay off: a fast solve earns a time bonus of up to +30 per stage, fading after the stage's target time. A clean solve (no hints, commands or wrong answers) earns +10, the first player to solve a stage gets +15 first blood, and finishing all six stages without revealing an answer earns +50.",
+    "This is a practice case: trying the hints and the Toolbox is part of the lesson. Don't share flags with other players until everyone is done. Sharing techniques is fine."
+  ],
+  "questions": [
+    {
+      "stage": {
+        "name": "Which page is broken?",
+        "goal": "Find the path that got the most 404 (not found) responses.",
+        "lookFor": [
+          "In `access.log` the status code comes right after the request in quotes: `\" 404 `",
+          "Some 404s are everyday noise: `/favicon.ico` and scanners probing for software the site doesn't run",
+          "A path may end in a query string like `?src=flyer`; it is still the same page"
+        ],
+        "tools": [
+          "read-readme",
+          "head-lines",
+          "nginx-fields",
+          "status-codes",
+          "grep-filter",
+          "top-404-paths"
+        ],
+        "explorerTip": "In the Explorer, pick `access.log` from the file list. Type `\" 404 ` (quote, space, 404, space) into the **contains** filter: only 404 lines stay. Then open **Count unique values**, pick the **path** example and press **Count**. The list is sorted by count, so the top row is your answer."
+      },
+      "id": "q1",
+      "title": "Which page is broken?",
+      "prompt": "Customers say \"the menu is broken\", but a website only knows paths. Start with the access log: each line is one request, and the status code says how it went (`200` OK, `404` not found).\n\nFind the **path that returned 404 most often** and answer with it exactly as requested, starting with `/` and without any query string.\n\nThis first stage is a tour of the **Evidence Explorer**: open a file, filter it, count values. The Explorer tip below walks you through it.",
+      "answerFormat": "URL path starting with /, no query string (e.g. /page.html)",
+      "placeholder": "/page.html",
+      "points": 100,
+      "targetMinutes": 2,
+      "hints": [
+        {
+          "cost": 5,
+          "text": "Not every 404 matters. Keep only the 404 lines, then look at **which path** each one asked for. One path is far ahead of the others."
+        },
+        {
+          "cost": 10,
+          "text": "Explorer: **contains** `\" 404 `, then **Count unique values** with the **path** example. Ignore `/favicon.ico` (browsers ask for it; this site has none) and the scanner paths like `/wp-login.php`. Answer without `?src=...`."
+        },
+        {
+          "cost": 20,
+          "text": "```sh\ngrep '\" 404 ' access.log | awk '{print $7}' | cut -d'?' -f1 | sort | uniq -c | sort -rn | head -n 5\n```\n`$7` is the 7th space-separated field of a line: the path. `cut -d'?' -f1` drops the query string."
+        }
+      ],
+      "successNote": "That is the page the flyer's QR code, old search results and the till screen all point at. Notice what the **noise** looked like: a browser asking for a favicon and a scanner probing for WordPress also return 404, every day, on every site. Counting by path is what separates \"lots of 404s\" from \"one page that is gone\". You just used the Explorer's **contains** filter and **Count unique values**, the browser versions of `grep` and `sort | uniq -c`."
+    },
+    {
+      "stage": {
+        "name": "When did it break?",
+        "goal": "Find the time of the first 404 for the page from Stage 1.",
+        "lookFor": [
+          "Before the break, the same page answered `200`",
+          "Stack two filters: the path, and the 404 status",
+          "The time is the 4th field, in square brackets, in UTC (`+0000`)"
+        ],
+        "tools": [
+          "grep-and",
+          "grep-first",
+          "nginx-time"
+        ],
+        "explorerTip": "Keep the `\" 404 ` filter and press **+ add filter** to add a second **contains** step with the path from Stage 1. Lines must pass both. Open the line actions and choose **First match** to jump to the earliest one (the file is in time order). Press **Enter** on a line to open **Line details** and read its fields."
+      },
+      "id": "q2",
+      "title": "When did it break?",
+      "prompt": "The page used to work: earlier in the log the same path answered `200`. Find the **first** request for it that got a **404**.\n\nAnswer with that line's time in **UTC** as `HH:MM:SS` (no date). In an nginx line the time sits in square brackets, like `[14/Nov/2026:08:00:40 +0000]`, where `+0000` means UTC.\n\nThis stage practises **two filters at once** and jumping to the **first match**.",
+      "answerFormat": "HH:MM:SS (UTC)",
+      "placeholder": "08:30:00",
+      "points": 100,
+      "targetMinutes": 2,
+      "hints": [
+        {
+          "cost": 5,
+          "text": "Two conditions: the line has the Stage 1 path **and** the 404 status. The log is sorted by time, so the first line that has both is the answer."
+        },
+        {
+          "cost": 10,
+          "text": "Explorer: filter **contains** `\" 404 `, then **+ add filter**, **contains** the path. Use **First match**. Copy only the `HH:MM:SS` part of `[14/Nov/2026:HH:MM:SS +0000]`."
+        },
+        {
+          "cost": 20,
+          "text": "```sh\npage='<your Stage 1 answer>'\ngrep '\" 404 ' access.log | grep \"GET $page\" | head -n 1\n```\nThen read the time between the first and second `:` after the date."
+        }
+      ],
+      "successNote": "Before that second the page worked; after it, it never did again. A clean **before/after edge** like this almost always lines up with a change, which is what you'll look for next. You also met the shape of an nginx timestamp: day/month/year, a colon, the time, and the offset from UTC. Always check that offset before you compare times from different files."
+    },
+    {
+      "stage": {
+        "name": "Which deploy did it?",
+        "goal": "Find the commit of the deploy that was live when the page first returned 404.",
+        "lookFor": [
+          "`deploy.log` is UTC too, so you can compare its times with Stage 2 directly",
+          "A deploy only takes effect when it **finishes**",
+          "A deploy that finished **after** the first 404 can't have caused it"
+        ],
+        "tools": [
+          "deploy-finished",
+          "deploy-steps",
+          "chat-search",
+          "chat-to-utc"
+        ],
+        "explorerTip": "Switch files: pick `deploy.log` in the file list and add a **contains** filter `deploy finished`. Three lines are left. Compare each time with your Stage 2 answer. The Toolbox tab has the same as a command: its **syntax** is free, and revealing the **full command** costs 5 points."
+      },
+      "id": "q3",
+      "title": "Which deploy did it?",
+      "prompt": "Sam deployed the site three times this morning. Each deploy has an id, a `commit` and a list of steps.\n\nFind the deploy that **finished last before** the first 404 from Stage 2, and answer with its `commit` value.\n\nThis stage is about the **Toolbox**: every command's **syntax** (with `<placeholders>`) is free to read. Revealing the **full, runnable command** costs 5 points. Try filling in a placeholder yourself first.",
+      "answerFormat": "7-char short SHA (hex)",
+      "placeholder": "1a2b3c4",
+      "points": 100,
+      "targetMinutes": 2,
+      "hints": [
+        {
+          "cost": 5,
+          "text": "Line up the `deploy finished` times with your Stage 2 time. Both files are UTC, so no conversion is needed."
+        },
+        {
+          "cost": 10,
+          "text": "Sam suspects the 11:24 CSS change in the chat. The chat is local time (UTC+1), so that is 10:24 UTC: **after** the page broke. Look at the deploy before it."
+        },
+        {
+          "cost": 20,
+          "text": "```sh\ngrep 'deploy finished' deploy.log\n```\nPick the last line whose time is earlier than your Stage 2 answer and copy its `commit=` value."
+        }
+      ],
+      "successNote": "The deploy log said `status=ok`, and it was right: the deploy did exactly what it was told. **\"Successful\" is not the same as \"safe\"**. Notice also how the chat pointed at the wrong deploy: Sam remembered his latest change, and the times in the chat were in a different zone. Correlating by time across files, after converting zones, is the core skill of every incident review."
+    },
+    {
+      "stage": {
+        "name": "How many requests failed?",
+        "goal": "Count every 404 response for the page from Stage 1.",
+        "lookFor": [
+          "The same two filters as Stage 2, but now you want the count",
+          "Requests with a query string (`?src=flyer`) count too",
+          "Only 404s: before the deploy the page answered `200`"
+        ],
+        "tools": [
+          "grep-count",
+          "grep-and"
+        ],
+        "explorerTip": "Go back to `access.log` with the two **contains** filters from Stage 2 (the `\" 404 ` status and the path). Above the lines the Explorer says **\"N of M lines\"**: N is your count. A **contains** filter on the path also matches the lines with `?src=flyer`."
+      },
+      "id": "q4",
+      "title": "How many requests failed?",
+      "prompt": "How big is the damage? Count **all** the requests for the Stage 1 page that got a **404**, in the whole log. Requests that carry a query string are the same page and count too.\n\nAnswer with a whole number.\n\nThis stage practises reading a **count**: in the Explorer it is right above the lines, in a terminal it is `grep -c`.",
+      "answerFormat": "Integer (requests)",
+      "placeholder": "12",
+      "points": 100,
+      "targetMinutes": 2,
+      "hints": [
+        {
+          "cost": 5,
+          "text": "Same filters as Stage 2. Don't stop at the first match this time: count them all."
+        },
+        {
+          "cost": 10,
+          "text": "In the Explorer the line count shows as \"N of M lines\" above the list. Make sure the path filter is a plain **contains** of the path, so lines with `?src=flyer` stay in."
+        },
+        {
+          "cost": 20,
+          "text": "```sh\npage='<your Stage 1 answer>'\ngrep '\" 404 ' access.log | grep -c \"GET $page\"\n```"
+        }
+      ],
+      "successNote": "Every one of those was a person or a device that wanted the menu and got an error page instead. Yet the uptime monitor stayed green the whole time, because it only checks the home page. **Monitoring that only checks `/` tells you the server is up, not that your pages work.** A count like this is also the number you put in the incident report."
+    },
+    {
+      "stage": {
+        "name": "Who was hit hardest?",
+        "goal": "Find the client IP that got the most 404s for the page from Stage 1.",
+        "lookFor": [
+          "The client IP is the first field of each line",
+          "Keep the Stage 4 filters and count by IP",
+          "The user agent (the last quoted field) tells you what the client is"
+        ],
+        "tools": [
+          "top-clients",
+          "user-agent",
+          "nginx-fields"
+        ],
+        "explorerTip": "With the Stage 4 filters still on, open **Count unique values** and pick the **client IP** example, then **Count**. One address is far ahead. Click it to add it as a filter, then press **Enter** on one of its lines to open **Line details** and read its user agent."
+      },
+      "id": "q5",
+      "title": "Who was hit hardest?",
+      "prompt": "Most failed requests came from different people, once each. One client kept failing, again and again.\n\nFind the **client IP** with the **most 404s for the Stage 1 page** and answer with it. Then look at its user agent: you'll recognise it from the chat.\n\nThis stage combines what you've learned: **filter**, then **count unique values** of another field.",
+      "answerFormat": "IPv4 address",
+      "placeholder": "192.0.2.1",
+      "points": 100,
+      "targetMinutes": 2,
+      "hints": [
+        {
+          "cost": 5,
+          "text": "Keep the filters from Stage 4. Now count the **first field** of each line, the client IP."
+        },
+        {
+          "cost": 10,
+          "text": "Explorer: **Count unique values**, **client IP** example. The winner is far ahead of number two. Its user agent tells you it is not a person."
+        },
+        {
+          "cost": 20,
+          "text": "```sh\npage='<your Stage 1 answer>'\ngrep '\" 404 ' access.log | grep \"GET $page\" | awk '{print $1}' | sort | uniq -c | sort -rn | head -n 3\n```"
+        }
+      ],
+      "successNote": "That is the menu screen by the till: it reloads the old address every two minutes, so it is both the loudest victim and the first to notice. Machines that hold a bookmark forever (screens, apps, printed QR codes, search engines) are exactly the clients that break when a URL changes. You also met the **user agent**: the field that tells you *what* made a request, not just *who*."
+    },
+    {
+      "stage": {
+        "name": "Where did the page go?",
+        "goal": "Find the new file name the deploy gave the page.",
+        "lookFor": [
+          "The deploy from Stage 3 lists every file it changed",
+          "The letters work like git: `M` modified, `A` added, `R` renamed (`old -> new`)",
+          "After the deploy, the new name answers `200` in the access log"
+        ],
+        "tools": [
+          "deploy-steps",
+          "grep-filter"
+        ],
+        "explorerTip": "Open `deploy.log` and filter **contains** the deploy id (`dep-...`) of the deploy from Stage 3: you'll see all its steps. Read the `changed` lines. To confirm, go back to `access.log` and filter **contains** the new name with `\" 200 `."
+      },
+      "id": "q6",
+      "title": "Where did the page go?",
+      "prompt": "The page didn't vanish by accident: the deploy **renamed** it. The home page's link was updated, which is why everything looked fine when Sam clicked through. Every old link (the flyer, the till screen, search results) still points at the old name.\n\nFind the page's **new file name** and answer with it, file name only, without a leading `/`.\n\nThe fix will be a **redirect** from the old address to this one.",
+      "answerFormat": "File name only, no leading / (e.g. page.html)",
+      "placeholder": "page.html",
+      "points": 150,
+      "targetMinutes": 2,
+      "hints": [
+        {
+          "cost": 5,
+          "text": "Read every step of the Stage 3 deploy. One of its `changed` lines is not a plain modification."
+        },
+        {
+          "cost": 10,
+          "text": "Look for the `R` (renamed) line: it reads `R old -> new`. The access log shows the new name answering `200` after the deploy."
+        },
+        {
+          "cost": 20,
+          "text": "```sh\ngrep ' R ' deploy.log\n```\nAnswer with the name after `->`."
+        }
+      ],
+      "successNote": "Case closed. A tidy rename broke every link that the deploy couldn't see: a printed QR code, a till screen, a search engine's index. **A URL is a promise to everyone who links to it.** The fix is one line of nginx (`return 301` from the old path to the new one) and a lesson: when you rename a page, keep the old address working. The debrief has the full story and everything you practised."
+    }
+  ],
+  "toolbox": [
+    {
+      "category": "Getting oriented",
+      "items": [
+        {
+          "id": "unzip-evidence",
+          "title": "Unpack the evidence",
+          "syntax": "unzip <evidence-zip> && cd <case-folder>",
+          "syntaxPowershell": "Expand-Archive .\\<evidence-zip> -DestinationPath <dest>\ncd .\\<case-folder>",
+          "command": "unzip first-shift-evidence.zip && cd first-shift",
+          "explain": "Extracts the pack. Everything lives under one top-level folder, `first-shift/`. Run the other commands from inside it.",
+          "powershell": "Expand-Archive .\\first-shift-evidence.zip -DestinationPath .\ncd .\\first-shift"
+        },
+        {
+          "id": "list-files",
+          "title": "See what you've got",
+          "syntax": "ls -la <dir>",
+          "syntaxPowershell": "Get-ChildItem <dir> | Select-Object <properties>",
+          "command": "ls -la",
+          "explain": "Every file with its size. All four are small enough to read end to end.",
+          "powershell": "Get-ChildItem | Select-Object Name, Length"
+        },
+        {
+          "id": "read-readme",
+          "title": "Read the README",
+          "syntax": "cat <file>",
+          "syntaxPowershell": "Get-Content <file>",
+          "command": "cat README_FIRST.txt",
+          "explain": "The on-call notes: the files, the clocks and a labelled example of one access log line.",
+          "powershell": "Get-Content README_FIRST.txt"
+        },
+        {
+          "id": "head-lines",
+          "title": "Peek at the first lines",
+          "syntax": "head -n <count> <file>",
+          "syntaxPowershell": "Get-Content <file> -TotalCount <count>",
+          "command": "head -n 3 access.log",
+          "explain": "Look at the format **before** you parse it. `tail -n 3` shows the end of the file.",
+          "powershell": "Get-Content access.log -TotalCount 3"
+        }
+      ]
+    },
+    {
+      "category": "Reading an access log line",
+      "items": [
+        {
+          "id": "nginx-fields",
+          "title": "Pick out fields",
+          "syntax": "awk '{print <fields>}' <file> | head -n <count>",
+          "syntaxPowershell": "Get-Content <file> -TotalCount <count> | ForEach-Object { $f = $_ -split ' '; '{0} {1} {2} {3}' -f $f[<i>], $f[<j>], $f[<k>], $f[<l>] }",
+          "command": "awk '{print $1, $4, $7, $9}' access.log | head -n 5",
+          "explain": "`awk` splits each line on spaces and numbers the pieces: `$1` client IP, `$4` time, `$7` path, `$9` status code. PowerShell counts from 0, so the same fields are `[0]`, `[3]`, `[6]` and `[8]`.",
+          "powershell": "Get-Content access.log -TotalCount 5 | ForEach-Object { $f = $_ -split ' '; '{0} {1} {2} {3}' -f $f[0], $f[3], $f[6], $f[8] }"
+        },
+        {
+          "id": "status-codes",
+          "title": "Count status codes",
+          "syntax": "awk '{print $<field>}' <file> | sort | uniq -c",
+          "syntaxPowershell": "Get-Content <file> | ForEach-Object { ($_ -split ' ')[<index>] } | Group-Object | Select-Object Count, Name",
+          "command": "awk '{print $9}' access.log | sort | uniq -c",
+          "explain": "One field, counted: how many `200`s, `404`s and others. `sort | uniq -c` is the classic histogram.",
+          "powershell": "Get-Content access.log | ForEach-Object { ($_ -split ' ')[8] } | Group-Object | Select-Object Count, Name"
+        },
+        {
+          "id": "nginx-time",
+          "title": "Just the time",
+          "syntax": "awk '{print substr($4, <start>, <length>)}' <file> | head -n <count>",
+          "syntaxPowershell": "Get-Content <file> -TotalCount <count> | ForEach-Object { ($_ -split ' ')[3].Substring(<start>, <length>) }",
+          "command": "awk '{print substr($4, 14, 8)}' access.log | head -n 3",
+          "explain": "Cuts `HH:MM:SS` out of `[14/Nov/2026:HH:MM:SS`. The time starts at character 14 of field 4.",
+          "powershell": "Get-Content access.log -TotalCount 3 | ForEach-Object { ($_ -split ' ')[3].Substring(13, 8) }"
+        },
+        {
+          "id": "user-agent",
+          "title": "Read the user agent",
+          "syntax": "grep '<pattern>' <file> | awk -F'\"' '{print $6}' | sort | uniq -c",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<pattern>' -SimpleMatch | ForEach-Object { ($_.Line -split '\"')[5] } | Group-Object | Select-Object Count, Name",
+          "command": "grep 'GET /robots.txt' access.log | awk -F'\"' '{print $6}' | sort | uniq -c",
+          "explain": "Splitting on `\"` instead of spaces makes the quoted parts fields: the 6th piece is the user agent, which says what kind of client sent the request.",
+          "powershell": "Select-String -Path access.log -Pattern 'GET /robots.txt' -SimpleMatch | ForEach-Object { ($_.Line -split '\"')[5] } | Group-Object | Select-Object Count, Name"
+        }
+      ]
+    },
+    {
+      "category": "grep & friends",
+      "items": [
+        {
+          "id": "grep-filter",
+          "title": "Keep matching lines",
+          "syntax": "grep '<pattern>' <file> | head -n <count>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<pattern>' -SimpleMatch | Select-Object -First <count>",
+          "command": "grep '\" 404 ' access.log | head -n 10",
+          "explain": "`grep` keeps the lines that contain the pattern. Searching for `\" 404 ` with the quote matches the status field only, never a size.",
+          "powershell": "Select-String -Path access.log -Pattern '\" 404 ' -SimpleMatch | Select-Object -First 10"
+        },
+        {
+          "id": "grep-and",
+          "title": "Two filters at once",
+          "syntax": "grep '<first pattern>' <file> | grep '<second pattern>' | head -n <count>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<first pattern>' -SimpleMatch | Where-Object { $_.Line -like '*<second pattern>*' } | Select-Object -First <count>",
+          "command": "grep '\" 404 ' access.log | grep 'GET /favicon.ico' | head -n 5",
+          "explain": "Pipe one `grep` into another: a line must match both. The Explorer does the same with **+ add filter**.",
+          "powershell": "Select-String -Path access.log -Pattern '\" 404 ' -SimpleMatch | Where-Object { $_.Line -like '*GET /favicon.ico*' } | Select-Object -First 5"
+        },
+        {
+          "id": "grep-first",
+          "title": "Stop at the first match",
+          "syntax": "grep -m1 '<pattern>' <file>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<pattern>' -SimpleMatch | Select-Object -First 1",
+          "command": "grep -m1 '\" 404 ' access.log",
+          "explain": "`-m1` stops after the first hit. In a file sorted by time, that's the **earliest** one. (The first 404 in the whole file is noise; combine filters first.)",
+          "powershell": "Select-String -Path access.log -Pattern '\" 404 ' -SimpleMatch | Select-Object -First 1"
+        },
+        {
+          "id": "grep-count",
+          "title": "Count matches",
+          "syntax": "grep -c '<pattern>' <file>",
+          "syntaxPowershell": "(Select-String -Path <file> -Pattern '<pattern>' -SimpleMatch).Count",
+          "command": "grep -c '\" 404 ' access.log",
+          "explain": "`-c` prints how many lines match instead of the lines. The Explorer shows the same number as \"N of M lines\".",
+          "powershell": "(Select-String -Path access.log -Pattern '\" 404 ' -SimpleMatch).Count"
+        }
+      ]
+    },
+    {
+      "category": "Counting values",
+      "items": [
+        {
+          "id": "top-404-paths",
+          "title": "Which paths fail most",
+          "syntax": "grep '<status filter>' <file> | awk '{print $<field>}' | cut -d'?' -f1 | sort | uniq -c | sort -rn | head -n <count>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<status filter>' -SimpleMatch | ForEach-Object { (($_.Line -split ' ')[<index>] -split '\\?')[0] } | Group-Object | Sort-Object Count -Descending | Select-Object -First <count> Count, Name",
+          "command": "grep '\" 404 ' access.log | awk '{print $7}' | cut -d'?' -f1 | sort | uniq -c | sort -rn | head -n 5",
+          "explain": "Keeps the 404s, takes the path (field 7), drops any `?query`, then counts and sorts, biggest first.",
+          "powershell": "Select-String -Path access.log -Pattern '\" 404 ' -SimpleMatch | ForEach-Object { (($_.Line -split ' ')[6] -split '\\?')[0] } | Group-Object | Sort-Object Count -Descending | Select-Object -First 5 Count, Name"
+        },
+        {
+          "id": "top-clients",
+          "title": "Which clients hit a path most",
+          "syntax": "grep '<pattern>' <file> | awk '{print $1}' | sort | uniq -c | sort -rn | head -n <count>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<pattern>' -SimpleMatch | ForEach-Object { ($_.Line -split ' ')[0] } | Group-Object | Sort-Object Count -Descending | Select-Object -First <count> Count, Name",
+          "command": "grep 'GET /favicon.ico' access.log | awk '{print $1}' | sort | uniq -c | sort -rn | head -n 5",
+          "explain": "The same counting trick on field 1, the client IP. The example counts favicon requests; swap in any path.",
+          "powershell": "Select-String -Path access.log -Pattern 'GET /favicon.ico' -SimpleMatch | ForEach-Object { ($_.Line -split ' ')[0] } | Group-Object | Sort-Object Count -Descending | Select-Object -First 5 Count, Name"
+        }
+      ]
+    },
+    {
+      "category": "The deploy log",
+      "items": [
+        {
+          "id": "deploy-finished",
+          "title": "When did each deploy finish?",
+          "syntax": "grep '<step name>' <file>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<step name>' -SimpleMatch",
+          "command": "grep 'deploy finished' deploy.log",
+          "explain": "One line per deploy with its time (UTC), commit and status. A deploy takes effect when it finishes.",
+          "powershell": "Select-String -Path deploy.log -Pattern 'deploy finished' -SimpleMatch"
+        },
+        {
+          "id": "deploy-steps",
+          "title": "Every step of one deploy",
+          "syntax": "grep 'id=<deploy id> ' <file>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern 'id=<deploy id> ' -SimpleMatch",
+          "command": "grep 'id=dep-0412 ' deploy.log",
+          "explain": "All lines of one deploy id, from start to finish, including each `changed` file. The trailing space stops `dep-041` from matching `dep-0412`.",
+          "powershell": "Select-String -Path deploy.log -Pattern 'id=dep-0412 ' -SimpleMatch"
+        }
+      ]
+    },
+    {
+      "category": "Time zones and the chat",
+      "items": [
+        {
+          "id": "chat-search",
+          "title": "Search the chat",
+          "syntax": "grep -i '<word>' <file>",
+          "syntaxPowershell": "Select-String -Path <file> -Pattern '<word>'",
+          "command": "grep -i 'deploy' team-chat.txt",
+          "explain": "Find who said what about a word, `-i` ignores case. Remember the chat clock is local time, UTC+1.",
+          "powershell": "Select-String -Path team-chat.txt -Pattern 'deploy'"
+        },
+        {
+          "id": "chat-to-utc",
+          "title": "Local chat time to UTC",
+          "syntax": "date -u -d '<local date and time> +0100' +%H:%M",
+          "syntaxPowershell": "([DateTimeOffset]::Parse('<local date and time> +01:00')).UtcDateTime.ToString('HH:mm')",
+          "command": "date -u -d '2026-11-14 10:44 +0100' +%H:%M",
+          "explain": "Converts a chat time (CET, +01:00) to UTC. Or just subtract one hour. `date -d` is GNU (Linux, WSL, Git Bash); on macOS, subtract by hand.",
+          "powershell": "([DateTimeOffset]::Parse('2026-11-14 10:44 +01:00')).UtcDateTime.ToString('HH:mm')"
+        }
+      ]
+    }
+  ],
+  "debrief": "_Sealed._ Finish all six stages to unlock the debrief."
+}
