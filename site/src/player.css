@@ -403,3 +403,36 @@ input[type="checkbox"].switch:checked::before { transform: none; background: var
 @media (forced-colors: active) {
   .q-strip { border: 1px solid CanvasText; }
 }
+
+/* leaderboard tools (#239): period (segmented radios, like the shell switch), find a player, Jump to me */
+.lb-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3); margin-block: 0 var(--space-2); }
+.lb-controls[hidden], .lb-since[hidden], .lb-period[hidden], .lb-search[hidden], .lb-jump[hidden] { display: none; }
+.lb-period { position: relative; border: 0; margin: 0; padding: 0; min-inline-size: 0; }
+.lb-period-track { display: inline-flex; gap: 2px; padding: var(--space-1); border-radius: var(--radius-control); background: var(--segment-track); }
+.lb-period-opt {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; min-block-size: var(--control-sm); padding-inline: var(--space-3);
+  border-radius: var(--radius-control); font-size: var(--type-small-size); font-weight: 500; color: var(--text-2); cursor: pointer; white-space: nowrap;
+  transition: background-color var(--motion-settle) var(--ease-standard), color var(--motion-settle) var(--ease-standard);
+}
+.lb-period-opt:hover { color: var(--text-1); }
+.lb-period-opt:has(input:checked) { background: var(--segment-thumb); color: var(--text-1); font-weight: 600; box-shadow: var(--surface-lift); }
+.lb-period-opt:has(input:focus-visible) { outline: var(--focus-width) solid var(--focus-ring); outline-offset: 1px; }
+.lb-period-opt input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.lb-search { display: flex; flex-direction: column; gap: var(--space-1); flex: 0 1 18rem; min-inline-size: 0; }
+.lb-search-input { min-block-size: var(--control-sm); border-radius: var(--radius-control); }
+.lb-jump { min-block-size: var(--control-sm); }
+.lb-since { margin: 0 0 var(--space-2); }
+.lb-view-status { margin: 0 0 var(--space-2); }
+.lb-view-status:empty { display: none; }
+/* Jump to me lands focus on the player's row: always show where it went, mouse or keyboard */
+.lb-table tr.is-me:focus { outline: var(--focus-width) solid var(--focus-ring); outline-offset: calc(-1 * var(--focus-width)); }
+:root[data-motion=reduce] .lb-period-opt { transition: none; }
+@media (max-width: 640px) {
+  .lb-period, .lb-period-track { inline-size: 100%; }
+  .lb-period-track { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+  .lb-period-opt, .lb-search-input, .lb-jump { min-block-size: var(--control-md); }
+  .lb-search { flex: 1 1 12rem; }
+}
+@media (forced-colors: active) {
+  .lb-period-opt:has(input:checked) { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+}
