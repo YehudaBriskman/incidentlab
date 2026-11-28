@@ -7,6 +7,7 @@ import type {
   AdminUsersResponse,
   CaseStats,
   CaseSummary,
+  LeaderboardPeriod,
   LeaderboardResponse,
   QuestionId,
   Schedule,
@@ -14,6 +15,7 @@ import type {
   UserStats,
 } from "../../shared/contract.ts";
 import type { AccountRecord, ProgressRecord, Secrets } from "../domain/types.ts";
+import { periodStart } from "../domain/period.ts";
 import { boardTotals } from "../domain/score.ts";
 import type { BoardTotals, ScoreRecord } from "../domain/score.ts";
 import type { Repositories } from "../repositories/repositories.ts";
@@ -323,14 +325,20 @@ export class StatsService {
   }
 
   /**
-   * Public standings of the opted-in players, overall or for one case. With `frozenAt`, only what happened
-   * before it counts: every solve in a summary keeps its time, so the frozen board needs no progress record.
+   * Public standings of the opted-in players, overall or for one case, all time or this week or month. With
+   * `frozenAt`, only what happened before it counts: every solve in a summary keeps its time, so the frozen
+   * board needs no progress record.
    */
-  async leaderboard(input: { caseId: string | null; frozenAt: string | null }): Promise<LeaderboardResponse> {
+  async leaderboard(input: { caseId: string | null; frozenAt: string | null; period?: LeaderboardPeriod }): Promise<LeaderboardResponse> {
     const cutoff = input.frozenAt;
-    const ranked = this.rank(this.rows(await this.boardPlayers(), { caseId: input.caseId, cutoff }));
+    const period = input.period ?? "all";
+    // The week and month boards (#239) cut the same summaries at the period's start: no extra record per player.
+    const since = period === "all" ? null : periodStart(period, this.now(), (await this.repos.schedule.get()).timezone);
+    const ranked = this.rank(this.rows(await this.boardPlayers(), { caseId: input.caseId, cutoff, since }));
     return {
       caseId: input.caseId,
+      period,
+      periodStart: since,
       frozen: cutoff !== null,
       frozenAt: cutoff,
       generatedAt: this.now().toISOString(),
@@ -361,7 +369,7 @@ export class StatsService {
     return players.filter((p): p is BoardPlayer => p !== null);
   }
 
-  private rows(players: readonly BoardPlayer[], filter: { caseId: string | null; cutoff: string | null }): BoardRow[] {
+  private rows(players: readonly BoardPlayer[], filter: { caseId: string | null; cutoff: string | null; since?: string | null }): BoardRow[] {
     const hidden = new Set(this.privateCaseIds());
     const publicOnly = (cases: BoardPlayer["score"]["cases"]): BoardPlayer["score"]["cases"] =>
       hidden.size === 0 ? cases : Object.fromEntries(Object.entries(cases).filter(([caseId]) => !hidden.has(caseId)));

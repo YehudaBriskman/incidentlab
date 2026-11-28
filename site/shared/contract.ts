@@ -284,10 +284,22 @@ export const LeaderboardEntrySchema = z.object({
   firstBloods: z.number().int().min(0),
   lastSolveAt: z.string().nullable(),
 });
-// GET /api/leaderboard?caseId=<id>   (public; omit caseId for overall). Only approved, non-guest accounts that
-// opted in (PUT /api/me/board) and solved at least one stage are listed.
+/**
+ * The leaderboard's time window (#239): every point ever, or only what was scored since the start of this week
+ * (Monday 00:00) or this month (the 1st, 00:00), in the schedule's time zone.
+ */
+export const LEADERBOARD_PERIODS = ["all", "week", "month"] as const;
+export const LeaderboardPeriodSchema = z.enum(LEADERBOARD_PERIODS);
+export type LeaderboardPeriod = z.infer<typeof LeaderboardPeriodSchema>;
+
+// GET /api/leaderboard?caseId=<id>&period=<all|week|month>   (public; omit caseId for overall, period for all
+// time). Only approved, non-guest accounts that opted in (PUT /api/me/board) and scored in the period are listed.
 export const LeaderboardResponseSchema = z.object({
   caseId: z.string().nullable(),
+  /** additive (#239): the window the standings cover; a class board is always "all" */
+  period: LeaderboardPeriodSchema.default("all"),
+  /** additive (#239): when the window began (ISO instant), null for all time */
+  periodStart: z.string().nullable().default(null),
   frozen: z.boolean(),
   frozenAt: z.string().nullable(),
   generatedAt: z.string(),

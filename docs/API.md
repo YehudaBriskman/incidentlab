@@ -14,7 +14,7 @@ both the browser and the function import it.
 
 ## CDN-cached public GETs (#140)
 
-`GET /api/event`, `GET /api/today` and `GET /api/leaderboard[?caseId=]` return the same body to every caller
+`GET /api/event`, `GET /api/today` and `GET /api/leaderboard[?caseId=][&period=]` return the same body to every caller
 and never read or set the session. Every open tab polls them, so Netlify's CDN serves them
 (`controllers/http.ts` `publicJson`) and cached hits never invoke the function. That matters because the free
 plan allows 125,000 function calls a month.
@@ -22,7 +22,7 @@ plan allows 125,000 function calls a month.
 | Route | `Netlify-CDN-Cache-Control` | Tag | Purged by |
 |---|---|---|---|
 | `/api/event` | `public, durable, max-age=10, stale-while-revalidate=20` while the event runs or starts or ends within 15 minutes; otherwise `max-age=300, stale-while-revalidate=600` (#242, `eventCacheWindow`) | `event` | `PUT /api/admin/event` |
-| `/api/leaderboard` | `public, durable, max-age=10, stale-while-revalidate=20` | `leaderboard` | `PUT /api/admin/event` (freeze), `PUT /api/me/board` (a player opts in or out) |
+| `/api/leaderboard` (every `caseId` and `period` copy) | `public, durable, max-age=10, stale-while-revalidate=20` | `leaderboard` | `PUT /api/admin/event` (freeze), `PUT /api/me/board` (a player opts in or out) |
 | `/api/today` | `max-age` and `stale-while-revalidate` up to 60 s each, capped at the seconds left until midnight in the schedule's time zone | `today` | `PUT /api/admin/schedule` |
 | `/api/cases`, `/api/cases/:caseId/content` (#243) | `public, durable, max-age=3600, stale-while-revalidate=86400` | `catalog`, `case:<caseId>` | publish, rollback, approve, delete, restore (below) |
 | `/api/classboard/:boardToken` (#181) | `public, durable, max-age=10, stale-while-revalidate=20` | `class:<classId>` | every class edit: `PATCH`, archive, restore, join-code and board-token rotation, an active join, approve, remove, leave. Solves don't purge it. |
@@ -163,7 +163,7 @@ progress view's `run` (`{classId, className, eventKey}`, null for the own run) s
 | POST | `/api/me/password` | cookie | `{currentPassword, newPassword}` | `{account, recoveryCode?}` + fresh cookie (other sessions end; `recoveryCode` when the change cleared `mustChangePassword`, #254) |
 | POST | `/api/me/recovery-code` | cookie | `{currentPassword}` | `{recoveryCode}` (replaces the old code; 400 `bad-credentials`; wrong passwords count against the username's sign-in limit) |
 | GET | `/api/event` | none | | `{event, serverTime}` |
-| GET | `/api/leaderboard?caseId=` | none | | `{caseId, frozen, frozenAt, generatedAt, entries}` (overall without caseId). Lists only approved, non-guest players who opted in and solved a stage. Built from the `globalboard:` markers and those players' `score:` summaries, never from every account or progress record. The summaries keep each solve's time, so the frozen board needs no progress record either. |
+| GET | `/api/leaderboard?caseId=&period=` | none | | `{caseId, period, periodStart, frozen, frozenAt, generatedAt, entries}` (overall without caseId). `period` (#239) is `all` (default, also when omitted), `week` (from Monday 00:00) or `month` (from the 1st, 00:00), both in the schedule's time zone; `periodStart` is that instant (null for all time); anything else is a 400. A period board counts only the solves and completions timed from `periodStart`, from the same summaries, so it costs no extra record read per player. The client always sends `caseId` before `period` and omits `period=all`, so every viewer shares one CDN copy per board. Search and "Jump to me" (±5 rows) are cut from this list in the browser: no personalised call. Lists only approved, non-guest players who opted in and solved a stage (in the period). Built from the `globalboard:` markers and those players' `score:` summaries, never from every account or progress record. The summaries keep each solve's time, so the frozen board needs no progress record either. |
 
 ### DB-stored case content (#64)
 

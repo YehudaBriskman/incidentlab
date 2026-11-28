@@ -33,7 +33,7 @@ const setup = (now = () => new Date("2026-11-26T12:00:00Z")) => {
   return { call };
 };
 
-for (const [path, tag] of [["/event", "event"], ["/leaderboard", "leaderboard"], ["/leaderboard?caseId=alpha", "leaderboard"], ["/today", "today"]] as const) {
+for (const [path, tag] of [["/event", "event"], ["/leaderboard", "leaderboard"], ["/leaderboard?caseId=alpha", "leaderboard"], ["/leaderboard?period=week", "leaderboard"], ["/leaderboard?caseId=alpha&period=month", "leaderboard"], ["/today", "today"]] as const) {
   test(`GET /api${path} is CDN-cacheable, keyed on the URL only, and tagged "${tag}"`, async () => {
     const { call } = setup();
     const res = await call(path, { cookie: "il_session=someone-elses-session" });
