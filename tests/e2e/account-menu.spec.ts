@@ -345,8 +345,9 @@ test("player routes: one visible h1 each and a title of their own; no back link 
     await page.waitForLoadState("networkidle");
     await expect(page.locator("#app a.back-link[href='#/']"), `${path}: no back link to home`).toHaveCount(0);
   }
+  // The case page's way back to the catalog is the breadcrumb (#266 replaced the header's back link with the status line).
   await page.goto(`/#/case/${CASE_ID}`);
-  await expect(page.locator("#app a.back-link")).toHaveAttribute("href", "#/cases");
+  await expect(page.locator("nav.crumbs a.crumb-link[href='#/cases']")).toBeVisible();
 });
 
 test("owner routes: one visible h1 each; the console's title names its section", async ({ page }) => {
