@@ -21,11 +21,12 @@ export type Who = "visitor" | "guest" | "player" | "admin";
 // The class pages (#182): `:class` and `:board` become the id and board token of a class the signed-in player (or
 // the site admin) creates before the scan.
 export const PAGES: Record<Who, readonly string[]> = {
-  visitor: ["/#/", "/#/cases", "/#/login", "/#/signup", "/#/leaderboard", `/#/case/${CASE}`, `/#/case/${CASE}/explorer`, "/#/classes", "/#/join/ABCDE-FGHJK"],
+  visitor: ["/#/", "/#/home", "/#/cases", "/#/login", "/#/signup", "/#/leaderboard", `/#/case/${CASE}`, `/#/case/${CASE}/explorer`, "/#/classes", "/#/join/ABCDE-FGHJK"],
   // a guest (#176) sees the guest banner on every page, and the account menu says "Guest"
-  guest: ["/#/", `/#/case/${CASE}`, `/#/case/${CASE}/toolbox`, "/#/me", "/#/classes"],
+  guest: ["/#/", "/#/home", `/#/case/${CASE}`, `/#/case/${CASE}/toolbox`, "/#/me", "/#/classes"],
   player: [
     "/#/",
+    "/#/home",
     `/#/case/${CASE}`,
     `/#/case/${CASE}/toolbox`,
     `/#/case/${CASE}/explorer`,

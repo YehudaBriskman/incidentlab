@@ -63,7 +63,8 @@ test("player walkthrough: sign up to first solved stage, then admin sign-in", as
 
   await test.step("no approval wait: saving the code leads home, to today's incident", async () => {
     await ui.codeSaved(page).click();
-    await page.goto("/#/");
+    await expect(page).toHaveURL(/#\/home$/); // the dashboard (#279)
+    await page.goto("/#/home");
     await expect(ui.todayCard(page)).toBeVisible();
     await expect(ui.todayCard(page)).toContainText(/ghost in the network/i);
   });

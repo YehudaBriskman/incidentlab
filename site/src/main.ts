@@ -10,6 +10,7 @@ import { TO } from "./i18n/strings-onboard";
 import { TE } from "./i18n/strings-errors";
 import { claimReload, classifyLoadError, clearReloadGuard, isChunkLoadError } from "./lib/load-recovery";
 import { homeView } from "./views/home";
+import { landingView } from "./views/landing";
 import { playNow } from "./lib/playNow";
 import { renderLeaderboard, stopLeaderboard } from "./views/leaderboard";
 import { applyPendingRestore, labelStatic } from "./shell/lang";
@@ -269,8 +270,13 @@ function route(): void {
   }
 
   try {
-    // #221: Home is the dashboard (continue, today, classes, streak, a few recommended cases); Cases is the catalog.
+    // #279: #/ is the landing for everyone; Home (#/home) is the dashboard (continue, today, classes, streak, a few
+    // recommended cases); Cases is the catalog (#221).
     if (parts.length === 0) {
+      mount(landingView());
+      return;
+    }
+    if (parts[0] === "home" && parts.length === 1) {
       mount(homeView("home"));
       return;
     }
@@ -283,12 +289,12 @@ function route(): void {
       document.title = `${signUp ? TA().signUpBtn : TA().signIn} · IncidentLab`;
       const code = query.get("code")?.trim();
       // Both routes run the account gate: signed out -> the form (a `?code=` class link prefills the class
-      // code); signed in -> the pending / rejected / password screens, or home once approved. The
+      // code); signed in -> the pending / rejected / password screens, or the dashboard (#/home) once approved. The
       // instructor's session goes to the admin panel instead of the "sign in as a player" card.
       lazyView(() =>
         loadAuthView().then((auth) =>
           legacy((root) =>
-            auth.withApprovedAccount(root, "IncidentLab", () => void (window.location.hash = "#/"), {
+            auth.withApprovedAccount(root, "IncidentLab", () => void (window.location.hash = "#/home"), {
               onAdmin: () => void (window.location.hash = "#/admin"),
               signedOutMode: signUp ? "sign-up" : "sign-in",
               inviteCode: code !== undefined && code.length > 0 ? code.slice(0, 40) : undefined,
@@ -311,7 +317,7 @@ function route(): void {
       loadingView();
       const token = routeToken;
       void playNow({ replace: true }).then((ok) => {
-        if (!ok && token === routeToken) window.location.replace("#/");
+        if (!ok && token === routeToken) window.location.replace("#/home");
       });
       return;
     }

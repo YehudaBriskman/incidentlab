@@ -11,9 +11,10 @@
   if (/^case\/[^/]+\/(toolbox|explorer)\/?$/.test(path) || /^settings\/(account|security|privacy|display)\/?$/.test(path)) {
     root.setAttribute("data-aside-page", "");
   }
-  // The static first paint in index.html (#225): its language before the app boots (same rule as getLang() in
-  // src/i18n/i18n.ts), and the static hero only where the app will draw the same hero (home, signed out, the same
-  // hint as likelySignedIn() in src/lib/session.ts). Everywhere else the plain loading card shows instead.
+  // The static first paint in index.html (#225, #279): its language before the app boots (same rule as getLang() in
+  // src/i18n/i18n.ts), and the landing's hero only on the landing (#/), for everyone. A likely signed-in visitor
+  // (the same hint as likelySignedIn() in src/lib/session.ts) gets the dashboard call to action (html[data-signed]).
+  // Every other route shows the plain loading card instead.
   var lang = null;
   var signedIn = false;
   try {
@@ -25,7 +26,8 @@
   if (lang !== "he" && lang !== "en") lang = (navigator.language || "").toLowerCase().indexOf("he") === 0 ? "he" : "en";
   root.lang = lang;
   root.dir = lang === "he" ? "rtl" : "ltr";
-  if (path !== "" || signedIn) root.setAttribute("data-boot", "app");
+  if (path !== "") root.setAttribute("data-boot", "app");
+  if (signedIn) root.setAttribute("data-signed", "");
   var raw = null;
   try {
     raw = window.localStorage.getItem("il.settings");

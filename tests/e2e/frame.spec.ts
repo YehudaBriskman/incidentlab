@@ -41,7 +41,7 @@ async function playerOnStage2(page: Page, request: APIRequestContext): Promise<s
 
 /** First load of the page (after any sign-in, so the app reads the session) with default settings. */
 async function freshSettings(page: Page, lang: "en" | "he" = "en"): Promise<void> {
-  await page.goto("/#/");
+  await page.goto("/#/home");
   await page.evaluate((l) => {
     localStorage.removeItem("il.settings");
     localStorage.setItem("il.lang", l);

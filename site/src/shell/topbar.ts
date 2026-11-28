@@ -5,6 +5,7 @@ import { T } from "../i18n/strings-player";
 import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { TS } from "../i18n/strings-shell";
+import { TL } from "../i18n/strings-landing";
 import { TC } from "../i18n/strings-classes";
 import { TSe, settingsSectionLabel } from "../i18n/strings-settings";
 import { isSettingsSection, settingsHref } from "../lib/settings-route";
@@ -36,7 +37,7 @@ export function setPageCrumb(text: string | null): void {
 }
 
 function crumbsFor(parts: readonly string[]): Crumb[] {
-  const homeCrumb: Crumb = { label: TS().navHome, href: "#/" };
+  const homeCrumb: Crumb = { label: TS().navHome, href: "#/home" };
   const key = currentNavKey(parts);
   const [section, id, sub] = parts;
   if (section === "case" && id !== undefined) {
@@ -52,6 +53,7 @@ function crumbsFor(parts: readonly string[]): Crumb[] {
     return [homeCrumb, { label: TSe().title, href: settingsHref("account") }, { label: settingsSectionLabel(id) }];
   }
   if (key === "home") return [{ label: TS().navHome }];
+  if (parts.length === 0) return [{ label: TL().crumb }]; // the landing (#279)
   if (key === "classes") {
     // #182: Classes > the class (its name once loaded) > Manage > the section on screen.
     const classesCrumb: Crumb = { label: TC().navClasses, href: "#/classes" };

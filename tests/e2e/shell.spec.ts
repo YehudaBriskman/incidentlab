@@ -74,6 +74,10 @@ test("the language switch goes to Hebrew RTL and back, and survives a reload", a
 
 test("navigation marks the current page with aria-current", async ({ page }) => {
   const nav = ui.nav(page);
+  // the landing (#/) is no nav item (#279); Home is the dashboard
+  await expect(nav.locator("[aria-current]")).toHaveCount(0);
+  await nav.getByRole("link", { name: "Home", exact: true }).click();
+  await expect(page).toHaveURL(/#\/home$/);
   await expect(nav.getByRole("link", { name: "Home", exact: true })).toHaveAttribute("aria-current", "page");
   await nav.getByRole("link", { name: "Cases" }).click();
   await expect(page).toHaveURL(/#\/cases$/);

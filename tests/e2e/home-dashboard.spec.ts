@@ -30,17 +30,19 @@ async function signedInPlayer(page: Page, request: APIRequestContext): Promise<v
   expect((await page.request.post("/api/auth/login", { data: { username, password: PASSWORD } })).status()).toBe(200);
 }
 
-async function englishHome(page: Page, hash = "#/"): Promise<void> {
+async function englishHome(page: Page, hash = "#/home"): Promise<void> {
   await page.addInitScript(() => localStorage.setItem("il.lang", "en"));
   await page.goto(`/${hash}`);
   await expect(ui.rows(page).first()).toBeVisible();
 }
 
-test("signed out: intro with guest and sign-up actions, the Start-here card, today's card and the table", async ({ page, request }) => {
+test("signed out: the dashboard at #/home has its h1, the Start-here card, today's card and the table", async ({ page, request }) => {
   await scheduleToday(request, CASE_ID);
   await englishHome(page);
   await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
-  await expect(page.getByRole("region", { name: "About IncidentLab" }).getByRole("link", { name: "Create account" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Home");
+  // the value statement and the sign-up actions live on the landing (#/, #279), not on the dashboard
+  await expect(page.locator(".lp-hero")).toHaveCount(0);
   // first-timers get the Start-here card in the Continue slot (#224)
   await expect(page.getByRole("region", { name: "Start here" })).toBeVisible();
   await expect(ui.continueCard(page)).toHaveCount(0);
@@ -134,14 +136,14 @@ test("Enter on a row's case link opens the case, and the visit shows under Recen
   await expect(page).toHaveURL(new RegExp(`#/case/${CASE_ID}$`));
   await expect(page.locator(".view h1, h1").first()).toBeVisible();
   // Opening today's case starts it: the Today card resumes it, so Continue (which would only repeat it) is gone.
-  await page.goto("/#/");
+  await page.goto("/#/home");
   await expect(ui.todayCard(page).getByRole("link", { name: /Ghost in the Network/ })).toHaveCount(1);
   await expect(ui.continueCard(page)).toHaveCount(0);
 
   // The toolbox is a place of its own: it shows under "Recently visited".
   await page.goto(`/#/case/${CASE_ID}/toolbox`);
   await expect(page.locator(".tb-section").first()).toBeVisible();
-  await page.goto("/#/");
+  await page.goto("/#/home");
   await expect(ui.continueCard(page).getByRole("list", { name: "Recently visited" }).getByRole("link", { name: /Toolbox/ })).toHaveAttribute("href", `#/case/${CASE_ID}/toolbox`);
 
   // A plain click anywhere on another row opens that case too
@@ -172,7 +174,7 @@ test("Hebrew at 390px: right-to-left, cards stacked, no horizontal overflow", as
   await signedInPlayer(page, request);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.addInitScript(() => localStorage.setItem("il.lang", "he"));
-  await page.goto("/#/");
+  await page.goto("/#/home");
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
   await expect(ui.rows(page).first()).toBeVisible();
   const today = await page.getByRole("region", { name: "התיק של היום" }).boundingBox();
