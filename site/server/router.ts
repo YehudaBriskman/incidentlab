@@ -45,6 +45,13 @@ import { AuthorAuthService } from "./services/AuthorAuthService.ts";
 import { CaseAuthoringService } from "./services/CaseAuthoringService.ts";
 import { CaseUploadService } from "./services/CaseUploadService.ts";
 import type { CachePurger } from "./services/CachePurger.ts";
+import { AuthorAccessController } from "./controllers/AuthorAccessController.ts";
+import { AuthorRequestRepository } from "./repositories/author-request-repository.ts";
+import { UsageCacheRepository } from "./repositories/config-repositories.ts";
+import { AuthorAccessService } from "./services/AuthorAccessService.ts";
+import { OverviewService } from "./services/OverviewService.ts";
+import { UsageService } from "./services/UsageService.ts";
+import type { UsageSource } from "./services/UsageService.ts";
 
 export type AppDeps = {
   readonly store: KvStore;
@@ -60,6 +67,8 @@ export type AppDeps = {
   readonly now?: () => Date;
   /** CDN purge after instructor writes (api.mts passes Netlify's); tests and the local server use the no-op. */
   readonly cachePurger?: CachePurger;
+  /** the Netlify usage API behind the owner overview's budget tile (#235); without it the tile says "not configured" */
+  readonly usage?: UsageSource;
 };
 
 export type App = { handle(req: Request, ip: string): Promise<Response> };
@@ -94,7 +103,7 @@ export const createApp = (deps: AppDeps): App => {
   const stats = new StatsService({ repos, secrets, privateCaseIds: () => secrets.privateCaseIds(), now, boardCache });
   const trashRepo = new TrashRepository(deps.store);
   const trash = new TrashService({ trash: trashRepo, repos, cases: caseRepo, scores, board, now, purger: deps.cachePurger });
-  const accounts = new AccountAdminService({ repos, firstBlood, game, stats, trash, trashRepo, scores, now, onBoardChange: clearBoard });
+  const accounts = new AccountAdminService({ repos, firstBlood, game, stats, trash, trashRepo, scores, now, onBoardChange: clearBoard, purger: deps.cachePurger });
   const audit = new AuditService({ repository: new AuditRepository(deps.store), repos, now });
 
   // Static (test-fixture) cases: only the admin may upload their ids, and their answer key is the drift
@@ -131,7 +140,13 @@ export const createApp = (deps: AppDeps): App => {
   const guestController = new GuestController({ guests: new GuestService({ repos, auth, limiter, now }) });
   const contentController = new ContentController({ cases, access });
   const adminGuard = new AdminAuthService({ adminKey: deps.adminKey, auth });
-  const adminController = new AdminController({ accounts, schedule, stats, events, audit, trash, guard: adminGuard, now, resets });
+  const authorAccess = new AuthorAccessService({ requests: new AuthorRequestRepository(deps.store), accounts: repos.accounts, limiter, now });
+  const overview = new OverviewService({
+    repos, authoring, resets, authorRequests: authorAccess, now,
+    usage: new UsageService({ cache: new UsageCacheRepository(deps.store), source: deps.usage, now }),
+  });
+  const adminController = new AdminController({ accounts, schedule, stats, events, audit, trash, guard: adminGuard, now, resets, overview });
+  const authorAccessController = new AuthorAccessController({ auth, access: authorAccess, accounts, guard: adminGuard, audit });
   const authorController = new AuthorController({
     guard: new AuthorAuthService({ admin: adminGuard, auth }), uploads: caseUploads, authoring, audit,
     onPublishedChange: () => secrets.refresh(true), // this instance plays the new version at once; others within SECRETS_REFRESH_MS
@@ -161,6 +176,9 @@ export const createApp = (deps: AppDeps): App => {
       "/api/me/recovery-code": { POST: () => authController.regenerateRecoveryCode(req) },
       "/api/me/cases": { GET: () => contentController.mine(req) },
       "/api/admin/reviews": { GET: () => authorController.reviews(req) },
+      "/api/admin/overview": { GET: () => adminController.overview(req) },
+      "/api/admin/author-requests": { GET: () => authorAccessController.list(req) },
+      "/api/me/author-request": { GET: () => authorAccessController.mine(req), POST: () => authorAccessController.create(req) },
       "/api/today": { GET: () => authController.today() },
       "/api/event": { GET: () => authController.event() },
       "/api/leaderboard": { GET: () => authController.leaderboard(req) },
@@ -257,12 +275,23 @@ export const createApp = (deps: AppDeps): App => {
     if (area === "admin" && first === "cases" && second !== undefined && segments.length === 5 && segments[4] === "review") {
       return { POST: () => authorController.review(req, second) };
     }
+    if (area === "admin" && first === "cases" && second !== undefined && segments.length === 5 && segments[4] === "review-content") {
+      return { GET: () => authorController.reviewContent(req, second) };
+    }
+    if (area === "admin" && first === "author-requests" && second !== undefined && segments.length === 5) {
+      const accountId = second;
+      if (segments[4] === "approve") return { POST: () => authorAccessController.approve(req, accountId) };
+      if (segments[4] === "reject") return { POST: () => authorAccessController.reject(req, accountId) };
+      return null;
+    }
     if (area === "admin" && first === "accounts" && second !== undefined) {
       const action = segments[4];
       if (segments.length === 4) return { DELETE: () => adminController.deleteAccount(req, second) };
       if (segments.length === 5 && action === "approve") return { POST: () => adminController.approve(req, second) };
       if (segments.length === 5 && action === "reject") return { POST: () => adminController.reject(req, second) };
       if (segments.length === 5 && action === "role") return { PUT: () => adminController.setRole(req, second) };
+      if (segments.length === 5 && action === "username") return { PUT: () => adminController.rename(req, second) };
+      if (segments.length === 5 && action === "board-visibility") return { PUT: () => adminController.setBoardVisibility(req, second) };
       if (segments.length === 5 && action === "class-limit") return { PUT: () => adminController.setClassLimit(req, second) };
       if (segments.length === 5 && action === "reset-password") return { POST: () => adminController.resetPassword(req, second) };
     }

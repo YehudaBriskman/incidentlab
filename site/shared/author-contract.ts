@@ -16,6 +16,7 @@
 import { z } from "zod";
 import { CaseIdSchema } from "./contract.ts";
 import {
+  CaseContentSchema,
   CaseLangSchema,
   CasePackageManifestSchema,
   CaseReviewSchema,
@@ -231,9 +232,16 @@ export const RestoreCaseResponseSchema = z.object({ caseId: CaseIdSchema, status
 export const SubmitReviewRequestSchema = z.object({}).strict();
 export const SetCaseClassesRequestSchema = z.object({
   classIds: z.array(z.string().min(1).max(64)).max(MAX_CASE_CLASSES),
+  /**
+   * additive (#234): also add the case to each class's case list (PATCH /api/classes/:id caseIds) in the same call,
+   * for classes the caller admins. Only a live version can be listed.
+   */
+  addToClassCases: z.boolean().default(false),
 });
 export type SetCaseClassesRequest = z.infer<typeof SetCaseClassesRequestSchema>;
 export const AuthorCaseResponseSchema = z.object({ case: AuthorCaseSchema });
+/** PUT /api/author/cases/:caseId/classes: the case, and (#234) the classes whose case list now has it. */
+export const SetCaseClassesResponseSchema = AuthorCaseResponseSchema.extend({ addedToClasses: z.array(z.string()).default([]) });
 
 export const REVIEW_NOTE_MAX = 500;
 export const ReviewDecisionSchema = z.enum(["approve", "reject"]);
@@ -265,3 +273,14 @@ export const ReviewItemSchema = z.object({
 });
 export type ReviewItem = z.infer<typeof ReviewItemSchema>;
 export const ReviewsResponseSchema = z.object({ reviews: z.array(ReviewItemSchema) });
+
+// GET /api/admin/cases/:caseId/review-content?lang=en|he -> {caseId, version, lang, content}   (#235, site admin only,
+//   no-store): the public content of the version waiting for review, so the owner can judge it before approving.
+//   Public content only: hint texts, runnable commands, answers and debriefs are never in it. `lang` falls back to en.
+export const ReviewContentResponseSchema = z.object({
+  caseId: CaseIdSchema,
+  version: z.number().int().min(1),
+  lang: CaseLangSchema,
+  content: CaseContentSchema,
+});
+export type ReviewContentResponse = z.infer<typeof ReviewContentResponseSchema>;

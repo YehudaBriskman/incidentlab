@@ -1,5 +1,6 @@
 // Instructor-side account management: approve/reject/delete, password resets, progress resets, CSV export.
 import { randomBytes } from "node:crypto";
+import { RESERVED_USERNAMES, usernameKey } from "../../shared/contract.ts";
 import type { AccountRecordRole, AccountStatus, AccountView, AdminProgress } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
 import type { FirstBloodRepository } from "../repositories/config-repositories.ts";
@@ -12,6 +13,8 @@ import type { ScoreService } from "./ScoreService.ts";
 import type { StatsService } from "./StatsService.ts";
 import type { TrashService } from "./TrashService.ts";
 import type { TrashRepository } from "../repositories/trash-repository.ts";
+import { classBoardTag, noopCachePurger } from "./CachePurger.ts";
+import type { CacheTag, CachePurger } from "./CachePurger.ts";
 
 // No look-alike characters (0/O, 1/l/I) so a password read aloud or off a projector is typed right.
 const TEMP_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -48,6 +51,7 @@ export class AccountAdminService {
   private readonly scores: ScoreService | null;
   private readonly now: () => Date;
   private readonly onBoardChange: () => void;
+  private readonly purger: CachePurger;
 
   constructor(deps: {
     repos: Repositories;
@@ -61,8 +65,11 @@ export class AccountAdminService {
     now: () => Date;
     /** a ban or unban changes who is on the board: the board's shared read is dropped (#185) */
     onBoardChange?: () => void;
+    /** a rename or a board hide changes public boards: their CDN copies are purged at once (#236) */
+    purger?: CachePurger | undefined;
   }) {
     this.onBoardChange = deps.onBoardChange ?? (() => undefined);
+    this.purger = deps.purger ?? noopCachePurger;
     this.repos = deps.repos;
     this.firstBlood = deps.firstBlood;
     this.game = deps.game;
@@ -73,16 +80,74 @@ export class AccountAdminService {
     this.now = deps.now;
   }
 
-  async setStatus(accountId: string, status: Exclude<AccountStatus, "pending">): Promise<AccountView> {
+  /**
+   * Approves, bans (`rejected`) or unbans. A ban may carry the owner's reason (#236), which the player reads at sign-in;
+   * approving clears it.
+   */
+  async setStatus(accountId: string, status: Exclude<AccountStatus, "pending">, reason: string | null = null): Promise<AccountView> {
     this.assertId(accountId);
     const found = await this.repos.accounts.get(accountId);
     if (!found) throw new AppError(404, "account not found");
     // Rejecting keeps the session: the player then sees the "not approved" screen instead of a silent
     // sign-out. Every case route already refuses rejected accounts, and they can't sign in again.
-    const account = { ...found.data, status, decidedAt: this.now().toISOString() };
+    const banReason = status === "rejected" && reason !== null && reason.length > 0 ? reason : null;
+    const account = { ...found.data, status, banReason, decidedAt: this.now().toISOString() };
     if (!(await this.repos.accounts.saveIfMatch(account, found.etag))) throw new AppError(409, "concurrent update, please retry");
     this.onBoardChange();
     return toAccountView(account);
+  }
+
+  /**
+   * The owner's forced rename (#236). The new name is claimed in the `username:` index first (a conditional write, so
+   * two renames or a sign-up can't take the same name), then the account is saved with a conditional write, and only
+   * then is the old name released. If the account write loses, the new claim is released again: the index never
+   * points two names at one account for longer than the call, and never points a name at nobody.
+   */
+  async rename(accountId: string, wanted: string): Promise<{ account: AccountView; from: string }> {
+    this.assertId(accountId);
+    const found = await this.repos.accounts.get(accountId);
+    if (!found) throw new AppError(404, "account not found");
+    if (found.data.kind === "guest") throw new AppError(409, "guests have generated names; delete the guest instead", { code: "guest" });
+    const username = wanted.trim();
+    const key = usernameKey(username);
+    if (RESERVED_USERNAMES.includes(key)) throw new AppError(409, "that username is reserved", { code: "reserved" });
+    const from = found.data.username;
+    if (username === from) return { account: toAccountView(found.data), from };
+    const sameKey = key === found.data.usernameKey; // only the case or the form changed: the index entry stays
+    const newHash = sha256Hex(key);
+    if (!sameKey && !(await this.repos.usernames.claim(newHash, accountId))) {
+      throw new AppError(409, "that username is taken", { code: "username-taken" });
+    }
+    const account = { ...found.data, username, usernameKey: key };
+    if (!(await this.repos.accounts.saveIfMatch(account, found.etag))) {
+      if (!sameKey) await this.repos.usernames.release(newHash);
+      throw new AppError(409, "concurrent update, please retry");
+    }
+    if (!sameKey) await this.repos.usernames.release(sha256Hex(found.data.usernameKey));
+    this.onBoardChange();
+    await this.purgeBoards(account);
+    return { account: toAccountView(account), from };
+  }
+
+  /** Hides an account from every board, or shows it again (#236). Not a ban: the player keeps playing. */
+  async setHidden(accountId: string, hidden: boolean): Promise<{ accountId: string; hiddenFromBoards: boolean }> {
+    this.assertId(accountId);
+    const found = await this.repos.accounts.get(accountId);
+    if (!found) throw new AppError(404, "account not found");
+    if (found.data.hiddenFromBoards !== hidden) {
+      const account = { ...found.data, hiddenFromBoards: hidden };
+      if (!(await this.repos.accounts.saveIfMatch(account, found.etag))) throw new AppError(409, "concurrent update, please retry");
+      this.onBoardChange();
+      await this.purgeBoards(account);
+    }
+    return { accountId, hiddenFromBoards: hidden };
+  }
+
+  /** The public boards that may show this account: the global board and each of its classes' boards. */
+  private async purgeBoards(account: { id: string }): Promise<void> {
+    const classIds = await this.repos.classes.listMemberOfIds(account.id);
+    const tags: CacheTag[] = ["leaderboard", ...classIds.map(classBoardTag)];
+    await this.purger.purge(tags);
   }
 
   /** Grants or revokes the author role. Sessions stay valid: the role is read from the record on each request. */

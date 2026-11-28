@@ -135,7 +135,8 @@ export class ClassBoardService {
     for (const run of eventRecords) runsOf.set(run.accountId, [...(runsOf.get(run.accountId) ?? []), run]);
     const members = await mapWithConcurrency(active, async ({ accountId }): Promise<ClassBoardMember | null> => {
       const [account, score] = await Promise.all([this.repos.accounts.get(accountId), this.repos.scores.get(accountId)]);
-      if (!account || account.data.kind !== "user" || account.data.status !== "approved") return null;
+      // Hidden by the owner (#236): off every class board too, though still a member who plays.
+      if (!account || account.data.kind !== "user" || account.data.status !== "approved" || account.data.hiddenFromBoards) return null;
       return { accountId, username: account.data.username, cases: withEventRuns(score?.data.cases ?? {}, runsOf.get(accountId) ?? []) };
     });
     return members.filter((m): m is ClassBoardMember => m !== null);

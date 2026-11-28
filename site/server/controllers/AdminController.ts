@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AUDIT_ADMIN_ACTOR, AccountClassLimitRequestSchema, AdminResetRequestSchema, AdminUsersQuerySchema, CaseIdSchema, EventSchema, ScheduleSchema, SetAccountRoleRequestSchema, SettingsSchema } from "../../shared/contract.ts";
+import { AUDIT_ADMIN_ACTOR, AccountClassLimitRequestSchema, AdminBoardVisibilityRequestSchema, AdminRejectRequestSchema, AdminRenameRequestSchema, AdminResetRequestSchema, AdminUsersQuerySchema, CaseIdSchema, EventSchema, ScheduleSchema, SetAccountRoleRequestSchema, SettingsSchema } from "../../shared/contract.ts";
 import type { AuditEntry } from "../../shared/contract.ts";
 import { AppError } from "../domain/types.ts";
 import type { AccountAdminService } from "../services/AccountAdminService.ts";
@@ -10,6 +10,7 @@ import type { ScheduleService } from "../services/ScheduleService.ts";
 import type { AccountDirectory, StatsService } from "../services/StatsService.ts";
 import type { TrashService } from "../services/TrashService.ts";
 import type { PasswordResetService } from "../services/PasswordResetService.ts";
+import type { OverviewService } from "../services/OverviewService.ts";
 import { json, noContent, parseBody, sessionToken } from "./http.ts";
 
 const EmptyBodySchema = z.object({}).strict();
@@ -26,6 +27,8 @@ export type AdminControllerDeps = {
   readonly now: () => Date;
   /** the teacher-vouched reset queue (#254); without it its routes are a 404 */
   readonly resets?: PasswordResetService;
+  /** the owner overview (#235); without it the route is a 404 */
+  readonly overview?: OverviewService;
 };
 
 export class AdminController {
@@ -81,6 +84,13 @@ export class AdminController {
     return json(200, await this.deps.stats.userPage(await this.directoryCache.result, parsed.data));
   }
 
+  /** GET /api/admin/overview (#235): on demand, no-store; see OverviewService for what it reads. */
+  async overview(req: Request): Promise<Response> {
+    await this.assertAdmin(req);
+    if (this.deps.overview === undefined) throw new AppError(404, "not found");
+    return json(200, await this.deps.overview.overview());
+  }
+
   async approve(req: Request, accountId: string): Promise<Response> {
     await parseBody(req, EmptyBodySchema);
     const account = await this.mutation(req, { action: "account.approve", target: accountId }, () => this.deps.accounts.setStatus(accountId, "approved"));
@@ -101,10 +111,32 @@ export class AdminController {
     return json(200, result);
   }
 
+  /** A ban, optionally with the reason the player reads at sign-in (#236); the audit keeps the reason too. */
   async reject(req: Request, accountId: string): Promise<Response> {
-    await parseBody(req, EmptyBodySchema);
-    const account = await this.mutation(req, { action: "account.reject", target: accountId }, () => this.deps.accounts.setStatus(accountId, "rejected"));
+    const { reason } = await parseBody(req, AdminRejectRequestSchema);
+    const text = reason === undefined || reason === "" ? null : reason;
+    const account = await this.mutation(req, { action: "account.reject", target: accountId, detail: text === null ? null : `reason: ${text}` }, () =>
+      this.deps.accounts.setStatus(accountId, "rejected", text),
+    );
     return json(200, { account });
+  }
+
+  /** PUT /api/admin/accounts/:id/username (#236): a forced rename, audited with the old and the new name. */
+  async rename(req: Request, accountId: string): Promise<Response> {
+    const { username } = await parseBody(req, AdminRenameRequestSchema);
+    const via = await this.assertAdmin(req);
+    const { account, from } = await this.deps.accounts.rename(accountId, username);
+    this.accountsCache = null;
+    this.directoryCache = null;
+    if (from !== account.username) await this.deps.audit.record({ action: "account.rename", target: accountId, detail: `${from} -> ${account.username}`, via, actor: AUDIT_ADMIN_ACTOR });
+    return json(200, { account });
+  }
+
+  /** PUT /api/admin/accounts/:id/board-visibility (#236): hide from (or show again on) every board. */
+  async setBoardVisibility(req: Request, accountId: string): Promise<Response> {
+    const { hidden } = await parseBody(req, AdminBoardVisibilityRequestSchema);
+    const result = await this.mutation(req, { action: hidden ? "account.board-hide" : "account.board-show", target: accountId }, () => this.deps.accounts.setHidden(accountId, hidden));
+    return json(200, result);
   }
 
   async approveAll(req: Request): Promise<Response> {

@@ -53,6 +53,8 @@ export const AccountViewSchema = z.object({
   /** additive (#172): user or guest, and whether the player shows on the global leaderboard */
   kind: AccountKindSchema.default("user"),
   showOnGlobalBoard: z.boolean().default(false),
+  /** additive (#236): the owner's reason for a ban, shown to the banned player; null unless the account is banned */
+  banReason: z.string().nullable().default(null),
 });
 export type AccountView = z.infer<typeof AccountViewSchema>;
 
@@ -206,6 +208,10 @@ export const UserStatsSchema = z.object({
   /** additive (#185): a full account or a guest, and the account's own class limit (null = the site default) */
   kind: AccountKindSchema.default("user"),
   classLimit: z.number().int().min(0).nullable().default(null),
+  /** additive (#236): the owner hid the account from every board (global, per case, class); not a ban */
+  hiddenFromBoards: z.boolean().default(false),
+  /** additive (#236): the owner's ban reason (null when none was given or the account isn't banned) */
+  banReason: z.string().nullable().default(null),
   commandsRevealed: z.number().int().min(0),
   achievements: z.array(z.object({ id: z.string(), earnedAt: z.string() })),
   /** `activeToday`: a stage was solved today (schedule time zone), so the streak is safe (#212); older servers omit it */
@@ -352,6 +358,8 @@ export const ErrorBodySchema = z.object({
    * acted on old state redraws from the server's instead of guessing.
    */
   progress: ProgressViewSchema.optional(),
+  /** Additive (#236): a 403 `rejected` at sign-in carries the owner's ban reason, when one was given. */
+  banReason: z.string().optional(),
 });
 
 // POST /api/auth/register  -> 201 {account, recoveryCode, class?} + cookie (approved at once since #173; the plain recovery
@@ -607,6 +615,75 @@ export const AdminStatsResponseSchema = z.object({ generatedAt: z.string(), case
 export const ResetPasswordResponseSchema = z.object({ temporaryPassword: z.string() });
 export const ApproveAllResponseSchema = z.object({ approved: z.number().int().min(0) });
 export const SettingsResponseSchema = z.object({ settings: SettingsSchema });
+// ---- moderation (#236) --------------------------------------------------------
+// POST /api/admin/accounts/:id/reject {reason?}          -> {account}   (ban; the reason is shown at sign-in)
+// PUT  /api/admin/accounts/:id/username {username}       -> {account}   (forced rename; 409 "username-taken")
+// PUT  /api/admin/accounts/:id/board-visibility {hidden} -> {accountId, hiddenFromBoards}
+export const BAN_REASON_MAX = 200;
+export const AdminRejectRequestSchema = z.object({ reason: z.string().trim().max(BAN_REASON_MAX).optional() }).strict();
+export const AdminRenameRequestSchema = z.object({ username: UsernameSchema }).strict();
+export const AdminBoardVisibilityRequestSchema = z.object({ hidden: z.boolean() }).strict();
+export const AdminBoardVisibilityResponseSchema = z.object({ accountId: z.string(), hiddenFromBoards: z.boolean() });
+
+// ---- author access requests (#234) ------------------------------------------------
+// POST /api/me/author-request {note?}  -> 201 {request}   (approved full accounts that aren't authors; one open
+//                                          request per account, 3 tries a day: 429)
+// GET  /api/me/author-request          -> {request | null}
+// GET  /api/admin/author-requests      -> {requests}       (oldest first)
+// POST /api/admin/author-requests/:accountId/approve {} -> {account}  (grants the author role)
+// POST /api/admin/author-requests/:accountId/reject {}  -> 204
+export const AUTHOR_REQUEST_NOTE_MAX = 300;
+export const AuthorAccessRequestCreateSchema = z.object({ note: z.string().trim().max(AUTHOR_REQUEST_NOTE_MAX).optional() }).strict();
+export const AuthorAccessRequestSchema = z.object({
+  accountId: z.string(),
+  username: z.string(),
+  note: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type AuthorAccessRequest = z.infer<typeof AuthorAccessRequestSchema>;
+export const AuthorAccessRequestResponseSchema = z.object({ request: AuthorAccessRequestSchema.nullable() });
+export const AuthorAccessRequestsResponseSchema = z.object({ requests: z.array(AuthorAccessRequestSchema) });
+
+// ---- owner overview (#235) --------------------------------------------------------
+// GET /api/admin/overview -> AdminOverview  (admin only, no-store; account and class records, the review and request
+//   queues, and the function-call usage cached for an hour in Blobs. Never reads progress.)
+export const FUNCTION_CALL_LIMIT = 125_000;
+export const OVERVIEW_DAYS = 30;
+const OverviewCount = z.number().int().min(0);
+export const UsageStatusSchema = z.enum(["ok", "not-configured", "not-reported", "error"]);
+export type UsageStatus = z.infer<typeof UsageStatusSchema>;
+export const OverviewUsageSchema = z.object({
+  status: UsageStatusSchema,
+  limit: OverviewCount,
+  /** function calls this billing period; null unless status is "ok" */
+  functionCalls: OverviewCount.nullable(),
+  bandwidthBytes: OverviewCount.nullable(),
+  bandwidthLimitBytes: OverviewCount.nullable(),
+  periodStart: z.string().nullable(),
+  periodEnd: z.string().nullable(),
+  /** when the server last asked Netlify (null when not configured) */
+  fetchedAt: z.string().nullable(),
+  error: z.string().nullable(),
+});
+export type OverviewUsage = z.infer<typeof OverviewUsageSchema>;
+export const AdminOverviewSchema = z.object({
+  generatedAt: z.string(),
+  /** the schedule's time zone: the sign-up days are calendar days there */
+  timezone: z.string(),
+  /** one row per day, oldest first; the last one is today */
+  signups: z.array(z.object({ date: z.string(), users: OverviewCount, guests: OverviewCount })),
+  accounts: z.object({ users: OverviewCount, guests: OverviewCount, authors: OverviewCount, banned: OverviewCount, hidden: OverviewCount }),
+  /**
+   * accounts (users and guests) last seen within 1, 7 and 30 days. lastSeenAt keeps only the latest visit, so there
+   * is no honest "previous 7 days" to compare with; the 30-day count is the context.
+   */
+  active: z.object({ d1: OverviewCount, d7: OverviewCount, d30: OverviewCount }),
+  classes: z.object({ active: OverviewCount, archived: OverviewCount, liveEvents: OverviewCount }),
+  queues: z.object({ reviews: OverviewCount, resetRequests: OverviewCount, authorRequests: OverviewCount, pendingSignups: OverviewCount }),
+  usage: OverviewUsageSchema,
+});
+export type AdminOverview = z.infer<typeof AdminOverviewSchema>;
+
 export const AuditResponseSchema = z.object({
   entries: z.array(AuditEntrySchema),
   /** additive (#185): display names for the account and class ids among the entries' actors and targets */

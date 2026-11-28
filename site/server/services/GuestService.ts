@@ -66,6 +66,8 @@ export class GuestService {
       showOnGlobalBoard: false,
       recoveryCodeHash: null,
       classLimit: null,
+      hiddenFromBoards: false,
+      banReason: null,
     };
     if (!(await this.repos.accounts.saveIfMatch(account, null))) throw new AppError(409, "id collision, retry");
     await this.limiter.hit(GUEST_LIMIT, ip);

@@ -3,6 +3,7 @@
 //   config:event                      LiveEvent
 //   firstblood:<caseId>:<questionId>  { accountId, at }   (claimed with onlyIfNew)
 //   audit:<isoTimestamp>:<random>     AuditEntry
+//   config:usage                      CachedUsageRecord (#235: the Netlify usage answer, kept for an hour)
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { AuditEntrySchema, EventSchema, SettingsSchema } from "../../shared/contract.ts";
@@ -88,5 +89,32 @@ export class AuditRepository {
     const keys = (await this.kv.listKeys("audit:")).sort().slice(-Math.min(limit, MAX_AUDIT_READ)).reverse();
     const rows = await mapWithConcurrency(keys, async (key) => parse(AuditEntrySchema, (await this.kv.get(key))?.data));
     return rows.filter((r): r is AuditEntry => r !== null);
+  }
+}
+
+/** The last Netlify usage answer (#235), so the owner overview asks the Netlify API at most once an hour. */
+export const CachedUsageRecordSchema = z.object({
+  fetchedAt: z.string(),
+  status: z.enum(["ok", "not-reported", "error"]),
+  functionCalls: z.number().int().min(0).nullable(),
+  limit: z.number().int().min(0),
+  bandwidthBytes: z.number().int().min(0).nullable(),
+  bandwidthLimitBytes: z.number().int().min(0).nullable(),
+  periodStart: z.string().nullable(),
+  periodEnd: z.string().nullable(),
+  error: z.string().nullable(),
+});
+export type CachedUsageRecord = z.infer<typeof CachedUsageRecordSchema>;
+
+export class UsageCacheRepository {
+  private readonly kv: KvStore;
+  constructor(kv: KvStore) {
+    this.kv = kv;
+  }
+  async get(): Promise<CachedUsageRecord | null> {
+    return parse(CachedUsageRecordSchema, (await this.kv.get("config:usage"))?.data);
+  }
+  async save(record: CachedUsageRecord): Promise<void> {
+    await this.kv.set("config:usage", record);
   }
 }

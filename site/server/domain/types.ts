@@ -38,6 +38,11 @@ export const AccountRecordSchema = z.object({
   recoveryCodeHash: z.string().nullable().default(null),
   /** how many classes this account may own (#179); null means the site default */
   classLimit: z.number().int().min(0).nullable().default(null),
+  // Moderation (#236), additive: accounts saved before it are on the boards and have no ban reason.
+  /** the owner hid the account from every board (global, per case and class boards); it still plays */
+  hiddenFromBoards: z.boolean().default(false),
+  /** the owner's reason for a ban (status "rejected"), shown to the player at sign-in; cleared on unban */
+  banReason: z.string().nullable().default(null),
 });
 export type AccountRecord = z.infer<typeof AccountRecordSchema>;
 
@@ -90,10 +95,12 @@ export class AppError extends Error {
   readonly details: readonly string[] | undefined;
   /** the player's current progress, sent with a 409 "stale" so the client redraws from it (#202, #203) */
   readonly progress: ProgressView | undefined;
+  /** the owner's ban reason, sent with a 403 "rejected" at sign-in (#236) */
+  readonly banReason: string | undefined;
   constructor(
     status: number,
     message: string,
-    options: { code?: string; retryAfterSeconds?: number; details?: readonly string[]; progress?: ProgressView } = {},
+    options: { code?: string; retryAfterSeconds?: number; details?: readonly string[]; progress?: ProgressView; banReason?: string } = {},
   ) {
     super(message);
     this.status = status;
@@ -101,5 +108,6 @@ export class AppError extends Error {
     this.retryAfterSeconds = options.retryAfterSeconds;
     this.details = options.details;
     this.progress = options.progress;
+    this.banReason = options.banReason;
   }
 }

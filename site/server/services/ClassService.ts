@@ -191,6 +191,15 @@ export class ClassService {
     }));
   }
 
+  /**
+   * Puts one case on the class's case list (its board), as a class admin (#234: the author assigns a private case to
+   * their class in one step). Idempotent. The same checks as an edit: the case must be assignable to this class.
+   */
+  async addCase(actor: ClassActor, classId: string, caseId: string): Promise<void> {
+    await this.assertAssignable(classId, [caseId]);
+    await this.mutate(actor, classId, "admin", (record) => (record.caseIds.includes(caseId) ? record : { ...record, caseIds: [...record.caseIds, caseId] }));
+  }
+
   /** Archiving is the soft delete: every record stays, joins and edits stop, and the owner can restore it any time. */
   archive(actor: ClassActor, classId: string): Promise<ClassDetail> {
     return this.mutate(actor, classId, "owner", (record) => ({ ...record, status: "archived" }), { allowArchived: true });
