@@ -21,7 +21,7 @@ export type Who = "visitor" | "guest" | "player" | "admin";
 // The class pages (#182): `:class` and `:board` become the id and board token of a class the signed-in player (or
 // the site admin) creates before the scan.
 export const PAGES: Record<Who, readonly string[]> = {
-  visitor: ["/#/", "/#/login", "/#/signup", "/#/leaderboard", `/#/case/${CASE}`, `/#/case/${CASE}/explorer`, "/#/classes", "/#/join/ABCDE-FGHJK"],
+  visitor: ["/#/", "/#/cases", "/#/login", "/#/signup", "/#/leaderboard", `/#/case/${CASE}`, `/#/case/${CASE}/explorer`, "/#/classes", "/#/join/ABCDE-FGHJK"],
   // a guest (#176) sees the guest banner on every page, and the account menu says "Guest"
   guest: ["/#/", `/#/case/${CASE}`, `/#/case/${CASE}/toolbox`, "/#/me", "/#/classes"],
   player: [
@@ -41,7 +41,7 @@ export const PAGES: Record<Who, readonly string[]> = {
   admin: [
     "/#/admin",
     "/#/author",
-    "/#/author/reviews",
+    "/#/admin/reviews",
     "/#/admin?tab=classes",
     "/#/admin?tab=live",
     "/#/admin?tab=stats",
@@ -83,14 +83,19 @@ export async function signIn(page: Page, who: Who): Promise<void> {
   expect((await page.request.post("/api/auth/login", { data: { username, password } })).ok()).toBe(true);
 }
 
+/** Switches to Hebrew through the account menu (#220: the language radios live there), then closes it. */
 export async function toHebrew(page: Page): Promise<void> {
-  const he = page.locator("button.lang-btn[lang=he]:visible").first();
-  if ((await he.count()) > 0) {
-    if ((await he.getAttribute("aria-pressed")) !== "true") await he.click();
-  } else {
-    // a phone keeps the language buttons in the nav drawer: choose Hebrew the way the buttons store it
-    await page.evaluate(() => window.localStorage.setItem("il.lang", "he"));
-    await page.reload();
+  if ((await page.locator("html").getAttribute("lang")) !== "he") {
+    const menu = page.locator(".account-btn:visible").first();
+    if ((await menu.count()) > 0) {
+      await menu.click();
+      await page.locator(".account-panel").getByRole("radio", { name: "עברית" }).check();
+      await page.keyboard.press("Escape");
+    } else {
+      // no visible account button (a narrow layout): choose Hebrew the way the radios store it
+      await page.evaluate(() => window.localStorage.setItem("il.lang", "he"));
+      await page.reload();
+    }
   }
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
 }

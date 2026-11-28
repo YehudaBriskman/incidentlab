@@ -22,6 +22,11 @@ const PATHS = {
   explorer: ['<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5"/><path d="M14 3l5 5v3"/><path d="M14 3v5h5"/><circle cx="17" cy="17" r="3"/><path d="M21 21l-1.8-1.8"/>', 18],
   panel: ['<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d="M15 10l-2 2 2 2"/>', 18],
   menu: ['<path d="M4 6h16M4 12h16M4 18h16"/>', 18],
+  // the account menu (#220): preferences (signed out), Settings, Display options, Sign out
+  sliders: ['<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>', 18],
+  gear: ['<circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/>', 18],
+  type: ['<path d="M4 19 9 5l5 14"/><path d="M5.8 14h6.4"/><path d="M15 12.5a2.7 2.7 0 0 1 5 1.4V19"/><path d="M20 15.8c-2.9-.4-5 .3-5 1.8 0 1 .8 1.6 1.9 1.6 1.5 0 3.1-1.2 3.1-3.4"/>', 18],
+  signOut: ['<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/><path d="M10 16l-4-4 4-4"/><path d="M6 12h10"/>', 18],
   filter: ['<path d="M4 5h16l-6 7.5V19l-4 2v-8.5z"/>', 16],
   chevron: ['<path d="M9 6l6 6-6 6"/>', 14],
   wifiOff: ['<path d="M2 8.8a15 15 0 0 1 4.2-2.6"/><path d="M10.7 5.1A15 15 0 0 1 22 8.8"/><path d="M5 12.6a10 10 0 0 1 3-1.8"/><path d="M16.9 11.1a10 10 0 0 1 2.1 1.5"/><path d="M8.5 16.4a5 5 0 0 1 7 0"/><path d="M12 20h.01"/><path d="M3 3l18 18"/>', 14],

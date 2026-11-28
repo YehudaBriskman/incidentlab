@@ -31,7 +31,7 @@ export const TSe = defineStrings({
     sessionTitle: "Session",
     signOutNote: "Signs you out on this device.",
     guestSignOutNote: "A guest can't sign back in. Create an account first to keep your progress.",
-    adminNote: "The instructor's session signs in with the admin key, so it has no password, recovery code or board setting here.",
+    adminNote: "The platform owner's session signs in with the admin key, so it has no password, recovery code or board setting here.",
     // Security
     securityIntro: "Your password and the recovery code that resets it.",
     guestSecurity: "Guests have no password. Create an account to set one, with a recovery code.",
@@ -73,7 +73,7 @@ export const TSe = defineStrings({
     sessionTitle: "התחברות",
     signOutNote: "מנתק אתכם במכשיר הזה.",
     guestSignOutNote: "אורח לא יכול להתחבר שוב. פתחו חשבון קודם כדי לשמור את ההתקדמות.",
-    adminNote: "חיבור המדריך נעשה עם מפתח הניהול, ולכן אין לו כאן סיסמה, קוד שחזור או הגדרת טבלה.",
+    adminNote: "החיבור של בעלי הפלטפורמה נעשה עם מפתח הניהול, ולכן אין לו כאן סיסמה, קוד שחזור או הגדרת טבלה.",
     // Security
     securityIntro: "הסיסמה שלכם וקוד השחזור שמאפס אותה.",
     guestSecurity: "לאורחים אין סיסמה. פתחו חשבון כדי לקבוע סיסמה וקוד שחזור.",

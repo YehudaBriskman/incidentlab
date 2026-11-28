@@ -1,4 +1,4 @@
-// The owner's review queue (#/author/reviews, #184): authors' cases waiting for review. Approve makes the reviewed
+// The owner's review queue (#/admin/reviews, #184; inside the platform console since #221): authors' cases waiting for review. Approve makes the reviewed
 // version public (with the same answer-drift confirmation as a publish); reject needs a note, which the author sees
 // next to the case on #/author. Only the site admin gets the queue; the server checks that on every call.
 import { z } from "zod";
@@ -8,6 +8,7 @@ import { dataTable, type DataTable } from "../components/dataTable";
 import { formField } from "../components/formLayout";
 import { TA } from "../i18n/strings-account";
 import { TRv } from "../i18n/strings-review";
+import { TS } from "../i18n/strings-shell";
 import { locale } from "../i18n/i18n";
 import { rawApiFetch } from "../lib/api";
 import { h, setChildren, type Child } from "../lib/dom";
@@ -40,7 +41,7 @@ async function adminJson<S extends z.ZodType>(method: string, path: string, sche
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 export function renderReviews(root: HTMLElement): void {
-  document.title = `${TRv().reviewsTitle} · IncidentLab`;
+  document.title = `${TRv().reviewsTitle} · ${TS().navConsole} · IncidentLab`;
   setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted" }, TRv().reviewsLoading)));
   loadAccount()
     .then((account) => {
@@ -171,7 +172,7 @@ function draw(root: HTMLElement): void {
       { class: "review-page" },
       h("h1", { id: "reviews-h" }, TRv().reviewsTitle),
       h("p", { class: "muted" }, TRv().reviewsLead),
-      h("p", {}, h("a", { class: "hit-link", href: "#/author" }, TRv().backToAuthoring)),
+      h("p", {}, h("a", { class: "hit-link", href: "#/admin" }, TRv().backToAuthoring)),
       table.element,
     ),
   );

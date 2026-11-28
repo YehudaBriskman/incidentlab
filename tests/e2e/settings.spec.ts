@@ -117,6 +117,7 @@ test("Privacy: the board opt-in saves and the account menu follows", async ({ pa
   await page.getByRole("button", { name: /Account:/ }).click();
   const menu = page.getByRole("dialog", { name: "Account" });
   await expect(menu).not.toContainText("Hidden from the board");
+  await expect(menu).toContainText("Shown on the global board");
   await expect(menu.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "#/settings/account");
 });
 
@@ -140,14 +141,14 @@ test("a guest sees the create-account card and no security section or forms", as
   await expect(page.locator(".settings-section")).toContainText("Guests aren't listed on the leaderboard.");
 });
 
-test("Display shares its settings with the ⚙ panel, and the language radio keeps focus", async ({ page }) => {
+test("Display shares its settings with the account menu, and the language radio keeps focus", async ({ page }) => {
   await english(page);
   await page.goto("/#/settings/display");
   const section = page.locator(".settings-section");
   await section.getByRole("radio", { name: "Dark" }).check();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await page.getByRole("button", { name: "Display settings" }).click();
-  const panel = page.locator("#settings-panel");
+  await page.getByRole("button", { name: "Language and display" }).click();
+  const panel = page.getByRole("dialog", { name: "Language and display" });
   await expect(panel.getByRole("radio", { name: "Dark" })).toBeChecked();
   await panel.getByRole("radio", { name: "Light" }).check();
   await page.keyboard.press("Escape");

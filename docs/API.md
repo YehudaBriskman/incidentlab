@@ -288,7 +288,7 @@ may reclaim unreferenced ones). CLI: `scripts/data.ts upload` (see `docs/CASE_CO
 
 The platform owner console is `#/admin` (`src/views/admin.ts`, panels in `src/views/manage/*`, #185): Users, Classes,
 Live, Stats, Global daily case (`/api/admin/schedule`), Site announcement (`/api/admin/event`), Audit log, and a
-Reviews link to `#/author/reviews` with the number waiting. Only Live (`/api/admin/progress`) and the site
+Reviews link to `#/admin/reviews` (inside the console; `#/author/reviews` redirects there) with the number waiting. Only Live (`/api/admin/progress`) and the site
 announcement poll, every 5 s in a visible tab; Users, Classes, Stats and Audit load on demand (opening the
 section, a search, filter or page, an action, or Refresh).
 

@@ -82,14 +82,15 @@ test("signed in with another case in progress: Continue lists it, not today's ca
   await expect(ui.todayCard(page).getByRole("link", { name: "Resume" })).toHaveAttribute("href", `#/case/${CASE_ID}`);
 });
 
-test("search and the filter popover by keyboard, with the count badge, clear and the URL query", async ({ page, request }) => {
+test("the catalog (#/cases): search and the filter popover by keyboard, with the count badge, clear and the URL query", async ({ page, request }) => {
   await scheduleToday(request, CASE_ID);
-  await englishHome(page);
+  await englishHome(page, "#/cases");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Cases");
   const total = await ui.rows(page).count();
 
   await ui.search(page).fill("ghost");
   await expect(ui.rows(page)).toHaveCount(1);
-  await expect(page).toHaveURL(/#\/\?q=ghost$/);
+  await expect(page).toHaveURL(/#\/cases\?q=ghost$/);
   await ui.search(page).fill("");
   await expect(ui.rows(page)).toHaveCount(total);
 
@@ -120,7 +121,7 @@ test("search and the filter popover by keyboard, with the count badge, clear and
   await ui.clearFilters(page).click();
   await expect(ui.filterButton(page)).toHaveAccessibleName(/^Filter$/);
   await expect(ui.rows(page)).toHaveCount(total);
-  await expect(page).toHaveURL(/#\/$/);
+  await expect(page).toHaveURL(/#\/cases$/);
 });
 
 test("Enter on a row's case link opens the case, and the visit shows under Recently visited", async ({ page, request }) => {
