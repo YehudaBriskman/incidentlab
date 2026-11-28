@@ -37,9 +37,11 @@ export const PAGES: Record<Who, readonly string[]> = {
     "/#/class/:class/manage?tab=live",
     "/#/class/:class/manage?tab=settings",
     "/#/classboard/:board?projector=1",
+    "/#/author",
   ],
   admin: [
     "/#/admin",
+    "/#/admin?tab=accounts",
     "/#/author",
     "/#/admin/reviews",
     "/#/admin?tab=classes",

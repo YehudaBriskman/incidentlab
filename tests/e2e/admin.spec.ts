@@ -361,7 +361,8 @@ test.describe("tablet rail", () => {
     await page.goto("/#/admin?tab=accounts");
     const rail = side.nav(page);
     await expect(rail).toBeVisible();
-    await expect(rail.getByRole("link")).toHaveCount(8);
+    // Overview (#235) + seven sections + Reviews
+    await expect(rail.getByRole("link")).toHaveCount(9);
     await expect.poll(async () => (await side.main(page).boundingBox())?.width).toBe(64);
     const event = rail.getByRole("link", { name: "Site announcement" });
     await expect(event).toHaveAttribute("title", "Site announcement");
