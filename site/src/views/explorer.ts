@@ -213,6 +213,17 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
   let detailSay = false;
   let histRefocus = false;
   let sentSteps: FilterStep[] = [];
+  /**
+   * The steps as they were sent, copied: highlighting runs on the main thread, so it must use what the worker
+   * accepted, never text typed since (a runaway regex being typed would hang the page on any re-render).
+   */
+  let sentCopies: Array<FilterStep | null> = [];
+  /** A step that blew the time budget stays out (null) until the worker has accepted a new pipeline. */
+  const appliedSteps = (): FilterStep[] =>
+    sentSteps.flatMap((s, i) => {
+      const copy = sentCopies[i];
+      return ui(s).slow || copy === null || copy === undefined ? [] : [copy];
+    });
   let lastEdited: FilterStep | null = null;
   let countState: CountState = { kind: "none" };
   let winStart = 0;
@@ -766,7 +777,11 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     if (regexes.length === 0) return false;
     // The pipeline ran fine before the last edit, so the edited step is the one to blame when it is a regex.
     const culprits = lastEdited !== null && regexes.includes(lastEdited) ? [lastEdited] : regexes;
-    for (const s of culprits) ui(s).slow = true;
+    for (const s of culprits) {
+      ui(s).slow = true;
+      const i = sentSteps.indexOf(s);
+      if (i >= 0) sentCopies[i] = null;
+    }
     paintSteps();
     return true;
   }
@@ -791,6 +806,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     filterGen++;
     filterJob = client.job();
     sentSteps = effectiveSteps();
+    sentCopies = sentSteps.map((s) => ({ ...s }));
     countState = { kind: "filtering" };
     paintCount(false);
     for (const a of aggs) if (a.state === "done") markAggStale(a, T().exAggUpdating);
@@ -1197,7 +1213,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
       client.send({ type: "window", job: windowJob, path: file.path, start: Math.max(0, first - 60), count: visible + 120 });
     }
     const frag = document.createDocumentFragment();
-    const active = sentSteps.filter((s) => !ui(s).slow);
+    const active = appliedSteps();
     for (let r = first; r < last; r++) frag.appendChild(renderRow(r, winRows[r - winStart], active));
     rowsLayer.replaceChildren(frag);
     if (wrap) {
@@ -1452,7 +1468,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
         h("dl", { class: "ex-detail-times", dir: "ltr" }, ...epochs.flatMap(([v, at]) => [h("dt", { class: "mono" }, v), h("dd", { class: "mono" }, at)])));
     }
     const raw = h("pre", { class: "ex-detail-raw", dir: "ltr", tabindex: "0", "aria-labelledby": "ex-detail-raw-h" });
-    const ranges = matchRanges(text, sentSteps.filter((s) => !ui(s).slow));
+    const ranges = matchRanges(text, appliedSteps());
     let pos = 0;
     for (const [a, b] of ranges) {
       if (a > pos) raw.append(text.slice(pos, a));
