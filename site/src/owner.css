@@ -1,0 +1,98 @@
+/* Owner and author tools (#234, #235, #236): the console's Overview section, the review preview and the author access
+   request. Tokens only (DESIGN.md); logical properties throughout. */
+
+/* ---- Overview: KPI row, the sign-up chart beside the queues and the budget ----
+   Neutrals only: users are a solid --text-2 fill, guests a hatched --edge-control fill (the series differ by
+   pattern, not hue); the accent never encodes data. Warning marks the 70% budget line and a breach. */
+.ov-lead { max-inline-size: var(--measure); margin: 0 0 var(--gap-related); }
+.ov-status { margin: 0 0 var(--gap-related); color: var(--text-2); }
+.ov-status.is-error { color: var(--danger-fg); }
+.ov-kpis { grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr)); margin: 0 0 var(--gap-stack); }
+.ov-tile-calls.is-text .stat-value { font-size: var(--step-1); }
+.ov-tile-calls.is-warning .stat-value { color: var(--warning-fg); }
+.ov-grid { display: grid; gap: var(--gap-stack); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1056px) { .ov-grid { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start; } }
+.ov-side { display: grid; gap: var(--gap-stack); min-inline-size: 0; }
+.ov-chart-skeleton { block-size: 160px; border-radius: var(--radius-control); }
+.ov-legend { display: flex; flex-wrap: wrap; gap: var(--gap-related) var(--gap-stack); list-style: none; margin: var(--gap-related) 0; padding: 0; font-size: var(--step--1); color: var(--text-2); }
+.ov-legend li { display: inline-flex; align-items: center; gap: var(--gap-tight); }
+.ov-key { display: inline-block; inline-size: 12px; block-size: 12px; border-radius: var(--radius-mark); }
+.ov-key.is-users, .ov-seg.is-users { background: var(--text-2); }
+.ov-key.is-guests, .ov-seg.is-guests { background: repeating-linear-gradient(135deg, var(--edge-control) 0 2px, var(--fill-track) 2px 5px); }
+.ov-key.is-guests { box-shadow: inset 0 0 0 1px var(--edge-control); }
+.ov-plot { display: grid; grid-template-columns: 2.5rem minmax(0, 1fr); gap: var(--gap-related); block-size: 160px; }
+.ov-yaxis { display: flex; flex-direction: column; justify-content: space-between; font-size: var(--step--1); color: var(--text-2); font-variant-numeric: tabular-nums; text-align: end; }
+.ov-bars { display: flex; align-items: stretch; gap: 2px; border-block-end: 1px solid var(--edge-subtle); min-inline-size: 0; }
+/* users on the baseline, guests above; a 2px surface gap between segments; rounded data ends only */
+.ov-col { flex: 1 1 0; min-inline-size: 0; display: flex; flex-direction: column-reverse; gap: 2px; }
+.ov-seg { display: block; min-block-size: 2px; }
+.ov-col > .ov-seg:last-child { border-start-start-radius: var(--radius-mark); border-start-end-radius: var(--radius-mark); }
+.ov-col:hover .ov-seg { filter: brightness(0.85); }
+.ov-xaxis { display: flex; justify-content: space-between; margin-block-start: var(--gap-tight); margin-inline-start: calc(2.5rem + var(--gap-related)); font-size: var(--step--1); color: var(--text-2); }
+.ov-table { margin-block-start: var(--gap-stack); }
+.ov-table > summary { cursor: pointer; display: inline-flex; align-items: center; min-block-size: 44px; color: var(--text-1); }
+.ov-queue-list { list-style: none; margin: 0 0 var(--gap-stack); padding: 0; display: grid; gap: var(--gap-tight); }
+.ov-queue-link {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--gap-related);
+  min-block-size: 44px; padding: 0 var(--space-3); border-radius: var(--radius-control);
+  background: var(--fill-inset); color: var(--text-1); text-decoration: none;
+}
+.ov-queue-link:hover { background: var(--hover-fill); }
+.ov-queue.is-waiting .ov-queue-label { font-weight: 600; }
+.ov-h3 { margin: 0 0 var(--gap-tight); font-size: var(--step-0); font-weight: 600; }
+.ov-budget-value { margin: 0 0 var(--gap-related); font-variant-numeric: tabular-nums; }
+.ov-budget-value strong { font-size: var(--step-2); }
+.ov-budget-state { margin: 0 0 var(--gap-tight); font-weight: 600; }
+.ov-bullet { position: relative; block-size: 12px; border-radius: var(--radius-mark); background: var(--fill-track); margin-block: var(--gap-related); }
+.ov-bullet-fill { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: var(--radius-mark); background: var(--text-2); }
+.ov-bullet.is-warning .ov-bullet-fill { background: var(--warning-fg); }
+.ov-bullet-pace { position: absolute; inset-block: -3px; inset-inline-start: 0; border: 1px dashed var(--edge-control); border-radius: var(--radius-mark); }
+.ov-bullet-mark { position: absolute; inset-block: -4px; inline-size: 2px; background: var(--warning-fg); }
+.ov-warn { color: var(--warning-fg); font-weight: 600; }
+.ov-hint { max-inline-size: var(--measure); }
+.ov-cmd { font-family: var(--font-mono); font-size: var(--step--1); overflow-wrap: anywhere; }
+
+/* ---- "Needs you" (#285): one row under the console header, on every section ---- */
+.needs-strip { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-related) var(--gap-stack); margin: var(--gap-related) 0; }
+.needs-label { font-weight: 600; font-size: var(--step--1); color: var(--text-2); }
+.needs-list { display: flex; flex-wrap: wrap; gap: var(--gap-related); list-style: none; margin: 0; padding: 0; }
+.needs-item {
+  display: inline-flex; align-items: center; gap: var(--gap-related); min-block-size: 44px; padding: 0 var(--space-3);
+  border-radius: var(--radius-pill); background: var(--warning-bg); color: var(--warning-fg); font-weight: 600; text-decoration: none;
+  box-shadow: inset 0 0 0 1px var(--warning-line, var(--warning-fg));
+}
+.needs-item:hover { text-decoration: underline; }
+.needs-dot { inline-size: 8px; block-size: 8px; border-radius: var(--radius-pill); background: currentColor; }
+.class-request-next { flex-basis: 100%; }
+
+/* ---- moderation (#236) ---- */
+.ban-reason { white-space: pre-wrap; overflow-wrap: anywhere; }
+.rejected-reason { margin: var(--gap-related) 0; padding: var(--space-3); border-radius: var(--radius-control); background: var(--fill-inset); max-inline-size: var(--measure); }
+.rejected-reason > p { margin: 0; }
+.rejected-reason > p + p { margin-block-start: var(--gap-tight); white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 600; }
+
+/* ---- review preview (#235) and author access (#234) ---- */
+.preview-lang { display: flex; flex-wrap: wrap; gap: var(--gap-related); border: 0; margin: 0 0 var(--gap-stack); padding: 0; }
+.preview-lang legend { padding: 0; margin-block-end: var(--gap-tight); font-size: var(--step--1); color: var(--text-2); }
+.preview-lang label { display: inline-flex; align-items: center; gap: var(--gap-tight); min-block-size: 44px; }
+.preview-body { display: grid; gap: var(--gap-stack); }
+.preview-body h3 { margin: 0 0 var(--gap-tight); font-size: var(--step-0); }
+.preview-source { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-inline-size: var(--measure); padding: var(--space-3); border-radius: var(--radius-control); background: var(--fill-inset); font: inherit; }
+.preview-list { margin: 0; padding-inline-start: var(--space-5); display: grid; gap: var(--gap-related); }
+.preview-list code { font-family: var(--font-mono); font-size: var(--step--1); overflow-wrap: anywhere; }
+.author-ask { margin-block: var(--gap-stack); max-inline-size: var(--read); }
+.author-ask textarea { min-block-size: 5rem; inline-size: 100%; }
+.author-guide { margin-block: var(--gap-stack); max-inline-size: var(--read); }
+.author-guide > summary { cursor: pointer; display: flex; align-items: center; min-block-size: 44px; font-weight: 600; }
+.author-guide ol { padding-inline-start: var(--space-5); display: grid; gap: var(--gap-related); }
+.author-guide code { font-family: var(--font-mono); font-size: var(--step--1); overflow-wrap: anywhere; }
+.author-requests { margin-block-start: var(--gap-section); }
+.req-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+@media (forced-colors: active) {
+  .ov-key.is-users, .ov-seg.is-users, .ov-bullet-fill { forced-color-adjust: none; background: CanvasText; }
+  .ov-key.is-guests, .ov-seg.is-guests { forced-color-adjust: none; background: repeating-linear-gradient(135deg, CanvasText 0 2px, Canvas 2px 5px); }
+  .ov-bullet { border: 1px solid CanvasText; }
+  .ov-bullet-mark { forced-color-adjust: none; background: Highlight; }
+  .ov-queue-link, .rejected-reason, .preview-source { border: 1px solid CanvasText; }
+}

@@ -114,6 +114,11 @@ export interface DialogAction<R extends string> {
    */
   run?: () => Promise<void>;
   busyLabel?: string;
+  /**
+   * With `run`: a rejection for which this returns true keeps the dialog open and usable again (the form shows the
+   * problem on its field, e.g. a taken username), instead of closing it and rejecting `result`.
+   */
+  stayOpenOn?: (err: unknown) => boolean;
 }
 
 export interface DialogOptions<R extends string> {
@@ -244,6 +249,14 @@ function showModal<R extends string>(kind: ModalKind, opts: DialogOptions<R>): D
       () => close(action.value),
       (err: unknown) => {
         if (settled) return;
+        if (action.stayOpenOn?.(err) === true) {
+          busy = false;
+          for (const [value, b] of buttons) b.disabled = actions.find((a) => a.value === value)?.disabled === true;
+          closeBtn?.removeAttribute("disabled");
+          if (btn !== undefined) btn.textContent = action.label;
+          el.removeAttribute("aria-busy");
+          return;
+        }
         settled = true;
         finish();
         rejectResult(err);

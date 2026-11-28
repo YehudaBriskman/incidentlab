@@ -13,7 +13,7 @@ import {
   UploadPartNameSchema,
 } from "../../shared/author-contract.ts";
 import { CaseIdSchema } from "../../shared/contract.ts";
-import { Sha256Schema } from "../../shared/case-records.ts";
+import { CaseLangSchema, Sha256Schema } from "../../shared/case-records.ts";
 import { AppError } from "../domain/types.ts";
 import type { AuditService } from "../services/AuditService.ts";
 import { actorLabel, ownerId } from "../services/AuthorAuthService.ts";
@@ -140,10 +140,12 @@ export class AuthorController {
     const actor = await this.actor(req);
     const id = valid(CaseIdSchema, caseId, "case");
     const body = await parseBody(req, SetCaseClassesRequestSchema);
-    const result = await this.authoring.setClasses(actor, id, body.classIds);
-    await this.record(actor, "case.classes", id, result.classIds.length === 0 ? "no classes" : `classes ${result.classIds.join(", ")}`);
+    const result = await this.authoring.setClasses(actor, id, body.classIds, { addToClassCases: body.addToClassCases });
+    const ids = result.case.classIds;
+    const listed = result.addedToClasses.length === 0 ? "" : `; on the case list of ${result.addedToClasses.join(", ")}`;
+    await this.record(actor, "case.classes", id, `${ids.length === 0 ? "no classes" : `classes ${ids.join(", ")}`}${listed}`);
     await this.onPublishedChange(); // the private-case list the session hint reads
-    return json(200, { case: result });
+    return json(200, result);
   }
 
   /** GET /api/admin/reviews (#184): the owner's review queue. */
@@ -162,6 +164,15 @@ export class AuthorController {
     await this.record(actor, body.decision === "approve" ? "case.review-approve" : "case.review-reject", id, `${body.decision === "approve" ? "approved, now public" : "rejected"}${note}`);
     await this.onPublishedChange();
     return json(200, { case: result });
+  }
+
+  /** GET /api/admin/cases/:caseId/review-content?lang= (#235): the reviewed version's public content. */
+  async reviewContent(req: Request, caseId: string): Promise<Response> {
+    await this.requireAdmin(req);
+    const id = valid(CaseIdSchema, caseId, "case");
+    const lang = CaseLangSchema.safeParse(new URL(req.url).searchParams.get("lang") ?? "en");
+    if (!lang.success) throw new AppError(400, "lang must be en or he");
+    return json(200, await this.authoring.reviewContent(id, lang.data));
   }
 
   private async requireAdmin(req: Request): Promise<Actor> {

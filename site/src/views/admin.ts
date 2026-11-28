@@ -12,6 +12,7 @@
 // this file mounts them with the /api/admin/* calls and keeps the shell (gate, sections, URL, poll, banner), the
 // trash and the audit log (classes replaced the site invite code, #204).
 import "../admin.css";
+import "../owner.css";
 import { T } from "../i18n/strings-tools";
 import { getLang } from "../i18n/i18n";
 import {
@@ -49,6 +50,10 @@ import {
   fetchEvent,
   fetchExportCsv,
   fetchMe,
+  fetchOverview,
+  fetchAuthorRequestCount,
+  renameAccount,
+  setAccountHidden,
   fetchProgress,
   fetchPublicLeaderboard,
   fetchReviewCount,
@@ -100,6 +105,8 @@ import { createBoardPanel } from "./manage/board";
 import { createStatsPanel } from "./manage/stats";
 import { createOwnerClassesPanel } from "./manage/ownerClasses";
 import { createResetRequestsPanel } from "./manage/resetRequests";
+import { createOverviewPanel } from "./manage/overview";
+import { TOw } from "../i18n/strings-owner";
 import type { MembersQuery } from "./manage/members";
 import { NARROW_QUERY, createManageHost } from "./manage/host";
 
@@ -109,8 +116,10 @@ const TODAY_REFRESH_MS = 60_000;
 const MAX_BACKOFF_MS = 60000;
 const TAB_STORAGE = "il.adminTab";
 
-type TabId = "accounts" | "classes" | "live" | "event" | "schedule" | "stats" | "audit";
-const TABS: readonly TabId[] = ["accounts", "classes", "live", "stats", "schedule", "event", "audit"];
+type TabId = "overview" | "accounts" | "classes" | "live" | "event" | "schedule" | "stats" | "audit";
+const TABS: readonly TabId[] = ["overview", "accounts", "classes", "live", "stats", "schedule", "event", "audit"];
+/** The section #/admin opens on (#235): what waits on the owner and the budget. */
+const DEFAULT_TAB: TabId = "overview";
 /** The sections whose data changes by the second: only these poll. The rest load on demand (#185). */
 const POLLED_TABS: ReadonlySet<TabId> = new Set<TabId>(["live", "event"]);
 /** How a load was asked for: the poll's tick, opening a section, or a refresh (the button, an action). */
@@ -122,6 +131,7 @@ const isTabId = (v: string | null): v is TabId => TABS.some((t) => t === v);
 const svgIcon = (paths: string): string =>
   `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true">${paths}</svg>`;
 const SECTION_ICONS: Readonly<Record<TabId, string>> = {
+  overview: svgIcon('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
   accounts: svgIcon('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/>'),
   classes: svgIcon('<path d="M3 9l9-5 9 5-9 5z"/><path d="M7 11.5V16c0 1.5 2.5 3 5 3s5-1.5 5-3v-4.5"/><path d="M21 9v5"/>'),
   live: svgIcon('<path d="M3 12h4l3-8 4 16 3-8h4"/>'),
@@ -158,6 +168,8 @@ export const REVIEWS_HREF = "#/admin/reviews";
 
 function sectionLabelOf(tab: TabId): string {
   switch (tab) {
+    case "overview":
+      return TOw().tabOverview;
     case "accounts":
       return T().admTabAccounts;
     case "classes":
@@ -194,6 +206,19 @@ export function consoleNav(current: "reviews"): NavSection {
   return { under: "admin", label: TS().adminSections, content: list };
 }
 
+/**
+ * The console's one page header (#285): the Platform console h1 under the owner eyebrow, on every section and on
+ * the review queue (#/admin/reviews), with the page's quick actions beside it.
+ */
+export function consoleHeader(actions: readonly Child[] = []): HTMLElement {
+  return h(
+    "header",
+    { class: "admin-head" },
+    h("div", { class: "admin-head-title" }, h("p", { class: "eyebrow" }, T().admInstructorLive), h("h1", { class: "admin-title" }, T().admClassDashboard)),
+    actions.length === 0 ? null : h("div", { class: "admin-head-actions" }, actions),
+  );
+}
+
 /** Unsaved drafts carried over when the view re-renders in place (the language toggle re-runs the route). */
 let carried: { schedule: Schedule | null; event: LiveEvent | null } | null = null;
 
@@ -206,9 +231,9 @@ let carried: { schedule: Schedule | null; event: LiveEvent | null } | null = nul
 function readStoredTab(): TabId {
   try {
     const v = sessionStorage.getItem(TAB_STORAGE);
-    return isTabId(v) ? v : "accounts";
+    return isTabId(v) ? v : DEFAULT_TAB;
   } catch {
-    return "accounts";
+    return DEFAULT_TAB;
   }
 }
 
@@ -296,6 +321,11 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     topUsers: [] as UserStats[],
     /** cases waiting for the owner's review (the Reviews link's badge); null until known */
     reviews: null as number | null,
+    /** vouched password reset requests and author access requests waiting (#285); null until known */
+    resets: null as number | null,
+    authorRequests: null as number | null,
+    /** pending sign-ups, from the users list (the Users badge) */
+    pendingSignups: 0,
     today: null as TodayResponse | null,
     progress: null as AdminProgressResult | null,
     stats: null as AdminStatsResult | null,
@@ -425,7 +455,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   /** The URL changed inside #/admin (Back/Forward between tabs, or a pasted link): follow it. */
   function applyUrlState(): void {
     const next = readUrlState();
-    const tab = next.tab ?? "accounts";
+    const tab = next.tab ?? DEFAULT_TAB;
     if (tab !== state.tab && !selectTab(tab, { fromUrl: true })) {
       history.replaceState(history.state, "", shownUrl);
       return;
@@ -442,6 +472,12 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     reattach: () => {
       syncShellSidebar();
       if (state.ready) applyUrlState();
+      else {
+        // Still signing in: the section in the new URL is the one to open once the console is built.
+        const wanted = readUrlState();
+        if (wanted.tab !== null) state.tab = wanted.tab;
+        if (wanted.caseId !== null) state.liveCaseId = wanted.caseId;
+      }
       setPageCrumb(tabLabel(state.tab));
       if (lastFocused && lastFocused.isConnected) lastFocused.focus({ preventScroll: true });
     },
@@ -691,6 +727,7 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   }
 
   const sectionGroups: ReadonlyArray<{ id: string; label: string; tabs: readonly TabId[] }> = [
+    { id: "overview", label: TOw().tabOverview, tabs: ["overview"] },
     { id: "people", label: TS().adminGroupPeople, tabs: ["accounts", "classes"] },
     { id: "live", label: TS().adminGroupLive, tabs: ["live", "stats"] },
     { id: "event", label: TS().adminGroupEvent, tabs: ["schedule", "event"] },
@@ -766,33 +803,18 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   function buildDashboard(): void {
     setChildren(
       container,
-      h(
-        "header",
-        { class: "admin-head" },
-        h(
-          "div",
-          { class: "admin-head-title" },
-          h("p", { class: "eyebrow" }, T().admInstructorLive),
-          h("h1", { class: "admin-title" }, T().admClassDashboard),
-        ),
-        // The page's quick actions: freshness, pause/refresh, the projector board (and Sign out for a typed key).
-        h(
-          "div",
-          { class: "admin-head-actions" },
-          updatedEl,
-          pauseBtn,
-          refreshBtn,
-          boardBtn,
-          // A session admin signs out from the account menu in the top bar; a typed key has no account there.
-          state.auth === "key" ? logoutBtn : null,
-        ),
-      ),
+      // The page's quick actions: freshness, pause/refresh, the projector board (and Sign out for a typed key: a
+      // session admin signs out from the account menu in the top bar).
+      consoleHeader([updatedEl, pauseBtn, refreshBtn, boardBtn, state.auth === "key" ? logoutBtn : null]),
+      // What waits on the owner, on every section (#285), above the KPIs and the tables.
+      needsStrip,
       statusBanner.el,
       [...tabPanels.values()],
     );
     buildSidebar();
     gateShown = false;
     syncShellSidebar();
+    overview.mount(tabPanels.get("overview") ?? container);
     buildAccountsPanel();
     ownerClasses.mount(tabPanels.get("classes") ?? container);
     live.mount(tabPanels.get("live") ?? container);
@@ -842,7 +864,79 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   const resetRequests = createResetRequestsPanel({
     host,
     api: { list: fetchResetRequests, approve: approveResetRequest, reject: rejectResetRequest },
+    onCount: (n) => {
+      if (n === state.resets) return;
+      state.resets = n;
+      renderUsersBadge();
+      renderNeeds();
+    },
   });
+
+  /** The Users link's badge (#285): pending sign-ups plus vouched password resets, both worked on that section. */
+  function renderUsersBadge(): void {
+    const pending = state.pendingSignups;
+    const resets = state.resets ?? 0;
+    const n = pending + resets;
+    pendingTabBadge.textContent = fmtInt(n);
+    pendingTabBadge.hidden = n === 0;
+    const label = resets === 0 ? T().admPendingBadge(pending) : TOw().usersBadge(pending, resets);
+    pendingTabBadge.setAttribute("aria-label", label);
+    const railLabel = n === 0 ? tabLabel("accounts") : `${tabLabel("accounts")}, ${label}`;
+    for (const link of sectionLinks.get("accounts") ?? []) link.dataset.navTip = railLabel;
+    refreshNav();
+  }
+
+  // "Needs you" (#285): the queues that wait on the owner, as links to where each is worked. Counts come with the
+  // console's first load and every Refresh (one small call per queue), never on the timer.
+  const needsStrip = h("nav", { class: "needs-strip", "aria-label": TOw().needsLabel, "data-testid": "needs-strip" });
+  function renderNeeds(): void {
+    const items: Array<{ id: string; text: string; href: string; tab: TabId | null }> = [];
+    const add = (id: string, n: number | null, text: (n: number) => string, href: string, tab: TabId | null): void => {
+      if (n !== null && n > 0) items.push({ id, text: text(n), href, tab });
+    };
+    add("resets", state.resets, TOw().needsResets, adminHash("accounts", null), "accounts");
+    add("reviews", state.reviews, TOw().needsReviews, REVIEWS_HREF, null);
+    add("authors", state.authorRequests, TOw().needsAuthors, REVIEWS_HREF, null);
+    add("signups", state.pendingSignups, TOw().needsSignups, adminHash("accounts", null), "accounts");
+    setChildren(
+      needsStrip,
+      h("span", { class: "needs-label" }, TOw().needsLabel),
+      items.length === 0
+        ? h("span", { class: "muted small" }, TOw().needsNone)
+        : h(
+            "ul",
+            { class: "needs-list" },
+            items.map((it) => {
+              const link = h("a", { class: "needs-item", href: it.href, "data-needs": it.id }, h("span", { class: "needs-dot", "aria-hidden": "true" }), it.text);
+              const tab = it.tab;
+              if (tab !== null) {
+                link.addEventListener("click", (e) => {
+                  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                  e.preventDefault();
+                  if (selectTab(tab)) tabPanels.get(tab)?.focus({ preventScroll: true });
+                });
+              }
+              return h("li", {}, link);
+            }),
+          ),
+    );
+  }
+
+  /** The queue counts behind "Needs you" (#285): reviews, vouched resets and author requests. Never throws. */
+  async function loadNeeds(): Promise<void> {
+    const [reviews, resets, authors] = await Promise.all([
+      fetchReviewCount().catch(() => null),
+      fetchResetRequests().then((r) => r.length).catch(() => null),
+      fetchAuthorRequestCount().catch(() => null),
+    ]);
+    if (disposed) return;
+    if (reviews !== null) state.reviews = reviews;
+    if (resets !== null) state.resets = resets;
+    if (authors !== null) state.authorRequests = authors;
+    renderReviewsBadge();
+    renderUsersBadge();
+    renderNeeds();
+  }
 
   const members = createMembersPanel({
     host,
@@ -851,6 +945,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     api: {
       setClassLimit: setAccountClassLimit,
       setStatus: setAccountStatus,
+      rename: renameAccount,
+      setHidden: setAccountHidden,
       setRole: setAccountRole,
       setStatuses: setAccountsStatus,
       approveAll,
@@ -864,12 +960,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
     },
     // The pending count is on the Accounts link in the sidebar too (badge and rail tooltip).
     onPendingCount: (n) => {
-      pendingTabBadge.textContent = fmtInt(n);
-      pendingTabBadge.hidden = n === 0;
-      pendingTabBadge.setAttribute("aria-label", T().admPendingBadge(n));
-      const railLabel = n === 0 ? tabLabel("accounts") : `${tabLabel("accounts")}, ${T().admPendingBadge(n)}`;
-      for (const link of sectionLinks.get("accounts") ?? []) link.dataset.navTip = railLabel;
-      refreshNav();
+      state.pendingSignups = n;
+      renderUsersBadge();
+      renderNeeds();
     },
     rerender: () => renderAccounts(),
   });
@@ -1013,8 +1106,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   function buildAccountsPanel(): void {
     setChildren(
       tabPanels.get("accounts") ?? container,
-      members.sections(),
+      // Vouched resets first (#285): they wait on the owner, and the users table grows without bound.
       resetRequests.section(),
+      members.sections(),
       h(
         "section",
         { class: "panel admin-panel trash-panel", "aria-labelledby": "admin-trash-title" },
@@ -1293,6 +1387,13 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
   // Classes (#185): every class on the site, on demand (views/manage/ownerClasses.ts)
   // =====================================================================================
 
+  // Overview (#235): the default section, on demand (opening it, Refresh), never on the timer.
+  const overview = createOverviewPanel({
+    host,
+    api: { load: fetchOverview },
+    links: { reviews: REVIEWS_HREF, accounts: adminHash("accounts", null) },
+  });
+
   const ownerClasses = createOwnerClassesPanel({
     host,
     api: { list: fetchAdminClasses, setMemberLimit: setClassMemberLimit, setArchived: setClassArchived },
@@ -1324,6 +1425,9 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
 
   function renderActiveTab(): void {
     switch (state.tab) {
+      case "overview":
+        overview.render();
+        break;
       case "accounts":
         renderAccounts();
         break;
@@ -1416,8 +1520,11 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
         tab === "audit" && onDemand ? fetchAudit(AUDIT_LIMIT) : Promise.resolve(null),
         tab === "stats" && onDemand ? fetchUsers({ sort: "rank", kind: "user", status: "approved", limit: 10 }) : Promise.resolve(null),
         mode === "manual" ? fetchReviewCount().catch(() => null) : Promise.resolve(null),
+        mode === "manual" ? loadNeeds() : Promise.resolve(),
         // The class list reports its own errors in its section.
         tab === "classes" && onDemand ? ownerClasses.load() : Promise.resolve(),
+        // And the overview (#235).
+        tab === "overview" && onDemand ? overview.load() : Promise.resolve(),
         // So does the reset request queue (#254).
         tab === "accounts" && onDemand ? resetRequests.load() : Promise.resolve(),
       ]);
@@ -1506,6 +1613,8 @@ function renderAdmin(root: HTMLElement, side: AdminSide): void {
       return;
     }
     buildDashboard();
+    renderNeeds();
+    void loadNeeds();
     // Canonical deep link for the current view (no new history entry).
     if (isAdminHash(location.hash)) setUrl(adminHash(state.tab, state.liveCaseId), "replace");
     stopTimers();

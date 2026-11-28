@@ -12,7 +12,7 @@
 import { randomBytes } from "node:crypto";
 import type { AuthorCase, PublishResponse, ReviewDecisionRequest, ReviewItem } from "../../shared/author-contract.ts";
 import { composeCaseMeta } from "../../shared/case-records.ts";
-import type { CaseMeta, CaseStatus, CaseVisibility } from "../../shared/case-records.ts";
+import type { CaseContent, CaseLang, CaseMeta, CaseStatus, CaseVisibility } from "../../shared/case-records.ts";
 import { AppError } from "../domain/types.ts";
 import type { CaseRepository } from "../repositories/case-repository.ts";
 import { mapWithConcurrency } from "../repositories/KvStore.ts";
@@ -22,7 +22,7 @@ import { assertOwner, ownerId } from "./AuthorAuthService.ts";
 import { caseChangeTags, noopCachePurger } from "./CachePurger.ts";
 import type { CachePurger } from "./CachePurger.ts";
 import type { Actor } from "./AuthorAuthService.ts";
-import type { ClassService } from "./ClassService.ts";
+import type { ClassActor, ClassService } from "./ClassService.ts";
 import type { TrashService } from "./TrashService.ts";
 
 const notFound = (): AppError => new AppError(404, "case not found", { code: "not-found" });
@@ -212,7 +212,12 @@ export class CaseAuthoringService {
    * Sets the classes whose active members may play the case while it is private. Every class added must be one
    * the author is an active admin of; the site admin may assign any existing class. Removing needs no check.
    */
-  async setClasses(actor: Actor, caseId: string, classIds: readonly string[]): Promise<AuthorCase> {
+  async setClasses(
+    actor: Actor,
+    caseId: string,
+    classIds: readonly string[],
+    options: { addToClassCases?: boolean } = {},
+  ): Promise<{ case: AuthorCase; addedToClasses: string[] }> {
     const { data: meta, etag } = await this.owned(actor, caseId);
     if (meta.status === "trashed") throw new AppError(409, "this case is deleted; restore it first", { code: "trashed" });
     const wanted = [...new Set(classIds)];
@@ -225,7 +230,30 @@ export class CaseAuthoringService {
           : await this.classes.isActiveClassAdmin(actor.accountId, classId);
       if (!allowed) throw new AppError(403, `you are not an admin of class ${classId}`, { code: "not-class-admin" });
     }
-    return toAuthorCase(await this.save(composeCaseMeta({ ...meta, classIds: wanted, updatedAt: this.now().toISOString() }), etag));
+    const saved = toAuthorCase(await this.save(composeCaseMeta({ ...meta, classIds: wanted, updatedAt: this.now().toISOString() }), etag));
+    // One step (#234): also put the case on each chosen class's case list, so it shows on the class page and board.
+    // Only a live version can be listed; a draft-only case is assigned and listed after its first publish.
+    const addedToClasses: string[] = [];
+    if (options.addToClassCases === true && this.classes !== null && meta.publishedVersion !== null) {
+      const classActor = await this.classActor(actor);
+      for (const classId of wanted) {
+        if (classActor === null) break;
+        try {
+          await this.classes.addCase(classActor, classId, caseId);
+          addedToClasses.push(classId);
+        } catch (err: unknown) {
+          if (!(err instanceof AppError)) throw err; // an archived class, or one the author no longer admins: skip it
+        }
+      }
+    }
+    return { case: saved, addedToClasses };
+  }
+
+  /** The class-side identity of an authoring actor: the site admin, or the author's own account. */
+  private async classActor(actor: Actor): Promise<ClassActor | null> {
+    if (actor.kind === "admin") return { kind: "site-admin", via: actor.via };
+    const account = this.accounts === null ? null : await this.accounts.get(actor.accountId);
+    return account === null ? null : { kind: "player", account: account.data };
   }
 
   /** The owner's queue: every case waiting for review, oldest submission first. */
@@ -251,6 +279,24 @@ export class CaseAuthoringService {
       };
     });
     return items.filter((i): i is ReviewItem => i !== null).sort((a, b) => (a.submittedAt ?? "").localeCompare(b.submittedAt ?? ""));
+  }
+
+  /**
+   * The public content of the version the owner is asked to review (#235): what players would read, per language,
+   * with no answer, hint text or command (the stored content never holds them; the upload's leak scan made sure).
+   * Falls back to English when the version has no content in `lang`.
+   */
+  async reviewContent(caseId: string, lang: CaseLang): Promise<{ caseId: string; version: number; lang: CaseLang; content: CaseContent }> {
+    const meta = (await this.cases.getMeta(caseId))?.data;
+    const version = meta === undefined ? null : reviewedVersion(meta);
+    if (meta === undefined || version === null || meta.status === "trashed") throw notFound();
+    if (lang !== "en") {
+      const localized = await this.cases.getContent(caseId, version, lang);
+      if (localized !== null) return { caseId, version, lang, content: localized };
+    }
+    const en = await this.cases.getContent(caseId, version, "en");
+    if (en === null) throw notFound();
+    return { caseId, version, lang: "en", content: en };
   }
 
   /** The owner's decision. Approve: the reviewed version goes public. Reject: the note is recorded, a pending version is dropped. */

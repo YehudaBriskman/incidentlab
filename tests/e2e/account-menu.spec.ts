@@ -274,7 +274,9 @@ test("the admin area: visitors never see the key form; Reviews lives inside the 
   await page.goto("/#/author/reviews");
   await expect(page).toHaveURL(/#\/admin\/reviews$/);
   await page.reload(); // the page above still had the visitor's session cached
-  await expect(page.getByRole("heading", { level: 1, name: "Review queue" })).toBeVisible();
+  // One console header on every console page (#285): the queue is the page's h2 under it.
+  await expect(page.getByRole("heading", { level: 1, name: "Platform console" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Review queue" })).toBeVisible();
   await expect(ui.nav(page).getByRole("link", { name: "Platform console", exact: true })).toHaveAttribute("aria-current", "true");
   await expect(ui.nav(page).locator(".nav-sub").getByRole("link", { name: /^Reviews/ })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("navigation", { name: "Breadcrumb" }).locator(".crumb")).toHaveText(["Home", "Platform console", "Reviews"]);

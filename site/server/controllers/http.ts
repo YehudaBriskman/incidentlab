@@ -43,6 +43,7 @@ export const errorResponse = (
     retryAfterSeconds?: number | undefined;
     details?: readonly string[] | undefined;
     progress?: ProgressView | undefined;
+    banReason?: string | undefined;
   } = {},
 ): Response => {
   const body = {
@@ -51,14 +52,15 @@ export const errorResponse = (
     ...(options.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: options.retryAfterSeconds }),
     ...(options.details === undefined ? {} : { details: options.details }),
     ...(options.progress === undefined ? {} : { progress: options.progress }),
+    ...(options.banReason === undefined ? {} : { banReason: options.banReason }),
   };
   return json(status, body, options.retryAfterSeconds === undefined ? {} : { "retry-after": String(options.retryAfterSeconds) });
 };
 
 export const toErrorResponse = (error: unknown): Response => {
   if (error instanceof AppError) {
-    const { code, retryAfterSeconds, details, progress } = error;
-    return errorResponse(error.status, error.message, { code, retryAfterSeconds, details, progress });
+    const { code, retryAfterSeconds, details, progress, banReason } = error;
+    return errorResponse(error.status, error.message, { code, retryAfterSeconds, details, progress, banReason });
   }
   console.error("[incidentlab-api] unhandled error", error);
   return errorResponse(500, "internal");

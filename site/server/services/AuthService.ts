@@ -66,6 +66,7 @@ export const ADMIN_VIEW = (createdAt: string): AccountView => ({
   mustChangePassword: false,
   kind: "user",
   showOnGlobalBoard: false,
+  banReason: null,
 });
 
 export const toAccountView = (account: AccountRecord): AccountView => ({
@@ -77,6 +78,8 @@ export const toAccountView = (account: AccountRecord): AccountView => ({
   mustChangePassword: account.mustChangePassword,
   kind: account.kind,
   showOnGlobalBoard: account.showOnGlobalBoard,
+  // Only the banned player sees the reason (#236); every other view carries null.
+  banReason: account.status === "rejected" ? account.banReason : null,
 });
 
 /** Recovery codes are stored like passwords (scrypt), over their normalized form. */
@@ -97,6 +100,10 @@ export const issueRecoveryCode = async (): Promise<{ code: string; hash: string 
  * GET /api/me and /api/session, and sign out. Every other signed-in route answers this 403.
  */
 export const passwordChangeRequired = (): AppError => new AppError(403, "set a new password first", { code: "password-change-required" });
+
+/** The 403 a banned account gets once it proved who it is (#236): with the owner's reason, when there is one. */
+const bannedError = (account: AccountRecord): AppError =>
+  new AppError(403, "this account was not approved", { code: "rejected", ...(account.banReason === null ? {} : { banReason: account.banReason }) });
 
 export const adminKeyFingerprint = (adminKey: string): string => sha256Hex(adminKey).slice(0, 16);
 
@@ -174,6 +181,8 @@ export class AuthService {
       showOnGlobalBoard: false,
       recoveryCodeHash: recovery.hash,
       classLimit: null,
+      hiddenFromBoards: false,
+      banReason: null,
     };
     // Claim the name first: the conditional write makes uniqueness race-free.
     if (!(await this.repos.usernames.claim(hashedKey, account.id))) throw new AppError(409, "that username is taken", { code: "username-taken" });
@@ -217,7 +226,8 @@ export class AuthService {
       throw new AppError(401, "wrong username or password", { code: "bad-credentials" });
     }
     const account = found.data;
-    if (account.status === "rejected") throw new AppError(403, "this account was not approved", { code: "rejected" });
+    // The password was right, so the player may read the owner's ban reason (#236).
+    if (account.status === "rejected") throw bannedError(account);
     // An unused temporary password stops working after 48 hours (#254): ask for a new reset.
     const expiresAt = account.mustChangePassword ? account.temporaryPasswordExpiresAt : null;
     if (expiresAt !== null && Date.parse(expiresAt) <= this.now().getTime()) {
@@ -260,7 +270,7 @@ export class AuthService {
       await this.limiter.hit(RECOVER_USER_LIMIT, key);
       throw new AppError(401, "wrong username or recovery code", { code: "bad-recovery-code" });
     }
-    if (found.data.status === "rejected") throw new AppError(403, "this account was not approved", { code: "rejected" });
+    if (found.data.status === "rejected") throw bannedError(found.data);
     const recovery = await issueRecoveryCode();
     const account: AccountRecord = {
       ...found.data,

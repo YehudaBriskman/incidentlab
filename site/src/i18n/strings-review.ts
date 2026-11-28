@@ -26,7 +26,10 @@ export const TRv = defineStrings({
     pendingReview: (id: string, version: number) => `${id} v${num(version)} waits for review. The public version stays live until it is approved.`,
 
     classesTitle: (id: string) => `Classes that may play ${id}`,
-    classesHelp: "Active members of these classes can play the case while it is private. A class admin can then add it to the class's cases.",
+    classesHelp: "Active members of these classes can play the case while it is private.",
+    classesAddLabel: "Also add it to each class's case list (its class page and board)",
+    classesAddHelp: "Only for a published version. Without this, a class admin adds it under Manage › Cases.",
+    classesListed: (n: number) => (n === 0 ? "" : ` Added to the case list of ${n === 1 ? "1 class" : `${num(n)} classes`}.`),
     classesEmpty: "You aren't an admin of any active class yet. Create a class first.",
     classesLoading: "Loading your classes…",
     classesLegend: "Your classes",
@@ -90,7 +93,10 @@ export const TRv = defineStrings({
     pendingReview: (id: string, version: number) => `${id} v${num(version)} ממתינה לבדיקה. הגרסה הציבורית נשארת עד האישור.`,
 
     classesTitle: (id: string) => `כיתות שיכולות לשחק ב-${id}`,
-    classesHelp: "חברים פעילים בכיתות האלה יכולים לשחק בתיק כל עוד הוא פרטי. מנהל כיתה יכול אחר כך להוסיף אותו לתיקי הכיתה.",
+    classesHelp: "חברים פעילים בכיתות האלה יכולים לשחק בתיק כל עוד הוא פרטי.",
+    classesAddLabel: "להוסיף אותו גם לרשימת התיקים של כל כיתה (עמוד הכיתה והלוח שלה)",
+    classesAddHelp: "רק לגרסה שפורסמה. בלי זה, מנהל כיתה מוסיף אותו בניהול › תיקים.",
+    classesListed: (n: number) => (n === 0 ? "" : ` נוסף לרשימת התיקים של ${n === 1 ? "כיתה אחת" : `${num(n)} כיתות`}.`),
     classesEmpty: "אתם עוד לא מנהלים אף כיתה פעילה. צרו כיתה קודם.",
     classesLoading: "טוענים את הכיתות שלכם…",
     classesLegend: "הכיתות שלכם",

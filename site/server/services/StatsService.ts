@@ -41,8 +41,12 @@ const shiftDate = (isoDate: string, days: number): string => new Date(Date.parse
 /** Ranks by score descending; ties share a rank (1, 1, 3). */
 const rankOf = (score: number, sortedScores: readonly number[]): number => sortedScores.indexOf(score) + 1;
 
-/** Who may be listed on the public board: an approved, full (non-guest) account that opted in. */
-export const isBoardEligible = (account: AccountRecord): boolean => account.status === "approved" && account.kind === "user" && account.showOnGlobalBoard;
+/**
+ * Who may be listed on the public board: an approved, full (non-guest) account that opted in and that the owner
+ * has not hidden from the boards (#236).
+ */
+export const isBoardEligible = (account: AccountRecord): boolean =>
+  account.status === "approved" && account.kind === "user" && account.showOnGlobalBoard && !account.hiddenFromBoards;
 
 export type BoardPlayer = { readonly account: AccountRecord; readonly score: ScoreRecord };
 
@@ -196,6 +200,8 @@ export class StatsService {
       role: account.role,
       kind: account.kind,
       classLimit: account.classLimit,
+      hiddenFromBoards: account.hiddenFromBoards,
+      banReason: account.status === "rejected" ? account.banReason : null,
       createdAt: account.createdAt,
       lastSeenAt: account.lastSeenAt,
       totalScore: sum((c) => c.score),

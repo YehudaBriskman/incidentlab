@@ -4,6 +4,10 @@
 import type { z } from "zod";
 import {
   AccountResponseSchema,
+  AdminBoardVisibilityResponseSchema,
+  AdminOverviewSchema,
+  AuthorAccessRequestsResponseSchema,
+  type AdminOverview,
   SessionResponseSchema,
   AccountClassLimitResponseSchema,
   AdminAccountsResponseSchema,
@@ -195,10 +199,36 @@ export async function setAccountClassLimit(id: string, classLimit: number | null
   return (await parseJson(await adminFetch(path, jsonInit("PUT", { classLimit })), AccountClassLimitResponseSchema, "/api/admin/accounts/:id/class-limit")).classLimit;
 }
 
-export async function setAccountStatus(id: string, action: "approve" | "reject"): Promise<AccountView> {
+/** Approves, or bans (`reject`); a ban may carry the reason the player reads at sign-in (#236). */
+export async function setAccountStatus(id: string, action: "approve" | "reject", reason?: string): Promise<AccountView> {
   const path = `/api/admin/accounts/${seg(id)}/${action}`;
-  const body = await parseJson(await adminFetch(path, jsonInit("POST", {})), AccountResponseSchema, path);
+  const payload = action === "reject" && reason !== undefined && reason.trim() !== "" ? { reason: reason.trim() } : {};
+  const body = await parseJson(await adminFetch(path, jsonInit("POST", payload)), AccountResponseSchema, path);
   return body.account;
+}
+
+/** The owner's forced rename (#236); 409 "username-taken" or "reserved" when the name can't be used. */
+export async function renameAccount(id: string, username: string): Promise<AccountView> {
+  const path = `/api/admin/accounts/${seg(id)}/username`;
+  return (await parseJson(await adminFetch(path, jsonInit("PUT", { username })), AccountResponseSchema, "/api/admin/accounts/:id/username")).account;
+}
+
+/** Hides an account from every board, or shows it again (#236). */
+export async function setAccountHidden(id: string, hidden: boolean): Promise<boolean> {
+  const path = `/api/admin/accounts/${seg(id)}/board-visibility`;
+  return (await parseJson(await adminFetch(path, jsonInit("PUT", { hidden })), AdminBoardVisibilityResponseSchema, "/api/admin/accounts/:id/board-visibility")).hiddenFromBoards;
+}
+
+/** How many players asked for author access (#234), for the console's "Needs you" strip (#285). */
+export async function fetchAuthorRequestCount(): Promise<number> {
+  const path = "/api/admin/author-requests";
+  return (await parseJson(await adminFetch(path), AuthorAccessRequestsResponseSchema, path)).requests.length;
+}
+
+/** The owner overview (#235): on demand, never on the dashboard's timer. */
+export async function fetchOverview(): Promise<AdminOverview> {
+  const path = "/api/admin/overview";
+  return parseJson(await adminFetch(path), AdminOverviewSchema, path);
 }
 
 /** Grants or revokes the author role (who may upload cases). */
