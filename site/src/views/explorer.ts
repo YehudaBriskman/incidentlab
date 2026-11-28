@@ -52,6 +52,7 @@ import {
 import type { EvidenceFile, PatternPreset } from "../explorer/files";
 import type { SortSpec, WorkerErrorCode, WorkerResponse } from "../explorer/protocol";
 import { T } from "../i18n/strings-tools";
+import { runQuestionStrip } from "./questionStrip";
 
 /** A file path with line-break opportunities after "/", "_" and "-", so names wrap at word joins, never mid-word or before the extension. */
 function breakablePath(path: string): Node[] {
@@ -2197,6 +2198,8 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     work,
   );
 
+  // The docked "Current question" (#215): answer from here with the case page's form, drafts and cooldown.
+  const strip = runQuestionStrip(c, "explorer", () => root.isConnected && ownsHash(window.location.hash));
 
   root.replaceChildren(
     h("div", { class: "explorer" },
@@ -2205,6 +2208,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
         // The page's one h1 (#222): the tool, then which case.
         h("h1", { class: "ex-heading" }, h("strong", {}, T().exTitle), h("span", { class: "ex-muted ex-case", dir: "auto" }, c.title)),
         tagline),
+      strip.el,
       announcer,
       h("div", { class: "ex-layout" }, main)),
   );
@@ -2243,6 +2247,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     if (raf) window.cancelAnimationFrame(raf);
     ro.disconnect();
     client.dispose();
+    strip.dispose();
     if (activeTeardown === teardown) activeTeardown = null;
   }
   function onHashChange(): void {

@@ -342,3 +342,62 @@ input[type="checkbox"].switch:checked::before { transform: none; background: var
 .lab-open .side-h, .lab-open p { margin: 0; }
 .lab-open-cmd { display: flex; align-items: flex-start; gap: var(--space-2); }
 .lab-open-cmd code { flex: 1; min-inline-size: 0; padding: var(--space-2); border-radius: var(--radius-control); background: var(--fill-inset); font-size: var(--type-label-size); overflow-wrap: anywhere; }
+
+/* ---- the docked "Current question" strip (#215): the Explorer and the Toolbox answer through the case page's
+   form. One line (stage · goal, the field and Check); "Show the question" opens the prompt under it. A soft card
+   like the Explorer's filters; on the Toolbox it sticks to the top of the content area above 640px. */
+.q-strip { display: grid; gap: var(--space-2); padding: var(--space-2) var(--space-4); background: var(--level-2); border-radius: var(--radius-card); box-shadow: var(--surface-lift); min-inline-size: 0; }
+.q-strip[hidden] { display: none; }
+.q-strip-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); min-inline-size: 0; }
+.q-strip-h { flex: 1 1 16rem; min-inline-size: 0; margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); font-size: var(--type-small-size); font-weight: 600; letter-spacing: 0; line-height: var(--type-small-lh); }
+/* "Current question" names the region for screen readers; on screen the stage line or the message says it */
+.q-strip-kicker, .q-strip-line:not(.is-question) .q-strip-h { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.q-strip-stage { font-weight: 500; color: var(--text-2); }
+.q-strip-sep { color: var(--text-muted); }
+.q-strip-note { flex: 1 1 16rem; margin: 0; font-size: var(--type-small-size); color: var(--text-2); }
+.q-strip-note p { margin: 0; }
+.q-strip-gate { font-weight: 600; color: var(--text); }
+.q-strip-note .muted { color: var(--text-muted); }
+.q-strip-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.q-strip-done { flex: 1 1 16rem; margin: 0; font-size: var(--type-small-size); font-weight: 600; color: var(--success-fg); }
+.q-strip-done:focus { outline: none; }
+.q-strip-done:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); border-radius: var(--radius-xs); }
+/* the stage line is the disclosure button: one ellipsed line, the whole goal once open */
+.q-strip-line.is-question .q-strip-h { flex: 1 1 10rem; display: block; }
+.q-strip-toggle { display: block; inline-size: 100%; min-block-size: var(--target-min); padding: var(--space-1) var(--space-2); margin-inline-start: calc(-1 * var(--space-2)); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text); font: inherit; text-align: start; cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.q-strip-toggle:hover { background: var(--hover-fill); }
+.q-strip-toggle:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: 0; }
+.q-strip.is-open .q-strip-toggle { white-space: normal; }
+.q-strip-chev { margin-inline-end: var(--space-1); color: var(--text-muted); }
+.q-strip-chev::before { content: "▸"; display: inline-block; }
+.q-strip-toggle[aria-expanded="true"] .q-strip-chev::before { transform: rotate(90deg); }
+[dir=rtl] .q-strip-chev::before { content: "◂"; }
+[dir=rtl] .q-strip-toggle[aria-expanded="true"] .q-strip-chev::before { transform: rotate(-90deg); }
+/* the shared answer form, compact: the label is read (the heading names the stage); the format shows with the prompt */
+.q-strip .answer-form { flex: 0 1 20rem; min-inline-size: 0; display: grid; gap: var(--space-1); }
+.q-strip .answer-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.q-strip .answer-form p { margin: 0; }
+.q-strip .answer-row { gap: var(--space-2); }
+.q-strip .answer-row .input-lg, .q-strip .answer-row .btn-lg { min-height: var(--control-md); --btn-h: var(--control-md); font-size: var(--type-small-size); }
+.q-strip .answer-row .btn-lg { padding-inline: var(--space-4); }
+.q-strip:not(.is-open) .answer-format-line { display: none; }
+.q-strip .feedback { margin: 0 !important; font-size: var(--type-small-size); }
+.q-strip-prompt { max-inline-size: var(--measure); max-block-size: 22vh; overflow: auto; font-size: var(--type-small-size); }
+.q-strip-prompt > :first-child { margin-block-start: 0; }
+.q-strip-prompt > :last-child { margin-block-end: 0; }
+.q-strip-prompt[hidden] { display: none; }
+@media (max-width: 520px) {
+  .q-strip .answer-row { flex-direction: row; }
+}
+/* the Explorer's line details open as a bottom sheet on narrow screens: the answer bar steps aside for it */
+.explorer:has(.ex-work.has-detail) .answer-bar { display: none; }
+@media (min-width: 641px) {
+  /* stuck flush under the top bar: the content area's top padding would show the commands scrolling past above it */
+  .toolbox-page > .q-strip { position: sticky; inset-block-start: calc(-1 * var(--space-4)); z-index: 3; margin-block: var(--space-3); }
+  /* a heading or command reached by the contents or by Tab never lands under the sticky strip (2.4.11) */
+  main.app-content:has(.toolbox-page > .q-strip:not([hidden])) { scroll-padding-block-start: 6rem; }
+  .toolbox-page:has(> .q-strip:not([hidden])) .tb-section { scroll-margin-block-start: 6rem; }
+}
+@media (forced-colors: active) {
+  .q-strip { border: 1px solid CanvasText; }
+}
