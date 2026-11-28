@@ -2,6 +2,7 @@
 // he-IL, never the browser's default), plus small storage helpers for remembered preferences.
 import { T } from "../../i18n/strings-tools";
 import { getLang } from "../../i18n/i18n";
+import { dateTimeZoneNode } from "../../lib/bidi";
 
 export const locale = (): string => (getLang() === "he" ? "he-IL" : "en-GB");
 
@@ -73,11 +74,8 @@ export function formatDateTimeSecZone(iso: string | null): string {
   }).format(t);
 }
 
-/** Same, with the time zone named ("25 Nov 2026, 18:30 GMT+2"): for values typed in a browser-formatted picker. */
-export function formatDateTimeZone(iso: string | null): string {
-  const t = ms(iso);
-  if (t === null) return "—";
-  return new Intl.DateTimeFormat(locale(), {
+const dateTimeZoneFmt = (): Intl.DateTimeFormat =>
+  new Intl.DateTimeFormat(locale(), {
     weekday: "short",
     day: "numeric",
     month: "short",
@@ -85,7 +83,18 @@ export function formatDateTimeZone(iso: string | null): string {
     hour: "2-digit",
     minute: "2-digit",
     timeZoneName: "short",
-  }).format(t);
+  });
+
+/** Same, with the time zone named ("25 Nov 2026, 18:30 GMT+2"): for values typed in a browser-formatted picker. */
+export function formatDateTimeZone(iso: string | null): string {
+  const t = ms(iso);
+  return t === null ? "—" : dateTimeZoneFmt().format(t);
+}
+
+/** The same date and time as an element whose zone name is an LTR isolate kept on the time's line (#248). */
+export function dateTimeZoneEl(iso: string | null): Node {
+  const t = ms(iso);
+  return t === null ? document.createTextNode("—") : dateTimeZoneNode(dateTimeZoneFmt(), t);
 }
 
 const numFormats = new Map<string, Intl.NumberFormat>();

@@ -8,7 +8,7 @@ import { toast } from "../../lib/overlay";
 import { formField } from "../../components/formLayout";
 import type { LiveEvent } from "../../../shared/contract";
 import type { AdminEventResult } from "../../lib/admin-api";
-import { errMessage, formatDateTime, formatDateTimeZone, formatDuration, locale, ms } from "./format";
+import { errMessage, dateTimeZoneEl, formatDateTime, formatDuration, locale, ms } from "./format";
 import type { ManageHost } from "./host";
 import { browserTimeZone, cloneEvent, eventSig, isoToLocalInput, localInputToIso, normalizeEvent } from "./eventModel";
 import { headWithHint } from "./ui";
@@ -422,7 +422,7 @@ export function createEventPanel(opts: EventOptions): EventPanel {
     evFreezeField.setError(errs.freeze);
     if (ev.draft) {
       const preview = (el: HTMLElement, iso: string | null): void => {
-        el.textContent = iso === null ? T().admTimeNotSet : formatDateTimeZone(iso);
+        setChildren(el, iso === null ? T().admTimeNotSet : dateTimeZoneEl(iso));
       };
       preview(evStartPreview, ev.draft.startsAt);
       preview(evEndPreview, ev.draft.endsAt);
