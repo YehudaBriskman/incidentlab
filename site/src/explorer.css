@@ -23,10 +23,11 @@
 .ex-file:hover { background: var(--hover-fill); color: var(--text-1); }
 .ex-file.is-active { background: var(--accent-soft); color: var(--text-1); font-weight: 500; }
 .ex-file:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
-.ex-file-name { font-size: var(--step--1); overflow-wrap: anywhere; }
+/* names break at the <wbr> after "/", "_" and "-" (breakablePath), and mid-word only when one part is wider than the row */
+.ex-file-name { font-size: var(--step--1); overflow-wrap: break-word; min-inline-size: 0; }
 .ex-file-meta { font-size: var(--step--2); color: var(--text-muted); display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; }
+.ex-dot[hidden] { display: none; }
 .ex-dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--success-fg); margin-inline-start: var(--space-2); }
-.ex-file-desc { font-size: var(--step--2); color: var(--text-2); }
 .ex-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
 /* time converter */
@@ -44,8 +45,12 @@
 .ex-main { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
 /* the terminal window's slim title bar: file name and format at the start, line counts at the end */
 .ex-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-3); flex-wrap: wrap; min-height: 40px; padding: var(--space-1) var(--space-4); }
+.ex-head-main { flex: 1 1 12rem; min-inline-size: 0; display: flex; flex-direction: column; gap: 2px; padding-block: var(--space-1); }
 .ex-head-title { display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; min-width: 0; }
-.ex-title { font-size: var(--type-small-size); font-weight: 600; margin: 0; word-break: break-all; letter-spacing: 0; }
+/* the picked file's description: one muted line under its name (#217), in the reading direction of its text */
+.ex-file-desc { margin: 0; font-size: var(--type-label-size); color: var(--text-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ex-file-desc[hidden] { display: none; }
+.ex-title { font-size: var(--type-small-size); font-weight: 600; margin: 0; overflow-wrap: break-word; min-inline-size: 0; letter-spacing: 0; }
 /* Mono only once it shows a file path (copyable); the "Pick a file" prompt is a UI label (#129). */
 .ex-title[dir=ltr] { font-family: var(--font-mono); }
 .ex-format { color: var(--text-muted); font-size: var(--type-label-size); }
@@ -73,7 +78,29 @@
 .ex-input, .ex-select { width: auto; color: var(--text); }
 .ex-input.mono { font-family: var(--font-mono); }
 .ex-year { width: 100%; }
-.ex-presets { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; font-size: var(--step--1); }
+.ex-filter-tools { display: flex; align-items: center; gap: var(--space-2) var(--space-3); flex-wrap: wrap; }
+.ex-presets { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; font-size: var(--step--1); flex: 1 1 auto; min-inline-size: 0; }
+.ex-presets .ex-chips { margin: 0; }
+/* "More filters (n)": a disclosure at the end of the filter card; its panel holds the JSON conditions, the column
+   view and the aggregations, with a hairline above it */
+.ex-more-filters { gap: var(--space-1); }
+.ex-more-chev::before { content: "▸"; display: inline-block; }
+.ex-more-filters[aria-expanded="true"] .ex-more-chev::before { transform: rotate(90deg); }
+[dir=rtl] .ex-more-chev::before { content: "◂"; }
+[dir=rtl] .ex-more-filters[aria-expanded="true"] .ex-more-chev::before { transform: rotate(-90deg); }
+.ex-more-panel { display: flex; flex-direction: column; gap: var(--space-3); padding-block-start: var(--space-3); border-block-start: 1px solid color-mix(in oklab, var(--edge-subtle) 60%, transparent); }
+.ex-more-panel[hidden] { display: none; }
+.ex-more-panel .ex-agg { box-shadow: none; background: var(--fill-inset); }
+
+/* active filters: one bar of removable chips (#217) */
+.ex-fchips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.ex-fchips[hidden] { display: none; }
+.ex-fchip { display: inline-flex; align-items: center; gap: var(--space-1); max-inline-size: 100%; min-block-size: var(--target-min); padding-inline: var(--space-3) var(--space-1); border-radius: var(--radius-full); background: var(--accent-soft); color: var(--text); font-size: var(--type-label-size); }
+.ex-fchip-label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-fchip-k { color: var(--text-2); }
+.ex-fchip-x { flex: none; display: inline-grid; place-items: center; inline-size: var(--target-min); block-size: var(--target-min); padding: 0; border: 0; border-radius: var(--radius-full); background: transparent; color: var(--text-2); font: inherit; font-size: var(--step-0); line-height: 1; cursor: pointer; }
+.ex-fchip-x:hover { background: var(--hover-fill); color: var(--text-1); }
+.ex-fchip-x:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: 0; }
 .ex-presets[hidden] { display: none; }
 .ex-chips { display: flex; gap: var(--space-2); flex-wrap: wrap; margin: var(--space-2) 0; }
 .ex-chips:empty { display: none; }
@@ -91,10 +118,11 @@
 .ex-notice-warn { background: var(--danger-bg); color: var(--danger-fg); }
 .ex-notice-info { background: var(--success-bg); color: var(--success-fg); }
 .ex-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
+.ex-head .ex-actions { margin-inline-start: auto; }
 .ex-drawer-tools .btn.is-copied { color: var(--success-fg); background: var(--success-bg); }
 /* the ⋯ menu button (#112): an icon button at the toolbar end, after the wrap toggle */
 .ex-more { font-size: var(--step-1); line-height: 1; }
-.ex-toggle { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--control-sm); padding: 0 var(--space-2); font-size: var(--step--1); color: var(--text-2); cursor: pointer; margin-inline-start: auto; }
+.ex-toggle { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--control-sm); padding: 0 var(--space-2); font-size: var(--step--1); color: var(--text-2); cursor: pointer; }
 
 /* log pane (always dark) */
 /* the terminal window: a soft card (12px, elevation 2) whose title bar sits on the card colour over the dark code surface */
@@ -211,11 +239,6 @@ th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
 .ex-file-group-n { font-weight: 400; }
 .ex-files-sub { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 
-/* time filter chip (from a histogram bar) */
-.ex-time-filter { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; font-size: var(--step--1); }
-.ex-time-filter[hidden] { display: none; }
-.ex-time-filter-k { color: var(--text-muted); min-width: 3ch; }
-.ex-time-chip { font-size: var(--step--1); }
 
 /* JSON conditions */
 .ex-jsonbar { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); align-items: start; }
@@ -299,6 +322,28 @@ th[aria-sort="descending"] .ex-th::after { content: " ▼"; }
 @media (max-width: 860px) {
   .ex-aggs, .ex-jsonbar { grid-template-columns: 1fr; }
   .ex-viewport { height: 60vh; height: 60svh; }
+}
+
+/* The tagline wraps to two lines beside the case name up to 1280px: it goes, and the h1 keeps the row. */
+@media (max-width: 1280px) {
+  .ex-status { display: none; }
+}
+
+/* "fit" above 640px (#217): the Explorer fills the content area and only the log scrolls, so there is no page
+   scroll around a nested scroller. The filter card and "More filters" scroll inside themselves when they grow. */
+@media (min-width: 641px) {
+  /* the column scrolls only when the strip and "More filters" are both open on a short screen */
+  .app-content[data-layout="fit"] .explorer { flex: 1; min-block-size: 0; padding-block-end: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .app-content[data-layout="fit"] .ex-layout { flex: 1; min-block-size: 0; display: flex; flex-direction: column; }
+  .app-content[data-layout="fit"] .ex-main { flex: 1; min-block-size: 0; }
+  .app-content[data-layout="fit"] .ex-controls { flex: none; max-block-size: 40vh; max-block-size: 40dvh; overflow: auto; overscroll-behavior: contain; }
+  .app-content[data-layout="fit"] .ex-work { flex: 1; min-block-size: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+  .app-content[data-layout="fit"] .ex-view { display: flex; flex-direction: column; min-block-size: 0; }
+  .app-content[data-layout="fit"] .ex-screen { flex: 1; min-block-size: 0; display: flex; flex-direction: column; }
+  .app-content[data-layout="fit"] .ex-viewport { flex: 1; block-size: auto; min-block-size: 12rem; }
+}
+@media (min-width: 1180px) {
+  .app-content[data-layout="fit"] .ex-drawer { position: static; max-height: none; }
 }
 
 @media (max-width: 600px) {
