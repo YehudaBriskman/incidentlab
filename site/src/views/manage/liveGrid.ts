@@ -82,7 +82,6 @@ export function createLiveGrid(opts: LiveGridOptions): LiveGrid {
     placeholder: T().admSearchPlaceholder,
     "aria-label": T().admSearchLabel,
     enterkeyhint: "search",
-    dir: "auto",
   });
   liveSearchInput.addEventListener("input", () => {
     liveFilter = liveSearchInput.value;

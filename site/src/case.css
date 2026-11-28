@@ -38,6 +38,24 @@
 .cs-event .home-class-event.is-live .dot { flex: none; background: var(--info-fg); }
 .cs-event .home-class-frozen { font-size: var(--type-label-size); }
 .cs-costs { flex: none; margin-inline-start: auto; }
+/* event runs (#253): "[Event run] <class> Switch" in the line, and the choice card under it */
+.cs-run { flex: none; gap: var(--space-2); }
+.cs-run-chip { flex: none; font-size: var(--type-label-size); }
+.cs-run-class { overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: var(--text-1); }
+.cs-run-switch { flex: none; }
+.cs-event .cs-run-switch { margin-inline-start: var(--space-2); }
+.run-choice {
+  display: grid; gap: var(--gap-related); margin-block-end: var(--gap-stack); padding: var(--pad-card);
+  background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift);
+}
+.run-choice > * { margin: 0; max-inline-size: var(--measure); }
+.run-choice-title { font-size: var(--type-title-size); font-weight: 600; color: var(--text-1); }
+.run-choice-class { font-weight: 600; color: var(--text-1); }
+.run-choice-body { color: var(--text-2); }
+.run-choice-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); max-inline-size: none; }
+.run-choice-note { font-weight: 400; }
+.run-choice-event { block-size: auto; min-block-size: var(--control-md); padding-block: var(--space-2); }
+.run-choice-label { text-wrap: balance; }
 /* the case's progress as a hairline under the line */
 .cs-progress { display: block; block-size: 2px; border-radius: var(--radius-pill); background: var(--fill-track); overflow: hidden; }
 .cs-progress .progress-fill { display: block; block-size: 100%; }
@@ -68,7 +86,10 @@ main.app-content:has(.case-status) { scroll-padding-block-start: calc(var(--case
   .cs-line { gap: var(--space-2); }
   .cs-stage::before { content: none; }
   .cs-name { display: none; }
-  .cs-class, .cs-event .home-class-event-name { display: none; }
+  .cs-class, .cs-event .home-class-event-name, .cs-run-class { display: none; }
+  /* on an event run the run and its switch take the clock's place on phones (#253) */
+  .cs-line:has(.cs-run) .cs-time { display: none; }
+  .cs-run::before { content: none; }
   .cs-item::before { margin-inline-end: var(--space-1); }
 }
 
@@ -168,4 +189,7 @@ main.app-content:has(.case-status) { scroll-padding-block-start: calc(var(--case
 @media print {
   .wb-tabrow, .need-help { display: none !important; }
   .case-work > [hidden] { display: flex !important; }
+}
+@media (forced-colors: active) {
+  .run-choice { border: 1px solid CanvasText; }
 }

@@ -2,6 +2,7 @@
 // its one-line-per-case form on phone cards, and the extra numbers that the column picker may have hidden.
 import { T } from "../../i18n/strings-tools";
 import { h, type Child } from "../../lib/dom";
+import { listText, nameNode } from "../../lib/bidi";
 import type { AccountStatus, CaseStats, UserStats } from "../../../shared/contract";
 import { caseTitle } from "./caseInfo";
 import { fmtInt, formatDateTime, formatSeconds } from "./format";
@@ -53,7 +54,7 @@ export function caseStatsTable(list: readonly CaseStats[]): HTMLElement {
         h(
           "tr",
           {},
-          h("td", {}, caseTitle(c.caseId)),
+          h("td", {}, nameNode(caseTitle(c.caseId))),
           h("td", {}, h("span", { class: `case-status is-${c.status}` }, T().admCaseStatus(c.status))),
           h(
             "td",
@@ -87,7 +88,7 @@ export function caseStatsList(list: readonly CaseStats[]): HTMLElement {
       h(
         "li",
         {},
-        h("span", { class: "case-line-title" }, caseTitle(c.caseId)),
+        h("span", { class: "case-line-title" }, nameNode(caseTitle(c.caseId))),
         h("span", { class: `case-status is-${c.status}` }, T().admCaseStatus(c.status)),
         h("span", { class: "muted small" }, `${T().admPointsShort(fmtInt(c.score))} · ${formatSeconds(c.durationSeconds)}`),
       ),
@@ -99,7 +100,7 @@ export function caseStatsList(list: readonly CaseStats[]): HTMLElement {
 export function acctExtras(a: UserStats): string {
   return [
     T().admExtraLine(fmtInt(a.hintsUsed), fmtInt(a.wrongAttempts), fmtInt(a.commandsRevealed)),
-    T().admBadgesTip(a.achievements.map((x) => T().admAchievement(x.id)).join(", ")),
+    T().admBadgesTip(listText(a.achievements.map((x) => T().admAchievement(x.id)))),
     T().admStreakTip(a.streak.current, a.streak.best),
     `${T().admColCreated}: ${formatDateTime(a.createdAt)}`,
   ].join(" · ");

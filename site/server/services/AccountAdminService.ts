@@ -147,7 +147,9 @@ export class AccountAdminService {
     const progress = (await this.repos.progress.list()).filter((r) => r.accountId === accountId);
     const memberships = await this.repos.classes.membershipsOf(accountId);
     // Trash first: if this write fails, nothing has been deleted yet.
-    await this.trash.put({ kind: "account", label: `account ${found.data.username}`, account: found.data, progress, firstBlood: {}, memberships });
+    const eventRuns = await this.repos.eventProgress.listMatching({ accountId });
+    await this.trash.put({ kind: "account", label: `account ${found.data.username}`, account: found.data, progress, firstBlood: {}, memberships, eventRuns });
+    await this.repos.eventProgress.deleteEntries(eventRuns);
     // Sessions die with the account (authenticate() rejects sessions whose account is gone).
     await this.repos.progress.deleteMany({ accountId });
     await this.repos.classes.removeAccount(accountId); // out of every class, in both indexes (#179)
@@ -181,11 +183,14 @@ export class AccountAdminService {
     const records = (await this.repos.progress.list(filter.caseId)).filter((r) => filter.accountId === undefined || r.accountId === filter.accountId);
     const isWholeCase = filter.accountId === undefined;
     const firstBlood = isWholeCase ? await this.trashRepo.readKeys(filter.caseId === undefined ? "firstblood:" : `firstblood:${filter.caseId}:`) : {};
-    if (records.length === 0 && Object.keys(firstBlood).length === 0) return;
+    // A reset clears class event runs of the same scope too (#268), into the same trash entry.
+    const eventRuns = await this.repos.eventProgress.listMatching(filter);
+    if (records.length === 0 && eventRuns.length === 0 && Object.keys(firstBlood).length === 0) return;
     const scope = filter.caseId ?? "all cases";
     const label = filter.accountId === undefined ? `progress of ${scope} (${records.length} players)` : `progress of ${scope} for one player`;
-    await this.trash.put({ kind: "progress", label, account: null, progress: records, firstBlood });
+    await this.trash.put({ kind: "progress", label, account: null, progress: records, firstBlood, eventRuns });
     await this.repos.progress.deleteMany(filter);
+    await this.repos.eventProgress.deleteEntries(eventRuns);
     if (isWholeCase) await this.firstBlood.clear(filter.caseId);
     const scores = this.scores;
     if (scores) await mapWithConcurrency(records, (r) => scores.syncCase(r.accountId, r.caseId));

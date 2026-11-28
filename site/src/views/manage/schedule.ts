@@ -7,7 +7,9 @@ import { h, setChildren } from "../../lib/dom";
 import { formField } from "../../components/formLayout";
 import type { Schedule, TodayResponse } from "../../../shared/contract";
 import { caseTitle } from "./caseInfo";
-import { errMessage } from "./format";
+import { errMessage, locale } from "./format";
+import { isolateText, nameNode } from "../../lib/bidi";
+import { formatIsoDay } from "../../lib/bidi-core";
 import type { ManageHost } from "./host";
 import { monthOf, scheduleCalendar, type Month } from "./scheduleCalendar";
 
@@ -149,9 +151,10 @@ export function createSchedulePanel(opts: ScheduleOptions): SchedulePanel {
     }
     setChildren(
       scheduleTodayEl,
-      h("strong", {}, T().admTodayIs(today.date, today.timezone)),
+      // the date in the UI locale, the date and the zone isolated so "(28 Nov 2026, Asia/Jerusalem)" keeps its order in Hebrew
+      h("strong", {}, T().admTodayIs(isolateText(formatIsoDay(locale(), today.date)), isolateText(today.timezone))),
       " ",
-      today.caseId ? caseTitle(today.caseId) : h("span", { class: "muted" }, T().admNoCaseToday),
+      today.caseId ? nameNode(caseTitle(today.caseId)) : h("span", { class: "muted" }, T().admNoCaseToday),
     );
   }
 

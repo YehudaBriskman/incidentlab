@@ -7,6 +7,7 @@
 import "../player.css";
 import type { Case } from "../../shared/case";
 import { h, html, setChildren } from "../lib/dom";
+import { bidiProse } from "../lib/bidi";
 import { md, mdInline } from "../lib/markdown";
 import { tooltip } from "../lib/overlay";
 import { isAdmin, loadAccount } from "../lib/session";
@@ -39,7 +40,7 @@ function stageList(c: Case, cls: string): HTMLElement {
         { class: "present-stage" },
         h("p", { class: "present-stage-n" }, TR().stageN(i + 1)),
         h("p", { class: "present-stage-name", dir: "auto" }, q.stage?.name ?? q.title),
-        q.stage?.goal ? html("p", { class: "present-stage-goal" }, mdInline(q.stage.goal)) : null,
+        q.stage?.goal ? bidiProse(html("p", { class: "present-stage-goal" }, mdInline(q.stage.goal))) : null,
       ),
     ),
   );
@@ -50,7 +51,7 @@ function evidenceList(files: Case["evidence"], cls: string): HTMLElement {
   return h(
     "ul",
     { class: cls },
-    files.map((f) => h("li", { class: "present-file" }, h("code", { class: "present-file-path", dir: "ltr" }, f.path), html("span", { class: "present-file-desc" }, mdInline(f.description)))),
+    files.map((f) => h("li", { class: "present-file" }, h("code", { class: "present-file-path", dir: "ltr" }, f.path), bidiProse(html("span", { class: "present-file-desc" }, mdInline(f.description))))),
   );
 }
 
@@ -86,11 +87,11 @@ export function renderInstructorPreview(root: HTMLElement, c: Case): void {
         ),
       ),
       h("p", { class: "muted small" }, TR().previewNote),
-      section(TR().story, html("div", { class: "prose present-prose" }, md(c.briefing))),
+      section(TR().story, bidiProse(html("div", { class: "prose present-prose" }, md(c.briefing)))),
       section(
         TR().inspired,
         h("p", { class: "present-inspired-title", dir: "auto" }, `${c.inspiredBy.title} (${c.inspiredBy.year})`),
-        html("p", { class: "present-prose" }, mdInline(c.inspiredBy.summary)),
+        bidiProse(html("p", { class: "present-prose" }, mdInline(c.inspiredBy.summary))),
       ),
       section(`${TR().evidence} · ${TR().evidenceCount(c.evidence.length)}`, evidenceList(c.evidence, "present-files")),
       section(TR().stages, stageList(c, "present-stages")),
@@ -103,13 +104,13 @@ type Slide = { title: string; body: HTMLElement | null; kicker?: string };
 function slidesFor(c: Case): Slide[] {
   return [
     { title: c.title, kicker: TR().eyebrow, body: h("div", {}, h("p", { class: "slide-lead" }, c.subtitle), metaLine(c)) },
-    { title: TR().story, body: html("div", { class: "prose slide-prose" }, md(c.briefing)) },
-    { title: TR().inspired, body: h("div", {}, h("p", { class: "slide-lead" }, `${c.inspiredBy.title} (${c.inspiredBy.year})`), html("p", { class: "slide-prose" }, mdInline(c.inspiredBy.summary))) },
+    { title: TR().story, body: bidiProse(html("div", { class: "prose slide-prose" }, md(c.briefing))) },
+    { title: TR().inspired, body: h("div", {}, h("p", { class: "slide-lead" }, `${c.inspiredBy.title} (${c.inspiredBy.year})`), bidiProse(html("p", { class: "slide-prose" }, mdInline(c.inspiredBy.summary)))) },
     { title: TR().evidence, kicker: TR().evidenceCount(c.evidence.length), body: evidenceList(c.evidence, "present-files slide-files") },
     ...c.questions.map((q, i): Slide => ({
       kicker: TR().stageN(i + 1),
       title: q.stage?.name ?? q.title,
-      body: q.stage?.goal ? html("p", { class: "slide-lead" }, mdInline(q.stage.goal)) : null,
+      body: q.stage?.goal ? bidiProse(html("p", { class: "slide-lead" }, mdInline(q.stage.goal))) : null,
     })),
     { title: TR().goSlideTitle, body: h("div", {}, h("p", { class: "slide-lead" }, TR().goSlideBody), metaLine(c)) },
   ];
@@ -156,7 +157,7 @@ export function presentView(c: Case): ViewResult {
       const draw = (): void => {
         const s = slides[at];
         if (s === undefined) return;
-        setChildren(head, s.kicker ? h("p", { class: "slide-kicker" }, s.kicker) : null, h("h1", { class: "slide-title", id: "slide-title" }, s.title));
+        setChildren(head, s.kicker ? h("p", { class: "slide-kicker" }, s.kicker) : null, h("h1", { class: "slide-title", id: "slide-title", dir: "auto" }, s.title));
         setChildren(body, s.body);
         body.scrollTop = 0;
         syncMore();

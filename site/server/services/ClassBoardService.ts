@@ -5,12 +5,18 @@
 // active member, the account (username only) and the `score:` summary: never a progress record, never a scan.
 // What counts is decided by the class's window rules (domain/class-board.ts).
 //
+// Event runs (#253): while the class has an event window, the board also lists the event occurrence's records
+// (`eventprogress:<classId>:<eventKey>:`, one key listing plus one read per record) and lets them replace the
+// members' own runs of those cases (domain/class-board.ts, withEventRuns).
+//
 // Solves don't purge the board's CDN copy: a purge per correct answer would cost a purge call per solve during a
 // class night, while the 10 s cache window already bounds how stale the board can be. Class edits do purge it
 // (ClassService), so a rotated token, an archive or a removed member applies at once.
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { AdminProgress, ClassBoardResponse } from "../../shared/contract.ts";
-import { classBoardRows, classWindow } from "../domain/class-board.ts";
+import { classBoardRows, classWindow, withEventRuns } from "../domain/class-board.ts";
+import { eventKeyOf, isEventLive } from "../domain/event-run.ts";
+import type { ProgressRecord } from "../domain/types.ts";
 import type { ClassBoardMember } from "../domain/class-board.ts";
 import type { ClassRecord } from "../domain/classes.ts";
 import { AppError } from "../domain/types.ts";
@@ -93,26 +99,44 @@ export class ClassBoardService {
   /**
    * Class admins' live view of one case: each active member's progress, the same view as the admin Live tab.
    * Reads only the members' own `progress:<caseId>:<member>` records (at most `memberLimit` of them); members who
-   * haven't opened the case are left out.
+   * haven't opened the case are left out. While the class event is live, a member's event run of the case
+   * replaces their own run (#268), the same rule as the class board.
    */
   async liveProgress(record: ClassRecord, caseId: string): Promise<{ generatedAt: string; caseId: string; players: AdminProgress[] }> {
     this.game.caseSecrets(caseId); // 404 for unknown cases
     const active = (await this.repos.classes.listMembers(record.id, record.memberLimit)).filter(({ member }) => member.status === "active");
+    const eventKey = isEventLive(record.event, this.now()) ? eventKeyOf(record.event) : null;
+    const eventStore = eventKey === null ? null : this.repos.eventProgress.forEvent(record.id, eventKey);
     const rows = await mapWithConcurrency(active, async ({ accountId }) => {
-      const [account, progress] = await Promise.all([this.repos.accounts.get(accountId), this.repos.progress.get(caseId, accountId)]);
+      const [account, own, event] = await Promise.all([
+        this.repos.accounts.get(accountId),
+        this.repos.progress.get(caseId, accountId),
+        eventStore === null ? Promise.resolve(null) : eventStore.get(caseId, accountId),
+      ]);
+      const progress = event ?? own;
       return account && progress ? this.game.toAdminView(progress.data, account.data) : null;
     });
     const players = rows.filter((p): p is AdminProgress => p !== null).sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
     return { generatedAt: this.now().toISOString(), caseId, players };
   }
 
-  /** Active members with a full, approved account, and their score summaries (none yet = nothing solved). */
+  /**
+   * Active members with a full, approved account, and their score summaries (none yet = nothing solved), with the
+   * current event occurrence's event-run records in place of their own runs of those cases (#253).
+   */
   private async boardMembers(record: ClassRecord): Promise<ClassBoardMember[]> {
-    const active = (await this.repos.classes.listMembers(record.id, record.memberLimit)).filter(({ member }) => member.status === "active");
+    const eventKey = eventKeyOf(record.event);
+    const [listed, eventRecords] = await Promise.all([
+      this.repos.classes.listMembers(record.id, record.memberLimit),
+      eventKey === null ? Promise.resolve([]) : this.repos.eventProgress.listEvent(record.id, eventKey),
+    ]);
+    const active = listed.filter(({ member }) => member.status === "active");
+    const runsOf = new Map<string, ProgressRecord[]>();
+    for (const run of eventRecords) runsOf.set(run.accountId, [...(runsOf.get(run.accountId) ?? []), run]);
     const members = await mapWithConcurrency(active, async ({ accountId }): Promise<ClassBoardMember | null> => {
       const [account, score] = await Promise.all([this.repos.accounts.get(accountId), this.repos.scores.get(accountId)]);
       if (!account || account.data.kind !== "user" || account.data.status !== "approved") return null;
-      return { accountId, username: account.data.username, cases: score?.data.cases ?? {} };
+      return { accountId, username: account.data.username, cases: withEventRuns(score?.data.cases ?? {}, runsOf.get(accountId) ?? []) };
     });
     return members.filter((m): m is ClassBoardMember => m !== null);
   }

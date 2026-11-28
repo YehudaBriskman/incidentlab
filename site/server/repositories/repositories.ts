@@ -9,6 +9,8 @@
 //   globalboard:<accountId>             { accountId, since } (only while opted in to the public board)
 //   class:, classcode:, classmember:, memberof:   classes (class-repository.ts, #179)
 //   resetrequest:<accountId>            ResetRequestRecord (reset-request-repository.ts, #254)
+//   eventprogress:<classId>:<eventKey>:<caseId>:<accountId>   ProgressRecord of a class event run (#253,
+//                                       domain/event-run.ts)
 import { z } from "zod";
 import { ScheduleSchema } from "../../shared/contract.ts";
 import type { Schedule } from "../../shared/contract.ts";
@@ -86,7 +88,13 @@ export class SessionRepository {
   }
 }
 
-export class ProgressRepository {
+/** What gameplay needs of a progress store: the player's own run or one event run (#253). */
+export interface ProgressStore {
+  get(caseId: string, accountId: string): Promise<Versioned<ProgressRecord> | null>;
+  saveIfMatch(record: ProgressRecord, etag: string | null): Promise<boolean>;
+}
+
+export class ProgressRepository implements ProgressStore {
   private readonly kv: KvStore;
   constructor(kv: KvStore) {
     this.kv = kv;
@@ -124,6 +132,63 @@ export class ProgressRepository {
   async deleteMany(filter: { caseId?: string; accountId?: string }): Promise<void> {
     const keys = (await this.listKeys(filter.caseId)).filter((k) => filter.accountId === undefined || k.endsWith(`:${filter.accountId}`));
     await mapWithConcurrency(keys, (key) => this.kv.delete(key));
+  }
+}
+
+/**
+ * Event-run records (#253): `eventprogress:<classId>:<eventKey>:<caseId>:<accountId>`, the same shape as
+ * `progress:`. Additive: a new prefix, written only by event runs; nothing else reads or writes it.
+ */
+/** One event-run record with the event occurrence it belongs to (#268). */
+export type EventRunEntry = { readonly classId: string; readonly eventKey: string; readonly record: ProgressRecord };
+
+export class EventProgressRepository {
+  private readonly kv: KvStore;
+  constructor(kv: KvStore) {
+    this.kv = kv;
+  }
+  private prefix(classId: string, eventKey: string): string {
+    return `eventprogress:${classId}:${eventKey}:`;
+  }
+  /** The store of one event occurrence, for GameService. */
+  forEvent(classId: string, eventKey: string): ProgressStore {
+    const key = (caseId: string, accountId: string): string => `${this.prefix(classId, eventKey)}${caseId}:${accountId}`;
+    return {
+      get: async (caseId, accountId) => parseVersioned(await this.kv.get(key(caseId, accountId)), ProgressRecordSchema),
+      saveIfMatch: (record, etag) => this.kv.setIfMatch(key(record.caseId, record.accountId), record, etag),
+    };
+  }
+  /**
+   * Every event-run record matching a case and/or an account (#268), with the event it belongs to: for account
+   * deletes, progress resets and the hygiene sweep. One listing of the prefix, then reads only for matching keys.
+   */
+  async listMatching(filter: { caseId?: string; accountId?: string }): Promise<EventRunEntry[]> {
+    const keys = (await this.kv.listKeys("eventprogress:")).flatMap((key) => {
+      const [, classId, eventKey, caseId, accountId] = key.split(":");
+      if (classId === undefined || eventKey === undefined || caseId === undefined || accountId === undefined) return [];
+      if (filter.caseId !== undefined && caseId !== filter.caseId) return [];
+      if (filter.accountId !== undefined && accountId !== filter.accountId) return [];
+      return [{ key, classId, eventKey }];
+    });
+    const rows = await mapWithConcurrency(keys, async ({ key, classId, eventKey }): Promise<EventRunEntry | null> => {
+      const record = parseVersioned(await this.kv.get(key), ProgressRecordSchema)?.data;
+      return record === undefined ? null : { classId, eventKey, record };
+    });
+    return rows.filter((r): r is EventRunEntry => r !== null);
+  }
+  /** Deletes these records (after they went to the trash). */
+  async deleteEntries(entries: readonly EventRunEntry[]): Promise<void> {
+    await mapWithConcurrency(entries, (e) => this.kv.delete(`${this.prefix(e.classId, e.eventKey)}${e.record.caseId}:${e.record.accountId}`));
+  }
+  /** Puts a trashed record back unless a newer one exists; true when restored. */
+  restoreEntry(entry: EventRunEntry): Promise<boolean> {
+    return this.forEvent(entry.classId, entry.eventKey).saveIfMatch(entry.record, null);
+  }
+  /** Every record of one event occurrence (one key listing, then one read per record). */
+  async listEvent(classId: string, eventKey: string): Promise<ProgressRecord[]> {
+    const keys = await this.kv.listKeys(this.prefix(classId, eventKey));
+    const rows = await mapWithConcurrency(keys, async (key) => parseVersioned(await this.kv.get(key), ProgressRecordSchema)?.data ?? null);
+    return rows.filter((r): r is ProgressRecord => r !== null);
   }
 }
 
@@ -169,6 +234,7 @@ export type Repositories = {
   readonly usernames: UsernameIndexRepository;
   readonly sessions: SessionRepository;
   readonly progress: ProgressRepository;
+  readonly eventProgress: EventProgressRepository;
   readonly schedule: ScheduleRepository;
   readonly rateLimits: RateLimitRepository;
   readonly scores: ScoreRepository;
@@ -182,6 +248,7 @@ export const createRepositories = (kv: KvStore): Repositories => ({
   usernames: new UsernameIndexRepository(kv),
   sessions: new SessionRepository(kv),
   progress: new ProgressRepository(kv),
+  eventProgress: new EventProgressRepository(kv),
   schedule: new ScheduleRepository(kv),
   rateLimits: new RateLimitRepository(kv),
   scores: new ScoreRepository(kv),

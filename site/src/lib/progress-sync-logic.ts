@@ -45,6 +45,11 @@ export function sameProgress(a: ProgressView, b: ProgressView): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+/** Both views are the same record: the own run, or the same class event occurrence's run (#253). */
+export function sameRun(a: ProgressView, b: ProgressView): boolean {
+  return (a.run?.classId ?? null) === (b.run?.classId ?? null) && (a.run?.eventKey ?? null) === (b.run?.eventKey ?? null);
+}
+
 export type IncomingDecision = "ignore" | "apply" | "refetch";
 
 /**
@@ -54,6 +59,8 @@ export type IncomingDecision = "ignore" | "apply" | "refetch";
 export function decideIncoming(current: ProgressView, lang: string, message: SyncMessage): IncomingDecision {
   const next = message.progress;
   if (next.caseId !== current.caseId || next.accountId !== current.accountId) return "ignore";
+  // A tab on the class event run never takes the own run's progress, or the other way round (#253).
+  if (!sameRun(next, current)) return "ignore";
   if (progressWeight(next) <= progressWeight(current)) return "ignore";
   return message.lang === lang ? "apply" : "refetch";
 }

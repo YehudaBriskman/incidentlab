@@ -3,7 +3,7 @@
 // browser has one). A tab coming back into view re-reads progress, at most every REFETCH_FLOOR_MS.
 import type { ProgressView } from "../../shared/contract";
 import { getLang } from "../i18n/i18n";
-import { decideIncoming, parseSyncMessage, sameProgress, shouldRefetch, type SyncMessage } from "./progress-sync-logic";
+import { decideIncoming, parseSyncMessage, sameProgress, sameRun, shouldRefetch, type SyncMessage } from "./progress-sync-logic";
 
 const CHANNEL = "incidentlab-progress";
 
@@ -91,7 +91,7 @@ export function followProgress(opts: {
       });
   };
   function onLocal(next: ProgressView): void {
-    if (!live() || next.caseId !== current.caseId) return;
+    if (!live() || next.caseId !== current.caseId || !sameRun(next, current)) return;
     current = next;
     syncedAt = Date.now();
   }

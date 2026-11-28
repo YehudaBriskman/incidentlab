@@ -6,6 +6,7 @@
 // - 640px and below: no column; the same menu button opens the Sheet.
 // The <nav> element itself moves into the Sheet and back (never cloned), so focus targets and listeners survive.
 import { h, html, setChildren, type Child } from "../lib/dom";
+import { nameNode } from "../lib/bidi";
 import { openSheet, type DialogHandle } from "../lib/overlay";
 import { cachedAccount, isAdmin, onAccountChange } from "../lib/session";
 import { TA } from "../i18n/strings-account";
@@ -228,7 +229,7 @@ export function showSubNav(spec: NavSection | null): void {
     const slot = items[spec.under].sub;
     const id = `nav-sub-${spec.under}`;
     if (!spec.content.hasAttribute("aria-label") && !spec.content.hasAttribute("aria-labelledby")) spec.content.setAttribute("aria-labelledby", id);
-    setChildren(slot, h("p", { class: "nav-sub-title", id, dir: "auto" }, spec.label), spec.content);
+    setChildren(slot, h("p", { class: "nav-sub-title", id }, nameNode(spec.label)), spec.content);
     slot.hidden = false;
   }
   draw();

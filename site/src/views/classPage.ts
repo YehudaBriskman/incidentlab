@@ -20,7 +20,9 @@ import { openGuestUpgrade } from "../shell/frame";
 import { setPageCrumb } from "../shell/topbar";
 import type { ViewResult } from "../shell/types";
 import { asLiveEvent, eventWhen, renderLeaderboard } from "./leaderboard";
-import { formatDateTimeZone } from "./manage/format";
+import { dateTimeZoneEl, locale } from "./manage/format";
+import { nameNode } from "../lib/bidi";
+import { formatIsoDay } from "../lib/bidi-core";
 import { classChips } from "./classes";
 
 let tickTimer: number | null = null;
@@ -37,7 +39,7 @@ export function classPageView(id: string): ViewResult {
 }
 
 const boardHref = (token: string): string => `#/classboard/${encodeURIComponent(token)}?projector=1`;
-const caseLink = (caseId: string): HTMLElement => h("a", { class: "hit-link", href: `#/case/${encodeURIComponent(caseId)}`, dir: "auto" }, caseSummary(caseId)?.title ?? caseId);
+const caseLink = (caseId: string): HTMLElement => h("a", { class: "hit-link", href: `#/case/${encodeURIComponent(caseId)}` }, nameNode(caseSummary(caseId)?.title ?? caseId));
 
 function card(id: string, title: string, aside: Child, body: Child, extra = ""): HTMLElement {
   return h(
@@ -118,7 +120,7 @@ function renderClassPage(root: HTMLElement, id: string): void {
       c.boardToken !== undefined ? h("a", { class: "btn", href: boardHref(c.boardToken) }, TC().projector) : null,
       leaveBtn,
     ];
-    const header = pageHeader({ title: h("bdi", {}, c.name), meta: h("span", { class: "class-chips" }, classChips(c)), actions, id: "class-title" });
+    const header = pageHeader({ title: h("bdi", { dir: "auto" }, c.name), meta: h("span", { class: "class-chips" }, classChips(c)), actions, id: "class-title" });
 
     if (m !== null && m.status === "pending") {
       setChildren(root, header, note(TC().pendingPageTitle, TC().pendingPageBody(c.name)));
@@ -130,12 +132,12 @@ function renderClassPage(root: HTMLElement, id: string): void {
     const todayCard = card(
       "class-today-h",
       TC().todayTitle,
-      today ? TC().todayDate(today.date) : null,
+      today ? TC().todayDate(formatIsoDay(locale(), today.date)) : null,
       todayCase !== null && caseSummary(todayCase) !== undefined
         ? h(
             "div",
             { class: "class-today" },
-            h("a", { class: "class-today-title", href: `#/case/${encodeURIComponent(todayCase)}`, dir: "auto" }, caseSummary(todayCase)?.title ?? todayCase),
+            h("a", { class: "class-today-title", href: `#/case/${encodeURIComponent(todayCase)}` }, nameNode(caseSummary(todayCase)?.title ?? todayCase)),
             h("p", { class: "muted small", dir: "auto" }, caseSummary(todayCase)?.subtitle ?? ""),
             h("a", { class: "btn btn-sm", href: `#/case/${encodeURIComponent(todayCase)}` }, TC().openCase),
           )
@@ -188,11 +190,10 @@ function drawEvent(c: ClassDetail): HTMLElement {
     if (!phaseEl.isConnected) return stopClassPage();
     drawPhase();
   }, 1000);
-  const when = (iso: string | null): string => (iso === null ? "—" : formatDateTimeZone(iso));
-  const rows: Array<[string, string]> = [];
-  if (ev.startsAt !== null) rows.push([TC().eventStarts, when(ev.startsAt)]);
-  if (ev.endsAt !== null) rows.push([TC().eventEnds, when(ev.endsAt)]);
-  if (ev.freezeAt !== null) rows.push([TC().eventFreeze, when(ev.freezeAt)]);
+  const rows: Array<[string, Node]> = [];
+  if (ev.startsAt !== null) rows.push([TC().eventStarts, dateTimeZoneEl(ev.startsAt)]);
+  if (ev.endsAt !== null) rows.push([TC().eventEnds, dateTimeZoneEl(ev.endsAt)]);
+  if (ev.freezeAt !== null) rows.push([TC().eventFreeze, dateTimeZoneEl(ev.freezeAt)]);
   return card(
     "class-event-h",
     TC().eventTitle,

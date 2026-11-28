@@ -156,6 +156,10 @@ it, and no public or CDN-cached response carries stage records. Constants: `SCOR
 | POST | `/api/cases/:caseId/reveal` | approved | `{questionId}` | `{progress}` (0 points, `revealedAnswer` set, next stage active) |
 | POST | `/api/cases/:caseId/reveal-command` | approved | `{toolId, expectedStage?}` | `{progress}` (−5 on the active stage; free if already paid or the case is done). `expectedStage` (additive): charge only if that stage is active, else 409 `stale` |
 | GET | `/api/cases/:caseId/debrief?lang=en\|he` | approved | | `{markdown}`, 403 until every stage is finished |
+
+Every play route above also takes an optional **event run** (#253): `run: {classId}` in a POST body, `?run=<classId>`
+on a GET. It plays that class's live event run instead of the player's own run (see Classes, "Event runs"); the
+progress view's `run` (`{classId, className, eventKey}`, null for the own run) says which record answered.
 | POST | `/api/me/password` | cookie | `{currentPassword, newPassword}` | `{account, recoveryCode?}` + fresh cookie (other sessions end; `recoveryCode` when the change cleared `mustChangePassword`, #254) |
 | POST | `/api/me/recovery-code` | cookie | `{currentPassword}` | `{recoveryCode}` (replaces the old code; 400 `bad-credentials`; wrong passwords count against the username's sign-in limit) |
 | GET | `/api/event` | none | | `{event, serverTime}` |
@@ -364,6 +368,7 @@ class response is personalised (`no-store`), except the public class board (belo
     A completion bonus counts by `completedAt` under the same rules. The class's first solver of each case and
     question (the earliest counted solve; ties go to the lower account id) gets the first-blood bonus instead of
     the site-wide first solver, and `firstBloods` counts class first solves.
+  - **Event runs (#253)** replace a member's own run on the board, case by case (see "Event runs" below).
   - **Rotating the token** makes the old URL 404 at once at the origin and purges the CDN copy; if the purge
     fails, the old URL can still be served for at most the cache window: 10 s plus 20 s stale-while-revalidate.
 - **Live progress** (`GET /api/classes/:id/progress?caseId=`, class admins and the site admin, no-store): each
@@ -371,6 +376,28 @@ class response is personalised (`no-store`), except the public class board (belo
   points, hints, wrong attempts; never the player's own answers or paid content). It reads only the members'
   `progress:<caseId>:<member>` records (at most `memberLimit`). Members who haven't opened the case are left out.
   400 without `caseId`, 404 `unknown-case` for an unknown one.
+- **Event runs (#253).** During a live class event a member may play an assigned case in a separate record that
+  counts on that class's board only, so a case finished before the event can still score that night. A play
+  route names the run with `run: {classId}` (POST body) or `?run=<classId>` (GET); `EventRunService` accepts it only
+  when the caller is an **active member** (else 403 `not-a-member`), the class is active and its event window is
+  **live now** (`startsAt <= now < endsAt`, both set), and the case is **assigned** to the class, or the class has
+  no assigned cases and the case is public (else 409 `event-not-live`). A refused run never falls back to the
+  own run. An accepted run reads and writes `eventprogress:<classId>:<eventKey>:<caseId>:<accountId>` for every
+  action (progress, setup-done, answer, hint, reveal-command, reveal, the debrief gate) with the same scoring,
+  penalties, rate limit, idempotency and 409 `stale` guards. It never claims `firstblood:` and never writes
+  `score:`, so it stays off the global board, My stats, achievements and streaks.
+  - **`eventKey`** names one occurrence of the class event: the first 16 hex characters of sha256 over `startsAt`
+    as an ISO instant (`server/domain/event-run.ts`). Renaming the event or moving its end or freeze keeps it;
+    moving `startsAt` starts a new occurrence, and the earlier records stay stored but no longer count.
+  - **On the board:** for the current occurrence, a member's event-run record of a case replaces their own run of
+    it, even before anything is solved in it. A member who never opened an event run of a case keeps their own
+    run's solves inside the window (the rules above), so a class that played the old way keeps its scores. The
+    window, the freeze and the class first-solver bonus apply to both kinds.
+  - **On the case page:** while a class event is live on the case, the page asks once (per case and tab) between
+    "Play the event run for <class> (counts on the class board only)" and "Continue your own run", and tells a
+    player who finished the case that the earlier solve doesn't count tonight. The choice lives in
+    sessionStorage (`il.run.<caseId>`); the status line shows "Event run · <class>" with Switch, and cross-tab
+    sync ignores progress of another run.
 - **No class admin may reset a password** or see anything of an account beyond its username and (later) its class
   progress: a reset by a class admin would allow account takeover. Only the site admin resets passwords.
 - **Archiving is the soft delete:** nothing is removed. An archived class takes no joins and no edits (409
@@ -445,7 +472,7 @@ Rules for changing stored data, backups, restores and migrations: see `docs/DATA
 One Netlify Blobs store, `incidentlab-v2`, with key prefixes: `account:`, `username:` (index),
 `session:`, `progress:<caseId>:<accountId>`, `config:schedule`, `config:settings`, `config:event`,
 `firstblood:<caseId>:<questionId>`, `audit:<iso>:<rand>`, `ratelimit:`, for classes `class:`, `classcode:`,
-`classmember:` and `memberof:`, and for DB-stored cases `case:`,
+`classmember:`, `memberof:` and `eventprogress:` (#253), and for DB-stored cases `case:`,
 `evidence:` and `upload:` (shapes in `docs/DATA.md`). Records written before scoring v2
 still parse (new fields have defaults); stages solved before it keep their points. The pre-accounts store
 `incidentlab-players` is no longer read.
