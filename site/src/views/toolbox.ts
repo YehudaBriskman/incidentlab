@@ -466,7 +466,6 @@ function drawToolbox(root: HTMLElement, c: Case, state: PageState): void {
     autocorrect: "off",
     spellcheck: "false",
     enterkeyhint: "search",
-    dir: "auto",
     "aria-describedby": `${filterId}-hint ${filterId}-count`,
   });
   filter.value = filters.get(c.id) ?? "";

@@ -55,7 +55,6 @@ export function createOwnerClassesPanel(opts: OwnerClassesOptions): OwnerClasses
     type: "search",
     class: "admin-input owner-class-search",
     enterkeyhint: "search",
-    dir: "auto",
     placeholder: T().admClassesSearch,
     "aria-label": T().admClassesSearchLabel,
   });

@@ -112,7 +112,6 @@ export function createMembersPanel(opts: MembersOptions): MembersPanel {
     type: "search",
     class: "admin-input admin-search",
     enterkeyhint: "search",
-    dir: "auto",
     placeholder: T().admUserSearchPlaceholder,
     "aria-label": T().admUserSearchLabel,
     maxlength: 64,
