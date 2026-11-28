@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { QUESTION_ORDER, type ProgressView, type StageProgress } from "../../shared/contract.ts";
-import { decideIncoming, parseSyncMessage, progressWeight, sameProgress, shouldRefetch, REFETCH_FLOOR_MS } from "./progress-sync-logic.ts";
+import { decideIncoming, parseSyncMessage, sameRun, progressWeight, sameProgress, shouldRefetch, REFETCH_FLOOR_MS } from "./progress-sync-logic.ts";
 
 const stage = (over: Partial<StageProgress> = {}): StageProgress => ({
   status: "locked",
@@ -30,6 +30,7 @@ const progress = (q1: Partial<StageProgress> = {}, over: Partial<ProgressView> =
   stages: Object.fromEntries(QUESTION_ORDER.map((q) => [q, q === "q1" ? stage({ status: "active", ...q1 }) : stage()])) as ProgressView["stages"],
   commandsRevealed: {},
   unlocked: { hints: {}, commands: {} },
+  run: null,
   ...over,
 });
 
@@ -71,4 +72,14 @@ test("decideIncoming applies newer progress of the same case and account only", 
 test("sameProgress compares the whole view", () => {
   assert.equal(sameProgress(progress(), progress()), true);
   assert.equal(sameProgress(progress(), progress({ wrongAttempts: 1 })), false);
+});
+
+test("a tab never takes another run's progress (#253)", () => {
+  const run = { classId: "AbCdEf123456", className: "Night shift", eventKey: "0123456789abcdef" };
+  const own = progress();
+  const onEvent = progress({ hintsRevealed: 1 }, { run });
+  assert.equal(sameRun(own, onEvent), false);
+  assert.equal(decideIncoming(own, "en", { kind: "progress", lang: "en", progress: onEvent }), "ignore");
+  assert.equal(decideIncoming(progress({}, { run }), "en", { kind: "progress", lang: "en", progress: onEvent }), "apply");
+  assert.equal(decideIncoming(progress({}, { run: { ...run, eventKey: "fedcba9876543210" } }), "en", { kind: "progress", lang: "en", progress: onEvent }), "ignore");
 });
