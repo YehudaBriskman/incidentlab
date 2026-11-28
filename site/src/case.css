@@ -7,6 +7,8 @@
 :root {
   /* component values: the sticky case status line (#216) and the gap under it */
   --case-status-h: 44px;
+  /* the second row a live class event takes on phones (#275) */
+  --case-status-row2: 28px;
   --case-sticky-top: calc(var(--case-status-h) + var(--space-3));
 }
 
@@ -38,6 +40,11 @@
 .cs-event .home-class-event.is-live .dot { flex: none; background: var(--info-fg); }
 .cs-event .home-class-frozen { font-size: var(--type-label-size); }
 .cs-costs { flex: none; margin-inline-start: auto; }
+.cs-costs-short { display: none; }
+@media (max-width: 380px) {
+  .cs-costs-long { display: none; }
+  .cs-costs-short { display: inline; }
+}
 /* event runs (#253): "[Event run] <class> Switch" in the line, and the choice card under it */
 .cs-run { flex: none; gap: var(--space-2); }
 .cs-run-chip { flex: none; font-size: var(--type-label-size); }
@@ -91,6 +98,17 @@ main.app-content:has(.case-status) { scroll-padding-block-start: calc(var(--case
   .cs-line:has(.cs-run) .cs-time { display: none; }
   .cs-run::before { content: none; }
   .cs-item::before { margin-inline-end: var(--space-1); }
+  /* A live class event gets its own row on phones (#275): squeezed into one line it shrank to a dot and cut the
+     stage count. The line wraps, the event takes the full second row with its name, and the sticky offsets grow. */
+  .cs-line { flex-wrap: wrap; row-gap: 0; }
+  .cs-stage { flex: none; }
+  .cs-event { order: 10; flex: 1 0 100%; min-block-size: var(--case-status-row2); }
+  .cs-event::before { content: none; }
+  .cs-event .home-class-event-name { display: inline; }
+  main.app-content:has(.cs-event:not([hidden])) {
+    --case-status-h: calc(44px + var(--case-status-row2));
+    --case-sticky-top: calc(var(--case-status-h) + var(--space-3));
+  }
 }
 
 /* reading text on the stage keeps the reading measure (DESIGN.md Layout: --measure on every paragraph container) */

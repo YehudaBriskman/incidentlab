@@ -162,3 +162,37 @@ test("Hebrew: the tabs run right to left (ArrowLeft is the next tab)", async ({ 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });
+
+test.describe("phones with a live class event (#275)", () => {
+  for (const width of [390, 360]) {
+    test.describe(`${width}px`, () => {
+      test.use({ viewport: { width, height: 800 }, isMobile: true, hasTouch: true });
+
+      test("the status line keeps the stage, the costs and the event, none cut off", async ({ page }) => {
+        await onStageOne(page, {
+          before: async () => {
+            const created = await page.request.post("/api/classes", { data: { name: "E2E phone class" } });
+            expect(created.status(), await created.text()).toBe(201);
+            const cls = ((await created.json()) as { class: { id: string } }).class;
+            const now = Date.now();
+            const patched = await page.request.patch(`/api/classes/${cls.id}`, {
+              data: { event: { name: "Phone night", startsAt: new Date(now - 10 * 60_000).toISOString(), endsAt: new Date(now + 2 * 3600_000).toISOString(), freezeAt: null, announcement: null } },
+            });
+            expect(patched.status(), await patched.text()).toBe(200);
+          },
+        });
+        const status = ui.status(page);
+        await expect(status.locator(".cs-event")).toContainText("Phone night");
+        const layout = await status.locator(".cs-line").evaluate((line) => ({
+          clipped: [...line.querySelectorAll<HTMLElement>(".cs-item")].filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.className),
+          overflow: line.scrollWidth - line.clientWidth,
+          height: line.getBoundingClientRect().height,
+        }));
+        expect(layout.clipped).toEqual([]);
+        expect(layout.overflow).toBeLessThanOrEqual(0);
+        expect(layout.height).toBeLessThanOrEqual(76); // two rows: the line, then the event
+        await expect(status.getByRole("button", { name: "Costs so far" })).toBeInViewport({ ratio: 1 });
+      });
+    });
+  }
+});
