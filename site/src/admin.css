@@ -125,7 +125,14 @@ input.admin-input[type="search"]:dir(rtl) { background-position: right var(--spa
 .key-done, .key-reached { display: inline-block; width: 12px; height: 10px; border-radius: 3px; }
 .key-done { background: var(--success-fg); }
 .key-reached { background: var(--info-bg); border: 1px solid var(--info-fg); }
-.funnel-row { display: grid; grid-template-columns: 52px minmax(0, 1fr) 56px; align-items: center; gap: var(--space-3); padding: var(--space-1) 0; }
+.funnel-row { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-1) 0; }
+.funnel-list { list-style: none; margin: 0; padding: 0; }
+.funnel-base { margin: 0 0 var(--space-2); }
+@media (max-width: 600px) {
+  /* the count says the denominator: it takes its own line under the bar on phones */
+  .funnel-row { grid-template-columns: 52px minmax(0, 1fr); row-gap: 2px; }
+  .admin-funnel .funnel-row .funnel-count { grid-column: 2; text-align: start; }
+}
 .funnel-label { font-size: var(--type-label-size); font-weight: 500; color: var(--text-2); }
 .funnel-track { position: relative; height: 12px; background: var(--fill-track); border-radius: var(--radius-pill); overflow: hidden; }
 .funnel-reached, .funnel-done { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: var(--radius-pill); transition: width var(--motion-dur-long) var(--motion-ease-standard); }
@@ -723,7 +730,6 @@ html.admin-savebar-open :is(main.app-content, .admin-tabpanel) { scroll-padding-
    Layout mirrors through logical properties (funnel, markers, padding, alignment).
    Numbers, codes, URLs and timestamps stay LTR, isolated from surrounding text. */
 [dir=rtl] .admin-tiles .stat-value,
-[dir=rtl] .funnel-count,
 [dir=rtl] .admin-table .num,
 [dir=rtl] .board-rank,
 [dir=rtl] .board-time,
@@ -737,6 +743,7 @@ html.admin-savebar-open :is(main.app-content, .admin-tabpanel) { scroll-padding-
 [dir=rtl] .funnel-count,
 [dir=rtl] .admin-table .num,
 [dir=rtl] .board-score { text-align: end; }
+/* #240: the funnel count is a Hebrew sentence with numbers ("2 סיימו · 2 הגיעו · מתוך 6"), read right to left */
 /* Values that carry a localized unit ("33 דק׳ 38 שנ׳", "לפני 6 דק׳") read in their own script's direction. */
 [dir=rtl] .admin-tiles .stat-value,
 [dir=rtl] .stats-kpi-value,

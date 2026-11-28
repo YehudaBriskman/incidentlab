@@ -55,12 +55,19 @@ export const scoreCaseOf = (record: ProgressRecord): ScoreCase | null => {
 };
 
 /**
- * Board totals over the summary's cases, optionally for one case and only for what happened by `cutoff`
- * (the event freeze). Same rules the progress-based board used: solved stages count by their finish time,
- * a completion bonus by the case's completion time.
+ * Board totals over the summary's cases, optionally for one case, only for what happened by `cutoff` (the
+ * event freeze) and only for what happened from `since` (the period's start, #239). Same rules the
+ * progress-based board used: solved stages count by their finish time, a completion bonus by the case's
+ * completion time.
  */
-export const boardTotals = (cases: Readonly<Record<string, ScoreCase>>, filter: { caseId: string | null; cutoff: string | null }): BoardTotals => {
-  const counts = (at: string | null): boolean => filter.cutoff === null || (at !== null && at <= filter.cutoff);
+export const boardTotals = (
+  cases: Readonly<Record<string, ScoreCase>>,
+  filter: { caseId: string | null; cutoff: string | null; since?: string | null },
+): BoardTotals => {
+  // `since` (#239, the week or month board): only what happened at or after it counts. Undated solves never do.
+  const since = filter.since ?? null;
+  const counts = (at: string | null): boolean =>
+    (filter.cutoff === null || (at !== null && at <= filter.cutoff)) && (since === null || (at !== null && at >= since));
   let score = 0;
   let stagesSolved = 0;
   let casesCompleted = 0;

@@ -76,6 +76,8 @@ export class ClassBoardService {
     const rows = classBoardRows(members, window, { caseId });
     return {
       caseId,
+      period: "all",
+      periodStart: null,
       frozen: window.cutoff !== null,
       frozenAt: window.cutoff,
       generatedAt: now.toISOString(),
