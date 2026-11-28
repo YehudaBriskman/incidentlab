@@ -85,6 +85,36 @@ test("Hebrew: the toolbox filter keeps its icon beside the placeholder, empty an
   await expectIconBesidePlaceholder(filter);
 });
 
+test("Hebrew: the Explorer mirrors (files at the right, Analyze at the left), with the case, file and typed filter isolated", async ({ page }) => {
+  await hebrewPlayerOnStageOne(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`/#/case/${CASE_ID}/explorer`);
+  await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+  const files = page.getByRole("complementary", { name: "קבצים וזמן" });
+  await files.getByRole("button").filter({ hasText: /\.log$/ }).first().click();
+  await expect(page.locator(".ex-count")).toHaveText(/מתוך/, { timeout: 60_000 });
+  // the header reads right to left: Files, the tool, then the file
+  const x = async (sel: string): Promise<number> => (await page.locator(sel).boundingBox())?.x ?? 0;
+  expect(await x(".ex-files-btn")).toBeGreaterThan(await x(".ex-heading"));
+  expect(await x(".ex-heading")).toBeGreaterThan(await x(".ex-title"));
+  await expect(page.locator(".ex-crumb-text")).toHaveAttribute("dir", "auto");
+  await expect(page.locator(".ex-title")).toHaveAttribute("dir", "ltr");
+  // the quick filter: the Hebrew placeholder reads right to left, a typed pattern left to right
+  const quick = page.getByRole("textbox", { name: "טקסט הסינון בשלב 1" });
+  await expect(quick).toHaveCSS("direction", "rtl");
+  await quick.fill("GET /");
+  await expect(quick).toHaveCSS("direction", "ltr");
+  // Analyze opens at the inline end, which is the left; the files pane is at the right
+  await page.getByRole("button", { name: /^ניתוח/ }).click();
+  const panel = await page.locator(".ex-analyze").boundingBox();
+  const log = await page.locator(".ex-view").boundingBox();
+  const side = await files.boundingBox();
+  expect(panel !== null && log !== null && panel.x + panel.width <= log.x + 1).toBe(true);
+  expect(side !== null && log !== null && side.x >= log.x + log.width - 1).toBe(true);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
 test("Hebrew: the console's user search keeps its icon beside the placeholder, and topics read in order", async ({ page }) => {
   expect((await page.request.post("/api/auth/login", { data: { username: ADMIN_USERNAME, password: ADMIN_KEY } })).ok()).toBe(true);
   await page.addInitScript(() => localStorage.setItem("il.lang", "he"));

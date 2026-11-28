@@ -242,7 +242,8 @@ function isKnownCase(id: string): boolean {
 function asideRoute(parts: readonly string[]): boolean {
   const [section, id, sub] = parts;
   if (parseSettingsRoute(parts)?.kind === "section") return true; // the settings sections list (#219)
-  return section === "case" && id !== undefined && parts.length === 3 && (sub === "toolbox" || sub === "explorer");
+  // The Explorer draws its own files pane (#280), so only the Toolbox takes the frame's page panel.
+  return section === "case" && id !== undefined && parts.length === 3 && sub === "toolbox";
 }
 
 function route(): void {
