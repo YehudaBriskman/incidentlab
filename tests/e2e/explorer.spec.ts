@@ -28,9 +28,16 @@ const ui = {
   condOp: (p: Page, n: number) => p.getByRole("combobox", { name: `Condition ${n} test` }),
   condValue: (p: Page, n: number) => p.getByRole("textbox", { name: `Condition ${n} value` }),
   addCond: (p: Page) => p.getByRole("button", { name: "+ Condition" }),
-  // JSON conditions, the column view and the aggregations sit behind "More filters" (#217)
-  moreFilters: (p: Page) => p.getByRole("button", { name: /^More filters/ }),
+  // Line filters after step 1, JSON conditions, the column view and the aggregations sit under Analyze (#280)
+  analyze: (p: Page) => p.getByRole("button", { name: /^Analyze/ }),
+  chips: (p: Page) => p.getByRole("list", { name: "Active filters" }),
 };
+
+/** Opens the Analyze panel (if closed) on one of its tabs. */
+async function analyzeTab(page: Page, tab: "Filters" | "Count unique values" | "Lines over time"): Promise<void> {
+  if ((await ui.analyze(page).getAttribute("aria-expanded")) !== "true") await ui.analyze(page).click();
+  await page.getByRole("tab", { name: tab }).click();
+}
 
 const LOADED = / of [\d,]+ lines?/;
 
@@ -95,7 +102,7 @@ test("explorer drawer: Enter opens line details, N and the buttons step, Escape 
   await ui.menuItem(page, "Line details").click();
   await expect(ui.drawer(page)).toBeVisible();
   await ui.drawer(page).getByRole("button", { name: /^Keep lines where service is / }).click();
-  await expect(ui.stepText(page, 2)).toHaveValue(/^service=/);
+  await expect(ui.chips(page)).toContainText(/contains service=/);
   await page.getByRole("button", { name: "Close details" }).click();
   await expect(ui.drawer(page)).toBeHidden();
 });
@@ -144,7 +151,7 @@ test("explorer histogram: a bar click, or arrow keys and Enter, keep only that t
   await page.goto(ROUTE);
   await openFile(page, "app/checkout-service.log");
   const total = await countOf(page);
-  await ui.moreFilters(page).click();
+  await analyzeTab(page, "Lines over time");
   await ui.plot(page).click();
   await expect(ui.bars(page).first()).toBeVisible();
 
@@ -152,7 +159,7 @@ test("explorer histogram: a bar click, or arrow keys and Enter, keep only that t
   await expect(ui.timeChip(page)).toBeVisible();
   await expect(page).toHaveURL(/[?&]t=\d+-\d+/);
   await expect.poll(() => countOf(page)).toBeLessThan(total);
-  await expect(page.locator(".ex-badge")).toHaveText("1");
+  await expect(ui.analyze(page)).toHaveText(/Analyze \(1\)/);
 
   await ui.removeTime(page).click();
   await expect(ui.timeChip(page)).toBeHidden();
@@ -178,7 +185,7 @@ test("explorer JSON: field picker and several conditions", async ({ page }) => {
   await openFile(page, "app/checkout-service.log");
   const total = await countOf(page);
   await expect(page.locator('#ex-json-fields option[value="level"]')).toHaveCount(1);
-  await ui.moreFilters(page).click();
+  await analyzeTab(page, "Filters");
 
   await ui.condField(page, 1).fill("level");
   await ui.condValue(page, 1).fill("warn");
@@ -232,24 +239,29 @@ test("explorer cache: a worker restart reloads a big file without downloading it
   expect(fetched).toHaveLength(1);
 });
 
-test("explorer on a phone: filters open in a bottom sheet, apply live, and focus returns to the Filters button", async ({ page }) => {
+test("explorer on a phone: the quick filter is on the page, and Analyze opens in a bottom sheet that applies live", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${ROUTE}?f=deploys/deploys.log`);
   await expect(ui.count(page)).toHaveText(LOADED, { timeout: 60_000 });
   const before = await countOf(page);
-  const summary = page.locator(".ex-controls-sum");
-  await summary.click();
-  const sheet = page.getByRole("dialog", { name: "Filters" });
+  await ui.stepText(page, 1).fill("DEPLOY");
+  await expect.poll(() => countOf(page)).toBeLessThan(before);
+  const deploys = await countOf(page);
+
+  await ui.analyze(page).click();
+  const sheet = page.getByRole("dialog", { name: "Analyze" });
   await expect(sheet).toBeVisible();
-  await sheet.getByRole("textbox", { name: "Step 1 filter text" }).fill("DEPLOY");
+  await sheet.getByRole("tab", { name: "Filters" }).click();
+  await sheet.getByRole("button", { name: "+ New step" }).click();
+  await expect(sheet.getByRole("textbox", { name: "Step 2 filter text" })).toBeFocused();
+  await sheet.getByRole("textbox", { name: "Step 2 filter text" }).fill("checkout");
   await sheet.getByRole("button", { name: "Show results" }).click();
   await expect(sheet).toBeHidden();
-  await expect(summary).toBeFocused();
-  await expect.poll(() => countOf(page)).toBeLessThan(before);
-  // the fieldset is back in the page, with the value kept
-  await expect(page.locator(".ex-controls > .ex-fieldset")).toHaveCount(1);
-  // (inside the collapsed inline panel, so query by attribute rather than by role)
-  await expect(page.locator('.ex-controls [aria-label="Step 1 filter text"]')).toHaveValue("DEPLOY");
+  await expect(ui.analyze(page)).toBeFocused();
+  await expect.poll(() => countOf(page)).toBeLessThan(deploys);
+  // the panel is back in the page with the step kept, and its chip shows on the page
+  await expect(page.locator('.ex-analyze [aria-label="Step 2 filter text"]')).toHaveValue("checkout");
+  await expect(ui.chips(page)).toContainText("contains checkout");
 });
 
 test("explorer files: rows show just the name; path, format and description open in a tooltip on hover and focus", async ({ page }) => {

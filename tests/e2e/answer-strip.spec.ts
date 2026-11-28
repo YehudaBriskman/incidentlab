@@ -165,50 +165,81 @@ test.describe("Explorer layout and filters (#217)", () => {
     await expect(count(page)).toHaveText(LOADED, { timeout: 60_000 });
     const total = await countOf(page);
     const chips = page.getByRole("list", { name: "Active filters" });
+    const quick = page.getByRole("textbox", { name: "Step 1 filter text" });
     await expect(chips).toBeHidden();
-    await page.getByRole("textbox", { name: "Step 1 filter text" }).fill("DEPLOY");
-    await expect(chips.getByRole("listitem")).toHaveCount(1);
-    await expect(chips).toContainText("contains DEPLOY");
+    // Step 1 is the quick filter in the toolbar (#280): it needs no chip of its own
+    await quick.fill("DEPLOY");
     await expect.poll(() => countOf(page)).toBeLessThan(total);
+    await expect(chips).toBeHidden();
 
-    await page.getByRole("button", { name: "+ add filter" }).click();
+    await page.getByRole("button", { name: "+ add filter", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "Step 2 filter text" })).toBeFocused();
     await page.getByRole("textbox", { name: "Step 2 filter text" }).fill("checkout");
-    await expect(chips.getByRole("listitem")).toHaveCount(2);
-
-    await chips.getByRole("button", { name: "Remove filter: contains DEPLOY" }).click();
     await expect(chips.getByRole("listitem")).toHaveCount(1);
-    await expect(chips.getByRole("button", { name: "Remove filter: contains checkout" })).toBeFocused();
-    await expect(page.getByRole("textbox", { name: "Step 1 filter text" })).toHaveValue("checkout");
-    await page.keyboard.press("Enter");
+    await expect(chips).toContainText("contains checkout");
+    await expect(page.getByRole("button", { name: /^Analyze \(1\)/ })).toBeVisible();
+
+    // the chip's label opens the step where it is edited
+    await page.getByRole("textbox", { name: "Step 2 filter text" }).blur();
+    await chips.getByRole("button", { name: "contains checkout", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Step 2 filter text" })).toBeFocused();
+
+    // removing step 1 moves step 2 into the quick filter
+    await page.getByRole("button", { name: "Remove step 1" }).click();
+    await expect(quick).toHaveValue("checkout");
+    await expect(quick).toBeFocused();
     await expect(chips).toBeHidden();
-    await expect(page.getByRole("textbox", { name: "Step 1 filter text" })).toBeFocused();
+    await quick.fill("");
+    await page.keyboard.press("Enter");
     await expect.poll(() => countOf(page)).toBe(total);
+
+    // a chip's × removes it and moves focus on (the next chip, else the quick filter)
+    await quick.fill("DEPLOY");
+    await page.getByRole("button", { name: "+ add filter", exact: true }).click();
+    await page.getByRole("textbox", { name: "Step 2 filter text" }).fill("a");
+    await page.getByRole("button", { name: "+ New step" }).click();
+    await page.getByRole("textbox", { name: "Step 3 filter text" }).fill("b");
+    await expect(chips.getByRole("listitem")).toHaveCount(2);
+    await chips.getByRole("button", { name: "Remove filter: contains a" }).click();
+    await expect(chips.getByRole("button", { name: "Remove filter: contains b" })).toBeFocused();
+    await chips.getByRole("button", { name: "Remove filter: contains b" }).click();
+    await expect(chips).toBeHidden();
+    await expect(quick).toBeFocused();
   });
 
-  test("More filters: JSON conditions, columns and aggregations fold away, with the count of active settings", async ({ page }) => {
+  test("Analyze: JSON conditions, columns and aggregations sit beside the log, with the count of active settings", async ({ page }) => {
     await page.goto(`${route}?f=app/checkout-service.log`);
     await expect(count(page)).toHaveText(LOADED, { timeout: 60_000 });
     const total = await countOf(page);
-    const more = page.getByRole("button", { name: /^More filters/ });
+    const more = page.getByRole("button", { name: /^Analyze/ });
     await expect(more).toHaveAttribute("aria-expanded", "false");
     await expect(page.getByRole("combobox", { name: "Condition 1 field" })).toBeHidden();
     await expect(page.getByRole("button", { name: "Plot", exact: true })).toBeHidden();
 
     await more.click();
     await expect(more).toHaveAttribute("aria-expanded", "true");
+    await page.getByRole("tab", { name: "Filters" }).click();
     await page.getByRole("combobox", { name: "Condition 1 field" }).fill("level");
     await page.getByRole("textbox", { name: "Condition 1 value" }).fill("warn");
-    await expect(more).toHaveText(/More filters \(1\)/);
+    await expect(more).toHaveText(/Analyze \(1\)/);
     await expect.poll(() => countOf(page)).toBeLessThan(total);
     await expect(page.getByRole("list", { name: "Active filters" })).toContainText("level equals warn");
 
-    // Closed again, the count stays on the button and the chip still removes the condition.
-    await more.click();
+    // APG tabs: arrows move between them, the panel follows
+    await page.getByRole("tab", { name: "Filters" }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByRole("tab", { name: "Count unique values" })).toBeFocused();
+    await expect(page.getByRole("tab", { name: "Count unique values" })).toHaveAttribute("aria-selected", "true");
+    await page.keyboard.press("End");
+    await expect(page.getByRole("button", { name: "Plot", exact: true })).toBeVisible();
+
+    // Escape closes the panel and returns to its button; the count stays and the chip still removes the condition.
+    await page.keyboard.press("Escape");
+    await expect(more).toBeFocused();
     await expect(page.getByRole("combobox", { name: "Condition 1 field" })).toBeHidden();
-    await expect(more).toHaveText(/More filters \(1\)/);
+    await expect(more).toHaveText(/Analyze \(1\)/);
     await page.getByRole("button", { name: "Remove filter: level equals warn" }).click();
-    await expect(more).toHaveText(/^\W*More filters$/);
+    await expect(more).toHaveText(/^\W*Analyze$/);
     await expect.poll(() => countOf(page)).toBe(total);
   });
 });
