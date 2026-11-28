@@ -50,6 +50,7 @@ export const TP = defineStrings({
     wrongValueCapped: (n: number, cap: number): string =>
       `Right format, wrong value. ${n} wrong answers; the penalty is capped at −${cap}, so more tries cost nothing extra.`,
     phTime: "HH:MM:SS",
+    phOther: "Your answer",
     phInteger: "digits only",
     phIpv4: "N.N.N.N",
     phSha: "7 hex characters",
@@ -171,6 +172,7 @@ export const TP = defineStrings({
     wrongValueCapped: (n: number, cap: number): string =>
       `הפורמט נכון, הערך לא. ${n} תשובות שגויות; הקנס מוגבל ל־${ltr(`−${cap}`)}, כך שניסיונות נוספים לא עולים עוד.`,
     phTime: "HH:MM:SS",
+    phOther: "התשובה שלכם",
     phInteger: "ספרות בלבד",
     phIpv4: "N.N.N.N",
     phSha: "xxxxxxx (hex)",

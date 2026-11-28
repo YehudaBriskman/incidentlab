@@ -91,6 +91,8 @@ function syncScrollLock(): void {
  */
 export function closeOverlays(): void {
   closeMenu();
+  // A tooltip belongs to an element of the page being left: it must never float over the next one (#282).
+  hideTooltipNow();
   for (const entry of [...modals.all()].reverse()) if (!entry.persistent()) entry.dismiss();
 }
 
@@ -988,6 +990,8 @@ function scheduleTooltipHide(): void {
 }
 
 function showTooltip(anchor: HTMLElement, content: () => Child): void {
+  // A hover timer can fire after its anchor left the page (a route change, a redraw): show nothing then (#282).
+  if (!anchor.isConnected) return;
   // Never cover the anchor's own open menu or popover with its tooltip.
   if (anchor.getAttribute("aria-expanded") === "true") return;
   window.clearTimeout(tooltipHideTimer);
