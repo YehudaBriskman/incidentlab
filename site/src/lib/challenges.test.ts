@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { boardEntryFor, classEventPhase, classRoleKind, dateInZone, homeClasses, isClassBoardFrozen, nextAchievement, pickClassEvent } from "./challenges.ts";
+import { achievementProgress, boardEntryFor, classEventPhase, classRoleKind, dateInZone, homeClasses, isClassBoardFrozen, nextAchievement, pickClassEvent } from "./challenges.ts";
 
 const NOW = Date.parse("2026-11-27T20:00:00Z");
 const IDS = ["first-blood", "clean-case", "speedrun", "no-hints-5", "all-cases", "streak-3", "streak-7"];
@@ -55,6 +55,19 @@ test("next achievement: the closest measurable one, else the first locked, else 
   const allButFirst = IDS.filter((id) => !["first-blood"].includes(id)).map((id) => ({ id, earnedAt: "x" }));
   assert.deepEqual(nextAchievement({ ...base, achievements: allButFirst }, IDS), { id: "first-blood", have: null, need: null });
   assert.equal(nextAchievement({ ...base, achievements: IDS.map((id) => ({ id, earnedAt: "x" })) }, IDS), null);
+  // #240: stages solved without a hint count toward "no-hints-5" once the server sends them.
+  assert.deepEqual(nextAchievement({ ...base, stagesNoHints: 4 }, IDS), { id: "no-hints-5", have: 4, need: 5 });
+});
+
+test("achievement progress counts only what the stats can measure exactly", () => {
+  const base = { achievements: [], streak: { current: 2, best: 2, activeToday: true }, cases: [{}, {}, {}] as never[], casesCompleted: 1 };
+  assert.deepEqual(achievementProgress(base, "streak-3"), { have: 2, need: 3 });
+  assert.deepEqual(achievementProgress(base, "streak-7"), { have: 2, need: 7 });
+  assert.deepEqual(achievementProgress(base, "all-cases"), { have: 1, need: 3 });
+  assert.equal(achievementProgress(base, "no-hints-5"), null, "an older server sends no count");
+  assert.deepEqual(achievementProgress({ ...base, stagesNoHints: 9 }, "no-hints-5"), { have: 5, need: 5 }, "capped at the goal");
+  for (const id of ["first-blood", "clean-case", "speedrun"]) assert.equal(achievementProgress(base, id), null, id);
+  assert.equal(achievementProgress({ ...base, cases: [] }, "all-cases"), null, "no released case: nothing to count");
 });
 
 test("the class event on a case page: live first (ending soonest), then one starting soon, only for assigned cases", () => {

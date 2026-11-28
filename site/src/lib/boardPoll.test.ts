@@ -48,7 +48,7 @@ test("a projector counts as watched while an event is live, and pauses like any 
 const entry = (username: string, score: number) => ({ rank: 1, username, score, stagesSolved: 3, casesCompleted: 0, firstBloods: 1, lastSolveAt: null });
 
 test("the board signature ignores generatedAt and changes with any drawn field", () => {
-  const data = { caseId: null, frozen: false, frozenAt: null, generatedAt: "2026-11-27T10:00:00Z", entries: [entry("ada", 500)] };
+  const data = { caseId: null, period: "all" as const, periodStart: null, frozen: false, frozenAt: null, generatedAt: "2026-11-27T10:00:00Z", entries: [entry("ada", 500)] };
   const same = boardSignature(data);
   assert.match(same, /^[0-9a-f]{8}$/);
   assert.equal(boardSignature({ ...data, generatedAt: "2026-11-27T10:00:10Z" }), same);
@@ -57,6 +57,7 @@ test("the board signature ignores generatedAt and changes with any drawn field",
   assert.notEqual(boardSignature({ ...data, frozen: true, frozenAt: "2026-11-27T10:00:00Z" }), same);
   assert.notEqual(boardSignature({ ...data, caseId: "alpha" }), same);
   assert.notEqual(boardSignature({ ...data, entries: [] }), same);
+  assert.notEqual(boardSignature({ ...data, period: "week", periodStart: "2026-11-23T00:00:00Z" }), same);
 });
 
 test("fnv1a matches the reference values", () => {
