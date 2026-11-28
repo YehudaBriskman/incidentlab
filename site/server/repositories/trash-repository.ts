@@ -21,6 +21,8 @@ export const TrashBundleSchema = z.object({
   caseStatus: CaseStatusSchema.nullable().default(null),
   /** a deleted account's class memberships (#179), put back in both indexes by a restore */
   memberships: z.array(TrashedMembershipSchema).default([]),
+  /** event-run records (#253, #268) removed with the account or reset with the progress */
+  eventRuns: z.array(z.object({ classId: z.string(), eventKey: z.string(), record: ProgressRecordSchema })).default([]),
 });
 export type TrashBundle = z.infer<typeof TrashBundleSchema>;
 

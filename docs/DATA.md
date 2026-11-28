@@ -277,9 +277,11 @@ route names a live class event run (`docs/API.md`, Classes, "Event runs"). Addit
 no other record changes. `eventKey` is the first 16 hex characters of sha256 over the class event's `startsAt` as an
 ISO instant (`server/domain/event-run.ts`): stable when the event is renamed or its end or freeze moves; a new
 `startsAt` is a new occurrence. Records of earlier occurrences stay stored and are no longer counted. The class
-board lists the current occurrence's records; nothing else reads them. An event run never writes `score:` or
-`firstblood:`. Not yet covered: account deletes, progress resets and the trash leave event-run records in place (the
-board shows only active members, so a deleted account's records are never listed).
+board lists the current occurrence's records, and class Live shows a member's event run in place of their own run
+while the event is live (#268). An event run never writes `score:` or `firstblood:`. An account delete and a progress
+reset (a case, one player's case, or everything) move the matching event-run records into the same `trash:` entry
+(`TrashBundle.eventRuns`, additive, default `[]`); a restore puts back those that no newer record replaced. The
+weekly hygiene job deletes event-run records whose run started more than 180 days ago (report field `oldEventRuns`).
 
 ### Audit (`audit:<isoTimestamp>:<random>`)
 

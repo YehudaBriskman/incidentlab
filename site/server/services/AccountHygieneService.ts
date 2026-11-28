@@ -36,7 +36,12 @@ export type HygieneReport = {
   readonly oldAudit: number;
   readonly expiredTrash: number;
   readonly expiredResetRequests: number;
+  /** event-run records (#253) of event occurrences that started more than 180 days ago (#268) */
+  readonly oldEventRuns: number;
 };
+
+/** Event-run records older than this are deleted by the weekly sweep (#268). */
+const OLD_EVENT_RUN_DAYS = 180;
 
 const AUDIT_KEY_TIME = /^audit:(\d{4}-\d{2}-\d{2}T[0-9:.]+Z):/;
 
@@ -65,7 +70,22 @@ export class AccountHygieneService {
     const oldAudit = await this.sweepAudit(nowMs, apply);
     const expiredTrash = await this.sweepTrash(apply);
     const expiredResetRequests = await this.sweepResetRequests(nowMs, apply);
-    return { applied: apply, idleGuests: guests.map((g) => g.username), guestProgress, expiredSessions, staleRateLimits, oldAudit, expiredTrash, expiredResetRequests };
+    const oldEventRuns = await this.sweepOldEventRuns(nowMs, apply);
+    return { applied: apply, idleGuests: guests.map((g) => g.username), guestProgress, expiredSessions, staleRateLimits, oldAudit, expiredTrash, expiredResetRequests, oldEventRuns };
+  }
+
+  /**
+   * Event-run records whose run started more than 180 days ago (#268). They only ever counted on the class board of
+   * that one event occurrence, long over by then, so they are deleted (not trashed).
+   */
+  private async sweepOldEventRuns(nowMs: number, apply: boolean): Promise<number> {
+    const cutoff = nowMs - OLD_EVENT_RUN_DAYS * DAY_MS;
+    const old = (await this.repos.eventProgress.listMatching({})).filter((e) => {
+      const started = Date.parse(e.record.startedAt ?? "");
+      return Number.isFinite(started) && started <= cutoff;
+    });
+    if (apply) await this.repos.eventProgress.deleteEntries(old);
+    return old.length;
   }
 
   private async idleGuests(nowMs: number): Promise<AccountRecord[]> {
