@@ -1,11 +1,17 @@
 // Staged gameplay for one account on one case: setup -> q1..q6 -> debrief. Answers are checked and scored
 // here only, and paid content (hint texts, full commands) leaves the server only once it is paid for.
+//
+// Event runs (#253): a context with `run` plays that class event's own record (`eventprogress:`, through
+// EventProgressRepository) with the same rules, idempotency and stale guards. An event run never claims
+// `firstblood:` (the class board derives its own first solver from solve times) and never syncs `score:`, so it
+// stays off the global board, achievements and streaks. EventRunService decides whether a run may be played.
 import { QUESTION_ORDER, SCORING, normalizeAnswer } from "../../shared/contract.ts";
 import type { AdminProgress, ProgressView, QuestionId, StageProgress } from "../../shared/contract.ts";
 import { AppError, PROGRESS_SCHEMA_VERSION } from "../domain/types.ts";
 import type { AccountRecord, CaseSecrets, ProgressRecord, Secrets } from "../domain/types.ts";
 import type { FirstBloodRepository } from "../repositories/config-repositories.ts";
-import type { ProgressRepository } from "../repositories/repositories.ts";
+import type { EventProgressRepository, ProgressStore } from "../repositories/repositories.ts";
+import type { EventRun } from "../domain/event-run.ts";
 import type { Versioned } from "../repositories/KvStore.ts";
 import type { ScoreService } from "./ScoreService.ts";
 import { parScore, scoreStage } from "./scoring.ts";
@@ -20,8 +26,8 @@ const MAX_SOLVED_ANSWER_CHARS = 200;
 type Mutation<T> = { result: T; changed: boolean };
 export type Player = Pick<AccountRecord, "id" | "username">;
 export type Lang = "en" | "he";
-/** Who is playing which case, and the language for paid content in responses. */
-export type PlayContext = { readonly player: Player; readonly caseId: string; readonly lang: Lang };
+/** Who is playing which case, and the language for paid content in responses; `run`: an event run (#253). */
+export type PlayContext = { readonly player: Player; readonly caseId: string; readonly lang: Lang; readonly run?: EventRun | null };
 
 const backoff = (attempt: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 10 * (attempt + 1))));
@@ -43,14 +49,17 @@ export const emptyStage = (): StageProgress => ({
 export const maxScoreOf = (secrets: CaseSecrets): number => parScore(secrets);
 
 export class GameService {
-  private readonly repository: ProgressRepository;
+  private readonly repository: ProgressStore;
+  private readonly eventProgress: EventProgressRepository | null;
   private readonly firstBlood: FirstBloodRepository;
   private readonly secrets: Secrets;
   private readonly scores: ScoreService | null;
   private readonly now: () => Date;
 
   constructor(deps: {
-    repository: ProgressRepository;
+    repository: ProgressStore;
+    /** event-run records (#253); left out only by tests that play no event run */
+    eventProgress?: EventProgressRepository;
     firstBlood: FirstBloodRepository;
     secrets: Secrets;
     /** keeps the board's score summary in step (#175); left out only by tests that don't need it */
@@ -58,10 +67,18 @@ export class GameService {
     now: () => Date;
   }) {
     this.repository = deps.repository;
+    this.eventProgress = deps.eventProgress ?? null;
     this.firstBlood = deps.firstBlood;
     this.secrets = deps.secrets;
     this.scores = deps.scores ?? null;
     this.now = deps.now;
+  }
+
+  /** The record the context plays: the player's own run, or the event run's (#253). */
+  private store(ctx: PlayContext): ProgressStore {
+    if (!ctx.run) return this.repository;
+    if (!this.eventProgress) throw new AppError(500, "event runs are not configured");
+    return this.eventProgress.forEvent(ctx.run.classId, ctx.run.eventKey);
   }
 
   caseSecrets(caseId: string): CaseSecrets {
@@ -77,20 +94,22 @@ export class GameService {
    */
   async progress(ctx: PlayContext): Promise<ProgressView> {
     this.caseSecrets(ctx.caseId); // 404 for unknown cases
-    const found = await this.repository.get(ctx.caseId, ctx.player.id);
+    const store = this.store(ctx);
+    const found = await store.get(ctx.caseId, ctx.player.id);
     if (found) {
-      if (this.touch(found.data)) await this.repository.saveIfMatch(found.data, found.etag);
+      if (this.touch(found.data)) await store.saveIfMatch(found.data, found.etag);
       return this.toView(found.data, ctx);
     }
     const record = this.newRecord(ctx.player.id, ctx.caseId);
-    if (!(await this.repository.saveIfMatch(record, null))) return this.progress(ctx); // lost a race: re-read
+    if (!(await store.saveIfMatch(record, null))) return this.progress(ctx); // lost a race: re-read
     return this.toView(record, ctx);
   }
 
   async setupDone(ctx: PlayContext): Promise<ProgressView> {
     this.caseSecrets(ctx.caseId);
-    if (!(await this.repository.get(ctx.caseId, ctx.player.id))) {
-      await this.repository.saveIfMatch(this.newRecord(ctx.player.id, ctx.caseId), null);
+    const store = this.store(ctx);
+    if (!(await store.get(ctx.caseId, ctx.player.id))) {
+      await store.saveIfMatch(this.newRecord(ctx.player.id, ctx.caseId), null);
     }
     return this.mutate(ctx, (record) => {
       if (record.setupDoneAt !== null) return { result: this.toView(record, ctx), changed: false };
@@ -107,9 +126,10 @@ export class GameService {
     const expected = secrets.answers[questionId];
     const isCorrect = expected !== undefined && normalizeAnswer(input.answer) === expected;
 
-    // First blood is claimed before the write; the claim is idempotent per account, so retries keep it.
+    // First blood is claimed before the write; the claim is idempotent per account, so retries keep it. An event
+    // run claims none: the class board gives its own first-solver bonus from solve times (domain/class-board.ts).
     let isFirstBlood = false;
-    if (isCorrect) {
+    if (isCorrect && !ctx.run) {
       const current = await this.repository.get(ctx.caseId, ctx.player.id);
       if (current && this.stage(current.data, questionId).status === "active") {
         isFirstBlood = await this.firstBlood.claim({ caseId: ctx.caseId, questionId, accountId: ctx.player.id, at: this.now().toISOString() });
@@ -223,7 +243,7 @@ export class GameService {
 
   async debrief(ctx: PlayContext): Promise<{ markdown: string }> {
     const secrets = this.caseSecrets(ctx.caseId);
-    const found = await this.repository.get(ctx.caseId, ctx.player.id);
+    const found = await this.store(ctx).get(ctx.caseId, ctx.player.id);
     if (!found || found.data.completedAt === null) throw new AppError(403, "debrief is locked until every stage is finished", { code: "locked" });
     return { markdown: ctx.lang === "he" && secrets.debriefHe ? secrets.debriefHe : secrets.debrief };
   }
@@ -295,6 +315,7 @@ export class GameService {
       stages,
       commandsRevealed: record.commandsRevealed,
       unlocked: { hints, commands },
+      run: ctx.run ? { classId: ctx.run.classId, className: ctx.run.className, eventKey: ctx.run.eventKey } : null,
     };
   }
 
@@ -305,7 +326,7 @@ export class GameService {
    * (the progress is saved): the next solve, a repeated answer or migration 003 re-derives it.
    */
   private async syncScore(ctx: PlayContext): Promise<void> {
-    if (!this.scores) return;
+    if (!this.scores || ctx.run) return; // an event run never touches `score:` (#253)
     try {
       await this.scores.syncCase(ctx.player.id, ctx.caseId);
     } catch (error) {
@@ -331,8 +352,8 @@ export class GameService {
     };
   }
 
-  private async load(accountId: string, caseId: string): Promise<Versioned<ProgressRecord>> {
-    const found = await this.repository.get(caseId, accountId);
+  private async load(ctx: PlayContext): Promise<Versioned<ProgressRecord>> {
+    const found = await this.store(ctx).get(ctx.caseId, ctx.player.id);
     if (!found) throw new AppError(403, "open the case first", { code: "locked" });
     return found;
   }
@@ -348,11 +369,11 @@ export class GameService {
   /** Optimistic read-modify-write with etag check and bounded retries. */
   private async mutate<T>(ctx: PlayContext, fn: (record: ProgressRecord) => Mutation<T>): Promise<T> {
     for (let attempt = 0; attempt <= MAX_WRITE_RETRIES; attempt++) {
-      const { data: record, etag } = await this.load(ctx.player.id, ctx.caseId);
+      const { data: record, etag } = await this.load(ctx);
       const { result, changed } = fn(record);
       const touched = this.touch(record);
       if (!changed && !touched) return result;
-      if (await this.repository.saveIfMatch(record, etag)) return result;
+      if (await this.store(ctx).saveIfMatch(record, etag)) return result;
       if (!changed) return result; // only lastSeenAt lost the race
       await backoff(attempt);
     }

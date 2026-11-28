@@ -631,7 +631,7 @@ export const T = defineStrings({
     admRestartBody: (stages: number, points: number) =>
       `Their progress on this case (${stages === 1 ? "1 stage" : `${stages} stages`} solved, ${points} points) is wiped and they start again from setup.`,
     admResetPwTitle: (name: string) => `Reset the password of ${name}?`,
-    admResetPwBody: "They are signed out now and get a one-time password, shown to you once, which they must change at sign-in.",
+    admResetPwBody: "Did you verify who this is? This reset skips the teacher vouch and is logged as unvouched. They are signed out now and get a one-time password, shown to you once, which works for 48 hours and must be changed at sign-in.",
     admApproveAllTitle: (n: number) => (n === 1 ? "Approve the 1 waiting sign-up?" : `Approve all ${n} waiting sign-ups?`),
     admApproveAllBody: "They can sign in and play right away.",
     admTheEvent: "the event",
@@ -1399,7 +1399,7 @@ export const T = defineStrings({
     admRestartBody: (stages: number, points: number) =>
       `ההתקדמות בתיק הזה (${stages === 1 ? "שלב אחד נפתר" : `${stages} שלבים נפתרו`}, ${points} נקודות) תימחק, והמשתתף יתחיל מההכנה.`,
     admResetPwTitle: (name: string) => `לאפס את הסיסמה של \u2068${name}\u2069?`,
-    admResetPwBody: "המשתתף מנותק עכשיו ומקבל סיסמה חד־פעמית, שתוצג לך פעם אחת, ועליו להחליף אותה בכניסה.",
+    admResetPwBody: "וידאתם מי זה? האיפוס הזה עוקף את אישור המורה ונרשם ביומן כלא־מאושר. המשתתף מנותק עכשיו ומקבל סיסמה חד־פעמית, שתוצג לכם פעם אחת, שתקפה ל־48 שעות ויש להחליף אותה בכניסה.",
     admApproveAllTitle: (n: number) => (n === 1 ? "לאשר את ההרשמה הממתינה?" : `לאשר את כל ${n} ההרשמות הממתינות?`),
     admApproveAllBody: "הם יוכלו להיכנס ולשחק מיד.",
     admTheEvent: "האירוע",

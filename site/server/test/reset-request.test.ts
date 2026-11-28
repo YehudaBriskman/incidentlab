@@ -44,13 +44,22 @@ const classWith = async (teacher: Person, students: readonly Person[], name = "N
 
 const requestReset = (h: Harness, username: string, ip = "10.5.0.1"): Promise<Response> => h.client(ip).call("/auth/reset-request", { body: { username } });
 
+/**
+ * A teacher, a student and their class, with the clock then moved 8 days on: a vouch needs a week of membership
+ * (#254). `advance` moves the clock further.
+ */
 const setup = async (now?: () => Date) => {
   const store = new InMemoryKvStore();
-  const h = createHarness({ store, ...(now === undefined ? {} : { now }) });
+  let offsetMs = 0;
+  const base = now ?? ((): Date => new Date());
+  const h = createHarness({ store, now: () => new Date(base().getTime() + offsetMs) });
   const teacher = await signUp(h, "teacher");
   const student = await signUp(h, "student");
   const classId = await classWith(teacher, [student]);
-  return { store, h, teacher, student, classId };
+  offsetMs += 8 * DAY_MS;
+  const advance = (ms: number): void => void (offsetMs += ms);
+  const clock = (): Date => new Date(base().getTime() + offsetMs);
+  return { store, h, teacher, student, classId, advance, clock };
 };
 
 test("a reset request answers the same 202 for a known name, an unknown name, a guest and the admin", async () => {
@@ -154,14 +163,14 @@ test("a class admin never sees or sets a password: no route answers with one, an
 test("an expired request can't be vouched for or approved, and the weekly sweep deletes it", async () => {
   let nowMs = Date.parse("2026-11-01T10:00:00Z");
   const now = (): Date => new Date(nowMs);
-  const { h, store, teacher, student, classId } = await setup(now);
+  const { h, store, teacher, student, classId, clock } = await setup(now);
   await expectStatus(requestReset(h, "student"), 202);
   await expectStatus(teacher.client.call(`/classes/${classId}/reset-requests/${student.id}/vouch`, { body: {} }), 200);
   nowMs += 7 * DAY_MS + 1000;
   await expectStatus(h.admin(`/admin/reset-requests/${student.id}/approve`, { body: {} }), 404, "no-reset-request");
   assert.deepEqual(AdminPasswordResetRequestsResponseSchema.parse(await (await h.admin("/admin/reset-requests")).json()).requests, []);
   await expectStatus(teacher.client.call(`/classes/${classId}/reset-requests/${student.id}/vouch`, { body: {} }), 404);
-  const hygiene = createAccountHygiene(store, now);
+  const hygiene = createAccountHygiene(store, clock);
   assert.equal((await hygiene.run({ apply: false })).expiredResetRequests, 1);
   assert.equal((await hygiene.run({ apply: true })).expiredResetRequests, 1);
   assert.deepEqual(await store.listKeys("resetrequest:"), []);
@@ -248,4 +257,49 @@ test("the owner can reject a vouched request; it then needs a new request", asyn
   await expectStatus(h.admin(`/admin/reset-requests/${student.id}/approve`, { body: {} }), 404, "no-reset-request");
   assert.deepEqual(ClassResetRequestsResponseSchema.parse(await (await teacher.client.call(`/classes/${classId}/reset-requests`)).json()).requests, []);
   await expectStatus(h.client().call("/auth/login", { body: { username: "student", password: PASSWORD } }), 200);
+});
+
+test("a class admin can vouch only for a student who has been in the class for 7 days (#254)", async () => {
+  const store = new InMemoryKvStore();
+  let nowMs = Date.parse("2026-11-01T10:00:00Z");
+  const h = createHarness({ store, now: () => new Date(nowMs) });
+  const teacher = await signUp(h, "teacher");
+  const student = await signUp(h, "student");
+  const classId = await classWith(teacher, [student]);
+  await expectStatus(requestReset(h, "student"), 202);
+  const listed = ClassResetRequestsResponseSchema.parse(await (await teacher.client.call(`/classes/${classId}/reset-requests`)).json());
+  assert.equal(listed.requests[0]?.vouchableAt, "2026-11-08T10:00:00.000Z");
+  const early = await teacher.client.call(`/classes/${classId}/reset-requests/${student.id}/vouch`, { body: {} });
+  assert.equal(early.status, 409);
+  assert.equal(((await early.json()) as { code?: string }).code, "member-too-new");
+  // a week on (the first request has expired by then) the student asks again, and the vouch counts
+  nowMs += 7 * DAY_MS;
+  await expectStatus(requestReset(h, "student", "10.5.0.9"), 202);
+  await expectStatus(teacher.client.call(`/classes/${classId}/reset-requests/${student.id}/vouch`, { body: {} }), 200);
+  const owner = AdminPasswordResetRequestsResponseSchema.parse(await (await h.admin("/admin/reset-requests")).json());
+  assert.equal(owner.requests.length, 1);
+});
+
+test("an unused temporary password stops working after 48 hours (#254)", async () => {
+  const { h, teacher, student, classId, advance } = await setup();
+  await expectStatus(requestReset(h, "student"), 202);
+  await expectStatus(teacher.client.call(`/classes/${classId}/reset-requests/${student.id}/vouch`, { body: {} }), 200);
+  const approved = ResetPasswordResponseSchema.parse(await (await h.admin(`/admin/reset-requests/${student.id}/approve`, { method: "POST", body: {} })).json());
+  advance(48 * 60 * 60 * 1000 + 1000);
+  const late = await h.client("10.9.0.1").call("/auth/login", { body: { username: "student", password: approved.temporaryPassword } });
+  assert.equal(late.status, 401);
+  assert.equal(((await late.json()) as { code?: string }).code, "temporary-password-expired");
+});
+
+test("the owner's direct reset is audited as unvouched and also expires after 48 hours (#254)", async () => {
+  const { h, student, advance } = await setup();
+  const reset = ResetPasswordResponseSchema.parse(await (await h.admin(`/admin/accounts/${student.id}/reset-password`, { method: "POST", body: {} })).json());
+  const audit = AuditResponseSchema.parse(await (await h.admin("/admin/audit")).json());
+  const entry = audit.entries.find((e) => e.action === "account.reset-password");
+  assert.equal(entry?.detail, "unvouched");
+  const ok = await h.client("10.9.0.2").call("/auth/login", { body: { username: "student", password: reset.temporaryPassword } });
+  assert.equal(ok.status, 200);
+  advance(49 * 60 * 60 * 1000);
+  const late = await h.client("10.9.0.3").call("/auth/login", { body: { username: "student", password: reset.temporaryPassword } });
+  assert.equal(late.status, 401);
 });

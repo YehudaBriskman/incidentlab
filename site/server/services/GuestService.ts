@@ -60,6 +60,7 @@ export class GuestService {
       lastSeenAt: nowIso,
       lastLoginAt: nowIso,
       mustChangePassword: false,
+      temporaryPasswordExpiresAt: null,
       role: "player",
       kind: "guest",
       showOnGlobalBoard: false,

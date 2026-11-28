@@ -31,6 +31,7 @@ import type { CatalogEntry } from "../../shared/catalog";
 import { getLang } from "../i18n/i18n";
 import { isCacheHit, type ClockSample } from "./clock";
 import { shareProgress } from "./progress-bus";
+import { runClassOf } from "./case-run";
 
 const rawBase: unknown = import.meta.env["VITE_API_BASE"];
 const API_BASE = typeof rawBase === "string" ? rawBase.replace(/\/$/, "") : "";
@@ -323,9 +324,19 @@ export async function fetchLeaderboard(caseId: string | null): Promise<Leaderboa
 
 /** Every case route carries ?lang= so the server localizes the paid-for hint texts. */
 const casePath = (caseId: string, action: string): string => `/api/cases/${encodeURIComponent(caseId)}/${action}?lang=${getLang()}`;
+/** A GET play route, with `&run=` while this tab plays the case's class event run (#253, lib/case-run.ts). */
+const caseGetPath = (caseId: string, action: string): string => {
+  const classId = runClassOf(caseId);
+  return classId === null ? casePath(caseId, action) : `${casePath(caseId, action)}&run=${encodeURIComponent(classId)}`;
+};
+/** A POST play body, with `run` while this tab plays the case's class event run (#253). */
+const playBody = <B extends object>(caseId: string, body: B): B | (B & { run: { classId: string } }) => {
+  const classId = runClassOf(caseId);
+  return classId === null ? body : { ...body, run: { classId } };
+};
 
 export async function getProgress(caseId: string): Promise<ProgressView> {
-  return (await request("GET", casePath(caseId, "progress"), ProgressResponseSchema)).progress;
+  return (await request("GET", caseGetPath(caseId, "progress"), ProgressResponseSchema)).progress;
 }
 
 /**
@@ -359,21 +370,21 @@ async function caseWrite<T>(caseId: string, write: () => Promise<T>, progressOf:
 const progressOnly = (body: { progress: ProgressView }): ProgressView => body.progress;
 
 export async function setupDone(caseId: string): Promise<ProgressView> {
-  return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "setup-done"), ProgressResponseSchema, {}), progressOnly));
+  return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "setup-done"), ProgressResponseSchema, playBody(caseId, {})), progressOnly));
 }
 
 export async function submitAnswer(caseId: string, questionId: QuestionId, answer: string): Promise<{ correct: boolean; progress: ProgressView }> {
-  return caseWrite(caseId, () => request("POST", casePath(caseId, "answer"), AnswerResponseSchema, { questionId, answer }), progressOnly);
+  return caseWrite(caseId, () => request("POST", casePath(caseId, "answer"), AnswerResponseSchema, playBody(caseId, { questionId, answer })), progressOnly);
 }
 
 /** Buys hint `expectedHint` (0-based: the number already shown). The server refuses any other one as stale. */
 export async function revealHint(caseId: string, questionId: QuestionId, expectedHint: number): Promise<ProgressView> {
-  const body = { questionId, expectedHint };
+  const body = playBody(caseId, { questionId, expectedHint });
   return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "hint"), ProgressResponseSchema, body), progressOnly));
 }
 
 export async function revealAnswer(caseId: string, questionId: QuestionId): Promise<ProgressView> {
-  return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "reveal"), ProgressResponseSchema, { questionId }), progressOnly));
+  return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "reveal"), ProgressResponseSchema, playBody(caseId, { questionId })), progressOnly));
 }
 
 /**
@@ -381,10 +392,10 @@ export async function revealAnswer(caseId: string, questionId: QuestionId): Prom
  * is the stage the page shows as active: the server refuses the charge as stale when another one is.
  */
 export async function revealCommand(caseId: string, toolId: string, expectedStage: QuestionId): Promise<ProgressView> {
-  const body = { toolId, expectedStage };
+  const body = playBody(caseId, { toolId, expectedStage });
   return progressOnly(await caseWrite(caseId, () => request("POST", casePath(caseId, "reveal-command"), ProgressResponseSchema, body), progressOnly));
 }
 
 export async function getDebrief(caseId: string): Promise<string> {
-  return (await request("GET", casePath(caseId, "debrief"), DebriefResponseSchema)).markdown;
+  return (await request("GET", caseGetPath(caseId, "debrief"), DebriefResponseSchema)).markdown;
 }

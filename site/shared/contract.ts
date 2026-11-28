@@ -113,6 +113,16 @@ export const StageProgressSchema = z.object({
 export type StageProgress = z.infer<typeof StageProgressSchema>;
 
 /** One account's progress on one case. A case the account never opened is returned with every stage locked. */
+/**
+ * Which record a play route reads and writes (#253): left out, the player's own run (`progress:`); with a class id,
+ * that class's live event run (`eventprogress:`), which counts on that class's board only.
+ */
+export const PlayRunSchema = z.object({ classId: z.string().regex(/^[0-9A-Za-z]{12}$/, "invalid class id") }).strict();
+export type PlayRun = z.infer<typeof PlayRunSchema>;
+/** The run a progress view belongs to: null = the player's own run; else the class and its event occurrence. */
+export const ProgressRunSchema = z.object({ classId: z.string(), className: z.string(), eventKey: z.string() });
+export type ProgressRun = z.infer<typeof ProgressRunSchema>;
+
 export const ProgressViewSchema = z.object({
   accountId: z.string(),
   username: z.string(),
@@ -132,6 +142,8 @@ export const ProgressViewSchema = z.object({
     /** `lab`: the lab image variant (#149), null when the item has none; older servers omit it */
     commands: z.record(z.string(), z.object({ command: z.string(), powershell: z.string().nullable(), lab: z.string().nullable().default(null) })),
   }),
+  /** additive (#253): the event run this view is, or null for the player's own run (older servers omit it) */
+  run: ProgressRunSchema.nullable().default(null),
 });
 export type ProgressView = z.infer<typeof ProgressViewSchema>;
 
@@ -415,6 +427,8 @@ export const ClassResetRequestSchema = z.object({
   expiresAt: z.string(),
   /** this class admin already vouched for it */
   vouchedByMe: z.boolean(),
+  /** from when a vouch counts: 7 days after the student joined the class (#254); older servers omit it */
+  vouchableAt: z.string().nullable().default(null),
 });
 export type ClassResetRequest = z.infer<typeof ClassResetRequestSchema>;
 export const ClassResetRequestsResponseSchema = z.object({ requests: z.array(ClassResetRequestSchema) });
@@ -498,14 +512,20 @@ export type TodayResponse = z.infer<typeof TodayResponseSchema>;
 // differs (another tab bought it, a retried request already did), the route charges nothing and answers 409 code
 // "stale" with the current `progress` in the error body. Clients that leave them out keep the old behaviour.
 // GET  /api/cases/:caseId/debrief?lang=en|he -> {markdown}  (403 until every stage is finished)
+// Event runs (#253): every route above takes an optional run, `run: {classId}` in a POST body and `?run=<classId>`
+// on a GET. It plays that class's live event run instead of the player's own record: a separate record that counts
+// on the class board only (never on `score:`, `firstblood:`, the global board, achievements or streaks). Refused
+// with 403 "not-a-member" (not an active member) or 409 "event-not-live" (the class has no event live now, or the
+// case is not assigned to it), never by falling back to the player's own run. The view's `run` names it.
 export const ProgressResponseSchema = z.object({ progress: ProgressViewSchema });
-export const AnswerRequestSchema = z.object({ questionId: QuestionIdSchema, answer: z.string().max(200) });
+export const SetupDoneRequestSchema = z.object({ run: PlayRunSchema.optional() }).strict();
+export const AnswerRequestSchema = z.object({ questionId: QuestionIdSchema, answer: z.string().max(200), run: PlayRunSchema.optional() });
 export const AnswerResponseSchema = z.object({ correct: z.boolean(), progress: ProgressViewSchema });
-export const QuestionRequestSchema = z.object({ questionId: QuestionIdSchema });
+export const QuestionRequestSchema = z.object({ questionId: QuestionIdSchema, run: PlayRunSchema.optional() });
 /** `expectedHint`: the 0-based index of the hint being bought, i.e. how many hints the client shows as bought. */
 export const HintRequestSchema = QuestionRequestSchema.extend({ expectedHint: z.number().int().min(0).max(99).optional() });
 /** `expectedStage`: the stage the client shows as active, the one the command is charged to. */
-export const RevealCommandRequestSchema = z.object({ toolId: z.string().min(1).max(80), expectedStage: QuestionIdSchema.optional() });
+export const RevealCommandRequestSchema = z.object({ toolId: z.string().min(1).max(80), expectedStage: QuestionIdSchema.optional(), run: PlayRunSchema.optional() });
 export const DebriefResponseSchema = z.object({ markdown: z.string() });
 
 // GET /api/me/stats -> UserStats

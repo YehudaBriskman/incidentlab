@@ -13,7 +13,10 @@ import { withApprovedAccount } from "./auth";
 import { renderInstructorPreview } from "./present";
 import { announce, copyButton, ensureAnnouncer, h, html, setChildren, type Child } from "../lib/dom";
 import { ICONS, type IconName } from "../shell/icons";
-import { confirm, popover } from "../lib/overlay";
+import { confirm, popover, toast } from "../lib/overlay";
+import { eventRunOpen, readRunChoice, runClassOf, runOffer, writeRunChoice } from "../lib/case-run";
+import { TR } from "../i18n/strings-event-run";
+import { serverNow } from "../lib/event";
 import { caseClassEvent, eventStatus } from "../components/classEventStatus";
 import { HEBREW, bidiProse, contentText } from "../lib/bidi";
 import { answerForm, clearAnswerDrafts } from "./answerForm";
@@ -140,7 +143,15 @@ export function renderCase(root: HTMLElement, c: Case): void {
 
 function loadProgress(root: HTMLElement, c: Case): void {
   setChildren(root, h("section", { class: "center-card" }, h("p", { class: "muted" }, T().loadingInvestigation)));
+  const onEventRun = runClassOf(c.id) !== null;
   getProgress(c.id)
+    .catch((err: unknown) => {
+      // A stored event run that the server no longer opens (#253): back to the own run, and say so.
+      if (!onEventRun || !(err instanceof ApiError) || (err.code !== "event-not-live" && err.code !== "not-a-member")) throw err;
+      writeRunChoice(c.id, { kind: "own" });
+      toast({ tone: "warning", text: TR().runClosed });
+      return getProgress(c.id);
+    })
     .then((progress) => renderStaged(root, c, progress))
     .catch((err: unknown) => {
       // Session expired or approval revoked since the page loaded: re-run the gate with fresh state.
@@ -288,10 +299,34 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
 
   // The class event on this case (live, or starting soon): looked up once per page load, then ticking on its own.
   const eventSlot = h("span", { class: "cs-item cs-event", hidden: true });
+  // Event runs (#253): which run this is, and the choice card while a class event is open on the own run.
+  const choiceSlot = h("div", { class: "run-choice-slot" });
+  const runItem = player.run === null ? null : eventRunItem(player.run.className, () => switchRun(root, c, { kind: "own" }));
   void caseClassEvent(c.id).then((picked) => {
     if (picked === null || !root.isConnected) return;
     setChildren(eventSlot, h("span", { class: "visually-hidden" }, `${TW().classEventSr}: `), h("bdi", { class: "cs-class" }, picked.className), eventStatus(picked.event));
     eventSlot.hidden = false;
+    const offer = runOffer({ onEventRun: player.run !== null, eventOpen: eventRunOpen(picked.event, serverNow()), choice: readRunChoice(c.id) });
+    const playEvent = (): void => switchRun(root, c, { kind: "event", classId: picked.classId });
+    const showOffer = (): void => {
+      eventSlot.append(h("button", { type: "button", class: "link-btn cs-run-switch", onclick: playEvent }, TR().switchEvent));
+    };
+    if (offer === "offer") showOffer();
+    if (offer !== "ask") return;
+    setChildren(
+      choiceSlot,
+      runChoiceCard({
+        className: picked.className,
+        finishedOwn: player.completedAt !== null,
+        onEvent: playEvent,
+        onOwn: () => {
+          writeRunChoice(c.id, { kind: "own" });
+          setChildren(choiceSlot);
+          showOffer();
+          document.getElementById("stage")?.querySelector<HTMLElement>(".stage-goal")?.focus({ preventScroll: true });
+        },
+      }),
+    );
   });
 
   const stepName = (key: StageKey): string => (key === "setup" ? T().setup : key === "debrief" ? T().debrief : stageLabel(c, key));
@@ -374,7 +409,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
     return h(
       "header",
       { class: "case-head case-status", "aria-label": TW().statusLabel },
-      h("div", { class: "cs-line" }, contentText("h1", { class: "cs-title" }, c.title), stageItem(), elScore, elTime, eventSlot, costsBtn, costsPanel),
+      h("div", { class: "cs-line" }, contentText("h1", { class: "cs-title" }, c.title), runItem, stageItem(), elScore, elTime, eventSlot, costsBtn, costsPanel),
       h("span", { class: "cs-progress", "aria-hidden": "true" }, elFill),
     );
   };
@@ -408,7 +443,7 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
     }, update));
 
     // The nav carries the labelled stages; phones (nav in a drawer) keep the compact dot row under the status line.
-    setChildren(root, header, stepper("row"), main, playerTag());
+    setChildren(root, header, choiceSlot, stepper("row"), main, playerTag());
     applyFocus();
     tick();
     if (player.completedAt === null) every(1000, tick);
@@ -416,6 +451,53 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
 
   draw();
   if (!isRelabel()) scrollContentTo(0);
+}
+
+/* ================= event runs (#253) ================= */
+
+/** Plays the case on another run: the choice is stored per case (lib/case-run.ts) and the page loads that record. */
+function switchRun(root: HTMLElement, c: Case, choice: Parameters<typeof writeRunChoice>[1]): void {
+  writeRunChoice(c.id, choice);
+  renderCase(root, c);
+}
+
+/** "[Event run] · <class> · Switch" at the start of the status line, while the page plays an event run. */
+function eventRunItem(className: string, onSwitch: () => void): HTMLElement {
+  return h(
+    "span",
+    { class: "cs-item cs-run" },
+    h("span", { class: "visually-hidden" }, `${TR().runSr} `),
+    h("span", { class: "chip pill-info cs-run-chip", "aria-hidden": "true" }, TR().runChip),
+    h("bdi", { class: "cs-run-class" }, className),
+    h("button", { type: "button", class: "link-btn cs-run-switch", "aria-label": TR().switchOwnLong, onclick: onSwitch }, TR().switchOwn),
+  );
+}
+
+/**
+ * The choice on the own run while a class event is open on this case: play the event run (counts on the class
+ * board only) or continue the own run. A player who already finished the case is told that solve doesn't count
+ * tonight. Shown once per case and tab: either answer is kept.
+ */
+function runChoiceCard(input: { className: string; finishedOwn: boolean; onEvent: () => void; onOwn: () => void }): HTMLElement {
+  const titleId = "run-choice-title";
+  return h(
+    "section",
+    { class: "run-choice", "aria-labelledby": titleId },
+    h("h2", { class: "run-choice-title", id: titleId }, TR().choiceTitle),
+    h("p", { class: "run-choice-class" }, TR().choiceClass, " ", h("bdi", {}, input.className)),
+    h("p", { class: "run-choice-body" }, input.finishedOwn ? TR().choiceDone : TR().choiceBody),
+    h(
+      "div",
+      { class: "run-choice-actions" },
+      h(
+        "button",
+        { type: "button", class: "btn btn-primary run-choice-event", onclick: input.onEvent },
+        // one span, so the flex button wraps the label as text rather than as columns
+        h("span", { class: "run-choice-label" }, TR().playEvent, " ", h("bdi", {}, input.className), " ", h("span", { class: "run-choice-note" }, TR().playEventNote)),
+      ),
+      h("button", { type: "button", class: "btn btn-ghost run-choice-own", onclick: input.onOwn }, TR().continueOwn),
+    ),
+  );
 }
 
 /**

@@ -28,6 +28,7 @@ import { CaseService } from "./services/CaseService.ts";
 import { EvidenceService } from "./services/evidenceStream.ts";
 import { EventService } from "./services/EventService.ts";
 import { GameService } from "./services/GameService.ts";
+import { EventRunService } from "./services/EventRunService.ts";
 import { GlobalBoardService } from "./services/GlobalBoardService.ts";
 import { ScoreService } from "./services/ScoreService.ts";
 import { GuestService } from "./services/GuestService.ts";
@@ -89,7 +90,7 @@ export const createApp = (deps: AppDeps): App => {
   const scores = new ScoreService({ repos, caseIds: () => Object.keys(secrets.cases), onChange: clearBoard });
   const board = new GlobalBoardService({ repos, scores, purger: deps.cachePurger, now, onChange: clearBoard });
   // GameService reads private cases too (#184); GameController checks access before every call.
-  const game = new GameService({ repository: repos.progress, firstBlood, secrets: secrets.playable, scores, now });
+  const game = new GameService({ repository: repos.progress, eventProgress: repos.eventProgress, firstBlood, secrets: secrets.playable, scores, now });
   const stats = new StatsService({ repos, secrets, privateCaseIds: () => secrets.privateCaseIds(), now, boardCache });
   const trashRepo = new TrashRepository(deps.store);
   const trash = new TrashService({ trash: trashRepo, repos, cases: caseRepo, scores, board, now, purger: deps.cachePurger });
@@ -125,7 +126,8 @@ export const createApp = (deps: AppDeps): App => {
   // Teacher-vouched resets (#254): class admins vouch, only the site owner's approval sets a password.
   const resets = new PasswordResetService({ repos, classes, accounts, limiter, now });
   const authController = new AuthController({ auth, schedule, stats, events, board, access, resets, audit });
-  const gameController = new GameController({ auth, game, access });
+  const runs = new EventRunService({ repos, publicCaseIds: () => Object.keys(secrets.cases), now });
+  const gameController = new GameController({ auth, game, access, runs });
   const guestController = new GuestController({ guests: new GuestService({ repos, auth, limiter, now }) });
   const contentController = new ContentController({ cases, access });
   const adminGuard = new AdminAuthService({ adminKey: deps.adminKey, auth });

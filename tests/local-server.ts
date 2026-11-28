@@ -63,8 +63,29 @@ const readBody = async (req: import("node:http").IncomingMessage): Promise<Buffe
   return Buffer.concat(chunks);
 };
 
+// Local-only test hook (never part of the Netlify function): backdates a class membership, so e2e can cover the
+// week-of-membership rule for reset vouches (#254) without waiting a week. POST {classId, accountId, days}.
+const BACKDATE_PATH = "/__local/backdate-member";
+const backdateMember = async (body: Buffer): Promise<number> => {
+  const { ClassRepository } = await import("../site/server/repositories/class-repository.ts");
+  const parsed: unknown = JSON.parse(body.toString("utf8"));
+  if (typeof parsed !== "object" || parsed === null) return 400;
+  const { classId, accountId, days } = parsed as Record<string, unknown>;
+  if (typeof classId !== "string" || typeof accountId !== "string" || typeof days !== "number") return 400;
+  const repo = new ClassRepository(appStores().kv);
+  const found = await repo.getMember(classId, accountId);
+  if (!found) return 404;
+  const joinedAt = new Date(Date.parse(found.data.joinedAt) - days * 86_400_000).toISOString();
+  return (await repo.saveMemberIfMatch(classId, accountId, { ...found.data, joinedAt }, found.etag)) ? 204 : 409;
+};
+
 createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+  if (url.pathname === BACKDATE_PATH && req.method === "POST") {
+    res.writeHead(await backdateMember(await readBody(req)));
+    res.end();
+    return;
+  }
   if (url.pathname.startsWith("/api/")) {
     const body = req.method === "GET" || req.method === "HEAD" ? undefined : await readBody(req);
     const headers = new Headers();
