@@ -52,10 +52,11 @@ import {
 import type { EvidenceFile, PatternPreset } from "../explorer/files";
 import type { SortSpec, WorkerErrorCode, WorkerResponse } from "../explorer/protocol";
 import { T } from "../i18n/strings-tools";
+import { runQuestionStrip } from "./questionStrip";
 
-/** A file path with line-break opportunities after "/", "_", "-" and ".", so names wrap at word joins, not mid-word. */
+/** A file path with line-break opportunities after "/", "_" and "-", so names wrap at word joins, never mid-word or before the extension. */
 function breakablePath(path: string): Node[] {
-  const parts = path.split(/(?<=[/_.-])/);
+  const parts = path.split(/(?<=[/_-])/);
   return parts.flatMap((part, i) => (i < parts.length - 1 ? [document.createTextNode(part), document.createElement("wbr")] : [document.createTextNode(part)]));
 }
 
@@ -163,11 +164,12 @@ type Progress =
  * The Explorer as a frame view: the log pane in main; the evidence files and the time converter in the page
  * panel (a file list with a search box and a converter form is page content, like an IDE's file tree, and forms
  * never go in the global nav); the case's Investigation, Toolbox and Explorer links under Cases in the nav.
+ * A "fit" page above 640px (#217): the log pane fills the height left under the filters, with no page scroll.
  */
 export function explorerView(c: Case): ViewResult {
   const main = h("div", { class: "view" });
   const sidebar = h("div", { class: "ex-side", id: "ex-sidebar" });
-  return { main, nav: createCaseNav(c, "explorer").section, aside: { label: T().exFilesTime, content: sidebar }, start: () => renderExplorer(main, c, sidebar) };
+  return { main, nav: createCaseNav(c, "explorer").section, aside: { label: T().exFilesTime, content: sidebar }, layout: "fit", start: () => renderExplorer(main, c, sidebar) };
 }
 
 export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement): void {
@@ -213,6 +215,17 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
   let detailSay = false;
   let histRefocus = false;
   let sentSteps: FilterStep[] = [];
+  /**
+   * The steps as they were sent, copied: highlighting runs on the main thread, so it must use what the worker
+   * accepted, never text typed since (a runaway regex being typed would hang the page on any re-render).
+   */
+  let sentCopies: Array<FilterStep | null> = [];
+  /** A step that blew the time budget stays out (null) until the worker has accepted a new pipeline. */
+  const appliedSteps = (): FilterStep[] =>
+    sentSteps.flatMap((s, i) => {
+      const copy = sentCopies[i];
+      return ui(s).slow || copy === null || copy === undefined ? [] : [copy];
+    });
   let lastEdited: FilterStep | null = null;
   let countState: CountState = { kind: "none" };
   let winStart = 0;
@@ -263,10 +276,13 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
 
   const title = h("h2", { class: "ex-title" }, T().exPickFile);
   const fileFormat = h("span", { class: "ex-format" });
+  // The picked file's description, as a muted line in the pane's title bar (it used to live only in a tooltip).
+  const fileDesc = h("p", { class: "ex-file-desc", dir: "auto", hidden: true });
   const countEl = h("p", { class: "ex-count" });
   const pipeline = h("div", { class: "ex-pipeline" });
   const presets = h("div", { class: "ex-chips" });
-  const presetsRow = h("div", { class: "ex-presets" }, h("span", { class: "ex-muted" }, T().exExamples), presets);
+  // Hidden until a file with examples is open: an empty "Examples:" label read as a broken row (#217).
+  const presetsRow = h("div", { class: "ex-presets", hidden: true }, h("span", { class: "ex-muted" }, T().exExamples), presets);
   const fieldList = h("datalist", { id: "ex-json-fields" });
   const condList = h("div", { class: "ex-conds" });
   const addCondBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exAddCond);
@@ -277,9 +293,20 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
       h("p", { class: "ex-muted ex-json-help", id: "ex-json-help" }, T().exJsonCondsHelp),
       condList, addCondBtn, fieldList),
     h("label", { for: "ex-cols", class: "ex-json-cols" }, h("span", {}, T().exColView), colsInput));
-  const timeRow = h("div", { class: "ex-time-filter", hidden: true });
   const filtersBadge = h("span", { class: "ex-badge" });
-  const controlsSet = h("fieldset", { class: "ex-fieldset" }, h("legend", { class: "ex-sr" }, T().exFilters), pipeline, timeRow, presetsRow, jsonBar);
+  // "More filters (n)" (#217): JSON conditions, the column view and the aggregations fold away, so the log keeps
+  // the height. A disclosure button, not <details>, so its name can carry the count of active settings.
+  const moreFiltersBtn = h("button", { class: "btn btn-sm ex-more-filters", type: "button", "aria-expanded": "false", "aria-controls": "ex-more-panel", "aria-describedby": "ex-more-help" },
+    h("span", { class: "ex-more-chev", "aria-hidden": "true" }), h("span", { class: "ex-more-label" }, T().exMoreFilters(0)));
+  const morePanel = h("div", { class: "ex-more-panel", id: "ex-more-panel", hidden: true });
+  // "+ add filter" and "More filters" share the row with the examples: one row less above the log.
+  const addStepBtn = h("button", { class: "btn btn-sm", type: "button" }, T().exAddFilter);
+  addStepBtn.addEventListener("click", () => addStep("contains", ""));
+  const filterTools = h("div", { class: "ex-filter-tools" }, addStepBtn, moreFiltersBtn, presetsRow, h("p", { class: "ex-sr", id: "ex-more-help" }, T().exMoreFiltersHelp));
+  // Active filters as removable chips in one bar (the Kibana/Grafana pattern): outside the fieldset, so phones
+  // see them while the filters sheet is closed.
+  const chipBar = h("ul", { class: "ex-fchips", "aria-label": T().exActiveFilters, hidden: true });
+  const controlsSet = h("fieldset", { class: "ex-fieldset" }, h("legend", { class: "ex-sr" }, T().exFilters), pipeline, filterTools, morePanel);
   const controlsSum = h("summary", { class: "ex-controls-sum" }, T().exFilters, filtersBadge);
   const controls = h("details", { class: "ex-controls" }, controlsSum, controlsSet);
   // Phones: the filters open in a bottom sheet over the log instead of pushing it down the page. The same
@@ -327,7 +354,6 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     h("p", { class: "ex-sr", id: "ex-detail-keys" }, T().exDetailKeys),
     h("div", { class: "ex-drawer-tools", role: "group", "aria-label": T().exMatchNav }, detailPrev, detailNext, detailCopy, detailLink),
     detailBody);
-  view.prepend(h("div", { class: "ex-head" }, h("div", { class: "ex-head-title" }, title, fileFormat), countEl));
   const work = h("div", { class: "ex-work" }, view, drawer);
 
   // Everything but match stepping lives behind one ⋯ menu (#112); the line keys (Enter, C, L) still reach it all.
@@ -339,6 +365,12 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
   const matchPos = h("span", { class: "ex-match-pos", "aria-live": "polite", "aria-atomic": "true" });
   const matchNav = h("div", { class: "ex-match-nav", role: "group", "aria-label": T().exMatchNav, hidden: true }, prevMatchBtn, matchPos, nextMatchBtn);
   const actionButtons = [prevMatchBtn, nextMatchBtn, moreBtn];
+  // The pane's title bar holds the file (name, format, description), its counts and the line actions, so the
+  // log starts one row higher than with a separate toolbar (#217).
+  view.prepend(h("div", { class: "ex-head" },
+    h("div", { class: "ex-head-main" }, h("div", { class: "ex-head-title" }, title, fileFormat), fileDesc),
+    countEl,
+    h("div", { class: "ex-actions" }, matchNav, h("label", { class: "ex-toggle", for: "ex-wrap" }, wrapCb, T().exWrap), moreBtn)));
 
   const makeAgg = (kind: Agg["kind"], label: string, placeholder: string): Agg => {
     const id = `ex-${kind}`;
@@ -637,34 +669,54 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
    * Path, format, size and description are secondary, so they live in a tooltip on hover and keyboard focus.
    * The folder stays in the button's name as hidden text, so screen readers and search still get the full path.
    */
+  /**
+   * The rows are built once per file and repainted in place: re-creating them under the pointer after a click
+   * re-opened the tooltip of the row just picked, over the filters (#217). The click itself closes the tooltip,
+   * and focus left on the row after a click is not keyboard focus, so it does not open it again.
+   */
+  const fileRows = new Map<string, { li: HTMLLIElement; paint: () => void }>();
   function fileItem(f: EvidenceFile, grouped: boolean): HTMLElement {
-    const bytes = knownBytes.get(f.path);
-    const size = bytes !== undefined ? fmtBytes(bytes) : f.size;
-    const active = file?.path === f.path;
+    const key = `${grouped ? "g" : "f"}:${f.path}`;
+    const cached = fileRows.get(key);
+    if (cached !== undefined) {
+      cached.paint();
+      return cached.li;
+    }
     const slash = f.path.lastIndexOf("/");
     const base = grouped && slash >= 0 ? f.path.slice(slash + 1) : f.path;
-    const loaded = inWorker.has(f.path);
-    const btn = h(
-      "button",
-      // data-sidebar-close: picking a file closes the page-panel drawer on narrow screens (shell/frame.ts)
-      // aria-label carries the full path: hidden text beside the visible name would be read with a space ("app/ x.log")
-      {
-        class: `ex-file${active ? " is-active" : ""}`, type: "button", "aria-current": active ? "true" : null, "data-sidebar-close": "",
-        "aria-label": loaded ? `${f.path}, ${T().exLoadedTag}` : f.path,
-      },
+    const dot = h("span", { class: "ex-dot", "aria-hidden": "true", hidden: true });
+    // data-sidebar-close: picking a file closes the page-panel drawer on narrow screens (shell/frame.ts)
+    const btn = h("button", { class: "ex-file", type: "button", "data-sidebar-close": "" },
       h("span", { class: "ex-file-name mono", dir: "ltr", "aria-hidden": "true" }, breakablePath(base)),
-      loaded ? h("span", { class: "ex-dot", "aria-hidden": "true" }) : null,
-    );
-    // num() returns an element (an LTR-isolated number), so the parts are joined as nodes, not as a string
-    const metaParts: (string | Node)[] = [f.format, size !== "" ? num(size) : "", loaded ? T().exLoadedTag : ""].filter((v) => v !== "");
-    const meta = metaParts.flatMap((part, i) => (i === 0 ? [part] : [" · ", part]));
-    tooltip(btn, () => [
-      h("span", { class: "tip-title mono", dir: "ltr" }, f.path),
-      meta.length > 0 ? h("span", { class: "tip-meta" }, ...meta) : null,
-      f.description !== "" ? h("span", { dir: "auto" }, f.description) : null,
-    ]);
+      dot);
+    const paint = (): void => {
+      const active = file?.path === f.path;
+      const loaded = inWorker.has(f.path);
+      btn.classList.toggle("is-active", active);
+      if (active) btn.setAttribute("aria-current", "true");
+      else btn.removeAttribute("aria-current");
+      // aria-label carries the full path: hidden text beside the visible name would be read with a space ("app/ x.log")
+      btn.setAttribute("aria-label", loaded ? `${f.path}, ${T().exLoadedTag}` : f.path);
+      dot.hidden = !loaded;
+    };
+    paint();
+    tooltip(btn, () => {
+      const bytes = knownBytes.get(f.path);
+      const size = bytes !== undefined ? fmtBytes(bytes) : f.size;
+      const loaded = inWorker.has(f.path);
+      // num() returns an element (an LTR-isolated number), so the parts are joined as nodes, not as a string
+      const metaParts: (string | Node)[] = [f.format, size !== "" ? num(size) : "", loaded ? T().exLoadedTag : ""].filter((v) => v !== "");
+      const meta = metaParts.flatMap((part, i) => (i === 0 ? [part] : [" · ", part]));
+      return [
+        h("span", { class: "tip-title mono", dir: "ltr" }, f.path),
+        meta.length > 0 ? h("span", { class: "tip-meta" }, ...meta) : null,
+        f.description !== "" ? h("span", { dir: "auto" }, f.description) : null,
+      ];
+    });
     btn.addEventListener("click", () => selectFile(f));
-    return h("li", {}, btn);
+    const li = h("li", {}, btn);
+    fileRows.set(key, { li, paint });
+    return li;
   }
 
   function setEnabled(on: boolean): void {
@@ -705,9 +757,12 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     }
     file = f;
     recordVisit({ kind: "explorer", caseId: c.id, file: f.path });
-    title.textContent = f.path;
+    title.replaceChildren(...breakablePath(f.path));
     title.setAttribute("dir", "ltr");
     fileFormat.textContent = f.format;
+    fileDesc.textContent = f.description;
+    fileDesc.title = f.description; // one ellipsed line in the title bar; the whole text on hover (and always to screen readers)
+    fileDesc.hidden = f.description === "";
     csvHeader = [];
     jsonBar.hidden = f.mode !== "json";
     count = 0;
@@ -728,6 +783,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     syncHash();
     renderFieldList();
     renderConds();
+    paintBadge();
     if (inWorker.has(f.path)) {
       paintProgress({ kind: "hidden" });
       loadJob = client.job();
@@ -766,7 +822,11 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     if (regexes.length === 0) return false;
     // The pipeline ran fine before the last edit, so the edited step is the one to blame when it is a regex.
     const culprits = lastEdited !== null && regexes.includes(lastEdited) ? [lastEdited] : regexes;
-    for (const s of culprits) ui(s).slow = true;
+    for (const s of culprits) {
+      ui(s).slow = true;
+      const i = sentSteps.indexOf(s);
+      if (i >= 0) sentCopies[i] = null;
+    }
     paintSteps();
     return true;
   }
@@ -791,6 +851,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     filterGen++;
     filterJob = client.job();
     sentSteps = effectiveSteps();
+    sentCopies = sentSteps.map((s) => ({ ...s }));
     countState = { kind: "filtering" };
     paintCount(false);
     for (const a of aggs) if (a.state === "done") markAggStale(a, T().exAggUpdating);
@@ -896,6 +957,96 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     filtersBadge.textContent = active > 0 ? String(active) : "";
     filtersBadge.hidden = active === 0;
     paintMatchNav();
+    paintMore();
+    paintChips();
+  }
+
+  /** Settings behind "More filters" that change the view: applied JSON conditions and the column view. */
+  function moreCount(): number {
+    if (file?.mode !== "json") return 0;
+    return appliedConds().length + (cols.length > 0 ? 1 : 0);
+  }
+
+  function paintMore(): void {
+    const label = moreFiltersBtn.querySelector(".ex-more-label");
+    if (label !== null) label.textContent = T().exMoreFilters(moreCount());
+  }
+
+  function setMoreOpen(open: boolean): void {
+    morePanel.hidden = !open;
+    moreFiltersBtn.setAttribute("aria-expanded", String(open));
+  }
+
+  /** One chip per active filter, each with its own remove button; focus moves on to the next chip (or the filter). */
+  function paintChips(): void {
+    const t = T();
+    const chips: Array<{ label: Array<Node | string>; name: string; cls?: string; removeLabel?: string; remove: () => void }> = [];
+    steps.forEach((step, idx) => {
+      if (step.text === "") return;
+      const kind = step.kind === "not" ? t.exNotContains : step.kind === "regex" ? "regex" : t.exContains;
+      chips.push({
+        label: [h("span", { class: "ex-fchip-k" }, kind), " ", h("bdi", { class: "mono", dir: "ltr" }, step.text)],
+        name: `${kind} ${step.text}`,
+        remove: () => {
+          steps.splice(idx, 1);
+          if (steps.length === 0) steps.push({ kind: "contains", text: "", ci: true });
+          renderPipeline();
+          scheduleFilter();
+        },
+      });
+    });
+    if (timeRange) {
+      const from = fmtBucket(timeRange.from);
+      const to = fmtBucket(timeRange.to);
+      chips.push({
+        label: [h("span", { class: "ex-fchip-k" }, t.exTimeFilter), " ", ...fill(t.exTimeRange, { from: num(from), to: num(to) })],
+        name: `${t.exTimeFilter} ${fillText(t.exTimeRange, { from, to })}`,
+        cls: "ex-time-chip",
+        removeLabel: t.exRemoveTime,
+        remove: () => setTimeRange(null),
+      });
+    }
+    if (file?.mode === "json") {
+      conds.forEach((cond, idx) => {
+        if (cond.field === "" || (cond.op !== "exists" && cond.value === "")) return;
+        const op = OPS.find(([v]) => v === cond.op)?.[1]() ?? cond.op;
+        const text = cond.op === "exists" ? `${cond.field} ${op}` : `${cond.field} ${op} ${cond.value}`;
+        chips.push({
+          label: [h("bdi", { class: "mono", dir: "ltr" }, cond.field), " ", h("span", { class: "ex-fchip-k" }, op), cond.op === "exists" ? "" : " ", cond.op === "exists" ? "" : h("bdi", { class: "mono", dir: "ltr" }, cond.value)],
+          name: text,
+          remove: () => {
+            conds.splice(idx, 1);
+            renderConds();
+            scheduleFilter();
+          },
+        });
+      });
+      if (cols.length > 0) {
+        chips.push({
+          label: [h("span", { class: "ex-fchip-k" }, t.exColView), " ", h("bdi", { class: "mono", dir: "ltr" }, cols.join(", "))],
+          name: `${t.exColView} ${cols.join(", ")}`,
+          remove: () => {
+            cols = [];
+            colsInput.value = "";
+            syncHash();
+            paintHeader();
+            scheduleRender();
+            paintBadge();
+          },
+        });
+      }
+    }
+    chipBar.hidden = chips.length === 0;
+    chipBar.replaceChildren(...chips.map((chip, i) => {
+      const x = h("button", { class: "ex-fchip-x", type: "button", "aria-label": chip.removeLabel ?? t.exRemoveFilter(chip.name), "data-chip": String(i) }, "×");
+      x.addEventListener("click", () => {
+        chip.remove();
+        // The chips were redrawn: focus the chip that took this one's place, else the first filter field.
+        const next = chipBar.querySelector<HTMLElement>(`[data-chip="${Math.min(i, chipBar.children.length - 1)}"]`);
+        (next ?? pipeline.querySelector<HTMLElement>(".ex-input"))?.focus();
+      });
+      return h("li", { class: `ex-fchip${chip.cls !== undefined ? ` ${chip.cls}` : ""}` }, h("span", { class: "ex-fchip-label" }, ...chip.label), x);
+    }));
   }
 
   function paintSteps(): void {
@@ -982,11 +1133,6 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
         stepEls.set(step, { row, input, err });
         return row;
       }),
-      (() => {
-        const add = h("button", { class: "btn btn-sm", type: "button" }, t.exAddFilter);
-        add.addEventListener("click", () => addStep("contains", ""));
-        return add;
-      })(),
     );
     paintSteps();
     paintBadge();
@@ -999,6 +1145,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     steps.push(step);
     lastEdited = step;
     renderPipeline();
+    if (text === "") stepEls.get(step)?.input.focus(); // "+ add filter": straight into the new step
     scheduleFilter();
   }
 
@@ -1061,22 +1208,9 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
   }
 
   /* ---------------------------------------------------------------- time filter */
+  /** The time filter (from a histogram bar) is one of the active-filter chips. */
   function paintTimeRow(): void {
-    timeRow.hidden = timeRange === null;
-    if (!timeRange) {
-      timeRow.replaceChildren();
-      return;
-    }
-    const remove = h("button", { class: "btn btn-sm btn-ghost btn-icon ex-remove", type: "button", "aria-label": T().exRemoveTime }, "×");
-    remove.addEventListener("click", () => {
-      setTimeRange(null);
-      pipeline.querySelector<HTMLInputElement>(".ex-input")?.focus();
-    });
-    timeRow.replaceChildren(
-      h("span", { class: "ex-time-filter-k" }, T().exTimeFilter),
-      h("span", { class: "chip pill-accent ex-time-chip" },
-        ...fill(T().exTimeRange, { from: num(fmtBucket(timeRange.from)), to: num(fmtBucket(timeRange.to)) })),
-      remove);
+    paintChips();
   }
 
   function setTimeRange(range: TimeRange | null): void {
@@ -1197,7 +1331,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
       client.send({ type: "window", job: windowJob, path: file.path, start: Math.max(0, first - 60), count: visible + 120 });
     }
     const frag = document.createDocumentFragment();
-    const active = sentSteps.filter((s) => !ui(s).slow);
+    const active = appliedSteps();
     for (let r = first; r < last; r++) frag.appendChild(renderRow(r, winRows[r - winStart], active));
     rowsLayer.replaceChildren(frag);
     if (wrap) {
@@ -1452,7 +1586,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
         h("dl", { class: "ex-detail-times", dir: "ltr" }, ...epochs.flatMap(([v, at]) => [h("dt", { class: "mono" }, v), h("dd", { class: "mono" }, at)])));
     }
     const raw = h("pre", { class: "ex-detail-raw", dir: "ltr", tabindex: "0", "aria-labelledby": "ex-detail-raw-h" });
-    const ranges = matchRanges(text, sentSteps.filter((s) => !ui(s).slow));
+    const ranges = matchRanges(text, appliedSteps());
     let pos = 0;
     for (const [a, b] of ranges) {
       if (a > pos) raw.append(text.slice(pos, a));
@@ -1985,7 +2119,9 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     syncHash();
     paintHeader();
     scheduleRender();
+    paintBadge();
   });
+  moreFiltersBtn.addEventListener("click", () => setMoreOpen(morePanel.hidden !== false));
   timeInput.addEventListener("input", renderTime);
   yearInput.addEventListener("input", () => {
     yearEdited = yearInput.value.trim() !== "";
@@ -2052,15 +2188,18 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
       ...aggBody(uniq, fill(T().exUniqueHelp, { cmd: h("code", { dir: "ltr" }, "grep -o | sort | uniq -c") }), aggButton(uniq, T().exCountBtn))),
     histDetails);
 
+  morePanel.append(jsonBar, aggSet);
+
   const main = h("section", { class: "ex-main", "aria-label": T().exTitle },
     controls,
+    chipBar,
     notice,
-    h("div", { class: "ex-actions" }, matchNav,
-      h("label", { class: "ex-toggle", for: "ex-wrap" }, wrapCb, T().exWrap), moreBtn),
     keysHelp,
     work,
-    aggSet,
   );
+
+  // The docked "Current question" (#215): answer from here with the case page's form, drafts and cooldown.
+  const strip = runQuestionStrip(c, "explorer", () => root.isConnected && ownsHash(window.location.hash));
 
   root.replaceChildren(
     h("div", { class: "explorer" },
@@ -2069,6 +2208,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
         // The page's one h1 (#222): the tool, then which case.
         h("h1", { class: "ex-heading" }, h("strong", {}, T().exTitle), h("span", { class: "ex-muted ex-case", dir: "auto" }, c.title)),
         tagline),
+      strip.el,
       announcer,
       h("div", { class: "ex-layout" }, main)),
   );
@@ -2107,6 +2247,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     if (raf) window.cancelAnimationFrame(raf);
     ro.disconnect();
     client.dispose();
+    strip.dispose();
     if (activeTeardown === teardown) activeTeardown = null;
   }
   function onHashChange(): void {

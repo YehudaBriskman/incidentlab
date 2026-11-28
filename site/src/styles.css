@@ -863,6 +863,11 @@ main.app-content {
   .app-content[data-layout="fit"] .page-body { flex: 1; min-block-size: 0; display: flex; flex-direction: column; align-items: stretch; } /* fill the width, not shrink to content */
   .app-content[data-layout="fit"] #app { flex: 1; min-block-size: 0; display: flex; flex-direction: column; }
 }
+/* a fit page with a page panel (the Explorer's files): the panel stays beside #app and both fill the height */
+@media (min-width: 1025px) {
+  :root[data-aside-page] .app-content[data-layout="fit"] .page-body { display: grid; grid-template-columns: var(--sidebar-size) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+  :root[data-aside-page] .app-content[data-layout="fit"] .page-aside { align-self: stretch; min-block-size: 0; max-block-size: none; }
+}
 /* the announcement: one compact dismissible notice at the top of the content area */
 .announce, .guest-banner { margin-block-end: var(--space-3); }
 :is(.announce, .guest-banner) .banner-text { padding-block: var(--space-1); }

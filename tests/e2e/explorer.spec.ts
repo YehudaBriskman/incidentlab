@@ -28,6 +28,8 @@ const ui = {
   condOp: (p: Page, n: number) => p.getByRole("combobox", { name: `Condition ${n} test` }),
   condValue: (p: Page, n: number) => p.getByRole("textbox", { name: `Condition ${n} value` }),
   addCond: (p: Page) => p.getByRole("button", { name: "+ Condition" }),
+  // JSON conditions, the column view and the aggregations sit behind "More filters" (#217)
+  moreFilters: (p: Page) => p.getByRole("button", { name: /^More filters/ }),
 };
 
 const LOADED = / of [\d,]+ lines?/;
@@ -142,6 +144,7 @@ test("explorer histogram: a bar click, or arrow keys and Enter, keep only that t
   await page.goto(ROUTE);
   await openFile(page, "app/checkout-service.log");
   const total = await countOf(page);
+  await ui.moreFilters(page).click();
   await ui.plot(page).click();
   await expect(ui.bars(page).first()).toBeVisible();
 
@@ -175,6 +178,7 @@ test("explorer JSON: field picker and several conditions", async ({ page }) => {
   await openFile(page, "app/checkout-service.log");
   const total = await countOf(page);
   await expect(page.locator('#ex-json-fields option[value="level"]')).toHaveCount(1);
+  await ui.moreFilters(page).click();
 
   await ui.condField(page, 1).fill("level");
   await ui.condValue(page, 1).fill("warn");
@@ -243,7 +247,7 @@ test("explorer on a phone: filters open in a bottom sheet, apply live, and focus
   await expect(summary).toBeFocused();
   await expect.poll(() => countOf(page)).toBeLessThan(before);
   // the fieldset is back in the page, with the value kept
-  await expect(page.locator(".ex-controls .ex-fieldset")).toHaveCount(1);
+  await expect(page.locator(".ex-controls > .ex-fieldset")).toHaveCount(1);
   // (inside the collapsed inline panel, so query by attribute rather than by role)
   await expect(page.locator('.ex-controls [aria-label="Step 1 filter text"]')).toHaveValue("DEPLOY");
 });

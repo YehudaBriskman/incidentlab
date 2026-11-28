@@ -1005,12 +1005,16 @@ document.addEventListener("keydown", (ev) => {
  */
 export function tooltip(anchor: HTMLElement, content: Child | (() => Child)): void {
   const get = typeof content === "function" ? content : (): Child => content;
+  // After a click the pointer has done its job: no tooltip until it leaves the anchor, even when the page moves
+  // the anchor under it (the Explorer redraws its file list on a pick, #217), so it never covers what opened.
+  let clicked = false;
   anchor.addEventListener("pointerenter", (ev) => {
-    if (ev.pointerType === "touch") return;
+    if (ev.pointerType === "touch" || clicked) return;
     window.clearTimeout(tooltipShowTimer);
     tooltipShowTimer = window.setTimeout(() => showTooltip(anchor, get), TOOLTIP_DELAY_MS);
   });
   anchor.addEventListener("pointerleave", () => {
+    clicked = false;
     window.clearTimeout(tooltipShowTimer);
     if (tooltipOwner === anchor) scheduleTooltipHide();
   });
@@ -1020,7 +1024,8 @@ export function tooltip(anchor: HTMLElement, content: Child | (() => Child)): vo
   anchor.addEventListener("blur", () => {
     if (tooltipOwner === anchor) hideTooltipNow();
   });
-  anchor.addEventListener("click", () => {
+  anchor.addEventListener("click", (ev) => {
+    if (ev.detail > 0) clicked = true; // a pointer click (a key press on a button reports detail 0)
     window.clearTimeout(tooltipShowTimer); // a hover timer still pending must not fire over what the click opened
     if (tooltipOwner === anchor) hideTooltipNow();
   });
