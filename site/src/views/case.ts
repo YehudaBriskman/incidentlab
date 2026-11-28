@@ -403,7 +403,13 @@ function renderStaged(root: HTMLElement, c: Case, initialPlayer: ProgressView): 
 
   /** One sticky line: the case title (the page's only h1), the stage, score and par, time, the class event, costs. */
   const statusLine = (): HTMLElement => {
-    const costsBtn = h("button", { type: "button", class: "btn btn-ghost btn-sm cs-costs" }, TW().costs);
+    // The short label fits the narrowest phones (#275); the name stays the full one, which contains it (2.5.3).
+    const costsBtn = h(
+      "button",
+      { type: "button", class: "btn btn-ghost btn-sm cs-costs", "aria-label": TW().costs },
+      h("span", { class: "cs-costs-long" }, TW().costs),
+      h("span", { class: "cs-costs-short", "aria-hidden": "true" }, TW().costsShort),
+    );
     const costsPanel = costsPopover(c, player);
     popover(costsBtn, costsPanel, { align: "end", onOpen: () => costsPanel.focus() });
     return h(
