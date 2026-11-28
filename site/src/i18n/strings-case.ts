@@ -1,0 +1,81 @@
+import { defineStrings, formatNumber as num } from "./i18n";
+
+// The case workspace (#213, #216): the question column, the workbench tabs, the "Need help?" row, the one-line
+// case status and its "Costs so far" popover. Costs use U+2212 (−) inside an LTR isolate, so the sign stays
+// before the digits in Hebrew. Class and event names are never concatenated in here: the view puts them in <bdi>.
+const ltr = (text: string): string => `⁦${text}⁩`;
+
+export const TW = defineStrings({
+  en: {
+    // workbench tabs
+    wbLabel: "Workbench",
+    paneQuestion: "Question",
+    paneCommands: "Commands",
+    paneEvidence: "Evidence",
+    paneHints: "Hints",
+    /** the screen-reader part of a tab's count, after the visible number */
+    commandsCount: (n: number): string => `, ${n} for this stage`,
+    hintsCount: (used: number, total: number): string => `, ${used} of ${total} bought`,
+    paneKeys: "Shortcut keys: G then Q, C, E or H switches the pane. Turn them off under Display settings.",
+    paneKeysShort: "Keys: G C · G E · G H",
+    // panes
+    needHelp: "Need help?",
+    hintsNone: "No hints bought for this stage yet. A hint costs points: it's under the answer, in “Need help?”.",
+    evidenceHead: "Evidence files",
+    evidenceOpen: (path: string): string => `Open ${path} in the Explorer`,
+    commandsMore: "All commands for this case",
+    // status line
+    statusLabel: "Case status",
+    statusSetup: "Setup",
+    statusDebrief: "Debrief",
+    statusStage: (n: number, total: number): string => `Stage ${n} of ${total}`,
+    statusStageShort: (n: number, total: number): string => `${n}/${total}`,
+    statusScore: (score: string, par: string): string => `${score} pts · par ${par}`,
+    statusClock: "Clock starts at Stage 1",
+    statusTimeSr: "Time",
+    classEventSr: "Class event",
+    costs: "Costs so far",
+    costsNone: "Nothing spent yet: no hints, commands or wrong answers.",
+    costsHints: (used: number, total: number, pts: number): string => `${used} of ${total} hints${pts > 0 ? ` · ${ltr(`−${num(pts)}`)} pts` : ""}`,
+    costsCommands: (n: number, pts: number): string => `${n} ${n === 1 ? "command" : "commands"} revealed${pts > 0 ? ` · ${ltr(`−${num(pts)}`)} pts` : ""}`,
+    costsWrong: (n: number, pts: number): string => `${n} wrong ${n === 1 ? "answer" : "answers"}${pts > 0 ? ` · ${ltr(`−${num(pts)}`)} pts` : ""}`,
+    costsRevealed: (n: number): string => `${n} ${n === 1 ? "answer" : "answers"} revealed`,
+    costsStageHints: (left: number, cost: number): string => `This stage: ${left} ${left === 1 ? "hint" : "hints"} left, the next costs ${num(cost)} pts`,
+    costsStageNoHints: "This stage: no hints left",
+    costsTotal: (pts: number): string => `Total ${ltr(`−${num(pts)}`)} pts`,
+  },
+  he: {
+    wbLabel: "שולחן עבודה",
+    paneQuestion: "שאלה",
+    paneCommands: "פקודות",
+    paneEvidence: "ראיות",
+    paneHints: "רמזים",
+    commandsCount: (n: number): string => `, ${n} לשלב הזה`,
+    hintsCount: (used: number, total: number): string => `, נקנו ${used} מתוך ${total}`,
+    paneKeys: "מקשי קיצור: G ואחריו Q, ‏C, ‏E או H מחליפים חלונית. אפשר לכבות אותם בהגדרות התצוגה.",
+    paneKeysShort: "מקשים: G C · G E · G H",
+    needHelp: "צריכים עזרה?",
+    hintsNone: "עוד לא נקנו רמזים לשלב הזה. רמז עולה נקודות: הוא מתחת לתשובה, ב„צריכים עזרה?”.",
+    evidenceHead: "קובצי הראיות",
+    evidenceOpen: (path: string): string => `לפתוח את ${path} ב-Explorer`,
+    commandsMore: "כל הפקודות של התיק",
+    statusLabel: "מצב התיק",
+    statusSetup: "הכנה",
+    statusDebrief: "תחקיר",
+    statusStage: (n: number, total: number): string => `שלב ${n} מתוך ${total}`,
+    statusStageShort: (n: number, total: number): string => `${n}/${total}`,
+    statusScore: (score: string, par: string): string => `${score} נק' · יעד ${par}`,
+    statusClock: "השעון מתחיל בשלב 1",
+    statusTimeSr: "זמן",
+    classEventSr: "אירוע הכיתה",
+    costs: "עלויות עד כה",
+    costsNone: "עוד לא הוצא דבר: אין רמזים, פקודות או תשובות שגויות.",
+    costsHints: (used: number, total: number, pts: number): string => `${used} מתוך ${total} רמזים${pts > 0 ? ` · ${ltr(`−${num(pts)}`)} נק'` : ""}`,
+    costsCommands: (n: number, pts: number): string => `${n === 1 ? "פקודה אחת נחשפה" : `${n} פקודות נחשפו`}${pts > 0 ? ` · ${ltr(`−${num(pts)}`)} נק'` : ""}`,
+    costsWrong: (n: number, pts: number): string => `${n === 1 ? "תשובה שגויה אחת" : `${n} תשובות שגויות`}${pts > 0 ? ` · ${ltr(`−${num(pts)}`)} נק'` : ""}`,
+    costsRevealed: (n: number): string => (n === 1 ? "תשובה אחת נחשפה" : `${n} תשובות נחשפו`),
+    costsStageHints: (left: number, cost: number): string => `בשלב הזה: ${left === 1 ? "נותר רמז אחד" : `נותרו ${left} רמזים`}, הבא עולה ${num(cost)} נק'`,
+    costsStageNoHints: "בשלב הזה לא נותרו רמזים",
+    costsTotal: (pts: number): string => `סך הכול ${ltr(`−${num(pts)}`)} נק'`,
+  },
+});

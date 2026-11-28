@@ -424,10 +424,11 @@ input.admin-input[type="search"] {
 .sched-check input { flex: none; }
 .sched-invalid { color: var(--danger-fg); }
 .admin-input[aria-invalid="true"] { border-color: var(--danger-fg); }
-.sched-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); position: sticky; bottom: var(--space-2); z-index: 2; box-shadow: var(--elevation-2); }
+.sched-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); position: sticky; bottom: calc(var(--space-2) + env(safe-area-inset-bottom, 0px)); z-index: 2; box-shadow: var(--elevation-2); }
 .sched-actions[hidden] { display: none; }
-/* While the save bar is up, focus scrolling keeps fields clear of it (WCAG 2.4.11). */
-html.admin-savebar-open { scroll-padding-bottom: 120px; }
+/* While the save bar is up, focus scrolling keeps fields clear of it (WCAG 2.4.11). The padding goes on the element
+   that scrolls (#218): the content area, or a fit dashboard's tab panel above 640px; never html, which doesn't. */
+html.admin-savebar-open :is(main.app-content, .admin-tabpanel) { scroll-padding-block-end: calc(120px + env(safe-area-inset-bottom, 0px)); }
 .field-error { margin: 0; font-weight: 600; }
 .field-error[hidden] { display: none; }
 .sched-actions .admin-error { flex-basis: 100%; }

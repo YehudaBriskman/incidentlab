@@ -1,3 +1,4 @@
+@import "./case.css";
 /* =====================================================================
    Player pages, Soft UI sweep B (DESIGN.md 3.0.0): case, toolbox, My stats, leaderboard and projector,
    auth, authoring. Imported by those views, so it loads after styles.css and wins at equal specificity.
@@ -137,30 +138,42 @@
   :is(.tb-chip[aria-pressed="true"], .cmd-shell-opt:has(input:checked)) { forced-color-adjust: none; background: Highlight; color: HighlightText; box-shadow: none; }
 }
 
-/* ---- phones (#132): a sticky answer bar while the real field is off screen. Phone-only: above 640px the bar
-   doesn't render. (Command rows are collapsed at every width since #214.) */
+/* ---- narrow screens (#132, #218): the answer bar pinned to the bottom edge while the real field is off screen
+   (or in another pane). Fixed, not sticky: sticky sat inside the padded content area and floated about 130px
+   above the bottom. It clears the nav rail at 641-1024px and the home indicator (safe area), and while it shows
+   the content scroller gets the same room at its end and as scroll padding, so a focused control is never under
+   it (WCAG 2.4.11). Above 1024px the question column keeps the real field in view and the bar doesn't render. */
 .answer-bar { display: none; }
-@media (max-width: 640px) {
+@media (max-width: 1024px) {
+  :root { --answer-bar-room: calc(var(--control-lg) + 2 * var(--space-2) + var(--space-2) + env(safe-area-inset-bottom, 0px)); }
   .answer-bar {
-    display: grid; gap: var(--gap-tight); position: sticky; inset-block-end: var(--space-2); z-index: 2;
-    margin-block-start: var(--gap-stack); padding: var(--space-2);
+    display: grid; gap: var(--gap-tight); position: fixed; z-index: 4;
+    inset-inline: calc(var(--rail-size) + var(--space-2)) var(--space-2);
+    inset-block-end: calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+    margin: 0; padding: var(--space-2);
     background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--elevation-2);
     transition: opacity var(--motion-settle) var(--ease-standard), visibility 0s linear 0s;
   }
-  /* hidden but in place: showing it never moves the page (the stage reserves its row) */
   .answer-bar[data-shown="false"] {
     visibility: hidden; opacity: 0;
     transition: opacity var(--motion-settle) var(--ease-exit), visibility 0s linear var(--motion-settle);
   }
+  main.app-content:has(.answer-bar[data-shown="true"]) {
+    padding-block-end: calc(var(--answer-bar-room) + var(--space-4));
+    scroll-padding-block-end: calc(var(--answer-bar-room) + var(--space-2));
+  }
   .answer-bar-row { display: flex; gap: var(--gap-related); }
   .answer-bar-input { flex: 1 1 auto; min-inline-size: 0; }
   .answer-bar-input[aria-invalid="true"] { border-width: 2px; border-color: var(--danger-fg); }
-  .answer-bar-submit { flex: none; }
+  .answer-bar-submit { flex: none; min-block-size: var(--control-md); }
   .answer-bar-note { margin: 0; padding-inline: var(--space-1); font-size: var(--type-label-size); line-height: var(--type-label-lh); color: var(--text-2); }
   .answer-bar-note:empty { display: none; }
   .answer-bar-note.is-wrong { color: var(--danger-fg); }
 }
-@media (max-width: 640px) and (forced-colors: active) {
+@media (max-width: 640px) {
+  .answer-bar { inset-inline: var(--space-2); }
+}
+@media (max-width: 1024px) and (forced-colors: active) {
   .answer-bar { border: 1px solid CanvasText; }
 }
 

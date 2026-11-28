@@ -97,3 +97,36 @@ export function nextAchievement(stats: Pick<UserStats, "achievements" | "streak"
   const first = locked[0];
   return first === undefined ? null : { id: first, have: null, need: null };
 }
+
+/** A class event shown on a case page: the class's name and its event window. */
+export type CaseClassEvent<E> = { readonly classId: string; readonly className: string; readonly event: E };
+
+/** How far ahead an upcoming class event is worth a place in the case status line. */
+export const CASE_EVENT_LOOKAHEAD_MS = 12 * 3_600_000;
+
+/**
+ * The class event that matters on this case page (#216): a live event first (the one that ends soonest), else
+ * one starting within CASE_EVENT_LOOKAHEAD_MS. Only classes whose assigned cases include this case count (no
+ * assigned cases = any public case). Null when there is none.
+ */
+export function pickClassEvent<E extends Pick<ClassEvent, "startsAt" | "endsAt">>(
+  classes: readonly { readonly id: string; readonly name: string; readonly event?: E; readonly caseIds?: readonly string[] }[],
+  caseId: string,
+  now: number,
+): CaseClassEvent<E> | null {
+  let live: { item: CaseClassEvent<E>; left: number } | null = null;
+  let soon: { item: CaseClassEvent<E>; left: number } | null = null;
+  for (const c of classes) {
+    if (c.event === undefined) continue;
+    if (c.caseIds !== undefined && c.caseIds.length > 0 && !c.caseIds.includes(caseId)) continue;
+    const phase = classEventPhase(c.event, now);
+    const item = { classId: c.id, className: c.name, event: c.event };
+    if (phase.kind === "live") {
+      const left = phase.msLeft ?? Number.POSITIVE_INFINITY;
+      if (live === null || left < live.left) live = { item, left };
+    } else if (phase.kind === "before" && phase.msLeft <= CASE_EVENT_LOOKAHEAD_MS) {
+      if (soon === null || phase.msLeft < soon.left) soon = { item, left: phase.msLeft };
+    }
+  }
+  return live?.item ?? soon?.item ?? null;
+}

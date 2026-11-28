@@ -61,7 +61,11 @@ test("desktop: the nav marks the page, nests the case's stages and tools, and ke
   // Cases is the ancestor of the page; the nested section is headed by the case title.
   await expect(ui.nav(page).getByRole("link", { name: "Cases", exact: true })).toHaveAttribute("aria-current", "true");
   await expect(ui.nav(page).getByRole("link", { name: "Toolbox: all commands" })).toHaveAttribute("href", `#/case/${CASE_ID}/toolbox`);
-  await expect(page.locator(".case-budget")).toContainText(/hints used/);
+  // The hint budget is in the status line's "Costs so far" popover (#216).
+  await page.getByRole("button", { name: "Costs so far" }).click();
+  await expect(page.getByRole("dialog", { name: "Costs so far" })).toContainText(/hints|Nothing spent yet/);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Costs so far" })).toBeFocused();
   // The breadcrumb names the case.
   await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText("Ghost in the Network");
 
