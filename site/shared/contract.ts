@@ -213,6 +213,8 @@ export const UserStatsSchema = z.object({
   /** additive (#236): the owner's ban reason (null when none was given or the account isn't banned) */
   banReason: z.string().nullable().default(null),
   commandsRevealed: z.number().int().min(0),
+  /** additive (#240): solved stages with no hint bought, the progress toward "no-hints-5"; older servers omit it */
+  stagesNoHints: z.number().int().min(0).default(0),
   achievements: z.array(z.object({ id: z.string(), earnedAt: z.string() })),
   /** `activeToday`: a stage was solved today (schedule time zone), so the streak is safe (#212); older servers omit it */
   streak: z.object({ current: z.number().int().min(0), best: z.number().int().min(0), activeToday: z.boolean().default(false) }),
@@ -290,10 +292,22 @@ export const LeaderboardEntrySchema = z.object({
   firstBloods: z.number().int().min(0),
   lastSolveAt: z.string().nullable(),
 });
-// GET /api/leaderboard?caseId=<id>   (public; omit caseId for overall). Only approved, non-guest accounts that
-// opted in (PUT /api/me/board) and solved at least one stage are listed.
+/**
+ * The leaderboard's time window (#239): every point ever, or only what was scored since the start of this week
+ * (Monday 00:00) or this month (the 1st, 00:00), in the schedule's time zone.
+ */
+export const LEADERBOARD_PERIODS = ["all", "week", "month"] as const;
+export const LeaderboardPeriodSchema = z.enum(LEADERBOARD_PERIODS);
+export type LeaderboardPeriod = z.infer<typeof LeaderboardPeriodSchema>;
+
+// GET /api/leaderboard?caseId=<id>&period=<all|week|month>   (public; omit caseId for overall, period for all
+// time). Only approved, non-guest accounts that opted in (PUT /api/me/board) and scored in the period are listed.
 export const LeaderboardResponseSchema = z.object({
   caseId: z.string().nullable(),
+  /** additive (#239): the window the standings cover; a class board is always "all" */
+  period: LeaderboardPeriodSchema.default("all"),
+  /** additive (#239): when the window began (ISO instant), null for all time */
+  periodStart: z.string().nullable().default(null),
   frozen: z.boolean(),
   frozenAt: z.string().nullable(),
   generatedAt: z.string(),

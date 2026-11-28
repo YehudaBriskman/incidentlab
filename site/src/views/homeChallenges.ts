@@ -12,6 +12,7 @@ import { nameNode } from "../lib/bidi";
 import { serverNow } from "../lib/event";
 import { getLang } from "../i18n/i18n";
 import { TC } from "../i18n/strings-challenges";
+import { achievementCountText } from "../i18n/strings-stats";
 import { achievementInfo } from "../i18n/strings-game";
 import { TGu } from "../i18n/strings-guest";
 import { TH } from "../i18n/strings-home";
@@ -160,7 +161,7 @@ function nextAchievementBlock(stats: UserStats): HTMLElement {
   const next = nextAchievement(stats, ACHIEVEMENT_IDS);
   if (next === null) return h("p", { class: "home-next-none" }, TC().allEarned);
   const info = achievementInfo(getLang(), next.id);
-  const count = next.have === null ? null : next.id === "all-cases" ? TC().nextCases(next.have, next.need) : TC().nextDays(next.have, next.need);
+  const count = next.have === null ? null : achievementCountText(next.id, next.have, next.need);
   const pct = next.have === null ? 0 : Math.round((next.have / next.need) * 100);
   return h(
     "div",

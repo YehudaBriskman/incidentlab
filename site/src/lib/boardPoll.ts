@@ -57,5 +57,5 @@ export function fnv1a(text: string): string {
  */
 export function boardSignature(data: LeaderboardResponse): string {
   const rows = data.entries.map((e) => [e.rank, e.username, e.score, e.stagesSolved, e.casesCompleted, e.firstBloods]);
-  return fnv1a(JSON.stringify([data.caseId, data.frozen, data.frozenAt ?? null, rows]));
+  return fnv1a(JSON.stringify([data.caseId, data.period, data.frozen, data.frozenAt ?? null, rows]));
 }

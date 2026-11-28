@@ -20,6 +20,7 @@ import {
   UserStatsResponseSchema,
   type AccountView,
   type ClassSummary,
+  type LeaderboardPeriod,
   type LeaderboardResponse,
   type LiveEvent,
   type ProgressView,
@@ -319,9 +320,16 @@ export async function fetchEvent(): Promise<{ event: LiveEvent; serverTime: stri
 }
 
 /** Public leaderboard: overall when `caseId` is null, else for that case. */
-export async function fetchLeaderboard(caseId: string | null): Promise<LeaderboardResponse> {
-  const query = caseId === null ? "" : `?caseId=${encodeURIComponent(caseId)}`;
-  return request("GET", `/api/leaderboard${query}`, LeaderboardResponseSchema);
+/**
+ * The public board (CDN-cached, one copy per URL). The query is always built in the same order (caseId, then
+ * period) and all time sends no period, so every viewer of a board shares one cached copy (#239).
+ */
+export async function fetchLeaderboard(caseId: string | null, period: LeaderboardPeriod = "all"): Promise<LeaderboardResponse> {
+  const params = new URLSearchParams();
+  if (caseId !== null) params.set("caseId", caseId);
+  if (period !== "all") params.set("period", period);
+  const query = params.toString();
+  return request("GET", `/api/leaderboard${query === "" ? "" : `?${query}`}`, LeaderboardResponseSchema);
 }
 
 // ---- gameplay (per case) ----------------------------------------------------
