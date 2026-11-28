@@ -33,7 +33,9 @@ test("case play keeps focus, discloses bonus losses and explains finished stages
     await expect(rules).toContainText(/ends its \+10 clean bonus/);
     // Both paths are links: the terminal one opens the command list.
     await expect(page.locator(".paths a.path-card")).toHaveCount(2);
-    await expect(page.locator(".paths a.path-card").first()).toHaveAttribute("href", `#/case/${CASE_ID}/toolbox`);
+    // the browser Explorer leads (#224); the terminal path is second
+    await expect(page.locator(".paths a.path-card").first()).toHaveAttribute("href", `#/case/${CASE_ID}/explorer`);
+    await expect(page.locator(".paths a.path-card").nth(1)).toHaveAttribute("href", `#/case/${CASE_ID}/toolbox`);
     await page.getByRole("button", { name: /ready/i }).click();
     await expect(page.locator(".answer-form input")).toBeVisible();
     await expect.poll(() => focusedClass(page)).toContain("stage-goal");

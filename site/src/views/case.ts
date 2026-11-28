@@ -531,8 +531,9 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
       });
   });
 
-  // "I'm ready" sits in the top block beside the download (#213), so starting never needs a long scroll; the
-  // briefing, checklist, paths and scoring follow for whoever wants them first.
+  // "I'm ready" sits in the top block beside the evidence (#213), so starting never needs a long scroll; the
+  // briefing, checklist, paths and scoring follow for whoever wants them first. The browser Explorer leads and the
+  // zip is the second path (#224): a phone or a locked-down laptop can't use a download.
   return h(
     "div",
     { class: "stage" },
@@ -545,10 +546,11 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
       h(
         "div",
         { class: "setup-actions" },
-        h("a", { class: "btn btn-lg", href: c.evidenceZip, download: true }, T().downloadBtn),
+        h("a", { class: "btn btn-lg", href: `#/case/${c.id}/explorer` }, T().openExplorerBtn),
         done ? h("p", { class: "done-note" }, T().setupComplete) : h("div", { class: "primary-action" }, ready),
       ),
       done ? null : errorEl,
+      h("p", { class: "setup-zip" }, h("a", { class: "hit-link", href: c.evidenceZip, download: true }, T().orDownload)),
       h(
         "details",
         { class: "quiet-details" },
@@ -569,18 +571,19 @@ function renderSetup(c: Case, player: ProgressView, update: (p: ProgressView) =>
       h(
         "div",
         { class: "paths" },
-        // Both paths are links with the same affordance: the terminal path opens the full command list.
-        h(
-          "a",
-          { class: "path-card path-link", href: `#/case/${c.id}/toolbox` },
-          h("h4", {}, T().pathTerminal),
-          h("p", { class: "muted" }, T().pathTerminalBody),
-        ),
+        // Both paths are links with the same affordance; the browser path comes first (#224), the terminal path
+        // opens the full command list.
         h(
           "a",
           { class: "path-card path-link", href: `#/case/${c.id}/explorer` },
           h("h4", {}, T().pathExplorer),
           h("p", { class: "muted" }, T().pathExplorerBody),
+        ),
+        h(
+          "a",
+          { class: "path-card path-link", href: `#/case/${c.id}/toolbox` },
+          h("h4", {}, T().pathTerminal),
+          h("p", { class: "muted" }, T().pathTerminalBody),
         ),
       ),
     ),
