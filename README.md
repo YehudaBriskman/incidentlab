@@ -16,6 +16,7 @@ PowerShell version), or entirely in the browser with the built-in **Evidence Exp
 
 | Status | Case | Skills |
 |---|---|---|
+| Ready, not yet published | **First Shift** (`first-shift`): a 10-minute tutorial. A bakery's site starts returning 404s right after a deploy; learn the Evidence Explorer, the toolbox and every answer format on the way. | explorer basics, nginx logs, deploy logs, time zones |
 | Live | **The 3 AM Outage** (`3am-outage`): checkout is down in the middle of the night and the chat is full of theories | log forensics, time zones, correlation, git archaeology |
 | Live | **Ghost in the Network** (`ghost-in-the-network`): Small requests work. Big ones hang forever. Half the fleet resolves an IP that hasn't existed since Tuesday. Nothing is down, yet nothing quite works. | tcpdump, wireshark, mtu, pmtud, icmp |
 | Live | **The Insider Commit** (`the-insider-commit`): SSH logins got 500 ms slower after a routine library update. A trusted maintainer, a tarball that doesn't match the repo. Follow the half-second. | supply-chain, git-archaeology, release-artifacts, autotools, binary-analysis |
