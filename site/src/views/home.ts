@@ -4,7 +4,9 @@
 // the page itself fits the viewport on desktop. Signed out, a compact intro above the cards carries the value
 // statement and the sign-up and guest actions. Signed in, a challenge row sits between the cards and the table
 // (views/homeChallenges.ts, #183): your classes (or a call to action, or the upgrade card for a guest) and your
-// streak. Filters, search and sort live in the URL query (#/?difficulty=hard).
+// streak, then the top few recommended cases and a link to the catalog.
+// #/cases (#221) is the catalog: the same table with every case, search, the Filter popover and Sort, whose state
+// lives in the URL query (#/cases?difficulty=hard). Each route has its own visible h1 and title.
 import "../home.css";
 import type { AccountView, CaseStats, TodayResponse, UserStats } from "../../shared/contract";
 import { caseSummaries, caseSummary, catalogFailed, catalogReady, reloadCatalog } from "../content/load";
@@ -462,17 +464,26 @@ function recommended(rows: readonly Row[]): Row[] {
 
 const queryOfHash = (): URLSearchParams => new URLSearchParams(window.location.hash.split("?")[1] ?? "");
 
-/** Home as a shell view: no sidebar (the filters sit in the table's toolbar). */
-export function homeView(): ViewResult {
+/** Which page: the dashboard (#/) or the case catalog (#/cases). */
+export type HomeMode = "home" | "cases";
+
+/** How many recommended cases the dashboard lists before "Browse all cases". */
+const HOME_ROWS = 5;
+
+/** Home or the catalog as a shell view: no sidebar (the catalog's filters sit in the table's toolbar). */
+export function homeView(mode: HomeMode = "home"): ViewResult {
   const main = h("div", { class: "view" });
-  return { main, start: () => renderHome(main) };
+  return { main, start: () => renderHome(main, mode) };
 }
 
-export function renderHome(root: HTMLElement): void {
-  document.title = T().homeTitle;
+export function renderHome(root: HTMLElement, mode: HomeMode = "home"): void {
+  const catalog = mode === "cases";
+  const path = catalog ? "cases" : "";
+  document.title = catalog ? TH().casesPageTitle : T().homeTitle;
   const token = Symbol("home");
   activeRender = token;
-  let filters: CaseFilters = parseFilters(queryOfHash());
+  // The dashboard has no filters: its rows are the recommended order. Only the catalog reads (and writes) the query.
+  let filters: CaseFilters = parseFilters(catalog ? queryOfHash() : new URLSearchParams());
   let state: HomeState = { loading: true, today: null, todayFailed: false, stats: new Map(), statsFailed: false, isPlayer: false, me: null, classes: { kind: "loading" } };
   /** the account the current answers were loaded for (`id:kind`): a change to another account reloads */
   let loadedFor: string | null = null;
@@ -485,13 +496,19 @@ export function renderHome(root: HTMLElement): void {
   const sortSelect = h("select", { class: "input home-sort", "aria-label": TH().sort });
   const toolbar = h("div", { class: "home-toolbar" });
   const tableSlot = h("div", { class: "home-table-slot" });
+  const browseAll = h("a", { class: "btn btn-sm btn-ghost home-browse", href: "#/cases" }, TH().browseAll);
   const cases = h(
     "section",
     { class: "home-cases", "aria-labelledby": "home-cases-h" },
-    h("header", { class: "home-cases-head" }, h("h2", { id: "home-cases-h", class: "home-card-title" }, TH().casesTitle), toolbar),
+    h("header", { class: "home-cases-head" }, h("h2", { id: "home-cases-h", class: "home-card-title" }, TH().casesTitle), catalog ? toolbar : browseAll),
     tableSlot,
   );
-  const dash = h("div", { class: "home-dash" }, h("h1", { class: "visually-hidden" }, TH().pageHeading), intro, top, chal, cases);
+  // One visible h1 per route (#222). Signed out, home's h1 is the intro's value statement (introStrip), so this one
+  // is hidden from everyone then, not only visually.
+  const pageH1 = h("h1", { class: "home-title" }, catalog ? TH().casesHeading : TH().pageHeading);
+  const dash = catalog
+    ? h("div", { class: "home-dash is-catalog" }, h("header", { class: "home-catalog-head" }, pageH1, h("p", { class: "muted" }, TH().casesIntro)), cases)
+    : h("div", { class: "home-dash" }, pageH1, intro, top, chal, cases);
   setChildren(root, dash);
 
   let table: DataTable<Row> | null = null;
@@ -501,13 +518,13 @@ export function renderHome(root: HTMLElement): void {
   let filter: FilterButtonHandle | null = null;
 
   /** Still the page on screen? (A late answer must not redraw, or rewrite the URL of, the next route.) */
-  const onHome = (): boolean => activeRender === token && dash.isConnected && window.location.hash.replace(/^#\/?/, "").split("?")[0] === "";
+  const onHome = (): boolean => activeRender === token && dash.isConnected && window.location.hash.replace(/^#\/?/, "").split("?")[0] === path;
 
   const writeUrl = (): void => {
-    if (!onHome()) return;
+    if (!onHome() || !catalog) return;
     const qs = serializeFilters(filters);
-    const next = `#/${qs ? `?${qs}` : ""}`;
-    if (window.location.hash !== next && window.location.hash !== (qs ? next : "")) history.replaceState(null, "", next);
+    const next = `#/cases${qs ? `?${qs}` : ""}`;
+    if (window.location.hash !== next) history.replaceState(null, "", next);
   };
 
   const allRows = (): Row[] => {
@@ -540,7 +557,8 @@ export function renderHome(root: HTMLElement): void {
   const applyRows = (): void => {
     if (table === null) return;
     const rows = allRows();
-    const visible = recommended(rows).filter((r) => matchesFilters(r.c, state.isPlayer ? statusOf(r.stats) : null, filters));
+    const matching = recommended(rows).filter((r) => matchesFilters(r.c, state.isPlayer ? statusOf(r.stats) : null, filters));
+    const visible = catalog ? matching : matching.slice(0, HOME_ROWS);
     table.update(visible);
     shown.textContent = rows.length === 0 ? "" : TH().shown(visible.length, rows.length);
     filter?.set(filterValue(filters));
@@ -598,7 +616,7 @@ export function renderHome(root: HTMLElement): void {
       rows: [],
       caption: TA().allCases,
       labelledBy: "home-cases-h",
-      regionLabel: TH().casesTitle,
+      regionLabel: TA().allCases, // not "Cases": the section around it already is that landmark (#249)
       wrapClass: "home-table",
       className: "home-cases-table",
       stackOnPhone: true,
@@ -642,7 +660,8 @@ export function renderHome(root: HTMLElement): void {
     if (!onHome()) return;
     // Before /api/me answers, lay out for the likely state (lib/session.ts hint) so nothing shifts when it does.
     const signedIn = likelySignedIn();
-    setChildren(intro, signedIn ? null : introStrip());
+    setChildren(intro, signedIn || catalog ? null : introStrip());
+    pageH1.hidden = !signedIn && !catalog;
     const single = isSingleCard(state, signedIn);
     top.classList.toggle("is-single", single);
     if (single) setChildren(top, todayCard(state, signedIn, reload));
@@ -663,7 +682,7 @@ export function renderHome(root: HTMLElement): void {
 
   /** The challenge row: who it is for comes from the account (a guess until /api/session answers). */
   function drawChallenges(): void {
-    if (!onHome()) return;
+    if (!onHome() || catalog) return; // the catalog has no challenge row
     const mode = challengeMode(likelySignedIn(), isAccountKnown() ? cachedAccount() : undefined);
     chal.hidden = mode === "none";
     if (mode === "none") {
@@ -751,10 +770,10 @@ export function renderHome(root: HTMLElement): void {
           : { me: null, failed: false, player: false },
       (): Loaded => ({ me: null, failed: false, player: false }),
     );
-    loadClasses(account);
+    if (!catalog) loadClasses(account); // the catalog shows no classes: don't spend the call
     // The case list (GET /api/cases) arrives with the other two; a failed fetch is retried by reload().
-    const catalog = catalogFailed() ? reloadCatalog() : catalogReady;
-    void Promise.all([today, stats, catalog]).then(([t, s]) => {
+    const catalogLoad = catalogFailed() ? reloadCatalog() : catalogReady;
+    void Promise.all([today, stats, catalogLoad]).then(([t, s]) => {
       if (!onHome()) return; // navigated away
       state = {
         loading: false,
@@ -792,7 +811,7 @@ function introStrip(): HTMLElement {
   return h(
     "section",
     { class: "home-intro", "aria-label": TH().introLabel },
-    h("div", { class: "home-intro-text" }, h("p", { class: "home-intro-title" }, TO().heroTitle), h("p", { class: "home-intro-sub" }, TO().heroSub)),
+    h("div", { class: "home-intro-text" }, h("h1", { class: "home-intro-title" }, TO().heroTitle), h("p", { class: "home-intro-sub" }, TO().heroSub)),
     h(
       "div",
       { class: "home-intro-actions" },

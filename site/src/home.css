@@ -17,7 +17,12 @@
   padding: var(--space-3) var(--space-4); background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--surface-lift);
 }
 .home-intro-text { min-inline-size: 0; flex: 1 1 32rem; }
-.home-intro-title { margin: 0; font-size: var(--type-body-size); font-weight: 600; line-height: var(--type-body-lh); }
+.home-intro-title { margin: 0; font-size: var(--type-body-size); font-weight: 600; line-height: var(--type-body-lh); letter-spacing: 0; }
+/* the page's visible h1 (#222): "Home" when signed in (signed out the intro's statement is the h1), "Cases" on the catalog */
+.home-title { margin: 0; }
+.home-catalog-head { display: flex; flex-direction: column; gap: var(--space-1); }
+.home-catalog-head p { margin: 0; }
+.home-browse { margin-inline-start: auto; }
 .home-intro-sub { margin: 0; color: var(--text-2); font-size: var(--type-small-size); line-height: var(--type-small-lh); }
 .home-intro-actions { display: flex; gap: var(--gap-related); flex: none; }
 

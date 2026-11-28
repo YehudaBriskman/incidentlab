@@ -114,10 +114,23 @@ export const TS = defineStrings({
     statusOffline: "Offline",
     accountButton: (name: string): string => `Account: \u2068${name}\u2069`,
     accountPanel: "Account",
-    roleAdmin: "Instructor",
+    roleAdmin: "Platform owner",
     roleAuthor: "Author",
     rolePlayer: "Player",
-    pageAsideOpen: (label: string): string => `Open ${label}`,
+
+    // the account menu (shell/accountMenu.ts, #220)
+    prefsButton: "Language and display",
+    menuDisplayOptions: "Display options…",
+    classOwnerOf: (n: number): string => (n === 1 ? "Owner of 1 class" : `Owner of ${num(n)} classes`),
+    classAdminOf: (n: number): string => (n === 1 ? "Co-admin of 1 class" : `Co-admin of ${num(n)} classes`),
+    classMemberOf: (n: number): string => (n === 1 ? "Member of 1 class" : `Member of ${num(n)} classes`),
+
+    // the owner's area has one name (#221)
+    navConsole: "Platform console",
+    crumbReviews: "Reviews",
+
+    // breadcrumb leaves (#222)
+    crumbSignUp: "Create account",
 
     // filterButton() (components/filterPopover.ts)
     filterButton: "Filter",
@@ -129,7 +142,7 @@ export const TS = defineStrings({
     navMain: "ראשי",
     navCases: "תיקים",
     navToday: "היום",
-    navAuthor: "ניהול תיקים",
+    navAuthor: "כתיבת תיקים",
     navMenu: "תפריט",
 
     liveStrip: "מצב חי",
@@ -223,10 +236,20 @@ export const TS = defineStrings({
     statusOffline: "אין חיבור",
     accountButton: (name: string): string => `חשבון: \u2068${name}\u2069`,
     accountPanel: "חשבון",
-    roleAdmin: "מדריך",
+    roleAdmin: "בעלי הפלטפורמה",
     roleAuthor: "כותב תיקים",
     rolePlayer: "שחקן",
-    pageAsideOpen: (label: string): string => `פתיחת ${label}`,
+
+    prefsButton: "שפה ותצוגה",
+    menuDisplayOptions: "אפשרויות תצוגה…",
+    classOwnerOf: (n: number): string => (n === 1 ? "בעלות על כיתה אחת" : n === 2 ? "בעלות על שתי כיתות" : `בעלות על ${num(n)} כיתות`),
+    classAdminOf: (n: number): string => (n === 1 ? "ניהול משותף של כיתה אחת" : n === 2 ? "ניהול משותף של שתי כיתות" : `ניהול משותף של ${num(n)} כיתות`),
+    classMemberOf: (n: number): string => (n === 1 ? "חברות בכיתה אחת" : n === 2 ? "חברות בשתי כיתות" : `חברות ב־${num(n)} כיתות`),
+
+    navConsole: "קונסולת הפלטפורמה",
+    crumbReviews: "סקירות",
+
+    crumbSignUp: "פתיחת חשבון",
 
     filterButton: "סינון",
     filterButtonCount: (n: number): string => `סינון, ${n} פעילים`,

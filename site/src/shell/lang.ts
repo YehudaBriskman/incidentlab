@@ -1,9 +1,8 @@
-// The EN | עב language toggle and what keeps a language switch lossless: the typed text, focus and the scroll
-// position of the content area survive the re-render of the current route.
+// What keeps a language switch lossless: the typed text, focus and the scroll position of the content area survive
+// the re-render of the current route. The language radios live in the account menu and on #/settings/display.
 import { getLang, setLang } from "../i18n/i18n";
-import { T } from "../i18n/strings-player";
 import { TO } from "../i18n/strings-onboard";
-import { h, restoreFields, snapshotFields, type FieldSnapshot } from "../lib/dom";
+import { restoreFields, snapshotFields, type FieldSnapshot } from "../lib/dom";
 import { contentScroller } from "./scroll";
 
 /** The skip link is static HTML: relabel it in the current language. */
@@ -44,8 +43,8 @@ export function applyPendingRestore(): void {
 
 /**
  * Switches the language and re-renders the route, keeping typed text and the scroll position. `button` keeps
- * focus when it had it (it must survive the re-render: the top-bar toggle does; a control inside #app does not,
- * so the settings page passes null and refocuses its own control).
+ * focus when it had it (it must survive the re-render; the radios in the account menu and on the settings page are
+ * redrawn, so they pass null and refocus their own control).
  */
 export function switchLang(lang: "en" | "he", button: HTMLElement | null): void {
   if (lang === getLang()) return;
@@ -60,21 +59,4 @@ export function switchLang(lang: "en" | "he", button: HTMLElement | null): void 
   setLang(lang);
   labelStatic();
   applyPendingRestore();
-}
-
-/** One EN | עב group. The frame mounts two (top bar on wide screens, nav foot on phones); CSS shows one. */
-export function createLangToggle(): HTMLElement {
-  const mk = (lang: "en" | "he", label: string): HTMLButtonElement => {
-    const btn: HTMLButtonElement = h("button", { type: "button", class: "lang-btn", lang, "aria-pressed": String(getLang() === lang), onclick: () => switchLang(lang, btn) }, label);
-    return btn;
-  };
-  const en = mk("en", "EN");
-  const he = mk("he", "עב");
-  const wrap = h("div", { class: "lang-toggle", role: "group", "aria-label": T().langToggle }, en, he);
-  window.addEventListener("hashchange", () => {
-    en.setAttribute("aria-pressed", String(getLang() === "en"));
-    he.setAttribute("aria-pressed", String(getLang() === "he"));
-    wrap.setAttribute("aria-label", T().langToggle);
-  });
-  return wrap;
 }

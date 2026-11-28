@@ -9,7 +9,6 @@
 // guest banner (#176): a quiet, persistent "create an account" line while the session is a guest.
 import type { LiveEvent } from "../../shared/contract";
 import { TG } from "../i18n/strings-game";
-import { TS } from "../i18n/strings-shell";
 import { appendChildren, h, html, setChildren, type Child } from "../lib/dom";
 import { cachedEvent, onEventChange } from "../lib/event";
 import { cachedAccount, isGuest, onAccountChange } from "../lib/session";
@@ -90,7 +89,8 @@ function drawHeader(header: Child): void {
       ? null
       : h(
           "button",
-          { type: "button", class: "btn btn-sm aside-trigger", "aria-haspopup": "dialog", "aria-label": TS().pageAsideOpen(spec.label), onclick: openAsideDrawer },
+          // its visible label is its name (WCAG 2.5.3, #249): an aria-label of "Open <panel>" hid the words on it
+          { type: "button", class: "btn btn-sm aside-trigger", "aria-haspopup": "dialog", onclick: openAsideDrawer },
           html("span", { class: "icon", "aria-hidden": "true" }, ICONS.panel),
           h("span", { class: "aside-trigger-label" }, spec.trigger ?? spec.label),
         );

@@ -148,7 +148,8 @@ test("top bar: the account menu shows the name, My stats and Sign out; the statu
   const panel = page.getByRole("dialog", { name: "Account" });
   await expect(panel).toBeVisible();
   await expect(panel).toContainText(username);
-  await expect(panel.getByRole("link", { name: "My stats" })).toBeFocused();
+  // focus starts on the identity header, the link to the account settings (#220)
+  await expect(panel.locator(".account-head")).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
   await expect(button).toBeFocused();
@@ -251,8 +252,8 @@ test.describe("phone", () => {
     await ui.menu(page).click();
     const drawer = page.getByRole("dialog", { name: "ניווט" });
     await expect(drawer).toBeVisible();
-    // The language toggle moves into the drawer on phones.
-    await expect(drawer.getByRole("group", { name: "שפה" })).toBeVisible();
+    // The language lives in the account menu on every width (#220), not in the drawer.
+    await expect(drawer.getByRole("group", { name: "שפה" })).toHaveCount(0);
     await expect.poll(async () => {
       const box = await drawer.boundingBox();
       return box === null ? null : { leftGap: box.x > 24, rightEdge: box.x + box.width >= 390 - 16 };

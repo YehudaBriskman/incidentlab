@@ -9,7 +9,7 @@ export const TG = defineStrings({
   en: {
     // header + event
     leaderboard: "Leaderboard",
-    adminLink: "Admin",
+    adminLink: "Platform console",
     eventStartsIn: (t: string): string => `starts in ${t}`,
     eventEndsIn: (t: string): string => `ends in ${t}`,
     eventLive: "live now",
@@ -145,7 +145,7 @@ export const TG = defineStrings({
   },
   he: {
     leaderboard: "טבלת מובילים",
-    adminLink: "ניהול",
+    adminLink: "קונסולת הפלטפורמה",
     eventStartsIn: (t: string): string => `מתחיל בעוד ${t}`,
     eventEndsIn: (t: string): string => `נגמר בעוד ${t}`,
     eventLive: "פעיל עכשיו",

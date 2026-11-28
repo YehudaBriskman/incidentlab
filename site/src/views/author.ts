@@ -5,7 +5,7 @@
 // players need an explicit second confirmation.
 // Private cases (#184): an author's case is private until the site owner approves it. The table shows its
 // visibility and review state (with the owner's note), and the row menu submits it for review and picks the
-// classes that may play it. The owner's queue is #/author/reviews (views/reviews.ts).
+// classes that may play it. The owner's queue is #/admin/reviews (views/reviews.ts).
 import { z } from "zod";
 import {
   AuthorCaseResponseSchema,
@@ -334,7 +334,7 @@ function draw(root: HTMLElement, isOwner: boolean): void {
       h("h1", {}, TAu().title),
       h("p", { class: "muted" }, TAu().lead),
       h("p", { class: "muted" }, TRv().privateLead),
-      isOwner ? h("p", {}, h("a", { class: "btn btn-outline", href: "#/author/reviews" }, TRv().reviewQueueLink)) : null,
+      isOwner ? h("p", {}, h("a", { class: "btn btn-outline", href: "#/admin/reviews" }, TRv().reviewQueueLink)) : null,
       form,
       h("h2", { id: "author-cases-h", class: "section-title" }, TAu().casesTitle),
       table.element,

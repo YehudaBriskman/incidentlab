@@ -101,7 +101,7 @@ test("case play keeps focus, discloses bonus losses and explains finished stages
     await expect(rows.nth(1)).toContainText(/answer revealed/);
     await expect(rows.nth(2)).toContainText(/clean/);
     await expect(page.locator(".debrief-next a[href='#/leaderboard']")).toBeVisible();
-    await expect(page.locator(".debrief-next a[href='#/']")).toBeVisible();
+    await expect(page.locator(".debrief-next a[href='#/cases']")).toBeVisible();
   });
 
   await test.step("debrief: the On this page contents jump to a heading and move focus there", async () => {

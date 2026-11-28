@@ -1,7 +1,7 @@
 // Onboarding locks (#34, #52): field-level errors and focus on sign-in / sign-up, the language toggle keeping
 // typed input, the recovery code shown first after sign-up (#174), and a rejection after it.
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { adminHeaders, randomUsername } from "./support";
+import { adminHeaders, randomUsername, switchLanguage } from "./support";
 
 const PASSWORD = "e2e-password-123";
 
@@ -14,7 +14,6 @@ const ui = {
   summary: (p: Page) => p.locator(".error-summary"),
   fieldError: (p: Page, id: string) => p.locator(`#${id}-error`),
   toSignUp: (p: Page) => p.getByRole("button", { name: /create an account/i }),
-  langButton: (p: Page, label: "EN" | "עב") => p.getByRole("group", { name: /^(language|שפה)$/i }).getByRole("button", { name: label }),
   codeHeading: (p: Page) => p.getByRole("heading", { level: 1, name: /save your recovery code/i }),
   rejectedHeading: (p: Page) => p.getByRole("heading", { level: 1, name: /account not approved/i }),
 };
@@ -78,7 +77,7 @@ test("language toggle re-labels the form and keeps what was typed, including the
   await expect(ui.classCode(page)).toHaveValue("CLASS-42");
   await ui.username(page).fill("typed_user");
   await ui.password(page).fill("typed-password");
-  await ui.langButton(page, "עב").click();
+  await switchLanguage(page, "he");
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
   await expect(ui.submit(page)).toHaveText("פתיחת חשבון");
   await expect(ui.username(page)).toHaveValue("typed_user");
@@ -86,11 +85,11 @@ test("language toggle re-labels the form and keeps what was typed, including the
   await expect(ui.classCode(page)).toHaveValue("CLASS-42");
 
   // #/login switched to sign-up in place: the switch keeps the mode, not just the values.
-  await ui.langButton(page, "EN").click();
+  await switchLanguage(page, "en");
   await page.goto("/#/login");
   await ui.toSignUp(page).click();
   await ui.username(page).fill("second_user");
-  await ui.langButton(page, "עב").click();
+  await switchLanguage(page, "he");
   await expect(ui.submit(page)).toHaveText("פתיחת חשבון");
   await expect(ui.username(page)).toHaveValue("second_user");
 });
@@ -110,10 +109,10 @@ test("sign-up is approved at once: the recovery code comes first, a language swi
   expect(JSON.stringify(await me.json())).toContain('"status":"approved"');
 
   // The code lives only in memory: re-labelling the page must not lose it.
-  await ui.langButton(page, "עב").click();
+  await switchLanguage(page, "he");
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
   await expect(page.getByTestId("recovery-code")).toHaveText(code);
-  await ui.langButton(page, "EN").click();
+  await switchLanguage(page, "en");
 
   // A rejection after sign-up: the next load of the gate shows it (the code, kept in memory only, is gone then).
   await rejectAccount(request, username);

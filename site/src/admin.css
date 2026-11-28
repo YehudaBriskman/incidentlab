@@ -50,7 +50,7 @@
   background: var(--level-1);
   border: 1px solid var(--edge-control);
   border-radius: var(--radius-control);
-  min-height: 36px;
+  min-height: var(--control-sm); /* 36, 44 on touch and in the phone console (#247) */
   padding: var(--space-1) var(--space-3);
   min-width: 0;
   transition: border-color var(--motion-settle) var(--ease-standard);
@@ -78,7 +78,7 @@ input.admin-input[type="search"] {
 /* ---- login ---- */
 .admin-login { max-width: 440px; width: 100%; margin: 8vh auto 0; }
 .admin-login-form { display: grid; gap: var(--space-3); margin-top: var(--space-4); }
-.admin-login-form .admin-input { min-height: 40px; }
+.admin-login-form .admin-input { min-height: var(--control-base); }
 .admin-label { font-size: var(--step--1); color: var(--text-2); }
 .admin-error {
   margin: 0;
@@ -101,6 +101,11 @@ input.admin-input[type="search"] {
    fold cannot stretch the document (fit pages must not scroll). */
 .admin-tipped { position: relative; }
 .admin-tipped:focus-visible { border-radius: var(--radius-control); }
+/* on touch a timestamp is a 44px tap target too (#247); a paragraph one keeps its full line */
+@media (pointer: coarse) {
+  .admin-tipped { display: inline-flex; align-items: center; min-block-size: var(--target-min); }
+  p.admin-tipped { display: flex; }
+}
 
 /* ---- tiles ---- */
 /* KPI tiles (components/statGrid.ts) at compact density: 8/12 padding, 72px tall, 12px corners, a 12px label
@@ -193,7 +198,7 @@ input.admin-input[type="search"] {
    muted sentence-case band, 60% row rules and the muted hover). */
 .admin-table { width: 100%; border-collapse: collapse; font-size: var(--type-small-size); }
 .admin-table thead th { height: 36px; padding: 6px var(--space-2); position: sticky; top: 0; vertical-align: middle; font-family: var(--font-sans); white-space: nowrap; }
-.admin-table thead th .dt-sort { min-block-size: 24px; }
+.admin-table thead th .dt-sort { min-block-size: var(--target-min); }
 .admin-table tbody > tr > :is(td, th) { padding: 6px var(--space-2); border-bottom: 1px solid color-mix(in oklab, var(--edge-subtle) 60%, transparent); vertical-align: middle; text-align: start; font-weight: inherit; }
 .admin-table tbody > tr > .num { text-align: end; }
 /* Flagged rows: a soft tone tint instead of a heavy side stripe. */
@@ -234,16 +239,16 @@ input.admin-input[type="search"] {
 /* segmented control (Soft UI, DESIGN.md 3.0.0): a muted track, 8px corners, 4px padding; the pressed segment is
    the card colour, lifted, with 4px corners. Nothing slides. */
 .seg { display: inline-flex; align-items: center; gap: 2px; padding: var(--space-1); border-radius: var(--radius-control); background: var(--fill-track); }
-.seg-btn { font: inherit; font-size: var(--type-small-size); font-weight: 500; color: var(--text-2); background: transparent; border: 0; border-radius: var(--radius-mark); padding: 0 var(--space-3); min-height: 28px; min-width: 0; cursor: pointer; transition: background-color var(--motion-settle) var(--ease-standard), color var(--motion-settle) var(--ease-standard); }
+.seg-btn { font: inherit; font-size: var(--type-small-size); font-weight: 500; color: var(--text-2); background: transparent; border: 0; border-radius: var(--radius-mark); padding: 0 var(--space-3); min-height: var(--control-xs); min-width: 0; cursor: pointer; transition: background-color var(--motion-settle) var(--ease-standard), color var(--motion-settle) var(--ease-standard); }
 .seg-btn:hover { color: var(--text-1); }
 .seg-btn[aria-pressed="true"] { background: var(--level-2); color: var(--text-1); box-shadow: var(--surface-lift); }
 .seg-btn:focus-visible { outline-offset: 2px; }
-.admin-check { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 36px; font-size: var(--type-small-size); cursor: pointer; }
+.admin-check { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--control-sm); font-size: var(--type-small-size); cursor: pointer; }
 .admin-check input { flex: none; }
 
 /* Row actions: the "⋯" button; its menu is the shared .ov-menu (lib/overlay.ts). */
 .row-menu-btn { gap: var(--space-1); }
-.row-menu-btn.is-icon { --btn-h: 28px; min-width: 28px; padding-inline: var(--space-1); background: transparent; }
+.row-menu-btn.is-icon { --btn-h: var(--control-xs); min-width: var(--btn-h); /* 28, 44 on touch (#247) */ padding-inline: var(--space-1); background: transparent; }
 .row-menu-btn.is-icon:hover:not(:disabled) { background: var(--hover-fill); }
 .row-menu-dots { font-size: var(--step-1); line-height: 1; }
 
@@ -453,7 +458,7 @@ html.admin-savebar-open :is(main.app-content, .admin-tabpanel) { scroll-padding-
 .cal-wd { display: none; color: var(--text-muted); font-size: var(--step--1); }
 .cal-day-head { flex-wrap: wrap; }
 .cal-day .today-tag { margin: 0; font-size: var(--type-label-size); padding: 0 var(--space-1); }
-.cal-select { width: 100%; font-size: var(--type-label-size); padding-block: var(--space-1); min-height: 32px; }
+.cal-select { width: 100%; font-size: var(--type-label-size); padding-block: var(--space-1); min-height: max(var(--control-sm) - var(--space-1), var(--target-min)); } /* 32, 44 on touch */
 .cal-day:not(.is-set) .cal-select { color: var(--text-muted); }
 
 /* ---- stats ---- */

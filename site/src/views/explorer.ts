@@ -178,7 +178,7 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
   const CASE_ZONES = caseZones(c);
   const ZONES = ["UTC", ...CASE_ZONES, ...ALL_ZONES.filter((z) => z !== "UTC" && !CASE_ZONES.includes(z))];
   const ownsHash = (hash: string): boolean => hash === ROUTE || hash.startsWith(`${ROUTE}?`) || hash.startsWith(`${ROUTE}/`);
-  document.title = T().exDocTitle;
+  document.title = T().exDocTitle(c.title);
 
   const initial = decodeState(window.location.hash.split("?")[1] ?? "");
 
@@ -2066,8 +2066,8 @@ export function renderExplorer(root: HTMLElement, c: Case, sidebar: HTMLElement)
     h("div", { class: "explorer" },
       h("div", { class: "ex-topbar" },
         h("a", { class: "btn btn-sm btn-ghost", href: `#/case/${c.id}` }, T().exBack),
-        h("strong", {}, T().exTitle),
-        h("span", { class: "ex-muted ex-case" }, c.title),
+        // The page's one h1 (#222): the tool, then which case.
+        h("h1", { class: "ex-heading" }, h("strong", {}, T().exTitle), h("span", { class: "ex-muted ex-case", dir: "auto" }, c.title)),
         tagline),
       announcer,
       h("div", { class: "ex-layout" }, main)),

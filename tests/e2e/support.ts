@@ -70,3 +70,19 @@ export async function approveAccount(request: APIRequestContext, username: strin
   const res = await request.post(`/api/admin/accounts/${account?.accountId}/approve`, { headers: adminHeaders, data: {} });
   expect(res.status(), await res.text()).toBe(200);
 }
+
+/* ---------- the account menu (#220): language, theme and the account live in one top-bar menu ---------- */
+
+/** The one top-bar menu button: the avatar signed in, "Language and display" signed out. */
+export const accountButton = (p: Page) => p.locator("header.topbar .account-btn");
+/** The menu's popover panel (desktop). On phones the same content opens in `.account-sheet`. */
+export const accountPanel = (p: Page) => p.locator(".account-panel");
+
+/** Switches the language through the account menu and closes it again (Escape returns focus to its button). */
+export async function switchLanguage(p: Page, lang: "en" | "he"): Promise<void> {
+  await accountButton(p).click();
+  await accountPanel(p).getByRole("radio", { name: lang === "he" ? "עברית" : "English" }).check();
+  await expect(p.locator("html")).toHaveAttribute("lang", lang);
+  await p.keyboard.press("Escape");
+  await expect(accountPanel(p)).toBeHidden();
+}

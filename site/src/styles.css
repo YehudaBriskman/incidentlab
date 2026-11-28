@@ -146,6 +146,7 @@
   --target-min: 24px;
   --control-xs: 28px;
   --control-sm: 36px;
+  --control-base: 40px;   /* the Soft UI default button and input (#247) */
   --control-md: 44px;
   --control-lg: 52px;
 
@@ -235,6 +236,7 @@
     --target-min: 44px;
     --control-xs: 44px;
     --control-sm: 44px;
+    --control-base: 44px;
   }
 }
 
@@ -588,7 +590,7 @@ code, pre, kbd, samp, .mono, .code-block, .syntax-block, .share-text, .answer-co
 .small { font-size: var(--type-small-size); line-height: var(--type-small-lh); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 /* off screen by its own height (not a fixed offset), so it stays hidden at any text size */
-.skip-link { position: absolute; inset-inline-start: var(--space-2); top: 0; transform: translateY(-100%); z-index: calc(var(--z-toast) + 1); background: var(--accent); color: var(--on-accent); font-weight: 600; text-decoration: none; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); }
+.skip-link { position: absolute; inset-inline-start: var(--space-2); top: 0; transform: translateY(-100%); min-block-size: var(--target-min); display: inline-flex; align-items: center; z-index: calc(var(--z-toast) + 1); background: var(--accent); color: var(--on-accent); font-weight: 600; text-decoration: none; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); }
 .skip-link:focus { top: var(--space-2); transform: none; }
 [hidden] { display: none !important; }
 
@@ -671,7 +673,6 @@ body { min-height: 0; overflow: hidden; }
 .nav-sub .step-locked:hover { background: none; color: var(--text-3); }
 .nav-sub-icon.is-dot::before { content: ""; inline-size: 6px; block-size: 6px; border-radius: var(--radius-full); background: currentColor; }
 .nav-foot { flex: none; display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2) var(--space-3) var(--space-3); }
-.nav-foot-lang { display: none; padding-inline: var(--space-2); }
 .nav-foot-link { display: flex; align-items: center; min-block-size: var(--target-min); padding-inline: var(--space-3); font-size: var(--type-label-size); color: var(--text-2); }
 /* The panel icon points inline-start ("fold away"); mirrored for RTL, flipped again to mean "unfold". */
 .nav-collapse-icon { transform: scaleX(var(--dir)); }
@@ -687,7 +688,7 @@ body { min-height: 0; overflow: hidden; }
 :root[data-nav="collapsed"] .app-frame > .app-nav :is(.nav-link, .nav-sub-link, .nav-collapse) { justify-content: center; padding-inline: 0; position: relative; }
 :root[data-nav="collapsed"] .app-frame > .app-nav .nav-head { justify-content: center; padding-inline: 0; }
 :root[data-nav="collapsed"] .app-frame > .app-nav .nav-sub { padding-inline-start: 0; }
-:root[data-nav="collapsed"] .app-frame > .app-nav :is(.nav-sub-badge, .nav-sub .tab-badge) { position: absolute; inset-block-start: 2px; inset-inline-end: 2px; min-inline-size: 16px; font-size: 10px; line-height: 16px; padding: 0 3px; }
+:root[data-nav="collapsed"] .app-frame > .app-nav :is(.nav-sub-badge, .nav-sub .tab-badge) { position: absolute; inset-block-start: 0; inset-inline-end: 0; min-inline-size: var(--space-4); font-size: var(--type-label-size); line-height: var(--space-4); padding: 0 var(--space-1); }
 @media (max-width: 1024px) {
   .app-frame > .app-nav .nav-scroll { padding-inline: var(--space-2); }
   .app-frame > .app-nav :is(.nav-label, .logo-word, .nav-sub-title, .nav-foot-link),
@@ -697,13 +698,12 @@ body { min-height: 0; overflow: hidden; }
   .app-frame > .app-nav :is(.nav-link, .nav-sub-link) { justify-content: center; padding-inline: 0; position: relative; }
   .app-frame > .app-nav .nav-head { justify-content: center; padding-inline: 0; }
   .app-frame > .app-nav .nav-sub { padding-inline-start: 0; }
-  .app-frame > .app-nav :is(.nav-sub-badge, .nav-sub .tab-badge) { position: absolute; inset-block-start: 2px; inset-inline-end: 2px; min-inline-size: 16px; font-size: 10px; line-height: 16px; padding: 0 3px; }
+  .app-frame > .app-nav :is(.nav-sub-badge, .nav-sub .tab-badge) { position: absolute; inset-block-start: 0; inset-inline-end: 0; min-inline-size: var(--space-4); font-size: var(--type-label-size); line-height: var(--space-4); padding: 0 var(--space-1); }
 }
 /* the drawer: the same <nav> in a start-edge Sheet, always with labels */
 .nav-sheet .ov-body { padding: 0; display: flex; }
 .nav-sheet .app-nav { display: flex; flex: 1; background: none; }
 .nav-sheet .nav-head, .nav-sheet .nav-collapse { display: none; }
-@media (max-width: 640px) { .nav-sheet .nav-foot-lang { display: block; } }
 @media (pointer: coarse) {
   .nav-link, .nav-sub-link { min-block-size: var(--target-min); }
 }
@@ -758,14 +758,9 @@ a.status-chip:hover { background: var(--hover-fill); color: var(--text-1); }
   .net-status.is-down .net-text { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 }
 .topbar-tools { display: flex; align-items: center; gap: var(--space-1); flex: none; }
-.topbar-lang { display: flex; }
-@media (max-width: 640px) { .topbar-lang { display: none; } }
-.lang-toggle { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--fill-inset); font-size: var(--type-label-size); }
-.lang-btn { min-block-size: 28px; min-inline-size: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-weight: 600; cursor: pointer; }
-.lang-btn:hover { color: var(--text-1); }
-.lang-btn[aria-pressed="true"] { background: var(--level-1); color: var(--text-1); box-shadow: var(--shadow-sm); }
 
-/* account: a circular avatar button and a popover with the name, role, My stats and Sign out */
+/* account (#220): the one menu of the top bar. A circular avatar button (signed in) or the preferences button
+   (signed out, an icon beside Sign in) opens a popover; on phones the same content is a bottom Sheet. */
 .account { display: flex; align-items: center; }
 .account-btn {
   display: inline-flex; align-items: center; justify-content: center; flex: none;
@@ -778,22 +773,55 @@ a.status-chip:hover { background: var(--hover-fill); color: var(--text-1); }
 }
 .avatar.is-lg { inline-size: 40px; block-size: 40px; font-size: var(--type-small-size); }
 .account-btn:hover .avatar { background: var(--hover-fill); }
-.account-panel { min-inline-size: 15rem; max-inline-size: min(20rem, calc(100vw - 2 * var(--gutter))); padding: var(--space-2); border-radius: var(--radius-lg); }
-.account-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-2) var(--space-3); }
-.account-who { display: flex; flex-direction: column; min-inline-size: 0; }
+.account { gap: var(--space-2); }
+.account-btn.is-prefs { border-radius: var(--radius-md); color: var(--text-2); }
+.account-btn.is-prefs:hover { background: var(--hover-fill); color: var(--text-1); }
+.account-btn .icon { display: inline-flex; }
+.ov-popover.account-panel {
+  inline-size: min(20rem, calc(100vw - 2 * var(--gutter))); max-block-size: calc(100dvh - var(--space-8)); overflow: auto;
+  padding: var(--space-2); border-radius: var(--radius-surface);
+}
+.account-head {
+  display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2); border-radius: var(--radius-md);
+  color: var(--text-1); text-decoration: none;
+}
+.account-head:hover { background: var(--hover-fill); }
+.account-who { display: flex; flex-direction: column; flex: 1; min-inline-size: 0; }
 .account-name { font-weight: 600; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-role { font-size: var(--type-label-size); color: var(--text-2); }
-.account-items { list-style: none; margin: 0; padding: var(--space-1) 0 0; display: flex; flex-direction: column; gap: 2px; }
+.account-head-chevron { display: inline-flex; flex: none; color: var(--text-3); transform: scaleX(var(--dir)); }
+.account-row { padding: var(--space-1) var(--space-2) var(--space-2); }
+.account-upgrade { inline-size: 100%; }
+.account-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.account-group { padding-block: var(--space-1); border-block-start: var(--edge-width) solid var(--edge-subtle); }
 .account-item {
-  display: flex; align-items: center; inline-size: 100%; min-block-size: var(--control-sm); padding: 0 var(--space-2);
+  display: flex; align-items: center; gap: var(--space-3); inline-size: 100%; min-block-size: var(--control-sm); padding: 0 var(--space-2);
   border: 0; border-radius: var(--radius-md); background: none; color: var(--text-1); font: inherit; font-size: var(--type-small-size); text-align: start; text-decoration: none; cursor: pointer;
 }
 .account-item:hover { background: var(--hover-fill); }
+.account-item-icon { display: inline-flex; flex: none; color: var(--text-2); }
+.account-item-icon.is-mirrored { transform: scaleX(var(--dir)); }
+.account-prefs { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3) var(--space-2) var(--space-1); border-block-start: var(--edge-width) solid var(--edge-subtle); }
+.account-prefs .settings-group { margin: 0; }
+.account-prefs .account-items { margin-inline: calc(-1 * var(--space-2)); }
+.account-panel > .account-prefs:first-child { border-block-start: 0; }
+.account-foot {
+  display: flex; align-items: center; min-block-size: var(--target-min); padding-inline: var(--space-2);
+  border-block-start: var(--edge-width) solid var(--edge-subtle); font-size: var(--type-label-size); color: var(--text-2);
+}
 .account-signin { white-space: nowrap; }
+/* phones: the same rows in a bottom Sheet, 44px each (--control-md) whatever the pointer */
+.account-sheet .ov-body { padding-block-start: 0; }
+.account-sheet-body > .account-prefs:first-child { border-block-start: 0; }
+.account-sheet :is(.account-item, .account-head, .account-foot, .settings-option) { min-block-size: var(--control-md); }
+@media (pointer: coarse) { .account-item, .account-head { min-block-size: var(--target-min); } }
 
 /* ---- content area: the page scroller ---- */
+/* position: relative makes the scroller the containing block of absolutely placed descendants (#249): without
+   it a visually hidden span deep in a long page is placed against the viewport and stretches the document,
+   which then scrolls blank canvas below the frame. */
 main.app-content {
-  grid-area: content; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain;
+  grid-area: content; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; position: relative;
   display: flex; flex-direction: column;
   max-width: none; margin: 0; padding: var(--space-4) var(--gutter) var(--space-8);
 }
@@ -860,15 +888,9 @@ main.app-content {
 .filter-option input { margin: 0; inline-size: 16px; block-size: 16px; accent-color: var(--accent); }
 @media (pointer: coarse) { .filter-option { min-block-size: var(--target-min); } }
 
-/* ⚙ display settings: an .ov-popover panel (lib/overlay.ts popover()) anchored under the button.
-   Soft UI card: 24px padding, each setting a full-width segmented control (muted track, the chosen
-   option a lifted pill). Native radios stay in place, visually hidden, so arrow keys and forms work.
-   `.ov-popover.settings-panel` outranks the generic `.ov-popover { padding: 0 }` that follows. */
-.ov-popover.settings-panel {
-  inline-size: min(20rem, calc(100vw - 2 * var(--gutter))); max-block-size: calc(100dvh - var(--space-8)); overflow: auto;
-  padding: var(--space-5); border-radius: var(--radius-surface);
-}
-.settings-title { font-size: var(--type-body-size); font-weight: 600; line-height: var(--type-body-lh); margin: 0 0 var(--space-4); letter-spacing: 0; }
+/* display settings as segmented radios (shell/settingsMenu.ts), in the account menu and on #/settings/display.
+   Each setting a full-width segmented control (muted track, the chosen option a lifted pill). Native radios stay
+   in place, visually hidden, so arrow keys and forms work. */
 .settings-group { border: 0; margin: 0 0 var(--space-4); padding: 0; min-inline-size: 0; }
 .settings-legend { padding: 0; margin-block-end: var(--space-2); font-size: var(--type-small-size); font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-1); }
 .settings-options {
@@ -885,10 +907,6 @@ main.app-content {
 .settings-option:has(input:checked) { background: var(--segment-thumb); color: var(--text-1); font-weight: 600; box-shadow: var(--surface-lift); }
 .settings-option:has(input:focus-visible) { outline: var(--focus-width) solid var(--focus-ring); outline-offset: 1px; }
 .settings-option input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
-.settings-link {
-  display: flex; align-items: center; min-block-size: var(--target-min); margin: var(--space-1) calc(-1 * var(--space-5)) calc(-1 * var(--space-5));
-  padding: var(--space-2) var(--space-5); border-block-start: 1px solid var(--edge-subtle); font-size: var(--type-small-size); color: var(--text-2);
-}
 @media (pointer: coarse) { .settings-option { min-block-size: var(--target-min); } }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success-fg); display: inline-block; }
 
@@ -1240,7 +1258,8 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 
 .tool-list { display: flex; flex-direction: column; gap: var(--space-5); }
 .cmd-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--space-2); }
-.cmd h4 { margin: 0; font-size: 1rem; }
+/* a card title is an h3 on the Toolbox page and an h4 on the case page (#249): the same look either way */
+.cmd :is(h3, h4) { margin: 0; font-size: var(--type-body-size); line-height: var(--type-body-lh); font-weight: 600; letter-spacing: normal; }
 .shell-tabs { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-md); overflow: hidden; }
 .shell-tab { min-height: var(--control-xs); background: none; border: 0; padding: var(--space-1) var(--space-3); font: inherit; font-size: var(--step--1); color: var(--text-muted); cursor: pointer; }
 .shell-tab:focus-visible { outline-offset: calc(-1 * var(--focus-width)); }
@@ -1299,6 +1318,9 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 .prose pre code { background: none; padding: 0; color: inherit; }
 .prose blockquote { margin: 1em 0; padding-inline-start: var(--space-4); border-inline-start: 3px solid var(--border-strong); color: var(--text-muted); }
 .prose table { border-collapse: collapse; display: block; overflow-x: auto; font-size: var(--step--1); }
+/* the debrief's tables scroll in a focusable region (views/case.ts scrollableTables), not in the table itself */
+.prose .prose-table { overflow-x: auto; margin-block: var(--space-4); }
+.prose .prose-table > table { display: table; overflow: visible; margin: 0; }
 .prose th, .prose td { border: 1px solid var(--border); padding: var(--space-2) var(--space-3); text-align: start; }
 .prose ul, .prose ol { padding-inline-start: 1.3em; }
 .prose img { max-width: 100%; }
@@ -1367,7 +1389,7 @@ html.has-modal { overflow: hidden; scrollbar-gutter: stable; }
 /* The code block is an LTR island in both languages, so its revealed marker stays on the physical left. */
 .cmd.is-revealed .code-block { box-shadow: inset 3px 0 0 var(--success-fg); }
 .cmd-tag { margin-inline-end: auto; }
-.cmd-head h4 + .cmd-tag { margin-inline-start: var(--space-1); }
+.cmd-head :is(h3, h4) + .cmd-tag { margin-inline-start: var(--space-1); }
 .cmd-actions { margin-top: var(--space-3); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
 .cmd-note { margin: 0; }
 .btn-reveal { border-style: dashed; }
@@ -1553,7 +1575,7 @@ body.projector main { max-width: none; padding: 0 4vw 4vh; }
   details::details-content { content-visibility: visible; display: block; } /* collapsed briefings print open */
   .prose a[href^="http"]::after, .stage a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 0.85em; overflow-wrap: anywhere; }
   a { color: var(--text); }
-  .table-wrap, .prose table { overflow: visible; display: table; }
+  .table-wrap, .prose table, .prose .prose-table { overflow: visible; display: table; }
 }
 
 /* ===== case play (wave 3) ===== */
@@ -1829,7 +1851,17 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
 @media (max-width: 600px) {
   .dt-wrap:has(.dt-stack) { border: 0; overflow: visible; }
   .dt-stack, .dt-stack tbody { display: block; }
-  .dt-stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  /* The header row becomes a visible bar of sort buttons (#246): clipped to 1px it left invisible tab stops.
+     Header cells with no control stay for screen readers only; the cards label each value themselves. */
+  .dt-wrap .dt-stack.data-table > thead { display: block; margin-block-end: var(--space-3); }
+  .dt-wrap .dt-stack.data-table > thead tr { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: 0; margin: 0; border: 0; border-radius: 0; background: none; }
+  .dt-wrap .dt-stack.data-table > thead th { position: static; display: block; block-size: auto; padding: 0; border: 0; background: none; box-shadow: none; font-size: var(--type-small-size); font-weight: 500; }
+  .dt-wrap .dt-stack.data-table > thead th:not(:has(button, input)) { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .dt-wrap .dt-stack.data-table > thead .dt-sort { min-block-size: var(--target-min); padding-inline: var(--space-3); border-radius: var(--radius-full); background: var(--level-2); box-shadow: var(--elev-1); color: var(--text-2); }
+  .dt-wrap .dt-stack.data-table > thead th[aria-sort="ascending"] .dt-sort, .dt-wrap .dt-stack.data-table > thead th[aria-sort="descending"] .dt-sort { background: var(--accent-soft); color: var(--accent-strong); }
+  .dt-wrap .dt-stack.data-table > thead .dt-select { display: inline-flex; align-items: center; min-block-size: var(--target-min); }
+  /* home has its own Sort select above the cards: no second sort bar */
+  .home-table .dt-stack thead { display: none; }
   .dt-stack tr { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-1) var(--space-3); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
   .dt-stack th, .dt-stack td { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0; border: 0; text-align: start; white-space: normal; }
   .dt-stack th[scope=row] { grid-column: 1 / -1; font-size: var(--step-0); font-weight: 700; }
@@ -1936,7 +1968,7 @@ th[aria-sort="ascending"] .dt-sort-icon, th[aria-sort="descending"] .dt-sort-ico
 .ov-sheet.is-bottom { border-start-start-radius: var(--radius-surface); border-start-end-radius: var(--radius-surface); }
 .ov-popover { border: 1px solid var(--border); border-radius: var(--radius-surface); box-shadow: var(--elevation-2); background: var(--level-3); }
 .ov-menu { padding: var(--space-1); }
-.ov-menu-item { min-block-size: 32px; border-radius: var(--radius-control); padding-inline: var(--space-2); transition: background-color var(--motion-settle) var(--ease-standard); }
+.ov-menu-item { min-block-size: max(var(--control-sm) - var(--space-1), var(--target-min)); border-radius: var(--radius-control); padding-inline: var(--space-2); transition: background-color var(--motion-settle) var(--ease-standard); }
 .ov-menu-item:hover { background: var(--hover); }
 .ov-tooltip { border: 1px solid var(--border); border-radius: var(--radius-control); box-shadow: var(--elevation-1); background: var(--level-3); padding: 6px var(--space-3); }
 .toast { border-color: var(--border); border-radius: var(--radius-card); box-shadow: var(--elevation-2); }
@@ -1998,18 +2030,18 @@ html { scrollbar-gutter: stable; }
 
 /* =====================================================================
    Soft UI sweep A (#97): the shared controls and overlay internals, after the Liba recipes (DESIGN.md 3.0.0
-   "Component recipes"). Sizes here are the recipe sizes (40 / 36 / 44 controls); the token block's older
-   --control-* scale stays for the views until their sweeps.
+   "Component recipes"). Sizes are the recipe sizes (40 / 36 / 44 controls), read from the control tokens
+   (--control-base / -sm / -md), so a coarse pointer lifts every one of them to 44px (#247).
    ===================================================================== */
 
-/* ---- buttons: 40 / sm 36 / lg 44; 14px medium; tinted by default ---- */
+/* ---- buttons: 40 / sm 36 / lg 44 (all 44 on touch); 14px medium; tinted by default ---- */
 .btn {
-  --btn-h: 40px;
+  --btn-h: var(--control-base);
   min-height: var(--btn-h); padding: 0 var(--space-4); gap: var(--space-2);
   font-size: var(--type-small-size); font-weight: 500; line-height: 1.25;
 }
 .btn-sm { --btn-h: var(--control-sm); padding-inline: var(--space-3); font-size: var(--type-small-size); }
-.btn-lg { --btn-h: 44px; padding-inline: var(--space-6); font-size: var(--type-small-size); }
+.btn-lg { --btn-h: var(--control-md); padding-inline: var(--space-6); font-size: var(--type-small-size); }
 .btn:disabled, .btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
 .btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .btn:hover:not(:disabled) { background: color-mix(in oklab, var(--fill-track) 80%, var(--fill-inset)); }
@@ -2024,21 +2056,30 @@ html { scrollbar-gutter: stable; }
 .btn-danger { background: var(--danger-fg); color: var(--on-danger); }
 .btn-danger:hover:not(:disabled) { background: color-mix(in oklab, var(--danger-fg) 90%, var(--level-1)); }
 /* icon buttons: a 40px square, 8px corners; on touch the hit area reaches 44px */
-.btn-icon { --btn-h: 40px; inline-size: var(--btn-h); min-inline-size: var(--btn-h); padding: 0; position: relative; }
+.btn-icon { --btn-h: var(--control-base); inline-size: var(--btn-h); min-inline-size: var(--btn-h); padding: 0; position: relative; }
 .btn-icon.btn-sm { --btn-h: var(--control-sm); }
 @media (pointer: coarse) {
-  :is(.btn-icon, .ov-close, .toast-close, .banner-close)::after { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: 44px; block-size: 44px; translate: -50% -50%; }
-  [dir="rtl"] :is(.btn-icon, .ov-close, .toast-close, .banner-close)::after { translate: 50% -50%; }
+  /* a narrow text button (a short "sm" label, an arrow) is still a 44px square on touch */
+  .btn { min-inline-size: var(--target-min); }
+  :is(.btn-icon, .ov-close, .toast-close, .banner-close, .info-dot)::after { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: var(--target-min); block-size: var(--target-min); translate: -50% -50%; }
+  [dir="rtl"] :is(.btn-icon, .ov-close, .toast-close, .banner-close, .info-dot)::after { translate: 50% -50%; }
+  .info-dot { position: relative; }
+  /* Small text links (a card's "All classes", the class page's case links, "Back to authoring"): the hit area
+     grows to 44px tall around the text without moving anything (#247). */
+  :is(.hit-link, .home-card-link, .stats-card-foot, .stats-card-head > a, .home-today-title, .class-today-title) { position: relative; }
+  :is(.hit-link, .home-card-link, .stats-card-foot, .stats-card-head > a, .home-today-title, .class-today-title)::after {
+    content: ""; position: absolute; inset-inline: 0; inset-block: calc(50% - var(--target-min) / 2);
+  }
 }
 
-/* ---- inputs and selects: 40px, 8px corners, the 3:1 control edge, 12px inline padding;
+/* ---- inputs and selects: 40px (44 on touch), 8px corners, the 3:1 control edge, 12px inline padding;
         16px text on phones (no iOS zoom on focus), 14px from 768px ---- */
 .input, select.input {
-  min-height: 40px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-control);
+  min-height: var(--control-base); padding: var(--space-2) var(--space-3); border-radius: var(--radius-control);
   border: 1px solid var(--edge-control); background: var(--level-1); font-size: 1rem; line-height: 1.4;
   transition: border-color var(--motion-settle) var(--ease-standard);
 }
-.input-lg { min-height: 44px; }
+.input-lg { min-height: var(--control-md); }
 @media (min-width: 768px) { .input, select.input { font-size: var(--type-small-size); } }
 .input:disabled { opacity: 0.5; cursor: not-allowed; }
 .input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
@@ -2064,8 +2105,8 @@ input[type="checkbox"]::before {
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / contain no-repeat;
 }
-/* the box is 16px; its hit area reaches the 24px minimum (WCAG 2.5.8) */
-input[type="checkbox"]::after { content: ""; position: absolute; inset: -5px; }
+/* the box is 16px; its hit area reaches the 24px minimum (WCAG 2.5.8), 44px on touch (#247) */
+input[type="checkbox"]::after { content: ""; position: absolute; inset: calc(50% - var(--target-min) / 2); }
 input[type="checkbox"]:checked, input[type="checkbox"]:indeterminate { background: var(--accent); border-color: var(--accent); }
 input[type="checkbox"]:checked::before { transform: scale(1); }
 input[type="checkbox"]:indeterminate::before { transform: scale(1); -webkit-mask: none; mask: none; block-size: 2px; border-radius: 1px; }
@@ -2133,7 +2174,7 @@ input[type="radio"] { inline-size: 16px; block-size: 16px; accent-color: var(--a
 /* ---- menu: 32px rows, 8px corners, soft accent hover; a check gutter when any row is checkable;
         full-bleed separators; the focus ring is inset and only shows when the row is not hovered ---- */
 .ov-menu { min-inline-size: 8rem; max-block-size: calc(100dvh - 2 * var(--space-2)); overflow-y: auto; }
-.ov-menu-item { position: relative; min-block-size: 32px; padding-block: 6px; padding-inline: var(--space-2); font-size: var(--type-small-size); gap: var(--space-2); }
+.ov-menu-item { position: relative; min-block-size: max(var(--control-sm) - var(--space-1), var(--target-min)); /* 32, 44 on touch (#247) */ padding-block: 6px; padding-inline: var(--space-2); font-size: var(--type-small-size); gap: var(--space-2); }
 .ov-menu-item:hover:not([aria-disabled="true"]), .ov-menu-item:focus-visible { background: var(--accent-soft); color: var(--accent-strong); }
 .ov-menu-item:focus-visible:not(:hover) { outline: 2px solid var(--focus-ring); outline-offset: -2px; box-shadow: none; }
 .ov-menu-item:focus-visible:hover { outline: none; }

@@ -913,13 +913,29 @@ function shareLine(c: Case, player: ProgressView): HTMLElement {
   );
 }
 
+/**
+ * A wide markdown table scrolls sideways in a named, focusable region (#249, WCAG 2.1.1): keyboard users can
+ * then scroll it, and the region is named by the heading above it.
+ */
+function scrollableTables<E extends HTMLElement>(el: E): E {
+  for (const table of el.querySelectorAll("table")) {
+    let heading: Element | null = table.previousElementSibling;
+    while (heading !== null && !/^H[1-6]$/.test(heading.tagName)) heading = heading.previousElementSibling;
+    const label = heading?.textContent?.trim() || TP().proseTable;
+    const region = h("div", { class: "prose-table", role: "region", tabindex: "0", "aria-label": label });
+    table.replaceWith(region);
+    region.append(table);
+  }
+  return el;
+}
+
 function renderDebrief(c: Case, player: ProgressView): HTMLElement {
   const body = h("div", { class: "prose" }, h("p", { class: "muted" }, T().loadingDebrief));
   // The debrief is long: an "On this page" contents list appears once it has enough headings.
   const reading = readingLayout({ content: body, tocLabel: TP().onThisPage, idPrefix: "debrief" });
   getDebrief(c.id)
     .then((markdown) => {
-      body.replaceChildren(bidiProse(html("div", {}, md(markdown))));
+      body.replaceChildren(scrollableTables(bidiProse(html("div", {}, md(markdown)))));
       reading.refresh();
     })
     .catch((err: unknown) => {
@@ -951,7 +967,7 @@ function renderDebrief(c: Case, player: ProgressView): HTMLElement {
       "div",
       { class: "row-actions debrief-next" },
       h("a", { class: "btn btn-primary", href: "#/leaderboard" }, TG().homeLeaderboard),
-      h("a", { class: "btn", href: "#/" }, T().backToCases),
+      h("a", { class: "btn", href: "#/cases" }, T().backToCases),
     ),
     reading.element,
   );

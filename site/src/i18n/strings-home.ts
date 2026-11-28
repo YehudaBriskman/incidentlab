@@ -5,7 +5,11 @@ import { defineStrings, formatNumber as num } from "./i18n";
 
 export const TH = defineStrings({
   en: {
-    pageHeading: "Cases dashboard",
+    pageHeading: "Home",
+    casesHeading: "Cases",
+    casesPageTitle: "Cases · IncidentLab",
+    casesIntro: "Every released case: search, filter and sort.",
+    browseAll: "Browse all cases",
     introLabel: "About IncidentLab",
 
     // Continue card
@@ -58,7 +62,11 @@ export const TH = defineStrings({
     shown: (n: number, total: number): string => `${num(n)} of ${num(total)} cases`,
   },
   he: {
-    pageHeading: "לוח התיקים",
+    pageHeading: "בית",
+    casesHeading: "תיקים",
+    casesPageTitle: "תיקים · IncidentLab",
+    casesIntro: "כל התיקים שפורסמו: חיפוש, סינון ומיון.",
+    browseAll: "לכל התיקים",
     introLabel: "על IncidentLab",
 
     continueTitle: "להמשיך",

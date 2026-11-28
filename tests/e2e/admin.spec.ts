@@ -286,7 +286,7 @@ test("sections: the sidebar links switch sections, mark the current one, and Bac
   await expect(side.panel(page, "accounts")).toBeVisible();
   await expect(side.link(page, /^Users/)).toHaveAttribute("aria-current", "page");
   // Admin is the ancestor of the section; the quick actions sit in the page header; Authoring is a nav item.
-  await expect(side.main(page).getByRole("link", { name: "Admin", exact: true })).toHaveAttribute("aria-current", "true");
+  await expect(side.main(page).getByRole("link", { name: "Platform console", exact: true })).toHaveAttribute("aria-current", "true");
   await expect(side.head(page).getByRole("button", { name: "Projector board" })).toBeVisible();
   await expect(side.main(page).getByRole("link", { name: "Authoring" })).toHaveAttribute("href", "#/author");
 
