@@ -222,7 +222,10 @@ export function createClassMembersPanel(opts: ClassMembersOptions): ClassMembers
 
   function resetRow(r: ClassResetRequest): HTMLLIElement {
     let action: HTMLElement;
+    const notYet = r.vouchableAt !== null && Date.parse(r.vouchableAt) > Date.now();
     if (r.vouchedByMe) action = h("span", { class: "chip pill-info" }, TC().vouched);
+    // A week of membership first (#254): the server refuses an earlier vouch.
+    else if (notYet && r.vouchableAt !== null) action = h("span", { class: "chip", "data-testid": "vouch-later" }, TC().vouchFrom(formatDateTime(r.vouchableAt)));
     else {
       const btn = h("button", { type: "button", class: "btn btn-sm", "data-testid": "vouch", "aria-disabled": vouching.has(r.accountId) ? "true" : null }, TC().vouch);
       btn.addEventListener("click", () => {

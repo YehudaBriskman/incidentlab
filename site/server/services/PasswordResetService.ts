@@ -95,7 +95,7 @@ export class PasswordResetService {
       if (!request || !isLiveRequest(request.data, nowMs)) return null;
       const account = await this.repos.accounts.get(accountId);
       if (!account) return null;
-      return this.toClassView(request.data, account.data.username, actor);
+      return this.toClassView(request.data, account.data.username, actor, member.data.joinedAt);
     });
     return rows.filter((r): r is ClassResetRequest => r !== null).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
@@ -115,21 +115,33 @@ export class PasswordResetService {
     const account = await this.repos.accounts.get(accountId);
     if (!account) throw noRequest();
     const nowIso = this.now().toISOString();
+    // Only a student who has been in the class a week (#254), so a fresh class can't be used to take an account.
+    const eligibleAt = vouchEligibleAt(member.data.joinedAt);
+    if (Date.parse(eligibleAt) > Date.parse(nowIso)) {
+      throw new AppError(409, "this student joined the class less than 7 days ago", { code: "member-too-new" });
+    }
     for (let attempt = 0; attempt < 3; attempt++) {
       const found = await this.repos.resetRequests.get(accountId);
       if (!found || !isLiveRequest(found.data, Date.parse(nowIso))) throw noRequest();
       const already = found.data.vouches.some((v) => v.classId === classId && v.byAccountId === actor.account.id);
-      if (already) return this.toClassView(found.data, account.data.username, actor);
+      if (already) return this.toClassView(found.data, account.data.username, actor, member.data.joinedAt);
       const vouch: ResetVouch = { classId, byAccountId: actor.account.id, at: nowIso };
       const next: ResetRequestRecord = { ...found.data, vouches: [...found.data.vouches, vouch] };
-      if (await this.repos.resetRequests.saveIfMatch(next, found.etag)) return this.toClassView(next, account.data.username, actor);
+      if (await this.repos.resetRequests.saveIfMatch(next, found.etag)) return this.toClassView(next, account.data.username, actor, member.data.joinedAt);
     }
     throw new AppError(409, "concurrent update, please retry");
   }
 
-  private toClassView(request: ResetRequestRecord, username: string, actor: ClassActor): ClassResetRequest {
+  private toClassView(request: ResetRequestRecord, username: string, actor: ClassActor, joinedAt: string): ClassResetRequest {
     const me = actor.kind === "player" ? actor.account.id : null;
-    return { accountId: request.accountId, username, createdAt: request.createdAt, expiresAt: request.expiresAt, vouchedByMe: request.vouches.some((v) => v.byAccountId === me) };
+    return {
+      accountId: request.accountId,
+      username,
+      createdAt: request.createdAt,
+      expiresAt: request.expiresAt,
+      vouchedByMe: request.vouches.some((v) => v.byAccountId === me),
+      vouchableAt: vouchEligibleAt(joinedAt),
+    };
   }
 
   // ---- site owner ----------------------------------------------------------------
@@ -193,11 +205,17 @@ export class PasswordResetService {
       ]);
       if (klass?.data.status !== "active" || !voucherAccount || !isUsableVoucher(voucherAccount.data)) return null;
       if (voucher?.data.status !== "active" || voucher.data.role !== "admin" || member?.data.status !== "active") return null;
+      // A membership younger than a week at the time of the vouch never counts (a rejoin restarts the clock).
+      if (Date.parse(vouchEligibleAt(member.data.joinedAt)) > Date.parse(v.at)) return null;
       return { classId: v.classId, className: klass.data.name, byAccountId: v.byAccountId, byUsername: voucherAccount.data.username, at: v.at, memberSince: member.data.joinedAt };
     });
     return rows.filter((r): r is ResetVouchView => r !== null);
   }
 }
+
+/** How long a student must have been in the class before a class admin may vouch for them (#254). */
+export const VOUCH_MIN_MEMBERSHIP_MS = 7 * 24 * 60 * 60 * 1000;
+const vouchEligibleAt = (joinedAt: string): string => new Date(Date.parse(joinedAt) + VOUCH_MIN_MEMBERSHIP_MS).toISOString();
 
 /** A voucher whose own account is banned or mid forced reset doesn't count. */
 const isUsableVoucher = (account: AccountRecord): boolean => account.kind === "user" && account.status === "approved" && !account.mustChangePassword;

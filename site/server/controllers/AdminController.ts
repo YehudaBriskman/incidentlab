@@ -118,7 +118,8 @@ export class AdminController {
 
   async resetPassword(req: Request, accountId: string): Promise<Response> {
     await parseBody(req, EmptyBodySchema);
-    const temporaryPassword = await this.mutation(req, { action: "account.reset-password", target: accountId }, () => this.deps.accounts.resetPassword(accountId));
+    // The console's direct reset skips the vouch queue (#254): the audit says so.
+    const temporaryPassword = await this.mutation(req, { action: "account.reset-password", target: accountId, detail: "unvouched" }, () => this.deps.accounts.resetPassword(accountId));
     return json(200, { temporaryPassword });
   }
 
