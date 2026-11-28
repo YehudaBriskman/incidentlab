@@ -27,7 +27,8 @@ export type ResetRequestsPanel = {
   render(): void;
 };
 
-export function createResetRequestsPanel(opts: { host: ManageHost; api: ResetRequestsApi }): ResetRequestsPanel {
+/** `onCount` (#285): the number of open requests whenever the list is known, for the console's "Needs you" strip. */
+export function createResetRequestsPanel(opts: { host: ManageHost; api: ResetRequestsApi; onCount?: (n: number) => void }): ResetRequestsPanel {
   const { host } = opts;
   let requests: AdminPasswordResetRequest[] | null = null;
   let error: string | null = null;
@@ -132,6 +133,7 @@ export function createResetRequestsPanel(opts: { host: ManageHost; api: ResetReq
       setChildren(bodyEl, h("p", { class: error ? "admin-error" : "muted admin-empty-small" }, error ?? T().admLoading));
       return;
     }
+    opts.onCount?.(requests.length);
     countEl.textContent = `(${fmtInt(requests.length)})`;
     setChildren(
       bodyEl,

@@ -13,6 +13,8 @@ import { TA } from "../i18n/strings-account";
 import { TG } from "../i18n/strings-game";
 import { TGu } from "../i18n/strings-guest";
 import { TO } from "../i18n/strings-onboard";
+import { TOw } from "../i18n/strings-owner";
+import "../owner.css";
 import { T } from "../i18n/strings-player";
 import { guestChoice } from "./guest";
 
@@ -172,7 +174,7 @@ export function withApprovedAccount(
         });
       } else if (isAdmin(account)) (options.onAdmin ?? (() => renderAdminCard(root, again)))();
       else if (account.status === "pending") renderPending(root, account, again);
-      else if (account.status === "rejected") renderRejected(root, account.username, again);
+      else if (account.status === "rejected") renderRejected(root, account.username, again, account.banReason);
       else if (account.mustChangePassword) renderForcedPasswordChange(root, context, again);
       else {
         draft = null;
@@ -557,7 +559,7 @@ export function renderAuthForm(
         const code = err instanceof ApiError ? err.code : null;
         if (code === "rejected") {
           // Not an input error: say what happened and what to do next, on its own screen.
-          renderRejected(root, credentials.username, () => renderAuthForm(root, opts));
+          renderRejected(root, credentials.username, () => renderAuthForm(root, opts), err instanceof ApiError ? err.banReason : null);
           return;
         }
         if (err instanceof ApiError && err.isRateLimited) {
@@ -1161,7 +1163,7 @@ function renderPending(root: HTMLElement, account: AccountView, onApproved: () =
  * The instructor rejected this account: reached from a session (`/api/me` says "rejected") or from a sign-in
  * attempt. Offers a new account (primary) and a way back. `onBack` re-runs the gate after signing out.
  */
-function renderRejected(root: HTMLElement, username: string, onBack: () => void): void {
+function renderRejected(root: HTMLElement, username: string, onBack: () => void, reason: string | null = null): void {
   stopAuthTimers();
   document.title = pageTitle(TA().rejectedTitle);
   const title = h("h1", { tabindex: "-1" }, TA().rejectedTitle);
@@ -1173,6 +1175,10 @@ function renderRejected(root: HTMLElement, username: string, onBack: () => void)
       { class: "center-card" },
       title,
       h("p", { class: "muted" }, TO().rejectedLead, h("bdi", {}, username), TO().rejectedTail),
+      // The owner's reason (#236), their own words: plain text in the page direction, never markup.
+      reason === null || reason === ""
+        ? null
+        : h("div", { class: "rejected-reason" }, h("p", { class: "muted small" }, TOw().rejectedReason), h("p", { dir: "auto", "data-ban-reason": "" }, reason)),
       h(
         "div",
         { class: "row-center" },

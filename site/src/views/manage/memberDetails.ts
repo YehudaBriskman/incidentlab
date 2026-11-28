@@ -1,6 +1,7 @@
 // Read-only pieces of the members table: the status and author pills, the per-case table in an expanded row,
 // its one-line-per-case form on phone cards, and the extra numbers that the column picker may have hidden.
 import { T } from "../../i18n/strings-tools";
+import { TOw } from "../../i18n/strings-owner";
 import { h, type Child } from "../../lib/dom";
 import { listText, nameNode } from "../../lib/bidi";
 import type { AccountStatus, CaseStats, UserStats } from "../../../shared/contract";
@@ -17,9 +18,15 @@ export function kindPill(a: UserStats): Child {
   return a.kind === "guest" ? [" ", h("span", { class: "status-pill is-guest" }, T().admGuestPill)] : null;
 }
 
-/** The author pill sits beside the status; players get none. */
+/**
+ * The author pill sits beside the status (players get none), then "Hidden from boards" (#236) when the owner hid
+ * the account; a banned account's reason is in the expanded row (acctExtras).
+ */
 export function rolePill(a: UserStats): Child {
-  return a.role === "author" ? [" ", h("span", { class: "status-pill is-author" }, T().admAuthorPill)] : null;
+  return [
+    a.role === "author" ? [" ", h("span", { class: "status-pill is-author" }, T().admAuthorPill)] : null,
+    a.hiddenFromBoards ? [" ", h("span", { class: "status-pill is-hidden-board" }, TOw().hiddenPill)] : null,
+  ];
 }
 
 export function caseStatsTable(list: readonly CaseStats[]): HTMLElement {
@@ -103,5 +110,6 @@ export function acctExtras(a: UserStats): string {
     T().admBadgesTip(listText(a.achievements.map((x) => T().admAchievement(x.id)))),
     T().admStreakTip(a.streak.current, a.streak.best),
     `${T().admColCreated}: ${formatDateTime(a.createdAt)}`,
-  ].join(" · ");
+    a.status === "rejected" && a.banReason !== null ? `${TOw().banReasonDetail}: ${a.banReason}` : null,
+  ].filter((x): x is string => x !== null).join(" · ");
 }

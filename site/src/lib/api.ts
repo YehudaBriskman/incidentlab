@@ -45,13 +45,16 @@ export class ApiError extends Error {
    * (code "unconfirmed": no response, or a 5xx): the view redraws from it instead of re-sending (#202, #203).
    */
   readonly progress: ProgressView | null;
+  /** the owner's ban reason with a 403 "rejected" at sign-in (#236) */
+  readonly banReason: string | null;
   constructor(
     status: number,
     message: string,
-    options: { code?: string | null; retryAfterSeconds?: number | null; progress?: ProgressView | null } = {},
+    options: { code?: string | null; retryAfterSeconds?: number | null; progress?: ProgressView | null; banReason?: string | null } = {},
   ) {
     super(message);
     this.name = "ApiError";
+    this.banReason = options.banReason ?? null;
     this.status = status;
     this.code = options.code ?? null;
     this.retryAfterSeconds = options.retryAfterSeconds ?? null;
@@ -182,6 +185,7 @@ async function requestWithHeaders<S extends z.ZodType>(
       code: parsed.success ? (parsed.data.code ?? null) : null,
       retryAfterSeconds: retry,
       progress: parsed.success ? (parsed.data.progress ?? null) : null,
+      banReason: parsed.success ? (parsed.data.banReason ?? null) : null,
     });
   }
   const parsed = schema.safeParse(json);

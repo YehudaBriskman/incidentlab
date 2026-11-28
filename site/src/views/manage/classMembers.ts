@@ -239,6 +239,8 @@ export function createClassMembersPanel(opts: ClassMembersOptions): ClassMembers
       h("span", { class: "player-name", dir: "auto" }, r.username),
       tipped(h("span", {}, TC().resetRequested(relativeAgo(r.createdAt, now))), formatDateTime(r.createdAt)),
       h("span", { class: "class-request-actions" }, action),
+      // #285: what happens after a vouch, on the row itself (the owner approves; the teacher never sets a password).
+      r.vouchedByMe ? null : h("span", { class: "muted small class-request-next", "data-testid": "vouch-next" }, TC().vouchNext),
     );
   }
 
